@@ -30,12 +30,20 @@ class WebviewActionRouter(private val project: Project) {
                         return@invokeLater
                     }
                     val context = AgentContext(project, editor, textBody)
-                    ExplainAgent().execute(context) { res -> bridge.sendMessage("explain", res) }
+                    ExplainAgent().execute(context) { res ->
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage("explain", res)
+                        }
+                    }
                 }
                 "/chat" -> {
                     logger.info("Router: /chat (일반 채팅) 분기")
                     val context = AgentContext(project, editor, textBody)
-                    ChatAgent().execute(context) { res -> bridge.sendMessage("chat", res) }
+                    ChatAgent().execute(context) { res ->
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage("chat", res)
+                        }
+                    }
                 }
                 else -> {
                     logger.warn("Router: 원격 정의되지 않은 JS 명령 수신 - $command")
