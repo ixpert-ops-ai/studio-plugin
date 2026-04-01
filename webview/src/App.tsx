@@ -124,7 +124,19 @@ function App() {
     };
 
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+
+    // 전역 JS 에러 핸들러 추가: 콘솔 로그 없이 무반응 현상을 디버깅
+    const handleError = (e: any) => {
+      const msg = e.message || e.toString();
+      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: `[JS Error] ${msg}` }]);
+      setIsTyping(false);
+    };
+    window.addEventListener('error', handleError);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      window.removeEventListener('error', handleError);
+    }
   }, []);
 
   const handleSend = () => {

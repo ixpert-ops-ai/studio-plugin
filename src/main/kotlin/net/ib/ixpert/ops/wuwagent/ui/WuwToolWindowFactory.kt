@@ -10,6 +10,9 @@ import java.awt.BorderLayout
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.SwingConstants
+import org.cef.CefSettings
+import org.cef.browser.CefBrowser
+import org.cef.handler.CefDisplayHandlerAdapter
 
 class WuwToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
@@ -28,6 +31,20 @@ class WuwToolWindowFactory : ToolWindowFactory {
             if (url != null) {
                 val browser = JBCefBrowser()
                 
+                // 디버깅: CEF 콘솔 로그를 idea.log 및 System.out에 덤프
+                browser.cefBrowser.client.addDisplayHandler(object : CefDisplayHandlerAdapter() {
+                    override fun onConsoleMessage(
+                        browser: CefBrowser?,
+                        level: CefSettings.LogSeverity?,
+                        message: String?,
+                        source: String?,
+                        line: Int
+                    ): Boolean {
+                        println("[WuwAgent CEF Console] $message | Source: $source:$line")
+                        return false
+                    }
+                })
+
                 // 생성된 JBCefBrowser 인스턴스를 JcefBridge에 등록 (UI 통신망 세팅)
                 val bridge = JcefBridge.getInstance(project)
                 bridge.registerBrowser(browser)
