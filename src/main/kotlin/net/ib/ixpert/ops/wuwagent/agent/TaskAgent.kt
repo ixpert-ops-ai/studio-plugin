@@ -11,13 +11,15 @@ import net.ib.ixpert.ops.wuwagent.client.OllamaClient
  *
  * 1. [IntentAnalyzer]로 사용자 의도 → [TaskPipeline] 결정
  * 2. 파이프라인의 각 [TaskPipeline.AgentStep]을 단일 백그라운드 태스크 안에서 순차 실행
- * 3. 각 Step 완료 시 [onStep] 콜백으로 중간 결과를 UI에 즉시 전달
- * 4. 전체 완료 후 [WuwAgent.execute]의 onSuccess 호출
+ * 3. 각 Step 시작 시 [onStepStart] 콜백으로 즉각 UI 노출
+ * 4. 각 Step 완료 시 [onStep] 콜백으로 결과 UI 전달
  *
- * @param onStep (stepLabel, content, isApplyable) — Step별 중간 결과 콜백
+ * @param onStep      (stepLabel, content, isApplyable) — Step별 결과 콜백
+ * @param onStepStart (stepLabel) — Step 시작 시 즉각 안내 표시용 콜백
  */
 class TaskAgent(
-    private val onStep: (stepLabel: String, content: String, isApplyable: Boolean) -> Unit
+    private val onStep: (stepLabel: String, content: String, isApplyable: Boolean) -> Unit,
+    private val onStepStart: (stepLabel: String) -> Unit = {}
 ) : WuwAgent {
 
     private val logger = Logger.getInstance(TaskAgent::class.java)
@@ -40,6 +42,9 @@ class TaskAgent(
                 pipeline.steps.forEachIndexed { idx, step ->
                     logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 시작")
                     indicator.text = "${step.label} 실행 중..."
+
+                    // Step 시작 신호 → UI에 즉시 노출
+                    onStepStart(step.label)
 
                     val result = step.executeSync(context, client)
                     logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료")

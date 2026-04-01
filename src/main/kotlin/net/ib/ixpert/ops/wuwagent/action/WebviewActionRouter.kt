@@ -60,7 +60,16 @@ class WebviewActionRouter(private val project: Project) {
                     logger.info("Router: /task 분기 → TaskAgent 시작")
                     val context = AgentContext(project, editor, textBody)
 
-                    // Step별 중간 결과 콜백: bridge.sendMessage("task_step", ...)
+                    // 🛎 즉시 시작 알림 (LLM 호출 전, 즉각 전송)
+                    bridge.sendMessage("task_start", "✅ 의도를 분석하고 있습니다...")
+
+                    // Step 시작 시 즉각 UI 피드백 (LLM 응답 기다리는 동안 사용자에게 진행 표시)
+                    val onStepStart = { stepLabel: String ->
+                        logger.info("Router: Step 시작 알림 → $stepLabel")
+                        bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중... (모델 크기에 따라 수 분 소요)")
+                    }
+
+                    // Step 완료 시 결과 전송
                     val onStep = { stepLabel: String, content: String, isApplyable: Boolean ->
                         logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable)")
                         bridge.sendMessage(
@@ -73,10 +82,7 @@ class WebviewActionRouter(private val project: Project) {
                         )
                     }
 
-                    TaskAgent(onStep).execute(context) { res ->
-                        // "__task_done__" 신호는 UI에 직접 노출하지 않음
-                        if (res != "__task_done__") bridge.sendMessage("task_done", res)
-                    }
+                    TaskAgent(onStep, onStepStart).execute(context) { _ -> /* task_done: no-op */ }
                 }
 
                 // ── Apply: 에디터에 코드 쓰기 ────────────────

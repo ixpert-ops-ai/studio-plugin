@@ -198,6 +198,17 @@ function App() {
       const data = event.data;
       if (!data || data.type !== 'ai_message') return;
 
+      // task_start / task_progress: 즉각 tool 말풍선으로 표시, typing 중지
+      if (data.subType === 'task_start' || data.subType === 'task_progress') {
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'tool',
+          content: data.content,
+        }]);
+        setIsTyping(false);
+        return;
+      }
+
       const newMsg: Message = {
         id: Date.now().toString(),
         role: 'ai',
