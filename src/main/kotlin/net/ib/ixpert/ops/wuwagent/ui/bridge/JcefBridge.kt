@@ -31,6 +31,10 @@ class JcefBridge(private val project: Project) {
         
         // JS 내부 window.addEventListener('message', ...) 에서 수신 가능한 구조
         val script = "window.postMessage($jsonString, '*');"
+        
+        val logger = com.intellij.openapi.diagnostic.Logger.getInstance(JcefBridge::class.java)
+        logger.info("Bridge: Webview로 응답 전송 중... (subType: $subType)")
+        
         browser?.cefBrowser?.executeJavaScript(script, browser?.cefBrowser?.url, 0)
     }
 

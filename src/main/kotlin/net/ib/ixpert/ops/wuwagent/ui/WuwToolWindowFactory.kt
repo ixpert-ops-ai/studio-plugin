@@ -32,7 +32,12 @@ class WuwToolWindowFactory : ToolWindowFactory {
                 val bridge = JcefBridge.getInstance(project)
                 bridge.registerBrowser(browser)
 
-                val htmlContent = url.readText(Charsets.UTF_8)
+                // JSQuery 바인딩 핸들러 생성 및 인젝션 런타임 셋업
+                val messageHandler = net.ib.ixpert.ops.wuwagent.ui.bridge.JcefMessageHandler(project, browser)
+                val injectScript = messageHandler.getInjectScript()
+
+                val originalHtml = url.readText(Charsets.UTF_8)
+                val htmlContent = originalHtml.replace("</head>", "<script>\n$injectScript\n</script>\n</head>")
                 browser.loadHTML(htmlContent, "http://wuwagent/index.html")
                 
                 panel.add(browser.component, BorderLayout.CENTER)

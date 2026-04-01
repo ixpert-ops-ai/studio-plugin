@@ -34,9 +34,11 @@ class ExplainAgent(private val project: Project, private val editor: Editor) {
 
                 // 2. PromptManager: 프롬프트 세팅
                 val systemPrompt = PromptManager.loadPrompt("explain_prompt.txt")
+                logger.info("Agent: 프롬프트 준비 완료, LLM 요청 개시. Model: qwen3-coder:30b")
 
                 // 3. Client: HTTP 요청
                 val response = ollamaClient.callChatApi(systemPrompt, codeToExplain)
+                logger.info("LLM Client: 응답 수신 성공 여부 = ${response?.message != null}")
 
                 val resultText = response?.message?.content ?: "서버에서 응답을 파싱하는데 실패했습니다."
 
