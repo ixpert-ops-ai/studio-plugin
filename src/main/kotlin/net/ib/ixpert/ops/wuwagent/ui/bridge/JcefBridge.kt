@@ -2,18 +2,22 @@ package net.ib.ixpert.ops.wuwagent.ui.bridge
 
 import com.google.gson.Gson
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.ui.jcef.JBCefBrowser
 
 /**
- * IDE와 Webview(JCEF) 간의 양방향/단방향 메시지 통신을 전담하는 브릿지 계층.
+ * IDE와 Webview(JCEF) 간의 단방향(IDE→JS) 메시지 통신을 전담하는 브릿지 계층.
  */
 @Service(Service.Level.PROJECT)
 class JcefBridge(private val project: Project) {
+
+    private val logger = Logger.getInstance(JcefBridge::class.java)
     private var browser: JBCefBrowser? = null
-    // JBCefJSQuery 객체가 GC 프로세스에 의해 수거되어 브릿지가 단절되는 것을 방지합니다.
-    private var messageHandler: Any? = null
     private val gson = Gson()
+
+    // JBCefJSQuery 객체가 GC로 수거되지 않도록 생명주기 고정
+    private var messageHandler: Any? = null
 
     fun registerBrowser(cefBrowser: JBCefBrowser) {
         this.browser = cefBrowser
@@ -25,22 +29,23 @@ class JcefBridge(private val project: Project) {
 
     /**
      * Webview (React) 창에 JSON 형태의 메시지를 전송합니다.
-     * 규격: { "type": "ai_message", "subType": "...", "content": "..." }
+     *
+     * @param subType   메시지 타입 ("explain", "chat", "task_step", "apply_result", "error" 등)
+     * @param content   본문 텍스트
+     * @param meta      부가 메타데이터 (예: stepLabel, applyable, code)
      */
-    fun sendMessage(subType: String, content: String) {
-        val payload = mapOf(
-            "type" to "ai_message",
+    fun sendMessage(subType: String, content: String, meta: Map<String, String> = emptyMap()) {
+        val payload = mutableMapOf(
+            "type"    to "ai_message",
             "subType" to subType,
             "content" to content
         )
+        payload.putAll(meta)
+
         val jsonString = gson.toJson(payload)
-        
-        // JS 내부 window.addEventListener('message', ...) 에서 수신 가능한 구조
         val script = "window.postMessage($jsonString, '*');"
-        
-        val logger = com.intellij.openapi.diagnostic.Logger.getInstance(JcefBridge::class.java)
-        logger.info("Bridge: Webview로 응답 전송 중... (subType: $subType)")
-        
+
+        logger.info("Bridge → Webview (subType=$subType, meta=${meta.keys})")
         browser?.cefBrowser?.executeJavaScript(script, browser?.cefBrowser?.url, 0)
     }
 
