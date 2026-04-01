@@ -39,6 +39,7 @@ class JcefMessageHandler(project: Project, browser: JBCefBrowser) {
      * Webview HTML의 <head> 태그 안에 주입할 런타임 자바스크립트 스니펫을 반환합니다.
      */
     fun getInjectScript(): String {
-        return jsQuery.inject("window.sendToIde")
+        // jsQuery.inject(varName) 은 주어진 varName을 request 페이로드로 하는 window.cefQuery 호출 스니펫을 반환합니다.
+        return "window.sendToIde = function(data) { \${jsQuery.inject(\"data\")} };"
     }
 }
