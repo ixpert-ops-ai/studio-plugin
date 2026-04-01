@@ -5,8 +5,8 @@ import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
+import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 import java.awt.BorderLayout
-import javax.swing.JButton
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.SwingConstants
@@ -16,22 +16,22 @@ class WuwToolWindowFactory : ToolWindowFactory {
         val panel = JPanel(BorderLayout())
 
         if (!JBCefApp.isSupported()) {
-            val label = JLabel("JCEF (Chromium) is not supported in this IDE version.", SwingConstants.CENTER)
-            panel.add(label, BorderLayout.CENTER)
+            panel.add(JLabel("JCEF (Chromium) is not supported in this IDE version.", SwingConstants.CENTER), BorderLayout.CENTER)
             val contentManager = toolWindow.contentManager
-            val content = contentManager.factory.createContent(panel, "", false)
-            contentManager.addContent(content)
+            contentManager.addContent(contentManager.factory.createContent(panel, "", false))
             return
         }
 
         try {
-            // 플러그인 빌드 후 리소스(webview/index.html) 읽기
             val url = WuwToolWindowFactory::class.java.getResource("/webview/index.html")
             
             if (url != null) {
                 val browser = JBCefBrowser()
-                // single-file 플러그인 덕분에 모든 리소스가 인라인된 HTML이므로 
-                // loadHTML() 호출 한 번으로 React 앱 전체가 렌더링됩니다.
+                
+                // 생성된 JBCefBrowser 인스턴스를 JcefBridge에 등록 (UI 통신망 세팅)
+                val bridge = JcefBridge.getInstance(project)
+                bridge.registerBrowser(browser)
+
                 val htmlContent = url.readText(Charsets.UTF_8)
                 browser.loadHTML(htmlContent, "http://wuwagent/index.html")
                 
@@ -45,7 +45,6 @@ class WuwToolWindowFactory : ToolWindowFactory {
         }
 
         val contentManager = toolWindow.contentManager
-        val content = contentManager.factory.createContent(panel, "", false)
-        contentManager.addContent(content)
+        contentManager.addContent(contentManager.factory.createContent(panel, "", false))
     }
 }

@@ -1,8 +1,5 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
-import com.intellij.notification.NotificationGroupManager
-import com.intellij.notification.NotificationType
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.progress.ProgressIndicator
@@ -13,46 +10,39 @@ import net.ib.ixpert.ops.wuwagent.client.OllamaClient
 import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
 import net.ib.ixpert.ops.wuwagent.service.EditorContextService
 
+/**
+ * 코드 설명(Explain) 오케스트레이션을 관장하는 Agent 컴포넌트입니다.
+ * UI나 외부 브릿지 통신에 대한 모든 참조를 제거하고, 오직 로직 흐름과 결과 리턴(Callback)만 다룹니다.
+ */
 class ExplainAgent(private val project: Project, private val editor: Editor) {
     private val logger = Logger.getInstance(ExplainAgent::class.java)
     private val ollamaClient = OllamaClient()
 
-    fun execute() {
-        // 1. Service 호출: 코드 영역 획득 (선택 영역 또는 파일 전체)
+    fun execute(onSuccess: (String) -> Unit) {
+        // 1. Service: 코드 영역 획득
         val codeToExplain = EditorContextService.extractCode(editor, project)
         if (codeToExplain.isBlank()) {
-            notifyUser("분석할 코드를 찾을 수 없습니다.")
+            onSuccess("분석할 코드를 확인하지 못했습니다.")
             return
         }
 
-        // 백그라운드 스레드로 실행 (ANR 방지)
+        // 백그라운드 스레드에서 LLM 비동기 연동 진행
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "WuwAgent: Explaining Code", false) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
-                indicator.text = "Ollama (qwen3-coder:30b)에 코드 분석을 요청중입니다..."
+                indicator.text = "Ollama 서버에 코드 분석(Explain) 요청 진행 중..."
 
-                // 2. PromptManager 호출: 특화 프롬프트 로드
+                // 2. PromptManager: 프롬프트 세팅
                 val systemPrompt = PromptManager.loadPrompt("explain_prompt.txt")
 
-                // 3. Client 호출: 외부 API 통신 (HTTP 직접 호출 안함)
+                // 3. Client: HTTP 요청
                 val response = ollamaClient.callChatApi(systemPrompt, codeToExplain)
 
-                val resultText = response?.message?.content ?: "LLM 서버로부터 정상적인 응답을 받지 못했습니다."
+                val resultText = response?.message?.content ?: "서버에서 응답을 파싱하는데 실패했습니다."
 
-                // 4. 이벤트 버스 / UI 렌더링 호출 (현재는 임시 알림으로 대체)
-                ApplicationManager.getApplication().invokeLater {
-                    notifyUser(resultText)
-                }
+                // 4. 의존성 격리: 성공 결과를 콜백으로만 돌려준다.
+                onSuccess(resultText)
             }
         })
-    }
-
-    private fun notifyUser(message: String) {
-        val group = NotificationGroupManager.getInstance().getNotificationGroup("WhatUWantNotification")
-        if (group != null) {
-            group.createNotification("WhatUWant?", message, NotificationType.INFORMATION).notify(project)
-        } else {
-            logger.warn("Notification group not found. Fallback log: $message")
-        }
     }
 }
