@@ -13,9 +13,7 @@ import net.ib.ixpert.ops.wuwagent.client.OllamaClient
  * 2. 파이프라인의 각 [TaskPipeline.AgentStep]을 단일 백그라운드 태스크 안에서 순차 실행
  * 3. 각 Step 시작 시 [onStepStart] 콜백으로 즉각 UI 노출
  * 4. 각 Step 완료 시 [onStep] 콜백으로 결과 UI 전달
- *
- * @param onStep      (stepLabel, content, isApplyable) — Step별 결과 콜백
- * @param onStepStart (stepLabel) — Step 시작 시 즉각 안내 표시용 콜백
+ * 5. [TaskCancellationToken]을 통해 외부에서 취소 가능
  */
 class TaskAgent(
     private val onStep: (stepLabel: String, content: String, isApplyable: Boolean) -> Unit,
@@ -26,34 +24,68 @@ class TaskAgent(
     private val client = OllamaClient()
 
     override fun execute(context: AgentContext, onSuccess: (String) -> Unit) {
+        TaskCancellationToken.reset()   // 이전 취소 상태 초기화
+
         ProgressManager.getInstance().run(object : Task.Backgroundable(
-            context.project, "WuwAgent: Task 분석 중", false
+            context.project, "WuwAgent: Task 실행 중", true   // canBeCancelled=true
         ) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
 
+                // 현재 스레드를 토큰에 등록 (cancel() 시 인터럽트)
+                TaskCancellationToken.backgroundThread = Thread.currentThread()
+
                 // ── Step 0: 의도 분석 ──────────────────────────
                 logger.info("TaskAgent: 의도 분석 시작 → '${context.payloadText}'")
                 indicator.text = "사용자 의도 분석 중..."
+
+                if (TaskCancellationToken.isCancelled.get()) { onSuccess("__cancelled__"); return }
+
                 val pipeline = IntentAnalyzer.analyze(context.payloadText, client)
                 logger.info("TaskAgent: Pipeline 결정 → ${pipeline::class.simpleName}")
 
                 // ── Step 1~N: Pipeline 순차 실행 ──────────────
-                pipeline.steps.forEachIndexed { idx, step ->
+                for ((idx, step) in pipeline.steps.withIndex()) {
+                    // 취소 체크 (Step 시작 전)
+                    if (TaskCancellationToken.isCancelled.get() || indicator.isCanceled) {
+                        logger.info("TaskAgent: 취소됨 — ${step.label} 건너뜀")
+                        onSuccess("__cancelled__")
+                        return
+                    }
+
                     logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 시작")
                     indicator.text = "${step.label} 실행 중..."
-
-                    // Step 시작 신호 → UI에 즉시 노출
                     onStepStart(step.label)
 
-                    val result = step.executeSync(context, client)
-                    logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료")
+                    try {
+                        val result = step.executeSync(context, client)
 
-                    // 중간 결과를 즉시 UI로 전달
-                    onStep(step.label, result, step.isApplyable)
+                        // executeSync 완료 후에도 취소 여부 재확인
+                        if (TaskCancellationToken.isCancelled.get()) {
+                            logger.info("TaskAgent: 취소됨 — ${step.label} 결과 버림")
+                            onSuccess("__cancelled__")
+                            return
+                        }
+
+                        logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료")
+                        onStep(step.label, result, step.isApplyable)
+
+                    } catch (e: InterruptedException) {
+                        logger.info("TaskAgent: 스레드 인터럽트 → 취소됨")
+                        Thread.currentThread().interrupt()
+                        onSuccess("__cancelled__")
+                        return
+                    } catch (e: Exception) {
+                        if (TaskCancellationToken.isCancelled.get()) {
+                            logger.info("TaskAgent: 취소 중 예외 → 정상 취소로 처리")
+                            onSuccess("__cancelled__")
+                            return
+                        }
+                        logger.error("TaskAgent: ${step.label} 실행 중 예외", e)
+                        onStep(step.label, "[오류] ${e.message}", false)
+                    }
                 }
 
-                // ── 완료 신호 ──────────────────────────────────
                 onSuccess("__task_done__")
             }
         })

@@ -144,8 +144,9 @@ interface ChatInputAreaProps {
   inputText: string;
   setInputText: (t: string) => void;
   onSend: () => void;
+  onStop: () => void;
 }
-const ChatInputArea = ({ inputText, setInputText, onSend }: ChatInputAreaProps) => {
+const ChatInputArea = ({ inputText, setInputText, onSend, onStop }: ChatInputAreaProps) => {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
   };
@@ -165,7 +166,7 @@ const ChatInputArea = ({ inputText, setInputText, onSend }: ChatInputAreaProps) 
             Undo
           </button>
           <div className="flex gap-2">
-            <button className="btn btn-danger"><Square size={12} fill="currentColor" />Stop</button>
+            <button className="btn btn-danger" onClick={onStop}><Square size={12} fill="currentColor" />Stop</button>
             <button className="btn btn-primary" onClick={onSend}>전송</button>
           </div>
         </div>
@@ -198,8 +199,8 @@ function App() {
       const data = event.data;
       if (!data || data.type !== 'ai_message') return;
 
-      // task_start / task_progress: 즉각 tool 말풍선으로 표시, typing 중지
-      if (data.subType === 'task_start' || data.subType === 'task_progress') {
+      // task_start / task_progress / task_cancelled: 즉각 tool 말풍선으로 표시, typing 중지
+      if (data.subType === 'task_start' || data.subType === 'task_progress' || data.subType === 'task_cancelled') {
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
           role: 'tool',
@@ -260,6 +261,12 @@ function App() {
     }
   };
 
+  const handleStop = () => {
+    if (window.sendToIde) {
+      window.sendToIde(JSON.stringify({ command: '/cancel' }));
+    }
+  };
+
   return (
     <>
       <Header />
@@ -288,7 +295,7 @@ function App() {
         )}
       </div>
 
-      <ChatInputArea inputText={inputText} setInputText={setInputText} onSend={handleSend} />
+      <ChatInputArea inputText={inputText} setInputText={setInputText} onSend={handleSend} onStop={handleStop} />
     </>
   );
 }

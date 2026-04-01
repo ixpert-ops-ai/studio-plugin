@@ -8,6 +8,7 @@ import net.ib.ixpert.ops.wuwagent.agent.AgentContext
 import net.ib.ixpert.ops.wuwagent.agent.ChatAgent
 import net.ib.ixpert.ops.wuwagent.agent.ExplainAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskAgent
+import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.service.EditorApplyService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
@@ -91,6 +92,13 @@ class WebviewActionRouter(private val project: Project) {
                     val codeToApply = EditorApplyService.extractCodeBlock(textBody)
                     val result = EditorApplyService.apply(project, codeToApply)
                     bridge.sendMessage("apply_result", result)
+                }
+
+                // ── Cancel: 실행 중인 Task 취소 ──────────────
+                "/cancel" -> {
+                    logger.info("Router: /cancel → TaskCancellationToken.cancel()")
+                    TaskCancellationToken.cancel()
+                    bridge.sendMessage("task_cancelled", "⛔ 작업이 취소되었습니다.")
                 }
 
                 else -> {
