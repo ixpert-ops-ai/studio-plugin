@@ -1,6 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Settings, Edit, Clock, CornerDownLeft, Square } from 'lucide-react';
 import './index.css';
+
+interface Message {
+  id: string;
+  role: 'user' | 'ai' | 'tool';
+  content: string;
+  subType?: string;
+}
 
 const Header = () => {
   const [mode, setMode] = useState<'Plan' | 'Act'>('Plan');
@@ -78,53 +85,85 @@ const ChatInputArea = () => {
 };
 
 function App() {
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: "1",
+      role: "ai",
+      content: "안녕하세요! 코드 블록을 선택하고 Explain 액션을 실행해보세요.",
+      subType: "welcome"
+    }
+  ]);
+  const [isTyping, setIsTyping] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const data = event.data;
+      if (data && data.type === 'ai_message') {
+        const newMessage: Message = {
+          id: Date.now().toString(),
+          role: 'ai',
+          content: data.content,
+          subType: data.subType
+        };
+        setMessages(prev => [...prev, newMessage]);
+        setIsTyping(false); // 수신 완료 시 로딩 중단
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
   return (
     <>
       <Header />
       <ContextBar />
       
       <div className="chat-list">
-        {/* User Message */}
-        <div className="msg-user">
-          MainActivity.kt 이 코드 리뷰해줘
-        </div>
-        
-        {/* Tool Action Message */}
-        <div className="msg-tool">
-          <div className="dot"></div>
-          파일 읽기 · MainActivity.kt
-        </div>
-        
-        {/* AI Message */}
-        <div className="msg-ai">
-          <div className="msg-ai-header">WhatUWant?</div>
-          <div className="msg-ai-content">
-            <p>전반적인 구조는 양호합니다. 다만 몇 가지 개선이 필요한 부분이 있습니다.</p>
-            <br />
-            <p>1. ViewModel 생명주기 처리 미흡</p>
-            <p>2. Coroutine scope 누수 가능성</p>
-          </div>
-          <div className="msg-ai-actions">
-            <button className="btn-small">Copy</button>
-            <button className="btn-small">Save</button>
-          </div>
-        </div>
+        {messages.map((msg) => {
+          if (msg.role === 'user') {
+            return (
+              <div key={msg.id} className="msg-user">
+                {msg.content}
+              </div>
+            );
+          }
+          
+          if (msg.role === 'tool') {
+            return (
+              <div key={msg.id} className="msg-tool">
+                <div className="dot"></div>
+                {msg.content}
+              </div>
+            );
+          }
 
-        {/* Tool Action Update Request */}
-        <div className="msg-tool" style={{ alignSelf: 'flex-end', background: 'transparent', border: '1px solid var(--border-color)' }}>
-          코드 개선 제<span style={{flex: 1, minWidth: '40px'}}></span><span style={{color: 'var(--text-main)'}}>MainActivity.kt</span>
-        </div>
-
-        {/* AI Streaming Message */}
-        <div className="msg-ai" style={{ width: 'fit-content' }}>
-          <div className="msg-ai-header">WhatUWant?</div>
-          <div className="flex items-center gap-2 text-muted" style={{ fontSize: '12px', color: 'var(--text-muted)'}}>
-            <div className="typing-dots">
-              <span></span><span></span><span></span>
+          // role === 'ai'
+          return (
+            <div key={msg.id} className="msg-ai">
+              <div className="msg-ai-header">WhatUWant? {msg.subType === 'explain' && <span style={{fontSize: '11px', color: 'var(--accent-color)'}}> [Explain]</span>}</div>
+              <div className="msg-ai-content">
+                <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+              </div>
+              <div className="msg-ai-actions">
+                <button className="btn-small">Copy</button>
+                <button className="btn-small">Save</button>
+              </div>
             </div>
-            응답 생성 중
+          );
+        })}
+
+        {isTyping && (
+          <div className="msg-ai" style={{ width: 'fit-content' }}>
+            <div className="msg-ai-header">WhatUWant?</div>
+            <div className="flex items-center gap-2 text-muted" style={{ fontSize: '12px', color: 'var(--text-muted)'}}>
+              <div className="typing-dots">
+                <span></span><span></span><span></span>
+              </div>
+              분석 중...
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <ChatInputArea />
