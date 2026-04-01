@@ -35,10 +35,16 @@ sealed class TaskPipeline {
         fun executeSync(context: AgentContext, client: OllamaClient): String {
             val systemPrompt = PromptManager.loadPrompt(promptFile)
 
-            // 에디터 코드 우선, 없으면 payloadText 사용
+            // 에디터 코드가 있다면 사용자의 입력(질문/요청)과 함께 묶어서 전송합니다.
             val userMessage = if (context.editor != null) {
                 val code = EditorContextService.extractCode(context.editor, context.project)
-                if (code.isNotBlank()) code else context.payloadText
+                if (code.isNotBlank() && context.payloadText.isNotBlank()) {
+                    "사용자 요청: ${context.payloadText}\n\n참조 코드:\n```\n$code\n```"
+                } else if (code.isNotBlank()) {
+                    code
+                } else {
+                    context.payloadText
+                }
             } else {
                 context.payloadText
             }
