@@ -1,0 +1,38 @@
+<idea-plugin>
+    <id>net.ib.ixpert.ops.wuwagent</id>
+    <name>WhatUWant?</name>
+    <vendor email="admin@jodongik.cloud" url="http://jodongik.cloud">Jodongik Cloud</vendor>
+    <description><![CDATA[
+      WhatUWant? (WuwAgent) is an on-premise AI Coding Assistant plugin powered by Ollama.
+      Provides code explain, review, refactoring, PMD analysis, Impact Analysis, and Generate Test.
+    ]]></description>
+
+    <!-- Product and plugin compatibility requirements.
+         See: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Add your extensions here -->
+        
+        <!-- ToolWindow Example: WuwAgent Chat window -->
+        <toolWindow id="WhatUWant?"
+                    anchor="right"
+                    icon="AllIcons.General.Robot"
+                    factoryClass="net.ib.ixpert.ops.wuwagent.ui.WuwToolWindowFactory"/>
+                    
+        <notificationGroup id="WhatUWantNotification"
+                           displayType="BALLOON"
+                           key="WhatUWantNotification" />
+    </extensions>
+
+    <actions>
+        <!-- Add your actions here -->
+        <action id="WuwAgent.ExplainAction"
+                class="net.ib.ixpert.ops.wuwagent.action.ExplainAction"
+                text="WhatUWant: Explain This Code"
+                description="Use WhatUWant Agent to explain this selected code.">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

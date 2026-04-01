@@ -1,0 +1,21 @@
+# IntelliJ IDEA Project files
+.idea/
+*.iml
+
+# Gradle
+.gradle/
+build/
+gradle-app.setting
+!gradle-wrapper.jar
+
+# Kotlin
+*.kotlin_module
+*.kotlin_builtins
+
+# WhatUWant Plugin Release
+_release/
+
+# Webview (React)
+webview/node_modules/
+webview/dist/
+webview/build/
