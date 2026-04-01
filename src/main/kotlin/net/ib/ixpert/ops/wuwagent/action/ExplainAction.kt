@@ -4,6 +4,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
+import net.ib.ixpert.ops.wuwagent.agent.AgentContext
 import net.ib.ixpert.ops.wuwagent.agent.ExplainAgent
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
@@ -20,9 +21,12 @@ class ExplainAction : AnAction("WhatUWant: Explain This Code", "Explain the sele
         // UI 통신망(브릿지) 인스턴스 획득
         val bridge = JcefBridge.getInstance(project)
         
+        // 다형성을 지원하는 공통 컨텍스트 생성
+        val context = AgentContext(project, editor, "")
+
         // Agent 실행 (Agent 내부에 UI가 노출되지 않게 Callback을 뚫어줍니다)
-        val agent = ExplainAgent(project, editor)
-        agent.execute { resultText ->
+        val agent = ExplainAgent()
+        agent.execute(context) { resultText ->
             
             // JCEF 브릿지 호출은 AWT/UI 스레드와 동기화
             ApplicationManager.getApplication().invokeLater {
