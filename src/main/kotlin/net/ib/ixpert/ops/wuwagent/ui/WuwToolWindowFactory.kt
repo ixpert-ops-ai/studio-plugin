@@ -34,6 +34,7 @@ class WuwToolWindowFactory : ToolWindowFactory {
 
                 // JSQuery 바인딩 핸들러 생성 및 인젝션 런타임 셋업
                 val messageHandler = net.ib.ixpert.ops.wuwagent.ui.bridge.JcefMessageHandler(project, browser)
+                bridge.registerMessageHandler(messageHandler)
                 val injectScript = messageHandler.getInjectScript()
 
                 val originalHtml = url.readText(Charsets.UTF_8)

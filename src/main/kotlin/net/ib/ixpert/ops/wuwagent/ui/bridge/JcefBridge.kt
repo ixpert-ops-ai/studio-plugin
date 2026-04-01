@@ -11,10 +11,16 @@ import com.intellij.ui.jcef.JBCefBrowser
 @Service(Service.Level.PROJECT)
 class JcefBridge(private val project: Project) {
     private var browser: JBCefBrowser? = null
+    // JBCefJSQuery 객체가 GC 프로세스에 의해 수거되어 브릿지가 단절되는 것을 방지합니다.
+    private var messageHandler: Any? = null
     private val gson = Gson()
 
     fun registerBrowser(cefBrowser: JBCefBrowser) {
         this.browser = cefBrowser
+    }
+
+    fun registerMessageHandler(handler: Any) {
+        this.messageHandler = handler
     }
 
     /**
