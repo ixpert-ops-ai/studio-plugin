@@ -36,6 +36,8 @@ class OllamaClient {
                     request.readString()
                 }
             
+            logger.info("Ollama API Raw Response: $responseString")
+            
             gson.fromJson(responseString, OllamaChatResponse::class.java)
         } catch (e: IOException) {
             logger.error("Failed to communicate with Ollama API: ${e.message}", e)
