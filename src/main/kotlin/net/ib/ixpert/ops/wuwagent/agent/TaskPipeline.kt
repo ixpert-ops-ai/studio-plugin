@@ -92,12 +92,15 @@ sealed class TaskPipeline {
     //  사전 정의된 파이프라인 목록
     // ──────────────────────────────────────────
 
-    /** 코드 개선 → 영향 분석 → 테스트 생성 */
+    /**
+     * 코드 개선 → 영향 분석
+     * - 1/2 코드 개선: Diff 대상 (isApplyable = true)
+     * - 2/2 영향 분석: 참고용 텍스트 (isApplyable = false)
+     */
     object Improve : TaskPipeline() {
         override val steps = listOf(
-            AgentStep("1/3 코드 개선",   "improve_prompt.txt", isApplyable = true),
-            AgentStep("2/3 영향 분석",   "impact_prompt.txt",  isApplyable = false),
-            AgentStep("3/3 테스트 생성", "test_prompt.txt",    isApplyable = true)
+            AgentStep("1/2 코드 개선", "improve_prompt.txt", isApplyable = true),
+            AgentStep("2/2 영향 분석", "impact_prompt.txt",  isApplyable = false)
         )
     }
 
