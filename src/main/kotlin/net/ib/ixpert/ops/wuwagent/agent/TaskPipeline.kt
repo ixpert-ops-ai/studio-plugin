@@ -5,6 +5,7 @@ import net.ib.ixpert.ops.wuwagent.client.OllamaClient
 import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
 import net.ib.ixpert.ops.wuwagent.service.EditorApplyService
 import net.ib.ixpert.ops.wuwagent.service.EditorContextService
+import net.ib.ixpert.ops.wuwagent.service.FileSearchService
 
 /**
  * 사전 정의된 Agent 실행 파이프라인을 표현하는 sealed class.
@@ -53,36 +54,52 @@ sealed class TaskPipeline {
 
             // ── 기존 코드 및 scope 사전 추출 ─────────────────
             var originalCode = ""
-            var applyScope = ""
-            val userMessage = if (context.editor != null) {
+            var applyScope   = ""
+            var userMessage: String
+
+            if (context.editor != null) {
+                // ① 에디터가 열려있으면 에디터 코드 우선 사용
                 val extraction = EditorContextService.extractCodeWithScope(context.editor, context.project)
                 if (extraction.code.isNotBlank()) {
                     originalCode = extraction.code
-                    applyScope = if (extraction.isSelection) "선택 영역" else "전체 파일"
+                    applyScope   = if (extraction.isSelection) "선택 영역" else "전체 파일"
                 }
-                when {
+                userMessage = when {
                     originalCode.isNotBlank() && context.payloadText.isNotBlank() ->
                         "사용자 요청: ${context.payloadText}\n\n참조 코드:\n```\n$originalCode\n```"
                     originalCode.isNotBlank() -> originalCode
                     else -> context.payloadText
                 }
             } else {
-                context.payloadText
+                // ② 에디터 없음 → payloadText 키워드로 프로젝트 파일 검색
+                val keyword = context.payloadText.trim()
+                val firstFile = if (keyword.isNotBlank()) {
+                    FileSearchService.searchFiles(context.project, keyword).firstOrNull()
+                } else null
+
+                if (firstFile != null) {
+                    val fileContent = FileSearchService.readFileContent(firstFile)
+                    logger.info("AgentStep[${label}]: FileSearch 히트 → ${firstFile.name} (${fileContent.length}자)")
+                    userMessage = "사용자 요청: $keyword\n\n// 파일: ${firstFile.name}\n```\n$fileContent\n```"
+                } else {
+                    // 검색 결과 없으면 텍스트만 전달
+                    userMessage = keyword
+                }
             }
 
             if (userMessage.isBlank()) {
                 return StepResult("", "", "[알림] 처리할 코드나 입력이 없습니다.", "")
             }
 
-            logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=$applyScope)")
-            val response = client.callChatApi(systemPrompt, userMessage)
-            val llmResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
+            logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=${applyScope.ifBlank { "file-search" }})")
+            val response      = client.callChatApi(systemPrompt, userMessage)
+            val llmResponse   = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
             val extractedCode = EditorApplyService.extractCodeBlock(llmResponse)
 
             return StepResult(
                 originalCode = originalCode,
-                applyScope = applyScope,
-                llmResponse = llmResponse,
+                applyScope   = applyScope,
+                llmResponse  = llmResponse,
                 extractedCode = extractedCode
             )
         }
