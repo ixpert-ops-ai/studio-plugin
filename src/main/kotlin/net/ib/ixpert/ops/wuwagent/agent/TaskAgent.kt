@@ -16,7 +16,7 @@ import net.ib.ixpert.ops.wuwagent.client.OllamaClient
  * 5. [TaskCancellationToken]을 통해 외부에서 취소 가능
  */
 class TaskAgent(
-    private val onStep: (stepLabel: String, content: String, isApplyable: Boolean) -> Unit,
+    private val onStep: (stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean) -> Unit,
     private val onStepStart: (stepLabel: String) -> Unit = {}
 ) : WuwAgent {
 
@@ -82,7 +82,7 @@ class TaskAgent(
                             return
                         }
                         logger.error("TaskAgent: ${step.label} 실행 중 예외", e)
-                        onStep(step.label, "[오류] ${e.message}", false)
+                        onStep(step.label, TaskPipeline.StepResult("", "", "[오류] ${e.message}", ""), false)
                     }
                 }
 

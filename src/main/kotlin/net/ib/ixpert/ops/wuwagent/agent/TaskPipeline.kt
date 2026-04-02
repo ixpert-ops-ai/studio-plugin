@@ -3,6 +3,7 @@ package net.ib.ixpert.ops.wuwagent.agent
 import com.intellij.openapi.diagnostic.Logger
 import net.ib.ixpert.ops.wuwagent.client.OllamaClient
 import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
+import net.ib.ixpert.ops.wuwagent.service.EditorApplyService
 import net.ib.ixpert.ops.wuwagent.service.EditorContextService
 
 /**
@@ -13,6 +14,21 @@ import net.ib.ixpert.ops.wuwagent.service.EditorContextService
  */
 sealed class TaskPipeline {
     abstract val steps: List<AgentStep>
+
+    /**
+     * 각 Step 실행 결과를 담는 컨테이너.
+     *
+     * @param originalCode   Diff 비교 기준이 되는 에디터의 기존 코드 (없으면 빈 문자열)
+     * @param applyScope     "선택 영역" / "전체 파일" / "" (originalCode 없을 때)
+     * @param llmResponse    LLM 원문 전체 응답 (설명 포함)
+     * @param extractedCode  LLM 응답에서 추출한 순수 코드 블록
+     */
+    data class StepResult(
+        val originalCode: String,
+        val applyScope: String,
+        val llmResponse: String,
+        val extractedCode: String
+    )
 
     /**
      * 파이프라인의 각 실행 단위.
@@ -32,30 +48,43 @@ sealed class TaskPipeline {
          * OllamaClient를 직접 사용해 동기적(blocking)으로 LLM을 호출합니다.
          * TaskAgent의 단일 Backgroundable 블록 안에서 호출됩니다.
          */
-        fun executeSync(context: AgentContext, client: OllamaClient): String {
+        fun executeSync(context: AgentContext, client: OllamaClient): StepResult {
             val systemPrompt = PromptManager.loadPrompt(promptFile)
 
-            // 에디터 코드가 있다면 사용자의 입력(질문/요청)과 함께 묶어서 전송합니다.
+            // ── 기존 코드 및 scope 사전 추출 ─────────────────
+            var originalCode = ""
+            var applyScope = ""
             val userMessage = if (context.editor != null) {
-                val code = EditorContextService.extractCode(context.editor, context.project)
-                if (code.isNotBlank() && context.payloadText.isNotBlank()) {
-                    "사용자 요청: ${context.payloadText}\n\n참조 코드:\n```\n$code\n```"
-                } else if (code.isNotBlank()) {
-                    code
-                } else {
-                    context.payloadText
+                val extraction = EditorContextService.extractCodeWithScope(context.editor, context.project)
+                if (extraction.code.isNotBlank()) {
+                    originalCode = extraction.code
+                    applyScope = if (extraction.isSelection) "선택 영역" else "전체 파일"
+                }
+                when {
+                    originalCode.isNotBlank() && context.payloadText.isNotBlank() ->
+                        "사용자 요청: ${context.payloadText}\n\n참조 코드:\n```\n$originalCode\n```"
+                    originalCode.isNotBlank() -> originalCode
+                    else -> context.payloadText
                 }
             } else {
                 context.payloadText
             }
 
             if (userMessage.isBlank()) {
-                return "[알림] 처리할 코드나 입력이 없습니다."
+                return StepResult("", "", "[알림] 처리할 코드나 입력이 없습니다.", "")
             }
 
-            logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile)")
+            logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=$applyScope)")
             val response = client.callChatApi(systemPrompt, userMessage)
-            return response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
+            val llmResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
+            val extractedCode = EditorApplyService.extractCodeBlock(llmResponse)
+
+            return StepResult(
+                originalCode = originalCode,
+                applyScope = applyScope,
+                llmResponse = llmResponse,
+                extractedCode = extractedCode
+            )
         }
     }
 

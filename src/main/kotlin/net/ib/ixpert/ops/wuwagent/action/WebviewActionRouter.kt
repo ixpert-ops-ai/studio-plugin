@@ -9,6 +9,7 @@ import net.ib.ixpert.ops.wuwagent.agent.ChatAgent
 import net.ib.ixpert.ops.wuwagent.agent.ExplainAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
+import net.ib.ixpert.ops.wuwagent.agent.TaskPipeline
 import net.ib.ixpert.ops.wuwagent.service.EditorApplyService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
@@ -71,14 +72,17 @@ class WebviewActionRouter(private val project: Project) {
                     }
 
                     // Step 완료 시 결과 전송
-                    val onStep = { stepLabel: String, content: String, isApplyable: Boolean ->
-                        logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable)")
+                    val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean ->
+                        logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, scope=${result.applyScope})")
                         bridge.sendMessage(
                             subType = "task_step",
-                            content = content,
+                            content = result.llmResponse,
                             meta = mapOf(
-                                "stepLabel"  to stepLabel,
-                                "applyable"  to isApplyable.toString()
+                                "stepLabel"     to stepLabel,
+                                "applyable"     to isApplyable.toString(),
+                                "originalCode"  to result.originalCode,
+                                "extractedCode" to result.extractedCode,
+                                "applyScope"    to result.applyScope
                             )
                         )
                     }

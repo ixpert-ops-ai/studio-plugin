@@ -324,3 +324,94 @@ textarea::placeholder {
   20% { opacity: 1; transform: scale(1.2); }
   100% { opacity: 0.2; transform: scale(0.8); }
 }
+
+/* ─────────────────────────────────────────────
+   Diff Panel
+───────────────────────────────────────────── */
+.diff-panel {
+  margin-top: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  font-size: 11px;
+}
+
+.diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.diff-content {
+  max-height: 300px;
+  overflow-y: auto;
+  background: #1a1b1e;
+}
+
+.diff-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  line-height: 1.5;
+}
+
+.diff-line-add  { background: rgba(82, 139, 78, 0.25); }
+.diff-line-remove { background: rgba(188, 63, 60, 0.25); }
+.diff-line-same { background: transparent; }
+
+.diff-marker {
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+  color: var(--text-muted);
+  user-select: none;
+  padding: 0 2px;
+}
+.diff-line-add    .diff-marker { color: #6abf69; }
+.diff-line-remove .diff-marker { color: #cf6679; }
+
+.diff-line pre {
+  margin: 0;
+  padding: 0 8px 0 0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-main);
+}
+.diff-line-add    pre { color: #a8d8a8; }
+.diff-line-remove pre { color: #e8a0a0; }
+
+/* scope 배지 */
+.scope-badge {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(53, 116, 240, 0.15);
+  color: #7eb8f7;
+  border: 1px solid rgba(53, 116, 240, 0.3);
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* Confirm Apply 버튼 */
+.btn-confirm {
+  background: rgba(82, 139, 78, 0.3);
+  color: #6abf69;
+  border: 1px solid rgba(82, 139, 78, 0.5);
+  padding: 4px 12px;
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.btn-confirm:hover {
+  background: rgba(82, 139, 78, 0.45);
+}

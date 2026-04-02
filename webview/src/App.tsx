@@ -15,56 +15,180 @@ interface Message {
   subType?: string;
   stepLabel?: string;
   applyable?: boolean;
+  originalCode?: string;
+  extractedCode?: string;
+  applyScope?: string;
 }
 
 // ─────────────────────────────────────────────
-//  Apply 버튼 포함 TaskStep 말풍선
+//  라인 Diff 알고리즘 (LCS 기반, 외부 라이브러리 없음)
 // ─────────────────────────────────────────────
+type DiffLine =
+  | { type: 'same';   text: string }
+  | { type: 'add';    text: string }
+  | { type: 'remove'; text: string };
+
+function computeLineDiff(oldText: string, newText: string): DiffLine[] {
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  const m = oldLines.length, n = newLines.length;
+
+  // 라인 수가 너무 많으면 단순 split 표시(성능 보호)
+  if (m * n > 250_000) {
+    return [
+      ...oldLines.map(t => ({ type: 'remove' as const, text: t })),
+      ...newLines.map(t => ({ type: 'add'    as const, text: t })),
+    ];
+  }
+
+  // LCS DP 테이블
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = oldLines[i - 1] === newLines[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+
+  // 역추적
+  const result: DiffLine[] = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+      result.unshift({ type: 'same', text: oldLines[i - 1] }); i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.unshift({ type: 'add', text: newLines[j - 1] }); j--;
+    } else {
+      result.unshift({ type: 'remove', text: oldLines[i - 1] }); i--;
+    }
+  }
+  return result;
+}
+
+// ─────────────────────────────────────────────
+//  DiffPanel 컴포넌트
+// ─────────────────────────────────────────────
+const DiffPanel = ({ originalCode, newCode, applyScope }: {
+  originalCode: string;
+  newCode: string;
+  applyScope?: string;
+}) => {
+  const lines = computeLineDiff(originalCode, newCode);
+  const added   = lines.filter(l => l.type === 'add').length;
+  const removed = lines.filter(l => l.type === 'remove').length;
+
+  return (
+    <div className="diff-panel">
+      <div className="diff-header">
+        <span>
+          <span style={{ color: '#6abf69', marginRight: 6 }}>+{added}</span>
+          <span style={{ color: '#cf6679' }}>-{removed}</span>
+        </span>
+        {applyScope && <span className="scope-badge">📌 {applyScope} 기준</span>}
+      </div>
+      <div className="diff-content">
+        {lines.map((line, idx) => (
+          <div key={idx} className={`diff-line diff-line-${line.type}`}>
+            <span className="diff-marker">
+              {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
+            </span>
+            <pre>{line.text}</pre>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
+//  TaskStepBubble — 비교 → 승인 → 적용 상태 머신
+// ─────────────────────────────────────────────
+type ApplyPhase = 'initial' | 'viewingDiff' | 'applied';
+
 const TaskStepBubble = ({ msg }: { msg: Message }) => {
-  const [applied, setApplied] = useState(false);
+  const [phase, setPhase]   = useState<ApplyPhase>('initial');
   const [copied, setCopied] = useState(false);
 
-  const handleApply = () => {
-    if (window.sendToIde) {
-      window.sendToIde(JSON.stringify({ command: '/apply', text: msg.content }));
-      setApplied(true);
-    }
-  };
+  const hasOriginal  = !!msg.originalCode && msg.originalCode.trim() !== '';
+  const codeToApply  = msg.extractedCode || msg.content;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(msg.content).then(() => {
+    navigator.clipboard.writeText(codeToApply).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
   };
 
+  const handleApply = () => {
+    if (window.sendToIde) {
+      window.sendToIde(JSON.stringify({ command: '/apply', text: codeToApply }));
+      setPhase('applied');
+    }
+  };
+
   return (
     <div className="msg-ai">
+      {/* 헤더 */}
       <div className="msg-ai-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>
-          WhatUWant?
-          {msg.stepLabel && (
-            <span style={{ fontSize: '11px', color: 'var(--accent-color)', marginLeft: '6px' }}>
-              ✅ {msg.stepLabel}
-            </span>
-          )}
-        </span>
+        <span>WhatUWant?</span>
+        {msg.stepLabel && (
+          <span style={{ fontSize: '11px', color: 'var(--accent-color, #7eb8f7)' }}>
+            ✅ {msg.stepLabel}
+          </span>
+        )}
       </div>
+
+      {/* LLM 설명 텍스트 */}
       <div className="msg-ai-content">
-        <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+        <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>
       </div>
-      <div className="msg-ai-actions">
+
+      {/* Diff 패널 (viewingDiff 단계에서만 표시) */}
+      {phase === 'viewingDiff' && hasOriginal && (
+        <DiffPanel
+          originalCode={msg.originalCode!}
+          newCode={msg.extractedCode || ''}
+          applyScope={msg.applyScope}
+        />
+      )}
+      {/* originalCode 없을 때 새 코드 생성 알림 */}
+      {phase === 'viewingDiff' && !hasOriginal && (
+        <div style={{ marginTop: 8, fontSize: '11px', color: 'var(--text-muted)' }}>
+          ℹ️ 기존 코드가 없어 Diff를 표시할 수 없습니다.
+        </div>
+      )}
+
+      {/* 액션 버튼 영역 */}
+      <div className="msg-ai-actions" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
         <button className="btn-small" onClick={handleCopy}>
           {copied ? '복사됨 ✓' : 'Copy'}
         </button>
-        {msg.applyable && (
-          <button
-            className="btn-small"
-            onClick={handleApply}
-            disabled={applied}
-            style={applied ? { opacity: 0.5 } : { background: 'var(--bg-button-active)', color: '#fff', border: 'none' }}
-          >
-            {applied ? 'Applied ✓' : '⚡ Apply'}
+
+        {msg.applyable && phase === 'applied' && (
+          <span style={{ fontSize: '11px', color: '#6abf69' }}>Applied ✓</span>
+        )}
+
+        {/* originalCode 없음: 새 코드 생성 배지 + 바로 Apply */}
+        {msg.applyable && phase === 'initial' && !hasOriginal && (
+          <>
+            <span className="scope-badge" style={{ fontSize: '10px' }}>새 코드 생성 (비교 없음)</span>
+            <button className="btn-small" onClick={handleApply}
+              style={{ background: 'var(--bg-button-active)', color: '#fff', border: 'none' }}>
+              ⚡ Apply
+            </button>
+          </>
+        )}
+
+        {/* originalCode 있음: Diff 보기 버튼 */}
+        {msg.applyable && phase === 'initial' && hasOriginal && (
+          <button className="btn-small" onClick={() => setPhase('viewingDiff')}>
+            🔍 Diff 보기
+          </button>
+        )}
+
+        {/* Diff 열람 후: Confirm Apply 버튼 */}
+        {msg.applyable && phase === 'viewingDiff' && (
+          <button className="btn-confirm" onClick={handleApply}>
+            ✅ Confirm Apply
           </button>
         )}
       </div>
@@ -83,18 +207,18 @@ const AiBubble = ({ msg }: { msg: Message }) => {
       setTimeout(() => setCopied(false), 2000);
     });
   };
-  const label = msg.subType === 'explain' ? ' [Explain]'
-               : msg.subType === 'chat'    ? ' [Chat]'
-               : msg.subType === 'apply_result' ? ' [Apply]'
-               : '';
+  const label = msg.subType === 'explain'      ? ' [Explain]'
+              : msg.subType === 'chat'          ? ' [Chat]'
+              : msg.subType === 'apply_result'  ? ' [Apply]'
+              : '';
   return (
     <div className="msg-ai">
       <div className="msg-ai-header">
         WhatUWant?
-        {label && <span style={{ fontSize: '11px', color: 'var(--accent-color)' }}>{label}</span>}
+        {label && <span style={{ fontSize: '11px', color: 'var(--accent-color, #7eb8f7)' }}>{label}</span>}
       </div>
       <div className="msg-ai-content">
-        <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+        <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>
       </div>
       <div className="msg-ai-actions">
         <button className="btn-small" onClick={handleCopy}>{copied ? '복사됨 ✓' : 'Copy'}</button>
@@ -123,7 +247,7 @@ const Header = () => {
       </div>
       <div className="toggle-group">
         <button className={`toggle-btn ${mode === 'Plan' ? 'active' : ''}`} onClick={() => setMode('Plan')}>Plan</button>
-        <button className={`toggle-btn ${mode === 'Act' ? 'active' : ''}`} onClick={() => setMode('Act')}>Act</button>
+        <button className={`toggle-btn ${mode === 'Act'  ? 'active' : ''}`} onClick={() => setMode('Act')}>Act</button>
       </div>
     </div>
   );
@@ -180,59 +304,55 @@ const ChatInputArea = ({ inputText, setInputText, onSend, onStop }: ChatInputAre
 // ─────────────────────────────────────────────
 function App() {
   const [messages, setMessages] = useState<Message[]>([{
-    id: '1', role: 'ai', content:
-      '/explain 명령어로 코드 설명 · /chat으로 일반 대화 · 아무 텍스트나 입력하면 AI가 알아서 처리합니다!',
+    id: '1', role: 'ai',
+    content: '/explain 코드 설명 · /chat 일반 대화 · 그 외 입력은 AI가 의도를 분석해 자동 실행합니다!',
     subType: 'welcome'
   }]);
-  const [isTyping, setIsTyping] = useState(false);
+  const [isTyping, setIsTyping]   = useState(false);
   const [inputText, setInputText] = useState('');
   const chatListRef = useRef<HTMLDivElement>(null);
 
-  // 메시지 추가 시 자동 스크롤
   useEffect(() => {
     chatListRef.current?.scrollTo({ top: chatListRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, isTyping]);
 
-  // IDE → React 이벤트 수신
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const data = event.data;
       if (!data || data.type !== 'ai_message') return;
 
-      // task_start / task_progress / task_cancelled: 즉각 tool 말풍선으로 표시, typing 중지
-      if (data.subType === 'task_start' || data.subType === 'task_progress' || data.subType === 'task_cancelled') {
-        setMessages(prev => [...prev, {
-          id: Date.now().toString(),
-          role: 'tool',
-          content: data.content,
-        }]);
+      // 진행 상태 tool 메시지 (typing 중지)
+      if (['task_start', 'task_progress', 'task_cancelled'].includes(data.subType)) {
+        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: data.content }]);
         setIsTyping(false);
         return;
       }
 
       const newMsg: Message = {
-        id: Date.now().toString(),
-        role: 'ai',
-        content: data.content,
-        subType: data.subType,
-        stepLabel: data.stepLabel || undefined,
-        applyable: data.applyable === 'true',
+        id:            Date.now().toString(),
+        role:          'ai',
+        content:       data.content,
+        subType:       data.subType,
+        stepLabel:     data.stepLabel    || undefined,
+        applyable:     data.applyable    === 'true',
+        originalCode:  data.originalCode || '',
+        extractedCode: data.extractedCode || '',
+        applyScope:    data.applyScope   || '',
       };
       setMessages(prev => [...prev, newMsg]);
       setIsTyping(false);
     };
 
-    const handleError = (e: any) => {
-      const msg = e.message || e.toString();
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: `[JS Error] ${msg}` }]);
+    const handleError = (e: ErrorEvent) => {
+      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: `[JS Error] ${e.message}` }]);
       setIsTyping(false);
     };
 
     window.addEventListener('message', handleMessage);
-    window.addEventListener('error', handleError);
+    window.addEventListener('error', handleError as EventListener);
     return () => {
       window.removeEventListener('message', handleMessage);
-      window.removeEventListener('error', handleError);
+      window.removeEventListener('error', handleError as EventListener);
     };
   }, []);
 
@@ -250,13 +370,11 @@ function App() {
       return;
     }
 
-    // 명령어 라우팅
     if (text.startsWith('/explain')) {
       window.sendToIde(JSON.stringify({ command: '/explain', text: text.replace('/explain', '').trim() }));
     } else if (text.startsWith('/chat')) {
-      window.sendToIde(JSON.stringify({ command: '/chat', text: text.replace('/chat', '').trim() }));
+      window.sendToIde(JSON.stringify({ command: '/chat',    text: text.replace('/chat', '').trim() }));
     } else {
-      // 일반 텍스트 → TaskAgent (IntentAnalyzer가 분기)
       window.sendToIde(JSON.stringify({ command: '/task', text }));
     }
   };
@@ -271,16 +389,13 @@ function App() {
     <>
       <Header />
       <ContextBar />
-
       <div className="chat-list" ref={chatListRef}>
         {messages.map((msg) => {
           if (msg.role === 'user') return <div key={msg.id} className="msg-user">{msg.content}</div>;
           if (msg.role === 'tool') return (
             <div key={msg.id} className="msg-tool"><div className="dot"></div>{msg.content}</div>
           );
-          // task_step: Apply 버튼 있는 전용 말풍선
           if (msg.subType === 'task_step') return <TaskStepBubble key={msg.id} msg={msg} />;
-          // 일반 AI 말풍선
           return <AiBubble key={msg.id} msg={msg} />;
         })}
 
@@ -294,7 +409,6 @@ function App() {
           </div>
         )}
       </div>
-
       <ChatInputArea inputText={inputText} setInputText={setInputText} onSend={handleSend} onStop={handleStop} />
     </>
   );
