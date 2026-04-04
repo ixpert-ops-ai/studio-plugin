@@ -18,6 +18,7 @@ interface Message {
   originalCode?: string;
   extractedCode?: string;
   applyScope?: string;
+  isSuccess?: boolean;
 }
 
 // ─────────────────────────────────────────────
@@ -338,6 +339,7 @@ function App() {
         originalCode:  data.originalCode || '',
         extractedCode: data.extractedCode || '',
         applyScope:    data.applyScope   || '',
+        isSuccess:     data.isSuccess    === 'true',
       };
       setMessages(prev => [...prev, newMsg]);
       setIsTyping(false);

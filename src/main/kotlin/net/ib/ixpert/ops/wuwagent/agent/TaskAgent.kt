@@ -67,8 +67,15 @@ class TaskAgent(
                             return
                         }
 
-                        logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료")
+                        logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료 (success=${result.isSuccess})")
                         onStep(step.label, result, step.isApplyable)
+
+                        // ❌ 에러 발생 시 파이프라인 즉시 중단
+                        if (!result.isSuccess) {
+                            logger.warn("TaskAgent: ${step.label} 실패 → 파이프라인 중단")
+                            onSuccess("__task_done__")
+                            return
+                        }
 
                     } catch (e: InterruptedException) {
                         logger.info("TaskAgent: 스레드 인터럽트 → 취소됨")
@@ -82,7 +89,9 @@ class TaskAgent(
                             return
                         }
                         logger.error("TaskAgent: ${step.label} 실행 중 예외", e)
-                        onStep(step.label, TaskPipeline.StepResult("", "", "[오류] ${e.message}", ""), false)
+                        onStep(step.label, TaskPipeline.StepResult("", "", "[오류] ${e.message}", "", isSuccess = false), false)
+                        onSuccess("__task_done__")
+                        return
                     }
                 }
 

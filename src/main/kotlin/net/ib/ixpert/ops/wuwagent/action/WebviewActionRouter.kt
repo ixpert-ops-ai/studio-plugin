@@ -78,11 +78,12 @@ class WebviewActionRouter(private val project: Project) {
                             subType = "task_step",
                             content = result.llmResponse,
                             meta = mapOf(
-                                "stepLabel"     to stepLabel,
-                                "applyable"     to isApplyable.toString(),
-                                "originalCode"  to result.originalCode,
+                                "stepLabel" to stepLabel,
+                                "applyable" to (if (result.isSuccess && isApplyable) "true" else "false"),
+                                "originalCode" to result.originalCode,
                                 "extractedCode" to result.extractedCode,
-                                "applyScope"    to result.applyScope
+                                "applyScope" to result.applyScope,
+                                "isSuccess" to result.isSuccess.toString()
                             )
                         )
                     }

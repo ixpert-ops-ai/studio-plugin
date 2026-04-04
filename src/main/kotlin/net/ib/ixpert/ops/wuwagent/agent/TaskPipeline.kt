@@ -28,7 +28,8 @@ sealed class TaskPipeline {
         val originalCode: String,
         val applyScope: String,
         val llmResponse: String,
-        val extractedCode: String
+        val extractedCode: String,
+        val isSuccess: Boolean = true
     )
 
     /**
@@ -52,43 +53,62 @@ sealed class TaskPipeline {
         fun executeSync(context: AgentContext, client: OllamaClient): StepResult {
             val systemPrompt = PromptManager.loadPrompt(promptFile)
 
-            // ── 기존 코드 및 scope 사전 추출 ─────────────────
             var originalCode = ""
             var applyScope   = ""
             var userMessage: String
 
-            if (context.editor != null) {
-                // ① 에디터가 열려있으면 에디터 코드 우선 사용
-                val extraction = EditorContextService.extractCodeWithScope(context.editor, context.project)
-                if (extraction.code.isNotBlank()) {
-                    originalCode = extraction.code
-                    applyScope   = if (extraction.isSelection) "선택 영역" else "전체 파일"
-                }
-                userMessage = when {
-                    originalCode.isNotBlank() && context.payloadText.isNotBlank() ->
-                        "사용자 요청: ${context.payloadText}\n\n참조 코드:\n```\n$originalCode\n```"
-                    originalCode.isNotBlank() -> originalCode
-                    else -> context.payloadText
+            val payload = context.payloadText.trim()
+            
+            // ① 파일명 패턴 추출 (대문자로 시작하는 단어 또는 확장자 포함 단어)
+            // (예: "MainActivity", "utils.kt", "ApiService.java")
+            val filePattern = Regex("\\b([A-Z][a-zA-Z0-9]*|\\w+\\.(kt|java|xml|gradle))\\b")
+            val potentialFileName = filePattern.find(payload)?.value
+
+            if (potentialFileName != null) {
+                // [CASE A] 파일명이 명시된 경우 → "파일 검색" 우선, 에디터 폴백 금지
+                val matchedFile = FileSearchService.searchFiles(context.project, potentialFileName).firstOrNull()
+                
+                if (matchedFile != null) {
+                    val fileContent = FileSearchService.readFileContent(matchedFile)
+                    logger.info("AgentStep[${label}]: 명시적 파일 검색 히트 → ${matchedFile.name}")
+                    userMessage = "사용자 요청: $payload\n\n// 파일: ${matchedFile.name}\n```\n$fileContent\n```"
+                } else {
+                    // ❌ 파일을 찾지 못한 경우 에디터 폴백 없이 에러 반환
+                    logger.warn("AgentStep[${label}]: 명시적 파일($potentialFileName)을 찾을 수 없음")
+                    return StepResult("", "", "[오류] 프로젝트에서 '$potentialFileName' 파일을 찾을 수 없습니다. 정확한 파일명을 입력해 주세요.", "", isSuccess = false)
                 }
             } else {
-                // ② 에디터 없음 → payloadText 키워드로 프로젝트 파일 검색
-                val keyword = context.payloadText.trim()
-                val firstFile = if (keyword.isNotBlank()) {
-                    FileSearchService.searchFiles(context.project, keyword).firstOrNull()
-                } else null
-
-                if (firstFile != null) {
-                    val fileContent = FileSearchService.readFileContent(firstFile)
-                    logger.info("AgentStep[${label}]: FileSearch 히트 → ${firstFile.name} (${fileContent.length}자)")
-                    userMessage = "사용자 요청: $keyword\n\n// 파일: ${firstFile.name}\n```\n$fileContent\n```"
+                // [CASE B] 파일명이 없는 일반 질문 → "에디터" 우선
+                if (context.editor != null) {
+                    val extraction = EditorContextService.extractCodeWithScope(context.editor, context.project)
+                    if (extraction.code.isNotBlank()) {
+                        originalCode = extraction.code
+                        applyScope   = if (extraction.isSelection) "선택 영역" else "전체 파일"
+                    }
+                    userMessage = when {
+                        originalCode.isNotBlank() && payload.isNotBlank() ->
+                            "사용자 요청: $payload\n\n참조 코드:\n```\n$originalCode\n```"
+                        originalCode.isNotBlank() -> originalCode
+                        else -> payload
+                    }
                 } else {
-                    // 검색 결과 없으면 텍스트만 전달
-                    userMessage = keyword
+                    // 에디터도 없으면 마지막 수단으로 전체 검색 (기존 로직 유지)
+                    val firstFile = if (payload.isNotBlank()) {
+                        FileSearchService.searchFiles(context.project, payload).firstOrNull()
+                    } else null
+
+                    if (firstFile != null) {
+                        val fileContent = FileSearchService.readFileContent(firstFile)
+                        logger.info("AgentStep[${label}]: 일반 검색 히트 → ${firstFile.name}")
+                        userMessage = "사용자 요청: $payload\n\n// 파일: ${firstFile.name}\n```\n$fileContent\n```"
+                    } else {
+                        userMessage = payload
+                    }
                 }
             }
 
             if (userMessage.isBlank()) {
-                return StepResult("", "", "[알림] 처리할 코드나 입력이 없습니다.", "")
+                return StepResult("", "", "[알림] 처리할 코드나 입력이 없습니다.", "", isSuccess = false)
             }
 
             logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=${applyScope.ifBlank { "file-search" }})")
