@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Settings, Edit, Clock, CornerDownLeft, Square } from 'lucide-react';
+import { useState, useEffect, useRef, memo } from 'react';
+import { Settings, Edit, RotateCcw, Square, Terminal } from 'lucide-react';
 import './index.css';
 
 declare global {
@@ -8,49 +8,46 @@ declare global {
   }
 }
 
+// ─────────────────────────────────────────────
+//  데이터 타입 정의
+// ─────────────────────────────────────────────
 interface Message {
   id: string;
   role: 'user' | 'ai' | 'tool';
-  content: string;
   subType?: string;
+  content: string;
   stepLabel?: string;
   applyable?: boolean;
+  isSuccess?: boolean;
   originalCode?: string;
   extractedCode?: string;
   applyScope?: string;
-  isSuccess?: boolean;
 }
 
+type ApplyPhase = 'initial' | 'viewingDiff' | 'applied';
+
 // ─────────────────────────────────────────────
-//  라인 Diff 알고리즘 (LCS 기반, 외부 라이브러리 없음)
+//  유틸리티: Diff 계산
 // ─────────────────────────────────────────────
-type DiffLine =
-  | { type: 'same';   text: string }
-  | { type: 'add';    text: string }
-  | { type: 'remove'; text: string };
+type DiffLine = { type: 'same' | 'add' | 'remove'; text: string };
 
 function computeLineDiff(oldText: string, newText: string): DiffLine[] {
   const oldLines = oldText.split('\n');
   const newLines = newText.split('\n');
   const m = oldLines.length, n = newLines.length;
 
-  // 라인 수가 너무 많으면 단순 split 표시(성능 보호)
   if (m * n > 250_000) {
     return [
       ...oldLines.map(t => ({ type: 'remove' as const, text: t })),
-      ...newLines.map(t => ({ type: 'add'    as const, text: t })),
+      ...newLines.map(t => ({ type: 'add' as const, text: t })),
     ];
   }
 
-  // LCS DP 테이블
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
   for (let i = 1; i <= m; i++)
     for (let j = 1; j <= n; j++)
-      dp[i][j] = oldLines[i - 1] === newLines[j - 1]
-        ? dp[i - 1][j - 1] + 1
-        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      dp[i][j] = oldLines[i - 1] === newLines[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
 
-  // 역추적
   const result: DiffLine[] = [];
   let i = m, j = n;
   while (i > 0 || j > 0) {
@@ -66,30 +63,16 @@ function computeLineDiff(oldText: string, newText: string): DiffLine[] {
 }
 
 // ─────────────────────────────────────────────
-//  DiffPanel 컴포넌트
+//  컴포넌트: DiffPanel
 // ─────────────────────────────────────────────
-const DiffPanel = ({ originalCode, newCode, applyScope }: {
-  originalCode: string;
-  newCode: string;
-  applyScope?: string;
-}) => {
+const DiffPanel = memo(({ originalCode, newCode }: { originalCode: string; newCode: string }) => {
   const lines = computeLineDiff(originalCode, newCode);
-  const added   = lines.filter(l => l.type === 'add').length;
-  const removed = lines.filter(l => l.type === 'remove').length;
-
   return (
     <div className="diff-panel">
-      <div className="diff-header">
-        <span>
-          <span style={{ color: '#6abf69', marginRight: 6 }}>+{added}</span>
-          <span style={{ color: '#cf6679' }}>-{removed}</span>
-        </span>
-        {applyScope && <span className="scope-badge">📌 {applyScope} 기준</span>}
-      </div>
       <div className="diff-content">
         {lines.map((line, idx) => (
           <div key={idx} className={`diff-line diff-line-${line.type}`}>
-            <span className="diff-marker">
+            <span style={{ width: 12, textAlign: 'center', opacity: 0.5 }}>
               {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
             </span>
             <pre>{line.text}</pre>
@@ -98,218 +81,120 @@ const DiffPanel = ({ originalCode, newCode, applyScope }: {
       </div>
     </div>
   );
-};
+});
 
 // ─────────────────────────────────────────────
-//  TaskStepBubble — 비교 → 승인 → 적용 상태 머신
+//  컴포넌트: ActionCard (코드 제안 카드)
 // ─────────────────────────────────────────────
-type ApplyPhase = 'initial' | 'viewingDiff' | 'applied';
-
-const TaskStepBubble = ({ msg }: { msg: Message }) => {
-  const [phase, setPhase]   = useState<ApplyPhase>('initial');
-  const [copied, setCopied] = useState(false);
-
-  const hasOriginal  = !!msg.originalCode && msg.originalCode.trim() !== '';
-  const codeToApply  = msg.extractedCode || msg.content;
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(codeToApply).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
-  const handleApply = () => {
-    if (window.sendToIde) {
-      window.sendToIde(JSON.stringify({ command: '/apply', text: codeToApply }));
-      setPhase('applied');
-    }
-  };
-
+const ActionCard = ({ msg, onApply }: { msg: Message; onApply: () => void }) => {
+  const [showDiff, setShowDiff] = useState(false);
+  
   return (
-    <div className="msg-ai">
-      {/* 헤더 */}
-      <div className="msg-ai-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>WhatUWant?</span>
-        {msg.stepLabel && (
-          <span style={{ fontSize: '11px', color: 'var(--accent-color, #7eb8f7)' }}>
-            ✅ {msg.stepLabel}
-          </span>
-        )}
+    <div className="action-card">
+      <div className="action-card-header">
+        <span className="title">코드 개선 제안</span>
+        <span className="filename">{msg.applyScope || 'MainActivity.kt'}</span>
       </div>
-
-      {/* LLM 설명 텍스트 */}
-      <div className="msg-ai-content">
-        <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>
-      </div>
-
-      {/* Diff 패널 (viewingDiff 단계에서만 표시) */}
-      {phase === 'viewingDiff' && hasOriginal && (
-        <DiffPanel
-          originalCode={msg.originalCode!}
-          newCode={msg.extractedCode || ''}
-          applyScope={msg.applyScope}
-        />
+      {showDiff && msg.originalCode && (
+        <DiffPanel originalCode={msg.originalCode} newCode={msg.extractedCode || ''} />
       )}
-      {/* originalCode 없을 때 새 코드 생성 알림 */}
-      {phase === 'viewingDiff' && !hasOriginal && (
-        <div style={{ marginTop: 8, fontSize: '11px', color: 'var(--text-muted)' }}>
-          ℹ️ 기존 코드가 없어 Diff를 표시할 수 없습니다.
-        </div>
-      )}
-
-      {/* 액션 버튼 영역 */}
-      <div className="msg-ai-actions" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-        <button className="btn-small" onClick={handleCopy}>
-          {copied ? '복사됨 ✓' : 'Copy'}
+      <div className="action-card-body">
+        <button className="btn-action" onClick={() => setShowDiff(!showDiff)}>
+          {showDiff ? 'Diff 숨기기' : 'Diff 보기'}
         </button>
-
-        {msg.applyable && phase === 'applied' && (
-          <span style={{ fontSize: '11px', color: '#6abf69' }}>Applied ✓</span>
-        )}
-
-        {/* originalCode 없음: 새 코드 생성 배지 + 바로 Apply */}
-        {msg.applyable && phase === 'initial' && !hasOriginal && (
-          <>
-            <span className="scope-badge" style={{ fontSize: '10px' }}>새 코드 생성 (비교 없음)</span>
-            <button className="btn-small" onClick={handleApply}
-              style={{ background: 'var(--bg-button-active)', color: '#fff', border: 'none' }}>
-              ⚡ Apply
-            </button>
-          </>
-        )}
-
-        {/* originalCode 있음: Diff 보기 버튼 */}
-        {msg.applyable && phase === 'initial' && hasOriginal && (
-          <button className="btn-small" onClick={() => setPhase('viewingDiff')}>
-            🔍 Diff 보기
-          </button>
-        )}
-
-        {/* Diff 열람 후: Confirm Apply 버튼 */}
-        {msg.applyable && phase === 'viewingDiff' && (
-          <button className="btn-confirm" onClick={handleApply}>
-            ✅ Confirm Apply
-          </button>
-        )}
+        <button className="btn-action btn-apply" onClick={onApply}>Apply</button>
+        <button className="btn-action">Ignore</button>
       </div>
     </div>
   );
 };
 
 // ─────────────────────────────────────────────
-//  일반 AI 말풍선
+//  컴포넌트: SuccessCard (적용 완료 카드)
 // ─────────────────────────────────────────────
-const AiBubble = ({ msg }: { msg: Message }) => {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    navigator.clipboard.writeText(msg.content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-  const label = msg.subType === 'explain'      ? ' [Explain]'
-              : msg.subType === 'chat'          ? ' [Chat]'
-              : msg.subType === 'apply_result'  ? ' [Apply]'
-              : '';
-  return (
-    <div className="msg-ai">
-      <div className="msg-ai-header">
-        WhatUWant?
-        {label && <span style={{ fontSize: '11px', color: 'var(--accent-color, #7eb8f7)' }}>{label}</span>}
-      </div>
-      <div className="msg-ai-content">
-        <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>
-      </div>
-      <div className="msg-ai-actions">
-        <button className="btn-small" onClick={handleCopy}>{copied ? '복사됨 ✓' : 'Copy'}</button>
-      </div>
+const SuccessCard = ({ filename, onUndo }: { filename: string; onUndo: () => void }) => (
+  <div className="success-card">
+    <div className="success-card-header">
+      <span className="title">Applied ✨</span>
+      <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{filename}</span>
     </div>
-  );
-};
-
-// ─────────────────────────────────────────────
-//  Header
-// ─────────────────────────────────────────────
-const Header = () => {
-  const [mode, setMode] = useState<'Plan' | 'Act'>('Plan');
-  return (
-    <div className="header flex-col">
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <span className="title">WhatUWant?</span>
-          <span className="badge">Android</span>
-        </div>
-        <div className="flex gap-2">
-          <button className="icon-btn" title="History"><Clock size={14} /></button>
-          <button className="icon-btn" title="New Chat"><Edit size={14} /></button>
-          <button className="icon-btn" title="Settings"><Settings size={14} /></button>
-        </div>
-      </div>
-      <div className="toggle-group">
-        <button className={`toggle-btn ${mode === 'Plan' ? 'active' : ''}`} onClick={() => setMode('Plan')}>Plan</button>
-        <button className={`toggle-btn ${mode === 'Act'  ? 'active' : ''}`} onClick={() => setMode('Act')}>Act</button>
-      </div>
+    <div className="success-card-content">
+      <span>✓ 파일이 성공적으로 수정되었습니다.</span>
+      <button className="btn-undo" onClick={onUndo}><RotateCcw size={10} /> Undo</button>
     </div>
-  );
-};
-
-const ContextBar = () => (
-  <div className="context-bar">
-    <span>Context</span>
-    <div className="progress-track"><div className="progress-fill" style={{ width: '30%' }}></div></div>
-    <span>1,240 / 4,096 tokens</span>
   </div>
 );
 
 // ─────────────────────────────────────────────
-//  입력창
+//  컴포넌트: MessageItem (역할별 분기)
 // ─────────────────────────────────────────────
-interface ChatInputAreaProps {
-  inputText: string;
-  setInputText: (t: string) => void;
-  onSend: () => void;
-  onStop: () => void;
-}
-const ChatInputArea = ({ inputText, setInputText, onSend, onStop }: ChatInputAreaProps) => {
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
+const MessageItem = ({ msg }: { msg: Message }) => {
+  const [phase, setPhase] = useState<ApplyPhase>('initial');
+
+  // 1. Tool / Status 메시지
+  if (msg.role === 'tool') {
+    return (
+      <div className="msg-tool">
+        <div className="dot" />
+        {msg.content}
+      </div>
+    );
+  }
+
+  // 2. User 메시지
+  if (msg.role === 'user') {
+    return <div className="msg-user">{msg.content}</div>;
+  }
+
+  const handleApply = () => {
+    if (window.sendToIde) {
+      window.sendToIde(JSON.stringify({ command: '/apply', text: msg.extractedCode || msg.content }));
+      setPhase('applied');
+    }
   };
+
+  const handleUndo = () => {
+    if (window.sendToIde) window.sendToIde(JSON.stringify({ command: '/undo' }));
+    setPhase('initial');
+  };
+
+  // 3. AI 메시지
+  const isError = msg.isSuccess === false;
+  const canShowActionCard = msg.applyable && msg.isSuccess !== false && phase === 'initial';
+
   return (
-    <div className="chat-input-area">
-      <button className="attach-btn">@ 파일 첨부</button>
-      <div className="textarea-wrapper">
-        <textarea
-          placeholder="질문이나 /explain, /chat 명령어를 입력하세요..."
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
-        <div className="input-footer">
-          <button className="btn btn-secondary">
-            <CornerDownLeft size={14} style={{ transform: 'rotate(90deg) scaleX(-1)' }} />
-            Undo
-          </button>
-          <div className="flex gap-2">
-            <button className="btn btn-danger" onClick={onStop}><Square size={12} fill="currentColor" />Stop</button>
-            <button className="btn btn-primary" onClick={onSend}>전송</button>
-          </div>
-        </div>
+    <div className="msg-ai">
+      <div className="msg-ai-header" style={{ color: isError ? 'var(--danger-color)' : 'inherit' }}>
+        WhatUWant?
+      </div>
+      <div className="msg-ai-content">
+        <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>
+      </div>
+
+      {canShowActionCard && (
+        <ActionCard msg={msg} onApply={handleApply} />
+      )}
+
+      {phase === 'applied' && (
+        <SuccessCard filename={msg.applyScope || 'MainActivity.kt'} onUndo={handleUndo} />
+      )}
+
+      <div className="msg-ai-actions">
+        <button className="btn-small" onClick={() => navigator.clipboard.writeText(msg.content)}>Copy</button>
+        {!canShowActionCard && phase !== 'applied' && <button className="btn-small">Save</button>}
       </div>
     </div>
   );
 };
 
 // ─────────────────────────────────────────────
-//  App
+//  메인 App
 // ─────────────────────────────────────────────
 function App() {
   const [messages, setMessages] = useState<Message[]>([{
-    id: '1', role: 'ai',
-    content: '/explain 코드 설명 · /chat 일반 대화 · 그 외 입력은 AI가 의도를 분석해 자동 실행합니다!',
-    subType: 'welcome'
+    id: '1', role: 'ai', content: '무엇을 도와드릴까요? (/explain, /chat, /task 등을 지원합니다.)'
   }]);
-  const [isTyping, setIsTyping]   = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const [inputText, setInputText] = useState('');
   const chatListRef = useRef<HTMLDivElement>(null);
 
@@ -322,97 +207,90 @@ function App() {
       const data = event.data;
       if (!data || data.type !== 'ai_message') return;
 
-      // 진행 상태 tool 메시지 (typing 중지)
       if (['task_start', 'task_progress', 'task_cancelled'].includes(data.subType)) {
         setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: data.content }]);
         setIsTyping(false);
         return;
       }
 
-      const newMsg: Message = {
+      setMessages(prev => [...prev, {
         id:            Date.now().toString(),
         role:          'ai',
         content:       data.content,
         subType:       data.subType,
-        stepLabel:     data.stepLabel    || undefined,
-        applyable:     data.applyable    === 'true',
-        originalCode:  data.originalCode || '',
-        extractedCode: data.extractedCode || '',
-        applyScope:    data.applyScope   || '',
-        isSuccess:     data.isSuccess    === 'true',
-      };
-      setMessages(prev => [...prev, newMsg]);
+        stepLabel:     data.stepLabel,
+        applyable:     data.applyable === 'true',
+        isSuccess:     data.isSuccess === 'true',
+        originalCode:  data.originalCode,
+        extractedCode: data.extractedCode,
+        applyScope:    data.applyScope,
+      }]);
       setIsTyping(false);
     };
-
-    const handleError = (e: ErrorEvent) => {
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: `[JS Error] ${e.message}` }]);
-      setIsTyping(false);
-    };
-
     window.addEventListener('message', handleMessage);
-    window.addEventListener('error', handleError as EventListener);
-    return () => {
-      window.removeEventListener('message', handleMessage);
-      window.removeEventListener('error', handleError as EventListener);
-    };
+    return () => window.removeEventListener('message', handleMessage);
   }, []);
 
   const handleSend = () => {
     const text = inputText.trim();
-    if (!text) return;
-
+    if (!text || !window.sendToIde) return;
     setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text }]);
     setInputText('');
     setIsTyping(true);
-
-    if (!window.sendToIde) {
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: '[오류] IDE 브릿지가 연결되지 않았습니다.' }]);
-      setIsTyping(false);
-      return;
-    }
-
-    if (text.startsWith('/explain')) {
-      window.sendToIde(JSON.stringify({ command: '/explain', text: text.replace('/explain', '').trim() }));
-    } else if (text.startsWith('/chat')) {
-      window.sendToIde(JSON.stringify({ command: '/chat',    text: text.replace('/chat', '').trim() }));
-    } else {
-      window.sendToIde(JSON.stringify({ command: '/task', text }));
-    }
-  };
-
-  const handleStop = () => {
-    if (window.sendToIde) {
-      window.sendToIde(JSON.stringify({ command: '/cancel' }));
-    }
+    window.sendToIde(JSON.stringify({ command: text.startsWith('/') ? text.split(' ')[0] : '/task', text }));
   };
 
   return (
-    <>
-      <Header />
-      <ContextBar />
-      <div className="chat-list" ref={chatListRef}>
-        {messages.map((msg) => {
-          if (msg.role === 'user') return <div key={msg.id} className="msg-user">{msg.content}</div>;
-          if (msg.role === 'tool') return (
-            <div key={msg.id} className="msg-tool"><div className="dot"></div>{msg.content}</div>
-          );
-          if (msg.subType === 'task_step') return <TaskStepBubble key={msg.id} msg={msg} />;
-          return <AiBubble key={msg.id} msg={msg} />;
-        })}
+    <div id="root">
+      <header className="header flex justify-between items-center">
+        <span className="title">WhatUWant?</span>
+        <div className="flex gap-2">
+          <button className="icon-btn"><Terminal size={14} /></button>
+          <button className="icon-btn"><Edit size={14} /></button>
+          <button className="icon-btn"><Settings size={14} /></button>
+        </div>
+      </header>
 
+      <div className="chat-list" ref={chatListRef}>
+        {messages.map(msg => <MessageItem key={msg.id} msg={msg} />)}
         {isTyping && (
           <div className="msg-ai" style={{ width: 'fit-content' }}>
             <div className="msg-ai-header">WhatUWant?</div>
-            <div className="flex items-center gap-2" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            <div className="flex items-center gap-2">
               <div className="typing-dots"><span></span><span></span><span></span></div>
-              응답 생성 중...
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>응답 생성 중...</span>
             </div>
           </div>
         )}
       </div>
-      <ChatInputArea inputText={inputText} setInputText={setInputText} onSend={handleSend} onStop={handleStop} />
-    </>
+
+      <div className="chat-input-area">
+        <div className="input-toolbar">
+          <button className="toolbar-btn">@ 파일 첨부</button>
+          <button className="toolbar-btn">/ 명령어</button>
+        </div>
+        <div className="textarea-wrapper">
+          <textarea
+            placeholder="메시지를 입력하세요..."
+            value={inputText}
+            onChange={e => setInputText(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+          />
+          <div className="input-footer">
+            <span className="helper-text">Shift+Enter : 줄바꿈 / Enter : 전송</span>
+            <div className="flex gap-2">
+              <button className="btn-small" style={{ borderColor: 'transparent' }} onClick={() => window.sendToIde?.(JSON.stringify({ command: '/undo' }))}>
+                <RotateCcw size={12} />
+              </button>
+              <button className="btn-small" style={{ background: 'var(--danger-color)', border: 'none' }} onClick={() => window.sendToIde?.(JSON.stringify({ command: '/cancel' }))}>
+                <Square size={10} fill="currentColor" /> Stop
+              </button>
+              <button className="btn-primary" onClick={handleSend}>전송</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
