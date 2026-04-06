@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, memo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Settings, Edit, RotateCcw, Square, Terminal } from 'lucide-react';
 import './index.css';
 
@@ -20,118 +20,64 @@ interface Message {
   applyable?: boolean;
   isSuccess?: boolean;
   originalCode?: string;
+  modifiedCode?: string;
   extractedCode?: string;
   applyScope?: string;
+  applied?: boolean;
 }
-
-type ApplyPhase = 'initial' | 'viewingDiff' | 'applied';
-
-// ─────────────────────────────────────────────
-//  유틸리티: Diff 계산
-// ─────────────────────────────────────────────
-type DiffLine = { type: 'same' | 'add' | 'remove'; text: string };
-
-function computeLineDiff(oldText: string, newText: string): DiffLine[] {
-  const oldLines = oldText.split('\n');
-  const newLines = newText.split('\n');
-  const m = oldLines.length, n = newLines.length;
-
-  if (m * n > 250_000) {
-    return [
-      ...oldLines.map(t => ({ type: 'remove' as const, text: t })),
-      ...newLines.map(t => ({ type: 'add' as const, text: t })),
-    ];
-  }
-
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 1; i <= m; i++)
-    for (let j = 1; j <= n; j++)
-      dp[i][j] = oldLines[i - 1] === newLines[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
-
-  const result: DiffLine[] = [];
-  let i = m, j = n;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      result.unshift({ type: 'same', text: oldLines[i - 1] }); i--; j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      result.unshift({ type: 'add', text: newLines[j - 1] }); j--;
-    } else {
-      result.unshift({ type: 'remove', text: oldLines[i - 1] }); i--;
-    }
-  }
-  return result;
-}
-
-// ─────────────────────────────────────────────
-//  컴포넌트: DiffPanel
-// ─────────────────────────────────────────────
-const DiffPanel = memo(({ originalCode, newCode }: { originalCode: string; newCode: string }) => {
-  const lines = computeLineDiff(originalCode, newCode);
-  return (
-    <div className="diff-panel">
-      <div className="diff-content">
-        {lines.map((line, idx) => (
-          <div key={idx} className={`diff-line diff-line-${line.type}`}>
-            <span style={{ width: 12, textAlign: 'center', opacity: 0.5 }}>
-              {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
-            </span>
-            <pre>{line.text}</pre>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-});
 
 // ─────────────────────────────────────────────
 //  컴포넌트: ActionCard (코드 제안 카드)
 // ─────────────────────────────────────────────
 const ActionCard = ({ msg, onApply }: { msg: Message; onApply: () => void }) => {
-  const [showDiff, setShowDiff] = useState(false);
-  
+  const hasOriginal = !!msg.originalCode && msg.originalCode.trim() !== '';
+  const hasModified = !!msg.modifiedCode && msg.modifiedCode.trim() !== '';
+  const canShowDiff = msg.isSuccess === true && hasOriginal && hasModified;
+
+  const handleApply = () => {
+    onApply();
+  };
+
+  const handleViewDiff = () => {
+    if (window.sendToIde) {
+      window.sendToIde(JSON.stringify({ 
+        command: '/viewDiff', 
+        original: msg.originalCode,
+        modified: msg.modifiedCode,
+        scope: msg.applyScope
+      }));
+    }
+  };
+
+
+
   return (
     <div className="action-card">
       <div className="action-card-header">
-        <span className="title">코드 개선 제안</span>
+        <span className="title">✨ 코드 개선 제안</span>
         <span className="filename">{msg.applyScope || 'MainActivity.kt'}</span>
       </div>
-      {showDiff && msg.originalCode && (
-        <DiffPanel originalCode={msg.originalCode} newCode={msg.extractedCode || ''} />
-      )}
       <div className="action-card-body">
-        <button className="btn-action" onClick={() => setShowDiff(!showDiff)}>
-          {showDiff ? 'Diff 숨기기' : 'Diff 보기'}
+        {canShowDiff && (
+          <button className="btn-action btn-diff" onClick={handleViewDiff}>
+            🔍 Diff 보기
+          </button>
+        )}
+        <button className="btn-action btn-apply" onClick={handleApply}>
+          Apply
         </button>
-        <button className="btn-action btn-apply" onClick={onApply}>Apply</button>
-        <button className="btn-action">Ignore</button>
       </div>
     </div>
   );
 };
 
 // ─────────────────────────────────────────────
-//  컴포넌트: SuccessCard (적용 완료 카드)
-// ─────────────────────────────────────────────
-const SuccessCard = ({ filename, onUndo }: { filename: string; onUndo: () => void }) => (
-  <div className="success-card">
-    <div className="success-card-header">
-      <span className="title">Applied ✨</span>
-      <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{filename}</span>
-    </div>
-    <div className="success-card-content">
-      <span>✓ 파일이 성공적으로 수정되었습니다.</span>
-      <button className="btn-undo" onClick={onUndo}><RotateCcw size={10} /> Undo</button>
-    </div>
-  </div>
-);
-
-// ─────────────────────────────────────────────
 //  컴포넌트: MessageItem (역할별 분기)
 // ─────────────────────────────────────────────
 const MessageItem = ({ msg }: { msg: Message }) => {
-  const [phase, setPhase] = useState<ApplyPhase>('initial');
+  const isApplied = msg.applied === true;
 
-  // 1. Tool / Status 메시지
+  // 1. Tool / Status 메시지 (진행 상태 등)
   if (msg.role === 'tool') {
     return (
       <div className="msg-tool">
@@ -146,43 +92,51 @@ const MessageItem = ({ msg }: { msg: Message }) => {
     return <div className="msg-user">{msg.content}</div>;
   }
 
+  // 3. AI 메시지 분기 처리
+  const isError = msg.isSuccess === false;
+  const isImprovement = msg.applyable === true;
+  const isAnalysis = !isError && !isImprovement;
+
   const handleApply = () => {
     if (window.sendToIde) {
-      window.sendToIde(JSON.stringify({ command: '/apply', text: msg.extractedCode || msg.content }));
-      setPhase('applied');
+      window.sendToIde(JSON.stringify({ 
+        command: '/apply',
+        id: msg.id,
+        text: msg.modifiedCode || msg.extractedCode || msg.content,
+        scope: msg.applyScope || '',
+        original: msg.originalCode || ''
+      }));
     }
   };
 
   const handleUndo = () => {
-    if (window.sendToIde) window.sendToIde(JSON.stringify({ command: '/undo' }));
-    setPhase('initial');
+    if (window.sendToIde) {
+      window.sendToIde(JSON.stringify({ command: '/undo', id: msg.id }));
+    }
   };
 
-  // 3. AI 메시지
-  const isError = msg.isSuccess === false;
-  const canShowActionCard = msg.applyable && msg.isSuccess !== false && phase === 'initial';
-
   return (
-    <div className="msg-ai">
-      <div className="msg-ai-header" style={{ color: isError ? 'var(--danger-color)' : 'inherit' }}>
-        WhatUWant?
+    <div className={`msg-ai ${isError ? 'error' : isAnalysis ? 'analysis' : 'improvement'}`}>
+      <div className="msg-ai-header">
+        {isError ? '❌ Error' : isAnalysis ? '📋 영향 분석' : '💡 개선 제안'}
       </div>
+      
       <div className="msg-ai-content">
         <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>
       </div>
 
-      {canShowActionCard && (
+      {isImprovement && !isError && !isApplied && (
         <ActionCard msg={msg} onApply={handleApply} />
       )}
 
-      {phase === 'applied' && (
-        <SuccessCard filename={msg.applyScope || 'MainActivity.kt'} onUndo={handleUndo} />
+      {isImprovement && isApplied && (
+        <div className="applied-info">
+          <span>✓ 코드가 에디터에 적용되었습니다.</span>
+          <button className="btn-undo-link" onClick={handleUndo}>Undo</button>
+        </div>
       )}
 
-      <div className="msg-ai-actions">
-        <button className="btn-small" onClick={() => navigator.clipboard.writeText(msg.content)}>Copy</button>
-        {!canShowActionCard && phase !== 'applied' && <button className="btn-small">Save</button>}
-      </div>
+      {/* UX: 일반 메시지에는 버튼을 붙이지 않음 (Copy, Save 제거) */}
     </div>
   );
 };
@@ -207,28 +161,56 @@ function App() {
       const data = event.data;
       if (!data || data.type !== 'ai_message') return;
 
-      if (['task_start', 'task_progress', 'task_cancelled'].includes(data.subType)) {
+      if (data.subType === 'apply_success') {
+        const targetId = data.id;
+        if (targetId) {
+          setMessages(prev => prev.map(m => m.id === targetId ? { ...m, applied: true } : m));
+        }
+        return;
+      }
+      if (data.subType === 'undo_success') {
+        const targetId = data.id;
+        if (targetId) {
+          setMessages(prev => prev.map(m => m.id === targetId ? { ...m, applied: false } : m));
+        }
+        return;
+      }
+
+      if (['task_start', 'task_progress', 'task_cancelled', 'error'].includes(data.subType)) {
         setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: data.content }]);
         setIsTyping(false);
         return;
       }
 
-      setMessages(prev => [...prev, {
-        id:            Date.now().toString(),
+      const newMsg: Message = {
+        id:            data.messageId || Date.now().toString(),
         role:          'ai',
         content:       data.content,
         subType:       data.subType,
-        stepLabel:     data.stepLabel,
-        applyable:     data.applyable === 'true',
-        isSuccess:     data.isSuccess === 'true',
-        originalCode:  data.originalCode,
-        extractedCode: data.extractedCode,
-        applyScope:    data.applyScope,
-      }]);
+        stepLabel:     data.stepLabel    || undefined,
+        applyable:     data.applyable    === 'true',
+        isSuccess:     data.isSuccess    !== 'false',
+        originalCode:  data.originalCode || undefined,
+        modifiedCode:  data.modifiedCode || undefined,
+        extractedCode: data.extractedCode || '',
+        applyScope:    data.applyScope   || '',
+        applied:       false,
+      };
+      setMessages(prev => [...prev, newMsg]);
       setIsTyping(false);
     };
+
+    const handleError = (e: ErrorEvent) => {
+      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: `[JS Error] ${e.message}` }]);
+      setIsTyping(false);
+    };
+
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    window.addEventListener('error', handleError as EventListener);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      window.removeEventListener('error', handleError as EventListener);
+    };
   }, []);
 
   const handleSend = () => {

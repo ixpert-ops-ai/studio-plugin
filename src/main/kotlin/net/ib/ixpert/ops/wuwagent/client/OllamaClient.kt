@@ -12,7 +12,7 @@ class OllamaClient {
     private val logger = Logger.getInstance(OllamaClient::class.java)
     private val gson = Gson()
     private val serverUrl = "http://ollama.jodongik.cloud/api/chat"
-    private val modelName = "qwen3-coder:30b"
+    private val modelName = "gemma4:latest"
 
     fun callChatApi(systemPrompt: String, userCode: String): OllamaChatResponse? {
         val messages = listOf(

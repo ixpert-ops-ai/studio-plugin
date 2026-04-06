@@ -11,6 +11,7 @@ import net.ib.ixpert.ops.wuwagent.agent.TaskAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.agent.TaskPipeline
 import net.ib.ixpert.ops.wuwagent.service.EditorApplyService
+import net.ib.ixpert.ops.wuwagent.service.EditorDiffService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
 /**
@@ -80,7 +81,8 @@ class WebviewActionRouter(private val project: Project) {
                             meta = mapOf(
                                 "stepLabel" to stepLabel,
                                 "applyable" to (if (result.isSuccess && isApplyable) "true" else "false"),
-                                "originalCode" to result.originalCode,
+                                "originalCode" to result.originalCode.orEmpty(),
+                                "modifiedCode" to result.modifiedCode.orEmpty(),
                                 "extractedCode" to result.extractedCode,
                                 "applyScope" to result.applyScope,
                                 "isSuccess" to result.isSuccess.toString()
@@ -94,9 +96,33 @@ class WebviewActionRouter(private val project: Project) {
                 // ── Apply: 에디터에 코드 쓰기 ────────────────
                 "/apply" -> {
                     logger.info("Router: /apply 분기 → EditorApplyService")
-                    val codeToApply = EditorApplyService.extractCodeBlock(textBody)
-                    val result = EditorApplyService.apply(project, codeToApply)
-                    bridge.sendMessage("apply_result", result)
+                    val messageId = payload["id"] ?: ""
+                    val scope = payload["scope"] ?: ""
+                    val original = payload["original"] ?: ""
+                    val result = EditorApplyService.apply(project, textBody, scope, original)
+                    
+                    if (result.startsWith("[오류]")) {
+                        bridge.sendMessage("task_progress", result)
+                    } else {
+                        bridge.sendMessage("apply_success", result, mapOf("id" to messageId))
+                    }
+                }
+
+                // ── Diff: IDE 내장 Diff 창 띄우기 ─────────────
+                "/viewDiff" -> {
+                    val original = payload["original"] ?: ""
+                    val modified = payload["modified"] ?: ""
+                    val scope    = payload["scope"] ?: "File"
+                    
+                    logger.info("Router: /viewDiff 분기 → original 길이: ${original.length}, modified 길이: ${modified.length}")
+                    
+                    if (original == modified) {
+                        logger.warn("Router: /viewDiff 무시됨 → original과 modified가 완벽히 동일합니다.")
+                        bridge.sendMessage("task_progress", "⚠️ 원본과 개선된 코드가 동일하여 Diff를 열 수 없습니다.")
+                        return@invokeLater
+                    }
+                    
+                    EditorDiffService.showDiff(project, original, modified, "AI 코드 개선 제안 ($scope)")
                 }
 
                 // ── Cancel: 실행 중인 Task 취소 ──────────────

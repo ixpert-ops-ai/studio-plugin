@@ -89,7 +89,18 @@ class TaskAgent(
                             return
                         }
                         logger.error("TaskAgent: ${step.label} 실행 중 예외", e)
-                        onStep(step.label, TaskPipeline.StepResult("", "", "[오류] ${e.message}", "", isSuccess = false), false)
+                        onStep(
+                            step.label,
+                            TaskPipeline.StepResult(
+                                originalCode = null,
+                                modifiedCode = null,
+                                applyScope = "",
+                                llmResponse = "[오류] ${e.message}",
+                                extractedCode = "",
+                                isSuccess = false
+                            ),
+                            false
+                        )
                         onSuccess("__task_done__")
                         return
                     }

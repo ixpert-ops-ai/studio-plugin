@@ -19,13 +19,15 @@ sealed class TaskPipeline {
     /**
      * 각 Step 실행 결과를 담는 컨테이너.
      *
-     * @param originalCode   Diff 비교 기준이 되는 에디터의 기존 코드 (없으면 빈 문자열)
+     * @param originalCode   Diff 비교 기준이 되는 기존 코드 (코드 변경이 있을 때만 세팅)
+     * @param modifiedCode   Diff 비교 대상이 되는 개선 코드 (코드 변경이 있을 때만 세팅)
      * @param applyScope     "선택 영역" / "전체 파일" / "" (originalCode 없을 때)
      * @param llmResponse    LLM 원문 전체 응답 (설명 포함)
      * @param extractedCode  LLM 응답에서 추출한 순수 코드 블록
      */
     data class StepResult(
-        val originalCode: String,
+        val originalCode: String?,
+        val modifiedCode: String?,
         val applyScope: String,
         val llmResponse: String,
         val extractedCode: String,
@@ -75,7 +77,14 @@ sealed class TaskPipeline {
                 } else {
                     // ❌ 파일을 찾지 못한 경우 에디터 폴백 없이 에러 반환
                     logger.warn("AgentStep[${label}]: 명시적 파일($potentialFileName)을 찾을 수 없음")
-                    return StepResult("", "", "[오류] 프로젝트에서 '$potentialFileName' 파일을 찾을 수 없습니다. 정확한 파일명을 입력해 주세요.", "", isSuccess = false)
+                    return StepResult(
+                        originalCode = null,
+                        modifiedCode = null,
+                        applyScope = "",
+                        llmResponse = "[오류] 프로젝트에서 '$potentialFileName' 파일을 찾을 수 없습니다. 정확한 파일명을 입력해 주세요.",
+                        extractedCode = "",
+                        isSuccess = false
+                    )
                 }
             } else {
                 // [CASE B] 파일명이 없는 일반 질문 → "에디터" 우선
@@ -108,19 +117,45 @@ sealed class TaskPipeline {
             }
 
             if (userMessage.isBlank()) {
-                return StepResult("", "", "[알림] 처리할 코드나 입력이 없습니다.", "", isSuccess = false)
+                return StepResult(
+                    originalCode = null,
+                    modifiedCode = null,
+                    applyScope = "",
+                    llmResponse = "[알림] 처리할 코드나 입력이 없습니다.",
+                    extractedCode = "",
+                    isSuccess = false
+                )
             }
 
             logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=${applyScope.ifBlank { "file-search" }})")
             val response      = client.callChatApi(systemPrompt, userMessage)
             val llmResponse   = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
-            val extractedCode = EditorApplyService.extractCodeBlock(llmResponse)
+            
+            // Ollama 가 타임아웃 등으로 "[Error]..." 반환 시 오류로 간주
+            val isErrorResponse = llmResponse.startsWith("[오류]") || llmResponse.startsWith("[Error]")
+            val extractedCode = if (isErrorResponse) "" else EditorApplyService.extractCodeBlock(llmResponse)
+            
+            // 코드 개선(Improve) 시, 원본과 동일하거나 비정상 응답이면 실패로 처리
+            val isPromptImprove = promptFile.contains("improve")
+            val hasCodeDiff = isApplyable &&
+                !isErrorResponse &&
+                originalCode.isNotBlank() &&
+                extractedCode.isNotBlank() &&
+                originalCode != extractedCode
+
+            val isActuallySuccess = when {
+                isErrorResponse -> false
+                isPromptImprove && !hasCodeDiff -> false // 개선 요청인데 변경된 게 없으면 실패
+                else -> true
+            }
 
             return StepResult(
-                originalCode = originalCode,
-                applyScope   = applyScope,
-                llmResponse  = llmResponse,
-                extractedCode = extractedCode
+                originalCode = if (hasCodeDiff) originalCode else null,
+                modifiedCode = if (hasCodeDiff) extractedCode else null,
+                applyScope = applyScope,
+                llmResponse = llmResponse,
+                extractedCode = extractedCode,
+                isSuccess = isActuallySuccess
             )
         }
     }
@@ -130,14 +165,14 @@ sealed class TaskPipeline {
     // ──────────────────────────────────────────
 
     /**
-     * 코드 개선 → 영향 분석
-     * - 1/2 코드 개선: Diff 대상 (isApplyable = true)
-     * - 2/2 영향 분석: 참고용 텍스트 (isApplyable = false)
+     * 분석 → 코드 개선
+     * - 1/2 영향 분석: 참고용 텍스트 (isApplyable = false)
+     * - 2/2 코드 개선: Diff 대상 (isApplyable = true)
      */
     object Improve : TaskPipeline() {
         override val steps = listOf(
-            AgentStep("1/2 코드 개선", "improve_prompt.txt", isApplyable = true),
-            AgentStep("2/2 영향 분석", "impact_prompt.txt",  isApplyable = false)
+            AgentStep("1/2 영향 분석", "impact_prompt.txt",  isApplyable = false),
+            AgentStep("2/2 코드 개선", "improve_prompt.txt", isApplyable = true)
         )
     }
 
