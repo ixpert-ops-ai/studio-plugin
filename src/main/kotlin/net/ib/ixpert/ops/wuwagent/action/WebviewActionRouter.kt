@@ -108,21 +108,70 @@ class WebviewActionRouter(private val project: Project) {
                     }
                 }
 
-                // ── Diff: IDE 내장 Diff 창 띄우기 ─────────────
+                // ── Diff: IDE 내장 Diff 창 띄우기 (블록 단위 적용 << 지원) ─────────────
                 "/viewDiff" -> {
                     val original = payload["original"] ?: ""
                     val modified = payload["modified"] ?: ""
                     val scope    = payload["scope"] ?: "File"
                     
-                    logger.info("Router: /viewDiff 분기 → original 길이: ${original.length}, modified 길이: ${modified.length}")
-                    
-                    if (original == modified) {
+                    if (original == modified && original.isNotBlank()) {
                         logger.warn("Router: /viewDiff 무시됨 → original과 modified가 완벽히 동일합니다.")
                         bridge.sendMessage("task_progress", "⚠️ 원본과 개선된 코드가 동일하여 Diff를 열 수 없습니다.")
                         return@invokeLater
                     }
                     
-                    EditorDiffService.showDiff(project, original, modified, "AI 코드 개선 제안 ($scope)")
+                    val fileEditorManager = FileEditorManager.getInstance(project)
+                    val targetFile = fileEditorManager.openFiles.firstOrNull { it.name == scope }
+                        ?: fileEditorManager.selectedTextEditor?.virtualFile
+                        
+                    if (targetFile == null) {
+                        logger.warn("Router: /viewDiff 대상을 찾을 수 없음 (scope=$scope)")
+                        bridge.sendMessage("error", "적용 대상 파일($scope)을 찾을 수 없어 Diff 뷰어를 열 수 없습니다.")
+                        return@invokeLater
+                    }
+                    
+                    val document = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(targetFile)
+                    if (document == null) {
+                        bridge.sendMessage("error", "해당 파일의 내용을 읽을 수 없습니다.")
+                        return@invokeLater
+                    }
+
+                    // 선택 영역 단위의 Diff일 경우 전체 문서 내에서 해당 영역만 교체하여 Full Text를 생성합니다.
+                    val fullOriginalText = document.text
+                    val rightFullText = if (original.isNotBlank() && original != modified) {
+                        // 문서 전체에서 original을 modified로 치환 (첫 번째 일치 항목 안전 교체)
+                        fullOriginalText.replaceFirst(original, modified)
+                    } else {
+                        modified
+                    }
+                    
+                    EditorDiffService.showDiff(project, targetFile, rightFullText, "AI 코드 개선 제안 ($scope)")
+                }
+
+                // ── Undo: IDE 기본 Undo 실행 (단축키 Ctrl+Z와 동일) ──────────────
+                "/undo" -> {
+                    logger.info("Router: /undo 분기 → IDE 기본 Undo (UndoManager) 실행")
+                    val messageId = payload["id"] ?: ""
+                    
+                    val fileEditorManager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+                    val selectedEditor = fileEditorManager.selectedEditor
+                    
+                    if (selectedEditor != null) {
+                        val undoManager = com.intellij.openapi.command.undo.UndoManager.getInstance(project)
+                        if (undoManager.isUndoAvailable(selectedEditor)) {
+                            // Undo는 EDT에서 실행되어야 함
+                            ApplicationManager.getApplication().invokeLater {
+                                undoManager.undo(selectedEditor)
+                                logger.info("Router: Undo 실행 성공")
+                                bridge.sendMessage("undo_success", "에디터 적용 사항이 취소되었습니다. (Undo)", mapOf("id" to messageId))
+                            }
+                        } else {
+                            logger.warn("Router: Undo 불가능한 상태")
+                            bridge.sendMessage("error", "취소(Undo)할 내역이 없습니다.")
+                        }
+                    } else {
+                        bridge.sendMessage("error", "활성화된 에디터를 찾을 수 없습니다.")
+                    }
                 }
 
                 // ── Cancel: 실행 중인 Task 취소 ──────────────

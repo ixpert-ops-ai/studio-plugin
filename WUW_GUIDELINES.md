@@ -134,6 +134,114 @@ Action → Agent → Service → LLM → Result → UI
 
 ---
 
+## 5. 작업 완료 기준
+
+하나의 작업(Task)은 아래 조건을 만족해야 완료로 간주한다.
+
+- 코드 수정 완료
+- 빌드 성공
+- _release 폴더에 최신 zip 반영
+- 기능 정상 동작 확인
+
+---
+
+## 6. 빌드 및 배포 규칙 (필수)
+
+모든 코드 수정 작업 완료 후 반드시 아래 절차를 수행한다.
+
+1. 플러그인 빌드 수행
+   - 명령어: ./gradlew buildPlugin
+
+2. 빌드 결과 확인
+   - 경로: build/distributions
+   - 최신 .zip 파일 생성 여부 확인
+
+3. 배포 파일 복사
+   - build/distributions의 최신 zip을 루트의 `_release` 폴더로 복사
+   - 기존 파일이 있을 경우 덮어쓰기 또는 정리
+
+4. 실패 처리
+   - 빌드 실패 시 즉시 중단하고 오류 로그 출력
+   - 복사 실패 시 원인 출력
+
+5. 검증
+   - 항상 최신 빌드 파일 기준으로 테스트 수행
+   - 이전 빌드 파일 사용 금지
+
+목표:
+코드 수정 → 빌드 → 배포 → 테스트가 항상 일관되게 수행되도록 한다.
+
+---
+
+## 7. Diff / Apply 규칙
+
+모든 코드 수정은 반드시 Diff 기반으로 수행한다.
+
+1. LLM은 직접 코드 수정 결과를 반환하지 않는다
+2. 반드시 원본 대비 변경점(Diff) 형태로 결과 생성
+3. 사용자는 Diff를 검토 후 Apply 수행
+4. 자동 적용 금지 (사용자 승인 필수)
+5. Diff 없이 파일 직접 수정 금지
+
+목표:
+코드 변경의 안정성과 추적 가능성 확보
+
+---
+
+## 8. Agent 역할 규칙
+
+Agent는 역할에 따라 아래 두 가지로 구분한다.
+
+### Text Agent
+- Explain
+- Review
+- Impact Analysis
+- Secure Coding
+- Query Validation
+
+특징:
+- 텍스트만 출력
+- 코드 수정 금지
+
+---
+
+### Code Agent
+- Improve
+- Generate Test
+
+특징:
+- Diff 생성 가능
+- Apply와 연결됨
+
+---
+
+규칙:
+- Text Agent는 코드 변경 금지
+- Code Agent만 Diff 생성 가능
+
+---
+
+## 9. Tool (Skill) 규칙
+
+Agent는 직접 작업을 수행하지 않고 Tool을 통해 작업을 수행한다.
+
+### 주요 Tool 예시
+- read_file: 파일 내용 조회
+- get_selection: 선택 영역 추출
+- apply_diff: 코드 변경 적용
+- search_reference: 참조 코드 탐색
+
+### 규칙
+1. Agent는 직접 파일 수정 금지
+2. 모든 파일 변경은 apply_diff Tool을 통해 수행
+3. Tool은 service 레이어를 통해 구현
+4. Tool은 재사용 가능하도록 설계
+
+목표:
+Agent는 판단만, 실제 작업은 Tool이 수행하도록 역할 분리
+
+---
+
 ## Summary
 
 ```text

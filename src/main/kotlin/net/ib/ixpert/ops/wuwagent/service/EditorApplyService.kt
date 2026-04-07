@@ -59,10 +59,20 @@ object EditorApplyService {
                     targetEditor!!.document.text
                 }
                 
-                // 원본 코드와 현재 에디터 코드가 다르면 중단
+                // 원본 코드와 현재 에디터 코드가 다르면 즉시 중단하지 않고, 사용자에게 의사 확인
                 if (currentTextToCompare.trim() != originalCode.trim()) {
-                    result = "[오류] 에디터의 현재 코드가 분석 당시의 원본과 다릅니다. (수정 중복 및 덮어쓰기 방지)"
-                    return@invokeAndWait
+                    val userResponse = com.intellij.openapi.ui.Messages.showYesNoDialog(
+                        project,
+                        "현재 코드가 변경되었습니다. 전체 내용을 덮어쓰시겠습니까?",
+                        "WhatUWant 원본 불일치 경고",
+                        com.intellij.openapi.ui.Messages.getWarningIcon()
+                    )
+                    
+                    if (userResponse != com.intellij.openapi.ui.Messages.YES) {
+                        result = "[취소] 에디터의 코드가 변경되어 사용자가 덮어쓰기를 취소했습니다."
+                        return@invokeAndWait
+                    }
+                    logger.info("EditorApplyService: 원본 코드 불일치 경고가 발생했으나, 사용자가 강제 덮어쓰기(Override)를 선택했습니다.")
                 }
             }
 
