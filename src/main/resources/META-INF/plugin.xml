@@ -1,9 +1,9 @@
 <idea-plugin>
     <id>net.ib.ixpert.ops.wuwagent</id>
-    <name>WhatUWant?</name>
+    <name>iXpert AI Assistant</name>
     <vendor email="admin@jodongik.cloud" url="http://jodongik.cloud">Jodongik Cloud</vendor>
     <description><![CDATA[
-      WhatUWant? (WuwAgent) is an on-premise AI Coding Assistant plugin powered by Ollama.
+      iXpert AI Assistant is an on-premise AI Coding Assistant plugin powered by Ollama.
       Provides code explain, review, refactoring, PMD analysis, Impact Analysis, and Generate Test.
     ]]></description>
 
@@ -24,6 +24,13 @@
         <notificationGroup id="WhatUWantNotification"
                            displayType="BALLOON"
                            key="WhatUWantNotification" />
+                           
+        <applicationService serviceImplementation="net.ib.ixpert.ops.wuwagent.setting.SettingsState"/>
+        
+        <applicationConfigurable instance="net.ib.ixpert.ops.wuwagent.setting.WuwSettingsConfigurable"
+                                 id="net.ib.ixpert.ops.wuwagent.setting.WuwSettingsConfigurable"
+                                 displayName="iXpert AI Assistant"
+                                 parentId="tools"/>
     </extensions>
 
     <actions>

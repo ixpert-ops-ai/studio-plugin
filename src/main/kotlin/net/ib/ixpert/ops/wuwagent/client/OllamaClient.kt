@@ -11,27 +11,34 @@ import java.io.IOException
 class OllamaClient {
     private val logger = Logger.getInstance(OllamaClient::class.java)
     private val gson = Gson()
-    private val serverUrl = "http://ollama.jodongik.cloud/api/chat"
-    private val modelName = "gemma4:latest"
-
     fun callChatApi(systemPrompt: String, userCode: String): OllamaChatResponse? {
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+        val serverUrl = "${settings.baseUrl.trimEnd('/')}/api/chat"
+
         val messages = listOf(
             OllamaMessage(role = "system", content = systemPrompt),
             OllamaMessage(role = "user", content = userCode)
         )
         val requestBody = OllamaChatRequest(
-            model = modelName,
+            model = settings.model,
             messages = messages,
-            stream = false
+            stream = false,
+            options = mapOf(
+                "temperature" to settings.temperature,
+                "num_ctx" to settings.contextWindow
+            )
         )
         val jsonPayload = gson.toJson(requestBody)
 
         return try {
             val responseString = HttpRequests.post(serverUrl, "application/json")
                 .tuner { connection -> 
-                    connection.setRequestProperty("Authorization", "Bearer ollama")
-                    connection.connectTimeout = 30_000 // 30초
-                    connection.readTimeout = 180_000 // 3분
+                    if (settings.apiKey.isNotBlank()) {
+                        connection.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+                    }
+                    val timeoutMs = settings.timeoutSeconds * 1000
+                    connection.connectTimeout = 30_000 // 연결은 30초 고정
+                    connection.readTimeout = timeoutMs
                 }
                 .connect { request ->
                     request.write(jsonPayload)

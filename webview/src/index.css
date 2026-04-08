@@ -339,6 +339,28 @@ body {
 
 .btn-danger { background: #cf6679; color: #fff; border: none; padding: 6px 16px; border-radius: 4px; }
 
+/* Model Status Footer */
+.model-status-footer {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.2px;
+}
+
+.model-status-footer strong {
+  margin-left: 2px;
+  color: var(--text-blue);
+  opacity: 0.9;
+}
+
+.mr-1 { margin-right: 4px; }
+.inline { display: inline; }
+.opacity-60 { opacity: 0.6; }
+
 /* Typing Indicator */
 .typing-dots { display: flex; gap: 4px; }
 .typing-dots span { width: 4px; height: 4px; background: var(--text-muted); border-radius: 50%; animation: typing 1.4s infinite ease-in-out; }

@@ -64,6 +64,11 @@ class WuwToolWindowFactory : ToolWindowFactory {
                         println("[WuwAgent] onLoadEnd inject script: $injectScript")
                         cefBrowser?.executeJavaScript(injectScript, cefBrowser.url, 0)
                         logger.info("WuwToolWindow: JS 브릿지 주입 완료.")
+
+                        // 초기 모델 정보 전송
+                        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+                        bridge.sendMessage("selected_model", settings.model)
+                        logger.info("WuwToolWindow: 초기 모델 정보 전송 완료 (${settings.model})")
                     }
                 }
             }, browser.cefBrowser)

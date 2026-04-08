@@ -181,6 +181,47 @@ class WebviewActionRouter(private val project: Project) {
                     bridge.sendMessage("task_cancelled", "⛔ 작업이 취소되었습니다.")
                 }
 
+                // ── Settings: 네이티브 설정 창 열기 ──────────────
+                "/openSettings" -> {
+                    logger.info("Router: /openSettings → ShowSettingsUtil 실행")
+                    com.intellij.openapi.options.ShowSettingsUtil.getInstance().showSettingsDialog(project, "iXpert AI Assistant")
+                }
+
+                // ── Alert: WebView에서 네이티브 메시지 박스 띄우기 ──────────────
+                "/alert" -> {
+                    val title = payload["title"] ?: "iXpert AI Assistant"
+                    val msg = payload["message"] ?: textBody
+                    val type = payload["type"] ?: "info"
+                    
+                    logger.info("Router: /alert 수신 (type=$type, title=$title)")
+                    if (type == "error") {
+                        com.intellij.openapi.ui.Messages.showErrorDialog(project, msg, title)
+                    } else {
+                        com.intellij.openapi.ui.Messages.showInfoMessage(project, msg, title)
+                    }
+                }
+
+                // ── Test Connection: Ollama 서버 연결 테스트 ──────────────
+                "/testConnection" -> {
+                    val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+                    val baseUrl = payload["baseUrl"] ?: settings.baseUrl
+                    val apiKey = payload["apiKey"] ?: settings.apiKey
+                    logger.info("Router: /testConnection 실행 (baseUrl=$baseUrl)")
+                    net.ib.ixpert.ops.wuwagent.service.WuwLlmService.testConnection(null, baseUrl, apiKey)
+                }
+
+                // ── Fetch Models: 모델 리스트 조회 ──────────────
+                "/fetchModels" -> {
+                    val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+                    val baseUrl = payload["baseUrl"] ?: settings.baseUrl
+                    val apiKey = payload["apiKey"] ?: settings.apiKey
+                    logger.info("Router: /fetchModels 실행 (baseUrl=$baseUrl)")
+                    net.ib.ixpert.ops.wuwagent.service.WuwLlmService.fetchModels(null, baseUrl, apiKey) { models ->
+                        // 조회 성공 시 WebView로 다시 전달하거나 로그만 남김 (현재는 네이티브 팝업이 주 목적)
+                        logger.info("Router: Models fetched successfully: $models")
+                    }
+                }
+
                 else -> {
                     logger.warn("Router: 정의되지 않은 명령어 수신 → $command")
                     bridge.sendMessage("error", "알 수 없는 명령어: $command")

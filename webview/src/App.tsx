@@ -150,6 +150,7 @@ function App() {
   }]);
   const [isTyping, setIsTyping] = useState(false);
   const [inputText, setInputText] = useState('');
+  const [selectedModel, setSelectedModel] = useState<string>('Loading...');
   const chatListRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -160,6 +161,11 @@ function App() {
     const handleMessage = (event: MessageEvent) => {
       const data = event.data;
       if (!data || data.type !== 'ai_message') return;
+
+      if (data.subType === 'selected_model') {
+        setSelectedModel(data.content);
+        return;
+      }
 
       if (data.subType === 'apply_success') {
         const targetId = data.id;
@@ -225,11 +231,13 @@ function App() {
   return (
     <div id="root">
       <header className="header flex justify-between items-center">
-        <span className="title">WhatUWant?</span>
+        <span className="title">iXpert AI Assistant</span>
         <div className="flex gap-2">
           <button className="icon-btn"><Terminal size={14} /></button>
           <button className="icon-btn"><Edit size={14} /></button>
-          <button className="icon-btn"><Settings size={14} /></button>
+          <button className="icon-btn" onClick={() => window.sendToIde?.(JSON.stringify({ command: '/openSettings' }))}>
+            <Settings size={14} />
+          </button>
         </div>
       </header>
 
@@ -237,7 +245,7 @@ function App() {
         {messages.map(msg => <MessageItem key={msg.id} msg={msg} />)}
         {isTyping && (
           <div className="msg-ai" style={{ width: 'fit-content' }}>
-            <div className="msg-ai-header">WhatUWant?</div>
+            <div className="msg-ai-header">iXpert AI Assistant</div>
             <div className="flex items-center gap-2">
               <div className="typing-dots"><span></span><span></span><span></span></div>
               <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>응답 생성 중...</span>
@@ -270,6 +278,10 @@ function App() {
               <button className="btn-primary" onClick={handleSend}>전송</button>
             </div>
           </div>
+        </div>
+        <div className="model-status-footer">
+          <Terminal size={10} className="inline mr-1 opacity-60" />
+          <span>Model: <strong>{selectedModel}</strong></span>
         </div>
       </div>
     </div>

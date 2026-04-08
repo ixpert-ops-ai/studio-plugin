@@ -141,7 +141,8 @@ Action → Agent → Service → LLM → Result → UI
 - 코드 수정 완료
 - 빌드 성공
 - _release 폴더에 최신 zip 반영
-- 기능 정상 동작 확인
+- 기능 테스트 완료
+- Git 커밋 완료
 
 ---
 
