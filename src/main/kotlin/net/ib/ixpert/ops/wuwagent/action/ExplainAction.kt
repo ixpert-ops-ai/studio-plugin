@@ -28,6 +28,11 @@ class ExplainAction : AnAction("WhatUWant: Explain This Code", "Explain the sele
         val agent = ExplainAgent()
         val messageId = "msg_${System.currentTimeMillis()}"
 
+        // 🛎 즉시 자리 만들기 (로딩 표시 유도)
+        ApplicationManager.getApplication().invokeLater {
+            bridge.sendMessage("explain_start", "🔍 코드를 분석하고 있습니다...", mapOf("messageId" to messageId))
+        }
+
         agent.execute(
             context, 
             onSuccess = { resultText ->

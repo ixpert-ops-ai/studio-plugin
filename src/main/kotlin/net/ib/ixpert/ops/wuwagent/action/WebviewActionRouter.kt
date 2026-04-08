@@ -44,9 +44,11 @@ class WebviewActionRouter(private val project: Project) {
                         bridge.sendMessage("explain", "활성화된 에디터가 없어 Explain을 실행할 수 없습니다.")
                         return@invokeLater
                     }
-                    val context = AgentContext(project, editor, textBody)
                     val messageId = "msg_${System.currentTimeMillis()}"
-                    
+                    // 🛎 즉시 자리 만들기 (로딩 표시 유도)
+                    bridge.sendMessage("explain_start", "🔍 코드를 분석하고 있습니다...", mapOf("messageId" to messageId))
+
+                    val context = AgentContext(project, editor, textBody)
                     ExplainAgent().execute(
                         context, 
                         onSuccess = { res ->
@@ -64,9 +66,11 @@ class WebviewActionRouter(private val project: Project) {
 
                 "/chat" -> {
                     logger.info("Router: /chat 분기")
-                    val context = AgentContext(project, editor, textBody)
                     val messageId = "msg_${System.currentTimeMillis()}"
-                    
+                    // 🛎 즉시 자리 만들기 (로딩 표시 유도)
+                    bridge.sendMessage("chat_start", "💬 답변을 준비 중입니다...", mapOf("messageId" to messageId))
+
+                    val context = AgentContext(project, editor, textBody)
                     ChatAgent().execute(
                         context, 
                         onSuccess = { res ->
@@ -85,25 +89,28 @@ class WebviewActionRouter(private val project: Project) {
                 // ── TaskAgent (오케스트레이터) ────────────────
                 "/task" -> {
                     logger.info("Router: /task 분기 → TaskAgent 시작")
+                    val messageId = "task_${System.currentTimeMillis()}"
                     val context = AgentContext(project, editor, textBody)
 
-                    // 🛎 즉시 시작 알림 (LLM 호출 전, 즉각 전송)
-                    bridge.sendMessage("task_start", "✅ 의도를 분석하고 있습니다...")
+                    // 🛎 즉시 시작 알림 (메시지 ID 포함하여 단일 말풍선 유도)
+                    bridge.sendMessage("task_start", "✅ 의도를 분석하고 있습니다...", mapOf("messageId" to messageId))
 
                     // Step 시작 시 즉각 UI 피드백 (LLM 응답 기다리는 동안 사용자에게 진행 표시)
                     val onStepStart = { stepLabel: String ->
                         logger.info("Router: Step 시작 알림 → $stepLabel")
-                        bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중... (모델 크기에 따라 수 분 소요)")
+                        bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", mapOf("messageId" to messageId))
                     }
 
                     // Step 완료 시 결과 전송
-                    val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, messageId: String ->
+                    val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, stepMsgId: String ->
                         logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, scope=${result.applyScope})")
+                        // Note: TaskAgent 단계별 고유 ID를 사용할 수도 있으나, 하나의 말풍선으로 모으기 위해 messageId를 meta에 함께 실어 보냅니다.
                         bridge.sendMessage(
                             subType = "task_step",
                             content = result.llmResponse,
                             meta = mapOf(
-                                "messageId" to messageId,
+                                "messageId" to messageId, 
+                                "stepMsgId" to stepMsgId, // 디버깅/추적용
                                 "stepLabel" to stepLabel,
                                 "applyable" to (if (result.isSuccess && isApplyable) "true" else "false"),
                                 "originalCode" to result.originalCode.orEmpty(),

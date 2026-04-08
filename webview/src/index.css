@@ -361,15 +361,27 @@ body {
 .inline { display: inline; }
 .opacity-60 { opacity: 0.6; }
 
-/* Typing Indicator */
-.typing-dots { display: flex; gap: 4px; }
-.typing-dots span { width: 4px; height: 4px; background: var(--text-muted); border-radius: 50%; animation: typing 1.4s infinite ease-in-out; }
+/* Typing Indicator (Premium Animation) */
+.typing-dots { 
+  display: flex; 
+  gap: 4px; 
+  align-items: center;
+  height: 12px;
+}
+.typing-dots span { 
+  width: 5px; 
+  height: 5px; 
+  background: var(--text-blue); 
+  border-radius: 50%; 
+  opacity: 0.4;
+  animation: typing 1.4s infinite ease-in-out; 
+}
 .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
 .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
 
 @keyframes typing {
-  0%, 80%, 100% { transform: scale(0); }
-  40% { transform: scale(1); }
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
+  40% { transform: scale(1.1); opacity: 1; }
 }
 
 .flex { display: flex; }

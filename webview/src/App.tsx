@@ -24,6 +24,7 @@ interface Message {
   extractedCode?: string;
   applyScope?: string;
   applied?: boolean;
+  isLoading?: boolean;
 }
 
 // ─────────────────────────────────────────────
@@ -122,6 +123,7 @@ const MessageItem = ({ msg }: { msg: Message }) => {
       </div>
       
       <div className="msg-ai-content">
+        {msg.isLoading && <div className="typing-dots" style={{ marginBottom: msg.content ? '8px' : '0' }}><span></span><span></span><span></span></div>}
         <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>
       </div>
 
@@ -148,14 +150,13 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([{
     id: '1', role: 'ai', content: '무엇을 도와드릴까요? (/explain, /chat, /task 등을 지원합니다.)'
   }]);
-  const [isTyping, setIsTyping] = useState(false);
   const [inputText, setInputText] = useState('');
   const [selectedModel, setSelectedModel] = useState<string>('Loading...');
   const chatListRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     chatListRef.current?.scrollTo({ top: chatListRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, isTyping]);
+  }, [messages]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -187,27 +188,42 @@ function App() {
         setMessages(prev => {
           const index = prev.findIndex(m => m.id === messageId);
           if (index !== -1) {
-            // 기존 메시지에 내용 추가
             const updated = [...prev];
-            updated[index] = { ...updated[index], content: updated[index].content + content };
+            updated[index] = { ...updated[index], content: updated[index].content + content, isLoading: false };
             return updated;
           } else {
-            // 새로운 스트리밍 메시지 생성
-            return [...prev, {
-              id: messageId,
-              role: 'ai',
-              content: content,
-              subType: 'chat_chunk'
-            }];
+            return [...prev, { id: messageId, role: 'ai', content: content, isLoading: false }];
           }
         });
-        setIsTyping(true); // 스트리밍 중에도 타이핑 상태 유지
         return;
       }
 
-      if (['task_start', 'task_progress', 'task_cancelled', 'error'].includes(data.subType)) {
+      if (['task_start', 'explain_start', 'chat_start'].includes(data.subType)) {
+        const { messageId } = data;
+        setMessages(prev => {
+           if (prev.some(m => m.id === messageId)) return prev;
+           return [...prev, { id: messageId, role: 'ai', content: data.content, isLoading: true }];
+        });
+        return;
+      }
+
+      if (data.subType === 'task_progress') {
+        const { messageId } = data;
+        setMessages(prev => {
+          const index = prev.findIndex(m => m.id === messageId);
+          if (index !== -1) {
+            const updated = [...prev];
+            updated[index] = { ...updated[index], content: data.content, isLoading: true };
+            return updated;
+          } else {
+            return [...prev, { id: messageId, role: 'ai', content: data.content, isLoading: true }];
+          }
+        });
+        return;
+      }
+
+      if (['task_cancelled', 'error'].includes(data.subType)) {
         setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: data.content }]);
-        setIsTyping(false);
         return;
       }
 
@@ -233,17 +249,15 @@ function App() {
         if (index !== -1) {
           const updated = [...prev];
           // 중요: content는 스트리밍으로 쌓인 기존 데이터를 유지하고 다른 필드만 덮어씀
-          updated[index] = { ...newMsg, content: updated[index].content };
+          updated[index] = { ...newMsg, content: updated[index].content, isLoading: false };
           return updated;
         }
         return [...prev, newMsg];
       });
-      setIsTyping(false);
     };
 
     const handleError = (e: ErrorEvent) => {
       setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: `[JS Error] ${e.message}` }]);
-      setIsTyping(false);
     };
 
     window.addEventListener('message', handleMessage);
@@ -259,7 +273,6 @@ function App() {
     if (!text || !window.sendToIde) return;
     setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text }]);
     setInputText('');
-    setIsTyping(true);
     window.sendToIde(JSON.stringify({ command: text.startsWith('/') ? text.split(' ')[0] : '/task', text }));
   };
 
@@ -278,15 +291,6 @@ function App() {
 
       <div className="chat-list" ref={chatListRef}>
         {messages.map(msg => <MessageItem key={msg.id} msg={msg} />)}
-        {isTyping && (
-          <div className="msg-ai" style={{ width: 'fit-content' }}>
-            <div className="msg-ai-header">iXpert AI Assistant</div>
-            <div className="flex items-center gap-2">
-              <div className="typing-dots"><span></span><span></span><span></span></div>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>응답 생성 중...</span>
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="chat-input-area">
