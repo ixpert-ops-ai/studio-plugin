@@ -21,6 +21,7 @@ interface WuwAgent {
     fun execute(
         context: AgentContext, 
         onSuccess: (String) -> Unit, 
-        onChunk: ((String) -> Unit)? = null
+        onChunk: ((String) -> Unit)? = null,
+        onError: (String) -> Unit
     )
 }

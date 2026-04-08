@@ -46,6 +46,12 @@ class ExplainAction : AnAction("WhatUWant: Explain This Code", "Explain the sele
                     // 수신된 청크를 즉시 웹뷰로 전송
                     bridge.sendMessageChunk(messageId, chunk)
                 }
+            },
+            onError = { errorMsg ->
+                ApplicationManager.getApplication().invokeLater {
+                    // 에러 발생 시 명시적 신호 전송
+                    bridge.sendMessage("error", errorMsg, mapOf("messageId" to messageId))
+                }
             }
         )
     }

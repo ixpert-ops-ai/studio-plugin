@@ -145,7 +145,8 @@ body {
 
 .msg-ai.error {
   border-left: 4px solid var(--danger-color);
-  background: rgba(207, 102, 121, 0.03);
+  background: rgba(207, 102, 121, 0.05);
+  border: 1px solid var(--danger-color);
 }
 
 .msg-ai-header {
@@ -165,6 +166,21 @@ body {
   line-height: 1.6;
   color: var(--text-main);
   font-size: 13px;
+}
+
+.error-text {
+  color: #ff8a80 !important;
+}
+
+.error-badge {
+  display: inline-block;
+  background-color: var(--danger-color);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: bold;
+  margin-bottom: 8px;
 }
 
 /* Action Card (UX Optimized) */

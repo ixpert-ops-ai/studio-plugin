@@ -25,6 +25,8 @@ interface Message {
   applyScope?: string;
   applied?: boolean;
   isLoading?: boolean;
+  isError?: boolean;
+  isStreaming?: boolean;
 }
 
 // ─────────────────────────────────────────────
@@ -122,8 +124,9 @@ const MessageItem = ({ msg }: { msg: Message }) => {
         {isError ? '❌ Error' : isAnalysis ? '📋 영향 분석' : '💡 개선 제안'}
       </div>
       
-      <div className="msg-ai-content">
+      <div className={`msg-ai-content ${msg.isError ? 'error-text' : ''}`}>
         {msg.isLoading && <div className="typing-dots" style={{ marginBottom: msg.content ? '8px' : '0' }}><span></span><span></span><span></span></div>}
+        {msg.isError && <div className="error-badge">ERROR</div>}
         <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>
       </div>
 
@@ -189,10 +192,15 @@ function App() {
           const index = prev.findIndex(m => m.id === messageId);
           if (index !== -1) {
             const updated = [...prev];
-            updated[index] = { ...updated[index], content: updated[index].content + content, isLoading: false };
+            updated[index] = { 
+              ...updated[index], 
+              content: updated[index].content + content, 
+              isLoading: false,
+              isStreaming: true 
+            };
             return updated;
           } else {
-            return [...prev, { id: messageId, role: 'ai', content: content, isLoading: false }];
+            return [...prev, { id: messageId, role: 'ai', content: content, isLoading: false, isStreaming: true }];
           }
         });
         return;
@@ -223,7 +231,20 @@ function App() {
       }
 
       if (['task_cancelled', 'error'].includes(data.subType)) {
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: data.content }]);
+        const { messageId } = data;
+        if (messageId) {
+          setMessages(prev => {
+            const index = prev.findIndex(m => m.id === messageId);
+            if (index !== -1) {
+              const updated = [...prev];
+              updated[index] = { ...updated[index], content: data.content, isLoading: false, isError: true };
+              return updated;
+            }
+            return [...prev, { id: messageId, role: 'ai', content: data.content, isError: true, isLoading: false }];
+          });
+        } else {
+          setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: data.content }]);
+        }
         return;
       }
 
@@ -247,9 +268,12 @@ function App() {
         // 이미 스트리밍으로 생성된 메시지가 있다면 메타데이터만 보강하고, 없으면 추가
         const index = prev.findIndex(m => m.id === messageId);
         if (index !== -1) {
+          const existing = prev[index];
           const updated = [...prev];
-          // 중요: content는 스트리밍으로 쌓인 기존 데이터를 유지하고 다른 필드만 덮어씀
-          updated[index] = { ...newMsg, content: updated[index].content, isLoading: false };
+          // 중요: 스트리밍이 이미 시작되었다면(isStreaming) 기존 누적 데이터를 보존하고,
+          // 아니라면(로딩 직후 응답 등) 새로운 전체 데이터를 사용합니다.
+          const finalContent = existing.isStreaming ? existing.content : newMsg.content;
+          updated[index] = { ...newMsg, content: finalContent, isLoading: false };
           return updated;
         }
         return [...prev, newMsg];

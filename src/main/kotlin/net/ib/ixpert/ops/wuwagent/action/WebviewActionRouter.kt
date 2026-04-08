@@ -60,6 +60,11 @@ class WebviewActionRouter(private val project: Project) {
                             ApplicationManager.getApplication().invokeLater {
                                 bridge.sendMessageChunk(messageId, chunk)
                             }
+                        },
+                        onError = { errorMsg ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", errorMsg, mapOf("messageId" to messageId))
+                            }
                         }
                     )
                 }
@@ -81,6 +86,11 @@ class WebviewActionRouter(private val project: Project) {
                         onChunk = { chunk ->
                             ApplicationManager.getApplication().invokeLater {
                                 bridge.sendMessageChunk(messageId, chunk)
+                            }
+                        },
+                        onError = { errorMsg ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", errorMsg, mapOf("messageId" to messageId))
                             }
                         }
                     )
@@ -122,7 +132,17 @@ class WebviewActionRouter(private val project: Project) {
                         )
                     }
 
-                    TaskAgent(onStep, onStepStart).execute(context, onSuccess = { _ -> /* task_done: no-op */ })
+                    val agent = TaskAgent(onStep, onStepStart)
+                    agent.execute(
+                        context, 
+                        onSuccess = { _ -> /* task_done: no-op */ },
+                        onChunk = null,
+                        onError = { errorMsg ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", errorMsg, mapOf("messageId" to messageId))
+                            }
+                        }
+                    )
                 }
 
                 // ── Apply: 에디터에 코드 쓰기 ────────────────

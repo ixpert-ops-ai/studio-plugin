@@ -28,7 +28,8 @@ class TaskAgent(
     override fun execute(
         context: AgentContext, 
         onSuccess: (String) -> Unit, 
-        onChunk: ((String) -> Unit)?
+        onChunk: ((String) -> Unit)?,
+        onError: (String) -> Unit
     ) {
         TaskCancellationToken.reset()   // 이전 취소 상태 초기화
 
@@ -88,10 +89,10 @@ class TaskAgent(
                         logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료 (success=${result.isSuccess})")
                         onStep(step.label, result, step.isApplyable, messageId)
 
-                        // ❌ 에러 발생 시 파이프라인 즉시 중단
+                        // ❌ 에러 발생 시 파이프라인 즉시 중단 및 에러 신호 전송
                         if (!result.isSuccess) {
                             logger.warn("TaskAgent: ${step.label} 실패 → 파이프라인 중단")
-                            onSuccess("__task_done__")
+                            onError(result.llmResponse) // 상세 에러 메시지 전달
                             return
                         }
 
@@ -107,20 +108,7 @@ class TaskAgent(
                             return
                         }
                         logger.error("TaskAgent: ${step.label} 실행 중 예외", e)
-                        onStep(
-                            step.label,
-                            TaskPipeline.StepResult(
-                                originalCode = null,
-                                modifiedCode = null,
-                                applyScope = "",
-                                llmResponse = "[오류] ${e.message}",
-                                extractedCode = "",
-                                isSuccess = false
-                            ),
-                            false,
-                            messageId
-                        )
-                        onSuccess("__task_done__")
+                        onError("[오류] ${step.label} 실행 중 예외가 발생했습니다: ${e.message}")
                         return
                     }
                 }

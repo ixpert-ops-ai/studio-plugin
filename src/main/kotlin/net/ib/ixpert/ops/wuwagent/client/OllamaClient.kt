@@ -90,11 +90,17 @@ class OllamaClient {
                     }
                 }
         } catch (e: IOException) {
-            logger.error("Failed to communicate with Ollama API: ${e.message}", e)
-            OllamaChatResponse(null, null, OllamaMessage("assistant", "[Error] Ollama 서버 연결/통신 실패 (Timeout 등): ${e.message}"), true)
+            val errorMsg = when {
+                e.message?.contains("timeout", ignoreCase = true) == true -> "[Error] Ollama 서버 응답 타임아웃 ($serverUrl). 설정에서 Timeout 시간을 늘려보세요."
+                e.message?.contains("refused", ignoreCase = true) == true -> "[Error] Ollama 서버 연결 거부 ($serverUrl). 서버가 실행 중인지 확인하세요."
+                else -> "[Error] Ollama 서버 통신 실패: ${e.message} ($serverUrl)"
+            }
+            logger.error(errorMsg, e)
+            OllamaChatResponse(null, null, OllamaMessage("assistant", errorMsg), true)
         } catch (e: Exception) {
-            logger.error("Unexpected error occurred while calling Ollama API: ${e.message}", e)
-            OllamaChatResponse(null, null, OllamaMessage("assistant", "[Error] 응답 파싱 실패 (서버가 응답 포맷을 다르게 내려줬을 확률이 높음): ${e.message}"), true)
+            val errorMsg = "[Error] 예상치 못한 전송/파싱 오류: ${e.message} ($serverUrl)"
+            logger.error(errorMsg, e)
+            OllamaChatResponse(null, null, OllamaMessage("assistant", errorMsg), true)
         }
     }
 }

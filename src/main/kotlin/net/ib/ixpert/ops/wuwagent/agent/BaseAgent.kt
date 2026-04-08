@@ -17,7 +17,8 @@ abstract class BaseAgent : WuwAgent {
     override abstract fun execute(
         context: AgentContext, 
         onSuccess: (String) -> Unit, 
-        onChunk: ((String) -> Unit)?
+        onChunk: ((String) -> Unit)?,
+        onError: (String) -> Unit
     )
 
     protected fun callLlmAsync(
@@ -25,9 +26,10 @@ abstract class BaseAgent : WuwAgent {
         taskTitle: String,
         systemPrompt: String,
         userMessage: String,
-        onSuccess: (String) -> Unit
+        onSuccess: (String) -> Unit,
+        onError: (String) -> Unit
     ) {
-        callLlmStreamAsync(project, taskTitle, systemPrompt, userMessage, onSuccess, null)
+        callLlmStreamAsync(project, taskTitle, systemPrompt, userMessage, onSuccess, null, onError)
     }
 
     protected fun callLlmStreamAsync(
@@ -36,7 +38,8 @@ abstract class BaseAgent : WuwAgent {
         systemPrompt: String,
         userMessage: String,
         onSuccess: (String) -> Unit,
-        onChunk: ((String) -> Unit)? = null
+        onChunk: ((String) -> Unit)? = null,
+        onError: (String) -> Unit
     ) {
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, taskTitle, false) {
             override fun run(indicator: ProgressIndicator) {
@@ -52,8 +55,13 @@ abstract class BaseAgent : WuwAgent {
                 // 2. 내용 파싱 및 방어 로직
                 val resultText = response?.message?.content ?: "[오류 발생] 알 수 없는 데이터 널 응답"
 
-                // 3. 전체 완료 콜백 (UI Thread 로 넘기는 동작은 밖의 람다에서 해줌)
-                onSuccess(resultText)
+                // 3. 에러 감지 및 콜백 분기
+                if (resultText.startsWith("[Error]")) {
+                    logger.error("BaseAgent: LLM 응답에 에러 포함됨 -> $resultText")
+                    onError(resultText)
+                } else {
+                    onSuccess(resultText)
+                }
             }
         })
     }
