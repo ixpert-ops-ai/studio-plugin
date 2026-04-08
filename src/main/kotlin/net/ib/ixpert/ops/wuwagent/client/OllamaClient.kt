@@ -29,6 +29,8 @@ class OllamaClient {
             )
         )
         val jsonPayload = gson.toJson(requestBody)
+        
+        logger.info("Ollama API Call: url=$serverUrl, model=${settings.model}")
 
         return try {
             val responseString = HttpRequests.post(serverUrl, "application/json")
