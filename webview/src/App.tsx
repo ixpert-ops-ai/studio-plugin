@@ -225,18 +225,23 @@ function App() {
                 isLoading = true;
                 break;
               case 'task_step':
-                // 텍스트 누적
+                // 텍스트 누적 (말풍선 확장 구조)
                 newContent += (newContent ? "\n\n" : "") + data.content;
                 currentStatus = undefined;
-                isLoading = false;
+                isLoading = true; // 다음 Step이 있을 수 있으므로 계속 로딩 유지
                 isStreaming = false;
+                break;
+              case 'task_success':
+                isLoading = false;
+                currentStatus = undefined;
+                // "완료되었습니다" 텍스트는 굳이 본문에 누적하지 않고 로딩만 해제 (사용자 선택)
                 break;
               case 'error':
               case 'task_cancelled':
                 currentStatus = undefined;
                 isLoading = false;
-                isError = true;
-                newContent = data.content; // 에러는 덮어쓰거나 하단 강조 (여기서는 덮어쓰기 선택)
+                isError = data.subType === 'error';
+                newContent += (newContent ? "\n\n" : "") + data.content;
                 break;
               case 'chat':
               case 'explain':

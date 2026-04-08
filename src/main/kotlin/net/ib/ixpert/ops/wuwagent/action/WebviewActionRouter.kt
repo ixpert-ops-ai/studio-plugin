@@ -132,10 +132,12 @@ class WebviewActionRouter(private val project: Project) {
                         )
                     }
 
-                    val agent = TaskAgent(onStep, onStepStart)
+                    val agent = TaskAgent(messageId, onStep, onStepStart)
                     agent.execute(
                         context, 
-                        onSuccess = { _ -> /* task_done: no-op */ },
+                        onSuccess = { _ -> 
+                            bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                        },
                         onChunk = null,
                         onError = { errorMsg ->
                             ApplicationManager.getApplication().invokeLater {

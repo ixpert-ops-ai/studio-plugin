@@ -18,6 +18,7 @@ import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
  * 5. [TaskCancellationToken]을 통해 외부에서 취소 가능
  */
 class TaskAgent(
+    private val messageId: String, // 통합 관리를 위한 단일 ID 주입
     private val onStep: (stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, messageId: String) -> Unit,
     private val onStepStart: (stepLabel: String) -> Unit = {}
 ) : WuwAgent {
@@ -65,10 +66,10 @@ class TaskAgent(
                     onStepStart(step.label)
 
                     val bridge = JcefBridge.getInstance(context.project)
-                    val messageId = "step_${System.currentTimeMillis()}"
+                    // ❌ 더 이상 매 Step마다 ID를 생성하지 않음. 주입받은 messageId 사용.
 
                     // 텍스트 기반 에이전트(isApplyable=false)인 경우에만 스트리밍 활성화
-                    val onChunk: ((String) -> Unit)? = if (!step.isApplyable) {
+                    val stepChunkHandler: ((String) -> Unit)? = if (!step.isApplyable) {
                         { chunk ->
                             ApplicationManager.getApplication().invokeLater {
                                 bridge.sendMessageChunk(messageId, chunk)
@@ -77,7 +78,7 @@ class TaskAgent(
                     } else null
 
                     try {
-                        val result = step.executeSync(context, client, onChunk)
+                        val result = step.executeSync(context, client, stepChunkHandler)
 
                         // executeSync 완료 후에도 취소 여부 재확인
                         if (TaskCancellationToken.isCancelled.get()) {
