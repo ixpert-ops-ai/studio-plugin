@@ -228,11 +228,12 @@ function App() {
       };
 
       setMessages(prev => {
-        // 이미 스트리밍으로 생성된 메시지가 있다면 덮어쓰기(내용 확정), 없으면 추가
+        // 이미 스트리밍으로 생성된 메시지가 있다면 메타데이터만 보강하고, 없으면 추가
         const index = prev.findIndex(m => m.id === messageId);
         if (index !== -1) {
           const updated = [...prev];
-          updated[index] = newMsg;
+          // 중요: content는 스트리밍으로 쌓인 기존 데이터를 유지하고 다른 필드만 덮어씀
+          updated[index] = { ...newMsg, content: updated[index].content };
           return updated;
         }
         return [...prev, newMsg];
