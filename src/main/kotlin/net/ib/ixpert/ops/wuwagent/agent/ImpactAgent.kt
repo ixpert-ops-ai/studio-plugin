@@ -5,7 +5,11 @@ import net.ib.ixpert.ops.wuwagent.service.EditorContextService
 
 /** 코드 변경 영향 범위를 분석하는 Agent */
 class ImpactAgent : BaseAgent() {
-    override fun execute(context: AgentContext, onSuccess: (String) -> Unit) {
+    override fun execute(
+        context: AgentContext, 
+        onSuccess: (String) -> Unit, 
+        onChunk: ((String) -> Unit)?
+    ) {
         val editor = context.editor ?: run {
             onSuccess("[상태 이상] 에디터 컨텍스트가 주어지지 않았습니다."); return
         }

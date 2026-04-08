@@ -24,16 +24,25 @@ class ExplainAction : AnAction("WhatUWant: Explain This Code", "Explain the sele
         // 다형성을 지원하는 공통 컨텍스트 생성
         val context = AgentContext(project, editor, "")
 
-        // Agent 실행 (Agent 내부에 UI가 노출되지 않게 Callback을 뚫어줍니다)
+        // Agent 실행 (에이전트로부터 받는 청크를 브릿지로 즉시 전달)
         val agent = ExplainAgent()
-        agent.execute(context) { resultText ->
-            
-            // JCEF 브릿지 호출은 AWT/UI 스레드와 동기화
-            ApplicationManager.getApplication().invokeLater {
-                // 서브 타입 "explain" 적용하여 JSON 렌더링 지시
-                bridge.sendMessage("explain", resultText)
+        val messageId = "msg_${System.currentTimeMillis()}"
+
+        agent.execute(
+            context, 
+            onSuccess = { resultText ->
+                ApplicationManager.getApplication().invokeLater {
+                    // 최종 결과 전송 (필요한 경우 meta 정보와 함께)
+                    bridge.sendMessage("explain", resultText, mapOf("messageId" to messageId))
+                }
+            },
+            onChunk = { chunk ->
+                ApplicationManager.getApplication().invokeLater {
+                    // 수신된 청크를 즉시 웹뷰로 전송
+                    bridge.sendMessageChunk(messageId, chunk)
+                }
             }
-        }
+        )
     }
 
     override fun update(e: AnActionEvent) {

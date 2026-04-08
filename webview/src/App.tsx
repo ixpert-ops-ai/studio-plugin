@@ -182,14 +182,38 @@ function App() {
         return;
       }
 
+      if (data.subType === 'chat_chunk') {
+        const { messageId, content } = data;
+        setMessages(prev => {
+          const index = prev.findIndex(m => m.id === messageId);
+          if (index !== -1) {
+            // 기존 메시지에 내용 추가
+            const updated = [...prev];
+            updated[index] = { ...updated[index], content: updated[index].content + content };
+            return updated;
+          } else {
+            // 새로운 스트리밍 메시지 생성
+            return [...prev, {
+              id: messageId,
+              role: 'ai',
+              content: content,
+              subType: 'chat_chunk'
+            }];
+          }
+        });
+        setIsTyping(true); // 스트리밍 중에도 타이핑 상태 유지
+        return;
+      }
+
       if (['task_start', 'task_progress', 'task_cancelled', 'error'].includes(data.subType)) {
         setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: data.content }]);
         setIsTyping(false);
         return;
       }
 
+      const messageId = data.messageId || Date.now().toString();
       const newMsg: Message = {
-        id:            data.messageId || Date.now().toString(),
+        id:            messageId,
         role:          'ai',
         content:       data.content,
         subType:       data.subType,
@@ -202,7 +226,17 @@ function App() {
         applyScope:    data.applyScope   || '',
         applied:       false,
       };
-      setMessages(prev => [...prev, newMsg]);
+
+      setMessages(prev => {
+        // 이미 스트리밍으로 생성된 메시지가 있다면 덮어쓰기(내용 확정), 없으면 추가
+        const index = prev.findIndex(m => m.id === messageId);
+        if (index !== -1) {
+          const updated = [...prev];
+          updated[index] = newMsg;
+          return updated;
+        }
+        return [...prev, newMsg];
+      });
       setIsTyping(false);
     };
 

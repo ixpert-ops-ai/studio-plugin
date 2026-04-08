@@ -8,7 +8,11 @@ import net.ib.ixpert.ops.wuwagent.service.EditorContextService
  */
 class ExplainAgent : BaseAgent() {
 
-    override fun execute(context: AgentContext, onSuccess: (String) -> Unit) {
+    override fun execute(
+        context: AgentContext, 
+        onSuccess: (String) -> Unit, 
+        onChunk: ((String) -> Unit)?
+    ) {
         val editor = context.editor
         if (editor == null) {
             onSuccess("[상태 이상] 에디터 컨텍스트가 주어지지 않았습니다.")
@@ -25,7 +29,14 @@ class ExplainAgent : BaseAgent() {
         // 2. PromptManager: 프롬프트 세팅
         val systemPrompt = PromptManager.loadPrompt("explain_prompt.txt")
 
-        // 3. BaseAgent의 비동기 호출 공통 메서드를 사용하여 구동 위임
-        callLlmAsync(context.project, "WuwAgent: Explaining Code", systemPrompt, codeToExplain, onSuccess)
+        // 3. BaseAgent의 스트리밍 호출 메서드를 사용하여 구동 위임
+        callLlmStreamAsync(
+            context.project, 
+            "WuwAgent: Explaining Code", 
+            systemPrompt, 
+            codeToExplain, 
+            onSuccess, 
+            onChunk
+        )
     }
 }

@@ -52,7 +52,7 @@ sealed class TaskPipeline {
          * OllamaClient를 직접 사용해 동기적(blocking)으로 LLM을 호출합니다.
          * TaskAgent의 단일 Backgroundable 블록 안에서 호출됩니다.
          */
-        fun executeSync(context: AgentContext, client: OllamaClient): StepResult {
+        fun executeSync(context: AgentContext, client: OllamaClient, onChunk: ((String) -> Unit)? = null): StepResult {
             val systemPrompt = PromptManager.loadPrompt(promptFile)
 
             var originalCode = ""
@@ -127,8 +127,8 @@ sealed class TaskPipeline {
                 )
             }
 
-            logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=${applyScope.ifBlank { "file-search" }})")
-            val response      = client.callChatApi(systemPrompt, userMessage)
+            logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=${applyScope.ifBlank { "file-search" }}, stream=${onChunk != null})")
+            val response      = client.callChatApiStream(systemPrompt, userMessage, onChunk)
             val llmResponse   = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
             
             // Ollama 가 타임아웃 등으로 "[Error]..." 반환 시 오류로 간주

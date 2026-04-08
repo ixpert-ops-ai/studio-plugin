@@ -49,6 +49,22 @@ class JcefBridge(private val project: Project) {
         browser?.cefBrowser?.executeJavaScript(script, browser?.cefBrowser?.url, 0)
     }
 
+    /**
+     * 스트리밍 중인 메시지의 일부분(Chunk)을 전송합니다.
+     */
+    fun sendMessageChunk(messageId: String, content: String, isFirst: Boolean = false) {
+        val payload = mapOf(
+            "type" to "ai_message",
+            "subType" to "chat_chunk",
+            "messageId" to messageId,
+            "content" to content,
+            "isFirst" to isFirst
+        )
+        val jsonString = gson.toJson(payload)
+        val script = "window.postMessage($jsonString, '*');"
+        browser?.cefBrowser?.executeJavaScript(script, browser?.cefBrowser?.url, 0)
+    }
+
     companion object {
         fun getInstance(project: Project): JcefBridge = project.getService(JcefBridge::class.java)
     }

@@ -45,17 +45,41 @@ class WebviewActionRouter(private val project: Project) {
                         return@invokeLater
                     }
                     val context = AgentContext(project, editor, textBody)
-                    ExplainAgent().execute(context) { res ->
-                        bridge.sendMessage("explain", res)
-                    }
+                    val messageId = "msg_${System.currentTimeMillis()}"
+                    
+                    ExplainAgent().execute(
+                        context, 
+                        onSuccess = { res ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("explain", res, mapOf("messageId" to messageId))
+                            }
+                        },
+                        onChunk = { chunk ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessageChunk(messageId, chunk)
+                            }
+                        }
+                    )
                 }
 
                 "/chat" -> {
                     logger.info("Router: /chat 분기")
                     val context = AgentContext(project, editor, textBody)
-                    ChatAgent().execute(context) { res ->
-                        bridge.sendMessage("chat", res)
-                    }
+                    val messageId = "msg_${System.currentTimeMillis()}"
+                    
+                    ChatAgent().execute(
+                        context, 
+                        onSuccess = { res ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("chat", res, mapOf("messageId" to messageId))
+                            }
+                        },
+                        onChunk = { chunk ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessageChunk(messageId, chunk)
+                            }
+                        }
+                    )
                 }
 
                 // ── TaskAgent (오케스트레이터) ────────────────
@@ -73,12 +97,13 @@ class WebviewActionRouter(private val project: Project) {
                     }
 
                     // Step 완료 시 결과 전송
-                    val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean ->
+                    val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, messageId: String ->
                         logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, scope=${result.applyScope})")
                         bridge.sendMessage(
                             subType = "task_step",
                             content = result.llmResponse,
                             meta = mapOf(
+                                "messageId" to messageId,
                                 "stepLabel" to stepLabel,
                                 "applyable" to (if (result.isSuccess && isApplyable) "true" else "false"),
                                 "originalCode" to result.originalCode.orEmpty(),
@@ -90,7 +115,7 @@ class WebviewActionRouter(private val project: Project) {
                         )
                     }
 
-                    TaskAgent(onStep, onStepStart).execute(context) { _ -> /* task_done: no-op */ }
+                    TaskAgent(onStep, onStepStart).execute(context, onSuccess = { _ -> /* task_done: no-op */ })
                 }
 
                 // ── Apply: 에디터에 코드 쓰기 ────────────────
