@@ -30,15 +30,15 @@ class ExplainAction : AnAction("WhatUWant: Explain This Code", "Explain the sele
 
         // 🛎 즉시 자리 만들기 (로딩 표시 유도)
         ApplicationManager.getApplication().invokeLater {
-            bridge.sendMessage("explain_start", "🔍 코드를 분석하고 있습니다...", mapOf("messageId" to messageId))
+            bridge.sendMessage("explain_start", "🔍 코드를 분석하고 있습니다...", messageId)
         }
 
         agent.execute(
             context, 
             onSuccess = { resultText ->
                 ApplicationManager.getApplication().invokeLater {
-                    // 최종 결과 전송 (필요한 경우 meta 정보와 함께)
-                    bridge.sendMessage("explain", resultText, mapOf("messageId" to messageId))
+                    // 최종 결과 전송 (messageId 명시)
+                    bridge.sendMessage("explain", resultText, messageId)
                 }
             },
             onChunk = { chunk ->
@@ -49,8 +49,8 @@ class ExplainAction : AnAction("WhatUWant: Explain This Code", "Explain the sele
             },
             onError = { errorMsg ->
                 ApplicationManager.getApplication().invokeLater {
-                    // 에러 발생 시 명시적 신호 전송
-                    bridge.sendMessage("error", errorMsg, mapOf("messageId" to messageId))
+                    // 에러 발생 시 명시적 신호 전송 (messageId 명시)
+                    bridge.sendMessage("error", errorMsg, messageId)
                 }
             }
         )

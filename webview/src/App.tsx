@@ -27,6 +27,7 @@ interface Message {
   isLoading?: boolean;
   isError?: boolean;
   isStreaming?: boolean;
+  currentStatus?: string;
 }
 
 // ─────────────────────────────────────────────
@@ -96,7 +97,7 @@ const MessageItem = ({ msg }: { msg: Message }) => {
   }
 
   // 3. AI 메시지 분기 처리
-  const isError = msg.isSuccess === false;
+  const isError = msg.isError === true;
   const isImprovement = msg.applyable === true;
   const isAnalysis = !isError && !isImprovement;
 
@@ -121,13 +122,23 @@ const MessageItem = ({ msg }: { msg: Message }) => {
   return (
     <div className={`msg-ai ${isError ? 'error' : isAnalysis ? 'analysis' : 'improvement'}`}>
       <div className="msg-ai-header">
-        {isError ? '❌ Error' : isAnalysis ? '📋 영향 분석' : '💡 개선 제안'}
+        {isError ? '❌ Error' : isAnalysis ? '📋 분석 & 결과' : '💡 개선 제안'}
       </div>
       
       <div className={`msg-ai-content ${msg.isError ? 'error-text' : ''}`}>
-        {msg.isLoading && <div className="typing-dots" style={{ marginBottom: msg.content ? '8px' : '0' }}><span></span><span></span><span></span></div>}
-        {msg.isError && <div className="error-badge">ERROR</div>}
-        <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>
+        {/* 누적된 설명/분석 텍스트 */}
+        {msg.content && <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>}
+
+        {/* 인라인 진행 상태 표시 */}
+        {msg.isLoading && (
+          <div className="inline-loading-area" style={{ marginTop: msg.content ? '12px' : '0' }}>
+            <div className="typing-dots"><span></span><span></span><span></span></div>
+            {msg.currentStatus && <span className="status-text">{msg.currentStatus}</span>}
+          </div>
+        )}
+
+        {/* 에러 정보 배지 */}
+        {isError && <div className="error-badge" style={{ marginTop: '12px' }}>ERROR</div>}
       </div>
 
       {isImprovement && !isError && !isApplied && (
@@ -171,113 +182,100 @@ function App() {
         return;
       }
 
+      const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
+
       if (data.subType === 'apply_success') {
-        const targetId = data.id;
-        if (targetId) {
-          setMessages(prev => prev.map(m => m.id === targetId ? { ...m, applied: true } : m));
+        if (messageId) {
+          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, applied: true } : m));
         }
         return;
       }
       if (data.subType === 'undo_success') {
-        const targetId = data.id;
-        if (targetId) {
-          setMessages(prev => prev.map(m => m.id === targetId ? { ...m, applied: false } : m));
+        if (messageId) {
+          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, applied: false } : m));
         }
         return;
       }
 
-      if (data.subType === 'chat_chunk') {
-        const { messageId, content } = data;
+      // 공통 처리 로직: messageId가 있는 모든 AI 응답
+      if (messageId) {
         setMessages(prev => {
           const index = prev.findIndex(m => m.id === messageId);
+          
+          // 1. 기존 메시지가 있는 경우 (Update)
           if (index !== -1) {
+            const existing = prev[index];
             const updated = [...prev];
-            updated[index] = { 
-              ...updated[index], 
-              content: updated[index].content + content, 
-              isLoading: false,
-              isStreaming: true 
+            
+            let newContent = existing.content;
+            let currentStatus = existing.currentStatus;
+            let isLoading = existing.isLoading;
+            let isError = existing.isError;
+            let isStreaming = existing.isStreaming;
+
+            // 서브타입별 업데이트 정책
+            switch (data.subType) {
+              case 'chat_chunk':
+                newContent += data.content;
+                isLoading = false;
+                isStreaming = true;
+                break;
+              case 'task_progress':
+                currentStatus = data.content;
+                isLoading = true;
+                break;
+              case 'task_step':
+                // 텍스트 누적
+                newContent += (newContent ? "\n\n" : "") + data.content;
+                currentStatus = undefined;
+                isLoading = false;
+                isStreaming = false;
+                break;
+              case 'error':
+              case 'task_cancelled':
+                currentStatus = undefined;
+                isLoading = false;
+                isError = true;
+                newContent = data.content; // 에러는 덮어쓰거나 하단 강조 (여기서는 덮어쓰기 선택)
+                break;
+              case 'chat':
+              case 'explain':
+                newContent = data.isStreaming ? existing.content : data.content;
+                isLoading = false;
+                break;
+            }
+
+            updated[index] = {
+              ...existing,
+              content:      newContent,
+              currentStatus: currentStatus,
+              isLoading:    isLoading,
+              isError:      isError,
+              isStreaming:  isStreaming,
+              // 코드 관련 메타데이터는 무조건 최신 정보로 덮어쓰기 (사용자 요구사항)
+              subType:       data.subType,
+              applyable:     data.applyable === 'true',
+              isSuccess:     data.isSuccess !== 'false',
+              applyScope:    data.applyScope || existing.applyScope,
+              originalCode:  data.originalCode || existing.originalCode,
+              modifiedCode:  data.modifiedCode || existing.modifiedCode,
+              extractedCode: data.extractedCode || existing.extractedCode,
             };
             return updated;
-          } else {
-            return [...prev, { id: messageId, role: 'ai', content: content, isLoading: false, isStreaming: true }];
           }
+
+          // 2. 신규 메시지 생성 (Create)
+          const newMsg: Message = {
+            id: messageId,
+            role: 'ai',
+            content: data.content,
+            subType: data.subType,
+            isLoading: ['task_start', 'explain_start', 'chat_start', 'task_progress'].includes(data.subType),
+            currentStatus: data.subType.endsWith('_start') ? data.content : undefined
+          };
+          return [...prev, newMsg];
         });
-        return;
       }
-
-      if (['task_start', 'explain_start', 'chat_start'].includes(data.subType)) {
-        const { messageId } = data;
-        setMessages(prev => {
-           if (prev.some(m => m.id === messageId)) return prev;
-           return [...prev, { id: messageId, role: 'ai', content: data.content, isLoading: true }];
-        });
-        return;
-      }
-
-      if (data.subType === 'task_progress') {
-        const { messageId } = data;
-        setMessages(prev => {
-          const index = prev.findIndex(m => m.id === messageId);
-          if (index !== -1) {
-            const updated = [...prev];
-            updated[index] = { ...updated[index], content: data.content, isLoading: true };
-            return updated;
-          } else {
-            return [...prev, { id: messageId, role: 'ai', content: data.content, isLoading: true }];
-          }
-        });
-        return;
-      }
-
-      if (['task_cancelled', 'error'].includes(data.subType)) {
-        const { messageId } = data;
-        if (messageId) {
-          setMessages(prev => {
-            const index = prev.findIndex(m => m.id === messageId);
-            if (index !== -1) {
-              const updated = [...prev];
-              updated[index] = { ...updated[index], content: data.content, isLoading: false, isError: true };
-              return updated;
-            }
-            return [...prev, { id: messageId, role: 'ai', content: data.content, isError: true, isLoading: false }];
-          });
-        } else {
-          setMessages(prev => [...prev, { id: Date.now().toString(), role: 'tool', content: data.content }]);
-        }
-        return;
-      }
-
-      const messageId = data.messageId || Date.now().toString();
-      const newMsg: Message = {
-        id:            messageId,
-        role:          'ai',
-        content:       data.content,
-        subType:       data.subType,
-        stepLabel:     data.stepLabel    || undefined,
-        applyable:     data.applyable    === 'true',
-        isSuccess:     data.isSuccess    !== 'false',
-        originalCode:  data.originalCode || undefined,
-        modifiedCode:  data.modifiedCode || undefined,
-        extractedCode: data.extractedCode || '',
-        applyScope:    data.applyScope   || '',
-        applied:       false,
-      };
-
-      setMessages(prev => {
-        // 이미 스트리밍으로 생성된 메시지가 있다면 메타데이터만 보강하고, 없으면 추가
-        const index = prev.findIndex(m => m.id === messageId);
-        if (index !== -1) {
-          const existing = prev[index];
-          const updated = [...prev];
-          // 중요: 스트리밍이 이미 시작되었다면(isStreaming) 기존 누적 데이터를 보존하고,
-          // 아니라면(로딩 직후 응답 등) 새로운 전체 데이터를 사용합니다.
-          const finalContent = existing.isStreaming ? existing.content : newMsg.content;
-          updated[index] = { ...newMsg, content: finalContent, isLoading: false };
-          return updated;
-        }
-        return [...prev, newMsg];
-      });
     };
 
     const handleError = (e: ErrorEvent) => {

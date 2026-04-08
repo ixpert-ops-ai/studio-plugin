@@ -32,20 +32,24 @@ class JcefBridge(private val project: Project) {
      *
      * @param subType   메시지 타입 ("explain", "chat", "task_step", "apply_result", "error" 등)
      * @param content   본문 텍스트
+     * @param messageId 메시지 고유 ID (단일 말풍선 추적용)
      * @param meta      부가 메타데이터 (예: stepLabel, applyable, code)
      */
-    fun sendMessage(subType: String, content: String, meta: Map<String, String> = emptyMap()) {
+    fun sendMessage(subType: String, content: String, messageId: String? = null, meta: Map<String, String> = emptyMap()) {
         val payload = mutableMapOf(
             "type"    to "ai_message",
             "subType" to subType,
             "content" to content
         )
+        if (messageId != null) {
+            payload["messageId"] = messageId
+        }
         payload.putAll(meta)
 
         val jsonString = gson.toJson(payload)
         val script = "window.postMessage($jsonString, '*');"
 
-        logger.info("Bridge → Webview (subType=$subType, meta=${meta.keys})")
+        logger.info("Bridge → Webview (subType=$subType, messageId=$messageId, meta=${meta.keys})")
         browser?.cefBrowser?.executeJavaScript(script, browser?.cefBrowser?.url, 0)
     }
 

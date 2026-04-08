@@ -46,14 +46,14 @@ class WebviewActionRouter(private val project: Project) {
                     }
                     val messageId = "msg_${System.currentTimeMillis()}"
                     // 🛎 즉시 자리 만들기 (로딩 표시 유도)
-                    bridge.sendMessage("explain_start", "🔍 코드를 분석하고 있습니다...", mapOf("messageId" to messageId))
+                    bridge.sendMessage("explain_start", "🔍 코드를 분석하고 있습니다...", messageId)
 
                     val context = AgentContext(project, editor, textBody)
                     ExplainAgent().execute(
                         context, 
                         onSuccess = { res ->
                             ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("explain", res, mapOf("messageId" to messageId))
+                                bridge.sendMessage("explain", res, messageId)
                             }
                         },
                         onChunk = { chunk ->
@@ -63,7 +63,7 @@ class WebviewActionRouter(private val project: Project) {
                         },
                         onError = { errorMsg ->
                             ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("error", errorMsg, mapOf("messageId" to messageId))
+                                bridge.sendMessage("error", errorMsg, messageId)
                             }
                         }
                     )
@@ -73,14 +73,14 @@ class WebviewActionRouter(private val project: Project) {
                     logger.info("Router: /chat 분기")
                     val messageId = "msg_${System.currentTimeMillis()}"
                     // 🛎 즉시 자리 만들기 (로딩 표시 유도)
-                    bridge.sendMessage("chat_start", "💬 답변을 준비 중입니다...", mapOf("messageId" to messageId))
+                    bridge.sendMessage("chat_start", "💬 답변을 준비 중입니다...", messageId)
 
                     val context = AgentContext(project, editor, textBody)
                     ChatAgent().execute(
                         context, 
                         onSuccess = { res ->
                             ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("chat", res, mapOf("messageId" to messageId))
+                                bridge.sendMessage("chat", res, messageId)
                             }
                         },
                         onChunk = { chunk ->
@@ -90,7 +90,7 @@ class WebviewActionRouter(private val project: Project) {
                         },
                         onError = { errorMsg ->
                             ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("error", errorMsg, mapOf("messageId" to messageId))
+                                bridge.sendMessage("error", errorMsg, messageId)
                             }
                         }
                     )
@@ -103,12 +103,12 @@ class WebviewActionRouter(private val project: Project) {
                     val context = AgentContext(project, editor, textBody)
 
                     // 🛎 즉시 시작 알림 (메시지 ID 포함하여 단일 말풍선 유도)
-                    bridge.sendMessage("task_start", "✅ 의도를 분석하고 있습니다...", mapOf("messageId" to messageId))
+                    bridge.sendMessage("task_start", "✅ 의도를 분석하고 있습니다...", messageId)
 
                     // Step 시작 시 즉각 UI 피드백 (LLM 응답 기다리는 동안 사용자에게 진행 표시)
                     val onStepStart = { stepLabel: String ->
                         logger.info("Router: Step 시작 알림 → $stepLabel")
-                        bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", mapOf("messageId" to messageId))
+                        bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
                     }
 
                     // Step 완료 시 결과 전송
@@ -118,8 +118,8 @@ class WebviewActionRouter(private val project: Project) {
                         bridge.sendMessage(
                             subType = "task_step",
                             content = result.llmResponse,
+                            messageId = messageId,
                             meta = mapOf(
-                                "messageId" to messageId, 
                                 "stepMsgId" to stepMsgId, // 디버깅/추적용
                                 "stepLabel" to stepLabel,
                                 "applyable" to (if (result.isSuccess && isApplyable) "true" else "false"),
@@ -139,7 +139,7 @@ class WebviewActionRouter(private val project: Project) {
                         onChunk = null,
                         onError = { errorMsg ->
                             ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("error", errorMsg, mapOf("messageId" to messageId))
+                                bridge.sendMessage("error", errorMsg, messageId)
                             }
                         }
                     )
@@ -154,9 +154,9 @@ class WebviewActionRouter(private val project: Project) {
                     val result = EditorApplyService.apply(project, textBody, scope, original)
                     
                     if (result.startsWith("[오류]")) {
-                        bridge.sendMessage("task_progress", result)
+                        bridge.sendMessage("task_progress", result, messageId)
                     } else {
-                        bridge.sendMessage("apply_success", result, mapOf("id" to messageId))
+                        bridge.sendMessage("apply_success", result, messageId)
                     }
                 }
 
@@ -215,11 +215,11 @@ class WebviewActionRouter(private val project: Project) {
                             ApplicationManager.getApplication().invokeLater {
                                 undoManager.undo(selectedEditor)
                                 logger.info("Router: Undo 실행 성공")
-                                bridge.sendMessage("undo_success", "에디터 적용 사항이 취소되었습니다. (Undo)", mapOf("id" to messageId))
+                                bridge.sendMessage("undo_success", "에디터 적용 사항이 취소되었습니다. (Undo)", messageId)
                             }
                         } else {
                             logger.warn("Router: Undo 불가능한 상태")
-                            bridge.sendMessage("error", "취소(Undo)할 내역이 없습니다.")
+                            bridge.sendMessage("error", "취소(Undo)할 내역이 없습니다.", messageId)
                         }
                     } else {
                         bridge.sendMessage("error", "활성화된 에디터를 찾을 수 없습니다.")

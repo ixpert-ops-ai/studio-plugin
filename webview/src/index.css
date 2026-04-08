@@ -377,7 +377,24 @@ body {
 .inline { display: inline; }
 .opacity-60 { opacity: 0.6; }
 
-/* Typing Indicator (Premium Animation) */
+/* Typing Indicator & Inline Loading Area */
+.inline-loading-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+.status-text {
+  opacity: 0.8;
+  font-style: italic;
+  font-size: 11px;
+}
+
 .typing-dots { 
   display: flex; 
   gap: 4px; 
