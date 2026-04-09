@@ -257,7 +257,7 @@ function App() {
               isLoading:    isLoading,
               isError:      isError,
               isStreaming:  isStreaming,
-              // 코드 관련 메타데이터는 무조건 최신 정보로 덮어쓰기 (사용자 요구사항)
+              // 코드 관련 메타데이터는 무조건 최신 정보로 덮어쓰기 (사용자 요구사항 - 항상 최신 제안만 유지)
               subType:       data.subType,
               applyable:     data.applyable === 'true',
               isSuccess:     data.isSuccess !== 'false',

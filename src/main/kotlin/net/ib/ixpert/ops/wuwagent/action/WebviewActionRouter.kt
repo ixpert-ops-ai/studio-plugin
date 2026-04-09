@@ -102,41 +102,48 @@ class WebviewActionRouter(private val project: Project) {
                     val messageId = "task_${System.currentTimeMillis()}"
                     val context = AgentContext(project, editor, textBody)
 
-                    // 🛎 즉시 시작 알림 (메시지 ID 포함하여 단일 말풍선 유도)
-                    bridge.sendMessage("task_start", "✅ 의도를 분석하고 있습니다...", messageId)
+                    // 🛎 즉시 시작 알림 (UI 스레드 큐로 보냄)
+                    ApplicationManager.getApplication().invokeLater {
+                        bridge.sendMessage("task_start", "✅ 의도를 분석하고 있습니다...", messageId)
+                    }
 
-                    // Step 시작 시 즉각 UI 피드백 (LLM 응답 기다리는 동안 사용자에게 진행 표시)
+                    // Step 시작 시 즉각 UI 피드백
                     val onStepStart = { stepLabel: String ->
                         logger.info("Router: Step 시작 알림 → $stepLabel")
-                        bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
+                        }
                     }
 
                     // Step 완료 시 결과 전송
                     val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, stepMsgId: String ->
                         logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, scope=${result.applyScope})")
-                        // Note: TaskAgent 단계별 고유 ID를 사용할 수도 있으나, 하나의 말풍선으로 모으기 위해 messageId를 meta에 함께 실어 보냅니다.
-                        bridge.sendMessage(
-                            subType = "task_step",
-                            content = result.llmResponse,
-                            messageId = messageId,
-                            meta = mapOf(
-                                "stepMsgId" to stepMsgId, // 디버깅/추적용
-                                "stepLabel" to stepLabel,
-                                "applyable" to (if (result.isSuccess && isApplyable) "true" else "false"),
-                                "originalCode" to result.originalCode.orEmpty(),
-                                "modifiedCode" to result.modifiedCode.orEmpty(),
-                                "extractedCode" to result.extractedCode,
-                                "applyScope" to result.applyScope,
-                                "isSuccess" to result.isSuccess.toString()
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage(
+                                subType = "task_step",
+                                content = result.llmResponse,
+                                messageId = messageId,
+                                meta = mapOf(
+                                    "stepMsgId" to stepMsgId,
+                                    "stepLabel" to stepLabel,
+                                    "applyable" to (if (result.isSuccess && isApplyable) "true" else "false"),
+                                    "originalCode" to result.originalCode.orEmpty(),
+                                    "modifiedCode" to result.modifiedCode.orEmpty(),
+                                    "extractedCode" to result.extractedCode,
+                                    "applyScope" to result.applyScope,
+                                    "isSuccess" to result.isSuccess.toString()
+                                )
                             )
-                        )
+                        }
                     }
 
                     val agent = TaskAgent(messageId, onStep, onStepStart)
                     agent.execute(
                         context, 
                         onSuccess = { _ -> 
-                            bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                            }
                         },
                         onChunk = null,
                         onError = { errorMsg ->
