@@ -12,7 +12,7 @@ import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
  * 에디터에서 "Explain This Code" 이벤트를 받아 Agent에게 위임하고,
  * 결과를 받아 UI 계층(JCEF)으로 연결해주는 라우터 성격을 띱니다.
  */
-class ExplainAction : AnAction("WhatUWant: Explain This Code", "Explain the selected code using WhatUWant Agent", com.intellij.icons.AllIcons.Actions.IntentionBulb) {
+class ExplainAction : AnAction() {
     
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return

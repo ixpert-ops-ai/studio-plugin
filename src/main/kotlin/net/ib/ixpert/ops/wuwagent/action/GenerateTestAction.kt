@@ -9,11 +9,7 @@ import net.ib.ixpert.ops.wuwagent.agent.TestAgent
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
 /** 에디터 우클릭 → "Generate Test" 액션 */
-class GenerateTestAction : AnAction(
-    "Generate Test",
-    "선택한 코드의 단위 테스트를 AI가 생성합니다.",
-    com.intellij.icons.AllIcons.Actions.AddFile
-) {
+class GenerateTestAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return

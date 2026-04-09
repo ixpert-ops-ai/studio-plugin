@@ -9,11 +9,7 @@ import net.ib.ixpert.ops.wuwagent.agent.QueryValidationAgent
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
 /** 에디터 우클릭 → "Query Validation" 액션 */
-class QueryValidationAction : AnAction(
-    "Query Validation",
-    "선택한 쿼리를 AI가 유효성 검증합니다.",
-    com.intellij.icons.AllIcons.Actions.CheckMulticaret
-) {
+class QueryValidationAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return

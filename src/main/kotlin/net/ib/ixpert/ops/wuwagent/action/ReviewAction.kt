@@ -18,11 +18,7 @@ import com.intellij.openapi.diagnostic.Logger
  * WebviewActionRouter의 /task 분기를 재활용하여 리뷰 파이프라인을 실행합니다.
  * 사용자 입력을 "/task review" 형태로 포장하여 라우터에 위임합니다.
  */
-class ReviewAction : AnAction(
-    "Review Code",
-    "선택한 코드를 AI가 리뷰합니다.",
-    com.intellij.icons.AllIcons.Actions.Preview
-) {
+class ReviewAction : AnAction() {
     private val logger = Logger.getInstance(ReviewAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {
