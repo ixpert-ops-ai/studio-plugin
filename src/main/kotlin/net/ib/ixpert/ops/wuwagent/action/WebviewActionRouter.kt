@@ -118,31 +118,45 @@ class WebviewActionRouter(private val project: Project) {
                     // Step 완료 시 결과 전송
                     val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, stepMsgId: String ->
                         logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, scope=${result.applyScope})")
-                        // 개선 Step(isApplyable=true)은 설명 텍스트만 말풍선에 표시 (코드 블록 제거)
-                        // Diff 내용은 modifiedCode/originalCode를 통해 Diff 카드로만 표시
-                        val displayContent = if (isApplyable) {
-                            result.llmResponse
+
+                        if (isApplyable && result.isSuccess) {
+                            // ── 코드 말풍선 (Step 2: Improve) ──────────────────────
+                            // 별도 messageId로 새 말풍선 생성 → 텍스트 말풍선과 완전 분리
+                            val codeMessageId = "${messageId}_code"
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage(
+                                    subType = "task_code",
+                                    content = "",  // 코드 말풍선에는 설명 텍스트 없음
+                                    messageId = codeMessageId,
+                                    meta = mapOf(
+                                        "stepLabel" to stepLabel,
+                                        "applyable" to "true",
+                                        "originalCode" to result.originalCode.orEmpty(),
+                                        "modifiedCode" to result.modifiedCode.orEmpty(),
+                                        "extractedCode" to result.extractedCode,
+                                        "applyScope" to result.applyScope,
+                                        "isSuccess" to "true"
+                                    )
+                                )
+                            }
+                        } else {
+                            // ── 텍스트 말풍선 (Step 1: Analyze / Explain) ───────────
+                            // 코드 블록 제거 후 설명 텍스트만 기존 말풍선에 누적
+                            val displayContent = result.llmResponse
                                 .replace(Regex("```[\\w]*\\n?[\\s\\S]*?```"), "")
                                 .trim()
-                        } else {
-                            result.llmResponse
-                        }
-                        ApplicationManager.getApplication().invokeLater {
-                            bridge.sendMessage(
-                                subType = "task_step",
-                                content = displayContent,
-                                messageId = messageId,
-                                meta = mapOf(
-                                    "stepMsgId" to stepMsgId,
-                                    "stepLabel" to stepLabel,
-                                    "applyable" to (if (result.isSuccess && isApplyable) "true" else "false"),
-                                    "originalCode" to result.originalCode.orEmpty(),
-                                    "modifiedCode" to result.modifiedCode.orEmpty(),
-                                    "extractedCode" to result.extractedCode,
-                                    "applyScope" to result.applyScope,
-                                    "isSuccess" to result.isSuccess.toString()
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage(
+                                    subType = "task_step",
+                                    content = displayContent,
+                                    messageId = messageId,
+                                    meta = mapOf(
+                                        "stepLabel" to stepLabel,
+                                        "applyable" to "false",
+                                        "isSuccess" to result.isSuccess.toString()
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
 
@@ -241,6 +255,43 @@ class WebviewActionRouter(private val project: Project) {
                         }
                     } else {
                         bridge.sendMessage("error", "활성화된 에디터를 찾을 수 없습니다.")
+                    }
+                }
+
+                // ── SaveMarkdown: 분석 텍스트를 Markdown 파일로 저장 ──────────
+                "/saveMarkdown" -> {
+                    logger.info("Router: /saveMarkdown → 파일 저장 다이얼로그 실행")
+                    val content = payload["content"] ?: textBody
+                    if (content.isBlank()) {
+                        bridge.sendMessage("error", "저장할 내용이 없습니다.")
+                        return@invokeLater
+                    }
+                    ApplicationManager.getApplication().invokeLater {
+                        val descriptor = com.intellij.openapi.fileChooser.FileSaverDescriptor(
+                            "분석 결과 저장",
+                            "Markdown 파일로 저장합니다.",
+                            "md"
+                        )
+                        val dialog = com.intellij.openapi.fileChooser.FileChooserFactory.getInstance()
+                            .createSaveFileDialog(descriptor, project)
+                        val projectBase = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                            .findFileByPath(project.basePath ?: "")
+                        val result = dialog.save(projectBase, "analysis_result.md")
+                        if (result != null) {
+                            try {
+                                result.getVirtualFile(true)?.let { vFile ->
+                                    com.intellij.openapi.vfs.VfsUtil.saveText(vFile, content)
+                                    logger.info("Router: Markdown 저장 완료 → ${vFile.path}")
+                                } ?: run {
+                                    val file = result.file
+                                    file.writeText(content)
+                                    logger.info("Router: Markdown 저장 완료 (fallback) → ${file.absolutePath}")
+                                }
+                            } catch (e: Exception) {
+                                logger.error("Router: Markdown 저장 실패", e)
+                                bridge.sendMessage("error", "파일 저장 중 오류가 발생했습니다: ${e.message}")
+                            }
+                        }
                     }
                 }
 

@@ -81,7 +81,7 @@ const ActionCard = ({ msg, onApply }: { msg: Message; onApply: () => void }) => 
 const MessageItem = ({ msg }: { msg: Message }) => {
   const isApplied = msg.applied === true;
 
-  // 1. Tool / Status 메시지 (진행 상태 등)
+  // 1. Tool / Status 메시지
   if (msg.role === 'tool') {
     return (
       <div className="msg-tool">
@@ -96,14 +96,11 @@ const MessageItem = ({ msg }: { msg: Message }) => {
     return <div className="msg-user">{msg.content}</div>;
   }
 
-  // 3. AI 메시지 분기 처리
   const isError = msg.isError === true;
-  const isImprovement = msg.applyable === true;
-  const isAnalysis = !isError && !isImprovement;
 
   const handleApply = () => {
     if (window.sendToIde) {
-      window.sendToIde(JSON.stringify({ 
+      window.sendToIde(JSON.stringify({
         command: '/apply',
         id: msg.id,
         text: msg.modifiedCode || msg.extractedCode || msg.content,
@@ -119,17 +116,52 @@ const MessageItem = ({ msg }: { msg: Message }) => {
     }
   };
 
-  return (
-    <div className={`msg-ai ${isError ? 'error' : isAnalysis ? 'analysis' : 'improvement'}`}>
-      <div className="msg-ai-header">
-        {isError ? '❌ Error' : isAnalysis ? '📋 분석 & 결과' : '💡 개선 제안'}
+  const handleCopy = () => {
+    navigator.clipboard.writeText(msg.content).catch(() => {});
+  };
+
+  const handleSave = () => {
+    if (window.sendToIde) {
+      window.sendToIde(JSON.stringify({ command: '/saveMarkdown', content: msg.content }));
+    }
+  };
+
+  // ── 코드 말풍선 (task_code): Diff 카드만 표시 ────────────────────
+  if (msg.subType === 'task_code') {
+    return (
+      <div className="msg-ai improvement">
+        <div className="msg-ai-header">💡 코드 개선 제안</div>
+        <div className="msg-ai-content">
+          {msg.isLoading && (
+            <div className="inline-loading-area">
+              <div className="typing-dots"><span></span><span></span><span></span></div>
+              <span className="status-text">개선 코드 생성 중...</span>
+            </div>
+          )}
+        </div>
+        {!isApplied && !isError && msg.applyable && (
+          <ActionCard msg={msg} onApply={handleApply} />
+        )}
+        {isApplied && (
+          <div className="applied-info">
+            <span>✓ 코드가 에디터에 적용되었습니다.</span>
+            <button className="btn-undo-link" onClick={handleUndo}>Undo</button>
+          </div>
+        )}
       </div>
-      
-      <div className={`msg-ai-content ${msg.isError ? 'error-text' : ''}`}>
-        {/* 누적된 설명/분석 텍스트 */}
+    );
+  }
+
+  // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
+  return (
+    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`}>
+      <div className="msg-ai-header">
+        {isError ? '❌ Error' : '📋 분석 & 결과'}
+      </div>
+
+      <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
         {msg.content && <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>}
 
-        {/* 인라인 진행 상태 표시 */}
         {msg.isLoading && (
           <div className="inline-loading-area" style={{ marginTop: msg.content ? '12px' : '0' }}>
             <div className="typing-dots"><span></span><span></span><span></span></div>
@@ -137,22 +169,20 @@ const MessageItem = ({ msg }: { msg: Message }) => {
           </div>
         )}
 
-        {/* 에러 정보 배지 */}
         {isError && <div className="error-badge" style={{ marginTop: '12px' }}>ERROR</div>}
       </div>
 
-      {isImprovement && !isError && !isApplied && (
-        <ActionCard msg={msg} onApply={handleApply} />
-      )}
-
-      {isImprovement && isApplied && (
-        <div className="applied-info">
-          <span>✓ 코드가 에디터에 적용되었습니다.</span>
-          <button className="btn-undo-link" onClick={handleUndo}>Undo</button>
+      {/* Copy / Save 버튼 (텍스트 말풍선에만 표시, 완료 후) */}
+      {!isError && !msg.isLoading && msg.content && (
+        <div className="msg-text-actions">
+          <button className="btn-text-action" onClick={handleCopy} title="클립보드에 복사">
+            📋 Copy
+          </button>
+          <button className="btn-text-action" onClick={handleSave} title="Markdown 파일로 저장">
+            💾 Save .md
+          </button>
         </div>
       )}
-
-      {/* UX: 일반 메시지에는 버튼을 붙이지 않음 (Copy, Save 제거) */}
     </div>
   );
 };
@@ -312,6 +342,25 @@ function App() {
           }
 
           // 2. 신규 메시지 생성 (Create)
+          if (data.subType === 'task_code') {
+            // 코드 말풍선: Diff 카드에 필요한 메타데이터를 즉시 설정
+            const codeMsg: Message = {
+              id: messageId,
+              role: 'ai',
+              subType: 'task_code',
+              content: '',
+              isLoading: false,
+              applyable: data.applyable === 'true',
+              isSuccess: data.isSuccess !== 'false',
+              applyScope: data.applyScope,
+              originalCode: data.originalCode,
+              modifiedCode: data.modifiedCode,
+              extractedCode: data.extractedCode,
+            };
+            return [...prev, codeMsg];
+          }
+
+          // 일반 메시지 생성 (텍스트 말풍선)
           const newMsg: Message = {
             id: messageId,
             role: 'ai',

@@ -422,3 +422,30 @@ body {
 .justify-between { justify-content: space-between; }
 .gap-2 { gap: 8px; }
 .flex-col { flex-direction: column; }
+
+/* 텍스트 말풍선 Copy / Save 버튼 영역 */
+.msg-text-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  margin-top: 8px;
+}
+
+.btn-text-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-text-action:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+}
