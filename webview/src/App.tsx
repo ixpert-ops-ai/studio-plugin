@@ -262,9 +262,11 @@ function App() {
             switch (data.subType) {
               case 'task_chunk':
                 // 분석 Step의 스트리밍 청크: 텍스트 누적만 수행
+                // ✅ 첫 청크 도착 = 실제 응답 시작 → currentStatus(로딩 문구) 제거
                 newContent += data.content;
                 isLoading = false;
                 isStreaming = true;
+                currentStatus = undefined;  // 로딩 문구 제거
                 break;
               case 'task_progress':
                 currentStatus = data.content;
@@ -361,13 +363,16 @@ function App() {
           }
 
           // 일반 메시지 생성 (텍스트 말풍선)
+          // ✅ _start subType은 로딩 문구를 currentStatus에만 보관, content는 비움
+          //    → task_chunk 도착 시 content에 이어붙지 않도록 분리
+          const isStartMsg = data.subType.endsWith('_start') || data.subType === 'task_progress';
           const newMsg: Message = {
             id: messageId,
             role: 'ai',
-            content: data.content,
+            content: isStartMsg ? '' : data.content,  // 로딩 문구는 content에 넣지 않음
             subType: data.subType,
             isLoading: ['task_start', 'explain_start', 'chat_start', 'task_progress'].includes(data.subType),
-            currentStatus: data.subType.endsWith('_start') ? data.content : undefined
+            currentStatus: isStartMsg ? data.content : undefined  // 로딩 문구는 UI 상태로만 관리
           };
           return [...prev, newMsg];
         });
