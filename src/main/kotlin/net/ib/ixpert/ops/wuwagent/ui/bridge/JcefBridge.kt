@@ -1,6 +1,7 @@
 package net.ib.ixpert.ops.wuwagent.ui.bridge
 
 import com.google.gson.Gson
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
@@ -59,14 +60,17 @@ class JcefBridge(private val project: Project) {
     fun sendMessageChunk(messageId: String, content: String, isFirst: Boolean = false) {
         val payload = mapOf(
             "type" to "ai_message",
-            "subType" to "chat_chunk",
+            "subType" to "task_chunk",
             "messageId" to messageId,
             "content" to content,
             "isFirst" to isFirst
         )
         val jsonString = gson.toJson(payload)
         val script = "window.postMessage($jsonString, '*');"
-        browser?.cefBrowser?.executeJavaScript(script, browser?.cefBrowser?.url, 0)
+        // ✅ invokeLater로 EDT 큐에 삽입 → sendMessage와 동일한 큐 → 순서 보장
+        ApplicationManager.getApplication().invokeLater {
+            browser?.cefBrowser?.executeJavaScript(script, browser?.cefBrowser?.url, 0)
+        }
     }
 
     companion object {

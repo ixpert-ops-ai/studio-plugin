@@ -215,7 +215,8 @@ function App() {
 
             // 서브타입별 업데이트 정책
             switch (data.subType) {
-              case 'chat_chunk':
+              case 'task_chunk':
+                // 분석 Step의 스트리밍 청크: 텍스트 누적만 수행
                 newContent += data.content;
                 isLoading = false;
                 isStreaming = true;
@@ -225,28 +226,44 @@ function App() {
                 isLoading = true;
                 break;
               case 'task_step':
-                // 텍스트 누적 (말풍선 확장 구조)
-                newContent += (newContent ? "\n\n" : "") + data.content;
-                currentStatus = undefined;
-                isLoading = true; // 다음 Step이 있을 수 있으므로 계속 로딩 유지
-                isStreaming = false;
+                if (data.applyable === 'true') {
+                  // ✅ 개선 Step(isApplyable=true): 텍스트 누적 + 코드 카드 설정
+                  newContent += (newContent ? '\n\n' : '') + data.content;
+                  isLoading = true; // 다음 Step 대기 가능
+                  isStreaming = false;
+                  currentStatus = undefined;
+                } else {
+                  // ✅ 분석 Step(isApplyable=false): 텍스트 누적만. 코드 카드 메타데이터 변경 없음.
+                  newContent += (newContent ? '\n\n' : '') + data.content;
+                  isLoading = true;
+                  isStreaming = false;
+                  currentStatus = undefined;
+                }
                 break;
               case 'task_success':
                 isLoading = false;
+                isStreaming = false;
                 currentStatus = undefined;
-                // "완료되었습니다" 텍스트는 굳이 본문에 누적하지 않고 로딩만 해제 (사용자 선택)
                 break;
               case 'error':
               case 'task_cancelled':
                 currentStatus = undefined;
                 isLoading = false;
+                isStreaming = false;
                 isError = data.subType === 'error';
-                newContent += (newContent ? "\n\n" : "") + data.content;
+                newContent += (newContent ? '\n\n' : '') + data.content;
+                break;
+              case 'chat_chunk':
+                // /chat, /explain 전용 스트리밍
+                newContent += data.content;
+                isLoading = false;
+                isStreaming = true;
                 break;
               case 'chat':
               case 'explain':
                 newContent = data.isStreaming ? existing.content : data.content;
                 isLoading = false;
+                isStreaming = false;
                 break;
             }
 
@@ -257,14 +274,24 @@ function App() {
               isLoading:    isLoading,
               isError:      isError,
               isStreaming:  isStreaming,
-              // 코드 관련 메타데이터는 무조건 최신 정보로 덮어쓰기 (사용자 요구사항 - 항상 최신 제안만 유지)
-              subType:       data.subType,
-              applyable:     data.applyable === 'true',
-              isSuccess:     data.isSuccess !== 'false',
-              applyScope:    data.applyScope || existing.applyScope,
-              originalCode:  data.originalCode || existing.originalCode,
-              modifiedCode:  data.modifiedCode || existing.modifiedCode,
-              extractedCode: data.extractedCode || existing.extractedCode,
+              subType:      data.subType,
+              // ✅ 코드 카드 메타데이터: applyable=true인 Step 완료 시에만 갱신
+              ...(data.subType === 'task_step' && data.applyable === 'true' ? {
+                applyable:    true,
+                isSuccess:    data.isSuccess !== 'false',
+                applyScope:   data.applyScope || existing.applyScope,
+                originalCode: data.originalCode || existing.originalCode,
+                modifiedCode: data.modifiedCode || existing.modifiedCode,
+                extractedCode: data.extractedCode || existing.extractedCode,
+              } : {
+                // 분석 Step 완료 시 코드 카드 상태를 건드리지 않음
+                applyable:    existing.applyable,
+                isSuccess:    existing.isSuccess,
+                applyScope:   existing.applyScope,
+                originalCode: existing.originalCode,
+                modifiedCode: existing.modifiedCode,
+                extractedCode: existing.extractedCode,
+              }),
             };
             return updated;
           }
