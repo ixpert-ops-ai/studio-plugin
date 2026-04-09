@@ -34,12 +34,27 @@
     </extensions>
 
     <actions>
-        <!-- Add your actions here -->
-        <action id="WuwAgent.ExplainAction"
-                class="net.ib.ixpert.ops.wuwagent.action.ExplainAction"
-                text="WhatUWant: Explain This Code"
-                description="Use WhatUWant Agent to explain this selected code.">
+        <!-- iXpert AI Assistant 컨텍스트 메뉴 그룹 -->
+        <group id="IxpertAiAssistant.EditorGroup"
+               text="iXpert AI Assistant"
+               description="iXpert AI Assistant actions"
+               popup="true">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
+
+            <action id="IxpertAiAssistant.ExplainAction"
+                    class="net.ib.ixpert.ops.wuwagent.action.ExplainAction"
+                    text="Explain Code"
+                    description="선택한 코드를 AI가 분석/설명합니다."/>
+
+            <action id="IxpertAiAssistant.ReviewAction"
+                    class="net.ib.ixpert.ops.wuwagent.action.ReviewAction"
+                    text="Review Code"
+                    description="선택한 코드를 AI가 리뷰합니다."/>
+
+            <action id="IxpertAiAssistant.ImproveAction"
+                    class="net.ib.ixpert.ops.wuwagent.action.ImproveAction"
+                    text="Improve Code"
+                    description="선택한 코드를 AI가 개선합니다."/>
+        </group>
     </actions>
 </idea-plugin>
