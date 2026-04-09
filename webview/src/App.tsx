@@ -274,14 +274,17 @@ function App() {
                 break;
               case 'task_step':
                 if (data.applyable === 'true') {
-                  // ✅ 개선 Step(isApplyable=true): 텍스트 누적 + 코드 카드 설정
-                  newContent += (newContent ? '\n\n' : '') + data.content;
-                  isLoading = true; // 다음 Step 대기 가능
+                  // 개선 Step: 코드 카드 데이터 설정 (content는 덕려쓰지 않음)
+                  isLoading = true;
                   isStreaming = false;
                   currentStatus = undefined;
                 } else {
-                  // ✅ 분석 Step(isApplyable=false): 텍스트 누적만. 코드 카드 메타데이터 변경 없음.
-                  newContent += (newContent ? '\n\n' : '') + data.content;
+                  // 분석 Step: 스트리밍으로 이미 콘텐츠가 쌓였으면 다시 append 안 함
+                  if (!existing.isStreaming) {
+                    // 스트리밍이 없었던 케이스 (fallback): 전체 텍스트 사용
+                    newContent = data.content || existing.content;
+                  }
+                  // 스트리밍이 쬄 케이스: content 기존 유지 (chunk로 이미 쌓임)
                   isLoading = true;
                   isStreaming = false;
                   currentStatus = undefined;
@@ -362,17 +365,22 @@ function App() {
             return [...prev, codeMsg];
           }
 
-          // 일반 메시지 생성 (텍스트 말풍선)
-          // ✅ _start subType은 로딩 문구를 currentStatus에만 보관, content는 비움
-          //    → task_chunk 도착 시 content에 이어붙지 않도록 분리
-          const isStartMsg = data.subType.endsWith('_start') || data.subType === 'task_progress';
+          // 구조: _start 또는 task_code 신호에만 신규 메시지 생성 허용
+          // 그 외 모든 신호(task_success, task_step, explain, error 등)는
+          // matching messageId가 없어도 새 말풍선 생성 금지 → 빈 말풍선 방지
+          const isStartSubType = data.subType.endsWith('_start');
+          if (!isStartSubType) {
+            // matching 메시지가 없는데 완료/에러 신호가 오면 무시
+            return prev;
+          }
+
           const newMsg: Message = {
             id: messageId,
             role: 'ai',
-            content: isStartMsg ? '' : data.content,  // 로딩 문구는 content에 넣지 않음
+            content: '',  // 로딩 문구는 content에 넣지 않음
             subType: data.subType,
-            isLoading: ['task_start', 'explain_start', 'chat_start', 'task_progress'].includes(data.subType),
-            currentStatus: isStartMsg ? data.content : undefined  // 로딩 문구는 UI 상태로만 관리
+            isLoading: true,
+            currentStatus: data.content  // 로딩 문구는 UI 상태로만 관리
           };
           return [...prev, newMsg];
         });
