@@ -167,9 +167,24 @@ function App() {
   const [inputText, setInputText] = useState('');
   const [selectedModel, setSelectedModel] = useState<string>('Loading...');
   const chatListRef = useRef<HTMLDivElement>(null);
+  const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적
 
+  // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화
   useEffect(() => {
-    chatListRef.current?.scrollTo({ top: chatListRef.current.scrollHeight, behavior: 'smooth' });
+    const el = chatListRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      isNearBottom.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 50;
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // 메시지 변경 시 하단 근처인 경우에만 자동 스크롤
+  useEffect(() => {
+    if (isNearBottom.current) {
+      chatListRef.current?.scrollTo({ top: chatListRef.current.scrollHeight, behavior: 'smooth' });
+    }
   }, [messages]);
 
   useEffect(() => {
