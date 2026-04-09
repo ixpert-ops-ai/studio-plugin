@@ -237,9 +237,42 @@ Agent는 직접 작업을 수행하지 않고 Tool을 통해 작업을 수행한
 2. 모든 파일 변경은 apply_diff Tool을 통해 수행
 3. Tool은 service 레이어를 통해 구현
 4. Tool은 재사용 가능하도록 설계
+5. Tool은 Agent에 종속되지 않고 독립적으로 재사용 가능해야 한다
 
 목표:
 Agent는 판단만, 실제 작업은 Tool이 수행하도록 역할 분리
+
+---
+
+## 10. 기능 개발 시작 가이드
+
+신규 기능 개발 시 아래 절차를 따른다.
+
+1. 해당 기능의 Agent 파일 생성
+   - 예: ReviewAgent, ImpactAgent 등
+
+2. prompt/ 폴더에 프롬프트 파일 추가
+   - 예: review_prompt.txt
+
+3. Agent에서 prompt 로드 후 LLM 호출 구현
+
+4. 결과를 UI에 출력
+
+주의사항:
+- Action은 수정하지 않는다
+- Service는 공통 로직만 사용한다
+- LLM 호출은 반드시 Agent에서만 수행한다
+
+---
+
+## 11. 브랜치 전략
+
+- main: 배포 기준 브랜치
+- develop: 개발 통합 브랜치
+- feature/*: 기능 단위 작업 브랜치
+
+작업 흐름:
+feature → develop → main
 
 ---
 
