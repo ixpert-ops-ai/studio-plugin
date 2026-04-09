@@ -4,7 +4,9 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
+import com.intellij.openapi.application.ApplicationManager
 import net.ib.ixpert.ops.wuwagent.client.OllamaClient
+import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
 /**
  * 상위 오케스트레이터 Agent.
@@ -16,14 +18,20 @@ import net.ib.ixpert.ops.wuwagent.client.OllamaClient
  * 5. [TaskCancellationToken]을 통해 외부에서 취소 가능
  */
 class TaskAgent(
-    private val onStep: (stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean) -> Unit,
+    private val messageId: String, // 통합 관리를 위한 단일 ID 주입
+    private val onStep: (stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, messageId: String) -> Unit,
     private val onStepStart: (stepLabel: String) -> Unit = {}
 ) : WuwAgent {
 
     private val logger = Logger.getInstance(TaskAgent::class.java)
     private val client = OllamaClient()
 
-    override fun execute(context: AgentContext, onSuccess: (String) -> Unit) {
+    override fun execute(
+        context: AgentContext, 
+        onSuccess: (String) -> Unit, 
+        onChunk: ((String) -> Unit)?,
+        onError: (String) -> Unit
+    ) {
         TaskCancellationToken.reset()   // 이전 취소 상태 초기화
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(
@@ -57,8 +65,20 @@ class TaskAgent(
                     indicator.text = "${step.label} 실행 중..."
                     onStepStart(step.label)
 
+                    val bridge = JcefBridge.getInstance(context.project)
+                    // ❌ 더 이상 매 Step마다 ID를 생성하지 않음. 주입받은 messageId 사용.
+
+                    // 텍스트 기반 에이전트(isApplyable=false)인 경우에만 스트리밍 활성화
+                    val stepChunkHandler: ((String) -> Unit)? = if (!step.isApplyable) {
+                        { chunk ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessageChunk(messageId, chunk)
+                            }
+                        }
+                    } else null
+
                     try {
-                        val result = step.executeSync(context, client)
+                        val result = step.executeSync(context, client, stepChunkHandler)
 
                         // executeSync 완료 후에도 취소 여부 재확인
                         if (TaskCancellationToken.isCancelled.get()) {
@@ -67,8 +87,15 @@ class TaskAgent(
                             return
                         }
 
-                        logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료")
-                        onStep(step.label, result, step.isApplyable)
+                        logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료 (success=${result.isSuccess})")
+                        onStep(step.label, result, step.isApplyable, messageId)
+
+                        // ❌ 에러 발생 시 파이프라인 즉시 중단 및 에러 신호 전송
+                        if (!result.isSuccess) {
+                            logger.warn("TaskAgent: ${step.label} 실패 → 파이프라인 중단")
+                            onError(result.llmResponse) // 상세 에러 메시지 전달
+                            return
+                        }
 
                     } catch (e: InterruptedException) {
                         logger.info("TaskAgent: 스레드 인터럽트 → 취소됨")
@@ -82,7 +109,8 @@ class TaskAgent(
                             return
                         }
                         logger.error("TaskAgent: ${step.label} 실행 중 예외", e)
-                        onStep(step.label, TaskPipeline.StepResult("", "", "[오류] ${e.message}", ""), false)
+                        onError("[오류] ${step.label} 실행 중 예외가 발생했습니다: ${e.message}")
+                        return
                     }
                 }
 

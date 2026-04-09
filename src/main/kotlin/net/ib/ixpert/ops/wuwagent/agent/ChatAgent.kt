@@ -7,15 +7,20 @@ import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
  */
 class ChatAgent : BaseAgent() {
 
-    override fun execute(context: AgentContext, onSuccess: (String) -> Unit) {
+    override fun execute(
+        context: AgentContext, 
+        onSuccess: (String) -> Unit, 
+        onChunk: ((String) -> Unit)?,
+        onError: (String) -> Unit
+    ) {
         val userQuery = context.payloadText
         if (userQuery.isBlank()) {
-            onSuccess("[알림] 입력된 질문이 없어 답변을 제공할 수 없습니다.")
+            onError("[알림] 입력된 질문이 없어 답변을 제공할 수 없습니다.")
             return
         }
 
         val systemPrompt = PromptManager.loadPrompt("chat_prompt.txt")
 
-        callLlmAsync(context.project, "WuwAgent: Answering Chat", systemPrompt, userQuery, onSuccess)
+        callLlmStreamAsync(context.project, "WuwAgent: Answering Chat", systemPrompt, userQuery, onSuccess, onChunk, onError)
     }
 }

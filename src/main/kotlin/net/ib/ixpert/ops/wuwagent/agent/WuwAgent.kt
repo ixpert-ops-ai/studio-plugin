@@ -15,7 +15,13 @@ data class AgentContext(
 interface WuwAgent {
     /**
      * 에이전트의 워크플로우를 진입시킵니다.
-     * 결과는 UI(Bridge) 콜백이나 외부로 토스하기 위해 onSuccess 로 반환.
+     * @param onSuccess 전체 작업 완료 시 결과 반환
+     * @param onChunk 스트리밍 데이터 수신 시 호출 (선택 사항)
      */
-    fun execute(context: AgentContext, onSuccess: (String) -> Unit)
+    fun execute(
+        context: AgentContext, 
+        onSuccess: (String) -> Unit, 
+        onChunk: ((String) -> Unit)? = null,
+        onError: (String) -> Unit
+    )
 }
