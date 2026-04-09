@@ -31,12 +31,6 @@ class ExplainAgent : BaseAgent() {
         val systemPrompt = PromptManager.loadPrompt("explain_prompt.txt")
 
         // 3. BaseAgent의 스트리밍 호출 메서드를 사용하여 구동 위임
-        println("=== SYSTEM PROMPT ===")
-        println(systemPrompt)
-
-        println("=== USER MESSAGE ===")
-        println(codeToExplain)
-
         callLlmStreamAsync(
             context.project, 
             "WuwAgent: Explaining Code", 
