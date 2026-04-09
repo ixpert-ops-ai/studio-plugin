@@ -118,10 +118,19 @@ class WebviewActionRouter(private val project: Project) {
                     // Step 완료 시 결과 전송
                     val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, stepMsgId: String ->
                         logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, scope=${result.applyScope})")
+                        // 개선 Step(isApplyable=true)은 설명 텍스트만 말풍선에 표시 (코드 블록 제거)
+                        // Diff 내용은 modifiedCode/originalCode를 통해 Diff 카드로만 표시
+                        val displayContent = if (isApplyable) {
+                            result.llmResponse
+                                .replace(Regex("```[\\w]*\\n?[\\s\\S]*?```"), "")
+                                .trim()
+                        } else {
+                            result.llmResponse
+                        }
                         ApplicationManager.getApplication().invokeLater {
                             bridge.sendMessage(
                                 subType = "task_step",
-                                content = result.llmResponse,
+                                content = displayContent,
                                 messageId = messageId,
                                 meta = mapOf(
                                     "stepMsgId" to stepMsgId,
