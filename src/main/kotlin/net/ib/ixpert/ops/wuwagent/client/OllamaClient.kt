@@ -41,7 +41,12 @@ class OllamaClient {
             )
         )
         val jsonPayload = gson.toJson(requestBody)
-        
+
+        logger.warn("=== OLLAMA PAYLOAD ===")
+        logger.warn("SYSTEM: $systemPrompt")
+        logger.warn("USER: ${userCode.take(200)}${if (userCode.length > 200) "..." else ""}")
+        logger.warn("FULL JSON: $jsonPayload")
+        logger.warn("=====================")
         logger.info("Ollama API Call (Stream=${onChunk != null}): url=$serverUrl, model=${settings.model}")
 
         return try {
