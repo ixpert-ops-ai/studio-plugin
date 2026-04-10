@@ -3,6 +3,7 @@ package net.ib.ixpert.ops.wuwagent.client
 import com.google.gson.Gson
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.util.io.HttpRequests
+import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.model.OllamaChatRequest
 import net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse
 import net.ib.ixpert.ops.wuwagent.model.OllamaMessage
@@ -11,6 +12,7 @@ import java.io.IOException
 class OllamaClient {
     private val logger = Logger.getInstance(OllamaClient::class.java)
     private val gson = Gson()
+
     fun callChatApi(systemPrompt: String, userCode: String): OllamaChatResponse? {
         return callChatApiStream(systemPrompt, userCode, null)
     }
@@ -20,8 +22,8 @@ class OllamaClient {
      * @param onChunk 각 데이터 청크 수신 시 호출될 콜백
      */
     fun callChatApiStream(
-        systemPrompt: String, 
-        userCode: String, 
+        systemPrompt: String,
+        userCode: String,
         onChunk: ((String) -> Unit)? = null
     ): OllamaChatResponse? {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
@@ -42,9 +44,11 @@ class OllamaClient {
         )
         val jsonPayload = gson.toJson(requestBody)
 
+        logger.info("Ollama API Call (Stream=${onChunk != null}): url=$serverUrl, model=${settings.model}")
+
         return try {
             HttpRequests.post(serverUrl, "application/json")
-                .tuner { connection -> 
+                .tuner { connection ->
                     if (settings.apiKey.isNotBlank()) {
                         connection.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
                     }
@@ -54,30 +58,52 @@ class OllamaClient {
                 }
                 .connect { request ->
                     request.write(jsonPayload)
-                    
+
                     if (onChunk != null) {
-                        val reader = request.connection.inputStream.bufferedReader()
+                        val inputStream = request.connection.inputStream
+                        // 취소 시 강제 close()로 스트림 즉시 종료할 수 있도록 등록
+                        TaskCancellationToken.activeInputStream = inputStream
+                        val reader = inputStream.bufferedReader()
                         var fullContent = ""
                         var lastResponse: OllamaChatResponse? = null
-                        
-                        reader.forEachLine { line ->
-                            if (line.isNotBlank()) {
-                                try {
-                                    val chunkResponse = gson.fromJson(line, OllamaChatResponse::class.java)
-                                    val content = chunkResponse.message?.content ?: ""
-                                    if (content.isNotEmpty()) {
-                                        fullContent += content
-                                        onChunk(content)
-                                    }
-                                    if (chunkResponse.done == true) {
-                                        lastResponse = chunkResponse
-                                    }
-                                } catch (e: Exception) {
-                                    logger.warn("Failed to parse chunk: $line", e)
+
+                        try {
+                            var line = reader.readLine()
+                            while (line != null) {
+                                // 매 청크마다 취소 여부 확인 → 취소 시 즉시 루프 탈출
+                                if (TaskCancellationToken.isCancelled.get()) {
+                                    logger.info("OllamaClient: 취소 감지 → 스트림 중단")
+                                    break
                                 }
+                                if (line.isNotBlank()) {
+                                    try {
+                                        val chunkResponse = gson.fromJson(line, OllamaChatResponse::class.java)
+                                        val content = chunkResponse.message?.content ?: ""
+                                        if (content.isNotEmpty()) {
+                                            fullContent += content
+                                            onChunk(content)
+                                        }
+                                        if (chunkResponse.done == true) {
+                                            lastResponse = chunkResponse
+                                        }
+                                    } catch (e: Exception) {
+                                        logger.warn("Failed to parse chunk: $line", e)
+                                    }
+                                }
+                                line = reader.readLine()
                             }
+                        } catch (e: IOException) {
+                            // activeInputStream.close()로 인한 IOException은 취소의 정상적인 결과
+                            if (TaskCancellationToken.isCancelled.get()) {
+                                logger.info("OllamaClient: 스트림 취소로 인한 IOException (정상) — ${e.message}")
+                            } else {
+                                throw e
+                            }
+                        } finally {
+                            TaskCancellationToken.activeInputStream = null
                         }
-                        // 모든 청크 합친 결과 반환
+
+                        // 부분 누적 내용으로 안전하게 반환 (취소 시에도 crash 없음)
                         lastResponse ?: OllamaChatResponse(
                             null, null, OllamaMessage("assistant", fullContent), true
                         )
@@ -89,9 +115,12 @@ class OllamaClient {
                 }
         } catch (e: IOException) {
             val errorMsg = when {
-                e.message?.contains("timeout", ignoreCase = true) == true -> "[Error] Ollama 서버 응답 타임아웃 ($serverUrl). 설정에서 Timeout 시간을 늘려보세요."
-                e.message?.contains("refused", ignoreCase = true) == true -> "[Error] Ollama 서버 연결 거부 ($serverUrl). 서버가 실행 중인지 확인하세요."
-                else -> "[Error] Ollama 서버 통신 실패: ${e.message} ($serverUrl)"
+                e.message?.contains("timeout", ignoreCase = true) == true ->
+                    "[Error] Ollama 서버 응답 타임아웃 ($serverUrl). 설정에서 Timeout 시간을 늘려보세요."
+                e.message?.contains("refused", ignoreCase = true) == true ->
+                    "[Error] Ollama 서버 연결 거부 ($serverUrl). 서버가 실행 중인지 확인하세요."
+                else ->
+                    "[Error] Ollama 서버 통신 실패: ${e.message} ($serverUrl)"
             }
             logger.error(errorMsg, e)
             OllamaChatResponse(null, null, OllamaMessage("assistant", errorMsg), true)

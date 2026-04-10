@@ -15,8 +15,8 @@ abstract class BaseAgent : WuwAgent {
     protected val ollamaClient = OllamaClient()
 
     override abstract fun execute(
-        context: AgentContext, 
-        onSuccess: (String) -> Unit, 
+        context: AgentContext,
+        onSuccess: (String) -> Unit,
         onChunk: ((String) -> Unit)?,
         onError: (String) -> Unit
     )
@@ -39,23 +39,37 @@ abstract class BaseAgent : WuwAgent {
         userMessage: String,
         onSuccess: (String) -> Unit,
         onChunk: ((String) -> Unit)? = null,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        messageId: String = "msg_${System.currentTimeMillis()}"
     ) {
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, taskTitle, false) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, taskTitle, true) {
             override fun run(indicator: ProgressIndicator) {
+                // 새 요청 시작 전 토큰 초기화 및 스레드/messageId 등록
+                TaskCancellationToken.reset()
+                TaskCancellationToken.backgroundThread = Thread.currentThread()
+                TaskCancellationToken.activeMessageId = messageId
+
                 indicator.isIndeterminate = true
                 indicator.text = "$taskTitle 요청을 Ollama API에 전달하는 중..."
 
-                logger.info("BaseAgent: 프롬프트 전달 완료. Model: qwen3-coder:30b (Stream=${onChunk != null})")
+                logger.info("BaseAgent: 프롬프트 전달 완료. messageId=$messageId, Stream=${onChunk != null}")
 
                 // 1. Client HTTP 스트리밍/블로킹 호출
                 val response = ollamaClient.callChatApiStream(systemPrompt, userMessage, onChunk)
                 logger.info("BaseAgent: LLM 응답 수신 완료 여부 = ${response?.message != null}")
 
-                // 2. 내용 파싱 및 방어 로직
+                // 2. 취소 여부 확인 — onError("__cancelled__") 로 Router에 전달
+                //    Router의 onError 에서 "__cancelled__" 는 무시되므로 UI 중복 노출 없음
+                if (TaskCancellationToken.isCancelled.get()) {
+                    logger.info("BaseAgent: 요청 취소됨 (messageId=$messageId)")
+                    onError("__cancelled__")
+                    return
+                }
+
+                // 3. 내용 파싱 및 방어 로직
                 val resultText = response?.message?.content ?: "[오류 발생] 알 수 없는 데이터 널 응답"
 
-                // 3. 에러 감지 및 콜백 분기
+                // 4. 에러 감지 및 콜백 분기
                 if (resultText.startsWith("[Error]")) {
                     logger.error("BaseAgent: LLM 응답에 에러 포함됨 -> $resultText")
                     onError(resultText)
