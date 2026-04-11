@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "webview-dev",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "/Users/jeongjunlee/Workspace/ai-plugin-androidstudio/build/nodejs/node-v20.11.1-darwin-arm64/bin/node",
+      "runtimeArgs": ["webview/node_modules/.bin/vite", "webview", "--port", "5173"],
       "port": 5173
     },
     {
