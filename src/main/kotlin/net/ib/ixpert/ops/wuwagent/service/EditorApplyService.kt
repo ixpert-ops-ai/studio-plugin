@@ -98,12 +98,30 @@ object EditorApplyService {
     }
 
     /**
-     * LLM 응답에서 첫 번째 코드 블록(``` ... ```)을 추출합니다.
-     * 코드 블록이 없으면 전체 텍스트를 그대로 반환합니다.
+     * LLM 응답에서 코드 블록(``` ... ```)을 추출합니다.
+     *
+     * - 코드 블록이 여러 개일 경우 **가장 긴 블록**을 반환합니다.
+     *   (LLM이 짧은 예시 블록과 전체 코드 블록을 함께 반환할 때 전체 코드를 선택하기 위함)
+     * - 코드 블록이 없으면 전체 텍스트를 그대로 반환합니다.
      */
     fun extractCodeBlock(content: String): String {
         val regex = Regex("```(?:\\w+)?\\n?([\\s\\S]*?)```")
-        val match = regex.find(content)
-        return match?.groupValues?.get(1)?.trim() ?: content.trim()
+        val matches = regex.findAll(content).toList()
+
+        logger.info("extractCodeBlock: 코드블록 ${matches.size}개 발견, 응답 전체 길이=${content.length}")
+        matches.forEachIndexed { i, m ->
+            logger.info("extractCodeBlock: 블록[$i] 길이=${m.groupValues[1].length}")
+        }
+
+        if (matches.isEmpty()) {
+            logger.info("extractCodeBlock: 코드블록 없음 → 전체 텍스트 반환 (길이=${content.trim().length})")
+            return content.trim()
+        }
+
+        // 가장 긴 블록 선택 (전체 파일일 가능성이 가장 높음)
+        val largest = matches.maxByOrNull { it.groupValues[1].length }!!
+        val extracted = largest.groupValues[1].trim()
+        logger.info("extractCodeBlock: 최대 블록 선택 (길이=${ extracted.length}) 앞 300자: ${extracted.take(300)}")
+        return extracted
     }
 }

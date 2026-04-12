@@ -53,8 +53,15 @@ sealed class TaskPipeline {
         /**
          * OllamaClient를 직접 사용해 동기적(blocking)으로 LLM을 호출합니다.
          * TaskAgent의 단일 Backgroundable 블록 안에서 호출됩니다.
+         *
+         * @param previousStepResult 이전 단계의 LLM 응답 텍스트 (2단계 이상 파이프라인에서 문맥 전달용)
          */
-        fun executeSync(context: AgentContext, client: OllamaClient, onChunk: ((String) -> Unit)? = null): StepResult {
+        fun executeSync(
+            context: AgentContext,
+            client: OllamaClient,
+            onChunk: ((String) -> Unit)? = null,
+            previousStepResult: String? = null
+        ): StepResult {
             val systemPrompt = PromptManager.loadPrompt(promptFile)
 
             var originalCode = ""
@@ -62,7 +69,11 @@ sealed class TaskPipeline {
             var userMessage: String
 
             val payload = context.payloadText.trim()
-            
+            // 이전 단계 결과가 있으면 userMessage에 포함할 문맥 블록 생성
+            val prevContext = if (!previousStepResult.isNullOrBlank())
+                "\n\n[이전 단계 분석 결과]\n$previousStepResult"
+            else ""
+
             // ① 파일명 패턴 추출 (대문자로 시작하는 단어 또는 확장자 포함 단어)
             // (예: "MainActivity", "utils.kt", "ApiService.java")
             val filePattern = Regex("\\b([A-Z][a-zA-Z0-9]*|\\w+\\.(kt|java|xml|gradle))\\b")
@@ -71,11 +82,11 @@ sealed class TaskPipeline {
             if (potentialFileName != null) {
                 // [CASE A] 파일명이 명시된 경우 → "파일 검색" 우선, 에디터 폴백 금지
                 val matchedFile = FileSearchService.searchFiles(context.project, potentialFileName).firstOrNull()
-                
+
                 if (matchedFile != null) {
                     val fileContent = FileSearchService.readFileContent(matchedFile)
                     logger.info("AgentStep[${label}]: 명시적 파일 검색 히트 → ${matchedFile.name}")
-                    userMessage = "사용자 요청: $payload\n\n// 파일: ${matchedFile.name}\n```\n$fileContent\n```"
+                    userMessage = "사용자 요청: $payload$prevContext\n\n// 파일: ${matchedFile.name}\n```\n$fileContent\n```"
                 } else {
                     // ❌ 파일을 찾지 못한 경우 에디터 폴백 없이 에러 반환
                     logger.warn("AgentStep[${label}]: 명시적 파일($potentialFileName)을 찾을 수 없음")
@@ -98,7 +109,9 @@ sealed class TaskPipeline {
                     }
                     userMessage = when {
                         originalCode.isNotBlank() && payload.isNotBlank() ->
-                            "사용자 요청: $payload\n\n참조 코드:\n```\n$originalCode\n```"
+                            "사용자 요청: $payload$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
+                        originalCode.isNotBlank() && prevContext.isNotBlank() ->
+                            "$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
                         originalCode.isNotBlank() -> originalCode
                         else -> payload
                     }
@@ -111,9 +124,9 @@ sealed class TaskPipeline {
                     if (firstFile != null) {
                         val fileContent = FileSearchService.readFileContent(firstFile)
                         logger.info("AgentStep[${label}]: 일반 검색 히트 → ${firstFile.name}")
-                        userMessage = "사용자 요청: $payload\n\n// 파일: ${firstFile.name}\n```\n$fileContent\n```"
+                        userMessage = "사용자 요청: $payload$prevContext\n\n// 파일: ${firstFile.name}\n```\n$fileContent\n```"
                     } else {
-                        userMessage = payload
+                        userMessage = payload + prevContext
                     }
                 }
             }
@@ -129,14 +142,18 @@ sealed class TaskPipeline {
                 )
             }
 
+            logger.warn("AgentStep[${label}] INPUT: originalCode 길이=${originalCode.length}, userMessage 길이=${userMessage.length}, prevContext 포함=${prevContext.isNotBlank()}")
             logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=${applyScope.ifBlank { "file-search" }}, stream=${onChunk != null})")
-            val response      = client.callChatApiStream(systemPrompt, userMessage, onChunk)
-            val llmResponse   = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
-            
+            val response    = client.callChatApiStream(systemPrompt, userMessage, onChunk)
+            val llmResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
+
             // Ollama 가 타임아웃 등으로 "[Error]..." 반환 시 오류로 간주
             val isErrorResponse = llmResponse.startsWith("[오류]") || llmResponse.startsWith("[Error]")
             val extractedCode = if (isErrorResponse) "" else EditorApplyService.extractCodeBlock(llmResponse)
-            
+
+            logger.warn("AgentStep[${label}] OUTPUT: llmResponse 길이=${llmResponse.length}, extractedCode 길이=${extractedCode.length}")
+            logger.warn("AgentStep[${label}] extractedCode 앞 300자: ${extractedCode.take(300)}")
+
             // 코드 개선(Improve) step 시, 원본과 동일하거나 비정상 응답이면 실패로 처리
             val hasCodeDiff = isApplyable &&
                 !isErrorResponse &&

@@ -53,6 +53,8 @@ class TaskAgent(
                 logger.info("TaskAgent: Pipeline 결정 → ${pipeline::class.simpleName}")
 
                 // ── Step 1~N: Pipeline 순차 실행 ──────────────
+                var previousStepResult: String? = null   // 이전 단계 LLM 응답 — 다음 단계 문맥으로 전달
+
                 for ((idx, step) in pipeline.steps.withIndex()) {
                     // 취소 체크 (Step 시작 전)
                     if (TaskCancellationToken.isCancelled.get() || indicator.isCanceled) {
@@ -61,7 +63,7 @@ class TaskAgent(
                         return
                     }
 
-                    logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 시작")
+                    logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 시작 (previousResult 있음=${previousStepResult != null})")
                     indicator.text = "${step.label} 실행 중..."
                     onStepStart(step.label)
 
@@ -78,7 +80,7 @@ class TaskAgent(
                     } else null
 
                     try {
-                        val result = step.executeSync(context, client, stepChunkHandler)
+                        val result = step.executeSync(context, client, stepChunkHandler, previousStepResult)
 
                         // executeSync 완료 후에도 취소 여부 재확인
                         if (TaskCancellationToken.isCancelled.get()) {
@@ -88,6 +90,8 @@ class TaskAgent(
                         }
 
                         logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료 (success=${result.isSuccess})")
+                        // 다음 단계 문맥 전달을 위해 현재 단계 LLM 응답 보관
+                        previousStepResult = result.llmResponse
                         onStep(step.label, result, step.isApplyable, messageId)
 
                         // ❌ 에러 발생 시 파이프라인 즉시 중단 및 에러 신호 전송
