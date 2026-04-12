@@ -5,7 +5,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import net.ib.ixpert.ops.wuwagent.agent.AgentContext
-import net.ib.ixpert.ops.wuwagent.agent.TestAgent
+import net.ib.ixpert.ops.wuwagent.agent.GenerateTestAgent
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
 /** 에디터 우클릭 → "Generate Test" 액션 */
@@ -22,7 +22,7 @@ class GenerateTestAction : AnAction() {
             bridge.sendMessage("explain_start", "🧪 테스트 코드를 생성하고 있습니다...", messageId)
         }
 
-        TestAgent().execute(
+        GenerateTestAgent().execute(
             context,
             onSuccess = { resultText ->
                 ApplicationManager.getApplication().invokeLater {
