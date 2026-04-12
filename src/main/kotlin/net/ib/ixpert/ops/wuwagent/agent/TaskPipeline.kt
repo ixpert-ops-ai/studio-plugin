@@ -37,14 +37,16 @@ sealed class TaskPipeline {
     /**
      * 파이프라인의 각 실행 단위.
      *
-     * @param label      UI에 표시될 단계 이름 (예: "1/3 코드 개선")
-     * @param promptFile 사용할 시스템 프롬프트 파일명
-     * @param isApplyable 결과에 Apply 버튼을 표시할지 여부
+     * @param label         UI에 표시될 단계 이름 (예: "1/3 코드 개선")
+     * @param promptFile    사용할 시스템 프롬프트 파일명
+     * @param isApplyable   결과에 Apply 버튼을 표시할지 여부
+     * @param isImproveStep 코드 변경 diff 검증을 수행할지 여부 (Improve 전용, prompt 이름에 의존하지 않음)
      */
     data class AgentStep(
         val label: String,
         val promptFile: String,
-        val isApplyable: Boolean = false
+        val isApplyable: Boolean = false,
+        val isImproveStep: Boolean = false
     ) {
         private val logger = Logger.getInstance(AgentStep::class.java)
 
@@ -135,8 +137,7 @@ sealed class TaskPipeline {
             val isErrorResponse = llmResponse.startsWith("[오류]") || llmResponse.startsWith("[Error]")
             val extractedCode = if (isErrorResponse) "" else EditorApplyService.extractCodeBlock(llmResponse)
             
-            // 코드 개선(Improve) 시, 원본과 동일하거나 비정상 응답이면 실패로 처리
-            val isPromptImprove = promptFile.contains("improve")
+            // 코드 개선(Improve) step 시, 원본과 동일하거나 비정상 응답이면 실패로 처리
             val hasCodeDiff = isApplyable &&
                 !isErrorResponse &&
                 originalCode.isNotBlank() &&
@@ -145,7 +146,7 @@ sealed class TaskPipeline {
 
             val isActuallySuccess = when {
                 isErrorResponse -> false
-                isPromptImprove && !hasCodeDiff -> false // 개선 요청인데 변경된 게 없으면 실패
+                isImproveStep && !hasCodeDiff -> false // 코드 개선 step인데 변경된 게 없으면 실패
                 else -> true
             }
 
@@ -166,21 +167,31 @@ sealed class TaskPipeline {
 
     /**
      * 분석 → 코드 개선
-     * - 1/2 영향 분석: 참고용 텍스트 (isApplyable = false)
-     * - 2/2 코드 개선: Diff 대상 (isApplyable = true)
+     * - 1/2 개선 분석: 참고용 텍스트 (isApplyable = false)
+     * - 2/2 코드 개선: Diff 대상 (isApplyable = true, isImproveStep = true)
      */
     object Improve : TaskPipeline() {
         override val steps = listOf(
-            AgentStep("1/2 영향 분석", "impact_prompt.txt",  isApplyable = false),
-            AgentStep("2/2 코드 개선", "improve_prompt.txt", isApplyable = true)
+            AgentStep("1/2 개선 분석", "improve_analysis_prompt.txt", isApplyable = false),
+            AgentStep("2/2 코드 개선", "improve_prompt.txt",          isApplyable = true, isImproveStep = true)
         )
     }
 
     /** 코드 리뷰 → 개선 제안 */
     object Review : TaskPipeline() {
         override val steps = listOf(
-            AgentStep("1/2 코드 리뷰",   "review_prompt.txt",  isApplyable = false),
-            AgentStep("2/2 개선 제안",   "improve_prompt.txt", isApplyable = true)
+            AgentStep("1/2 코드 리뷰", "review_prompt.txt",         isApplyable = false),
+            AgentStep("2/2 개선 제안", "review_improve_prompt.txt", isApplyable = true, isImproveStep = true)
+        )
+    }
+
+    /**
+     * 영향 분석 (단독 파이프라인)
+     * - ImpactAnalysisAction 및 직접 파이프라인 실행 시 사용
+     */
+    object Impact : TaskPipeline() {
+        override val steps = listOf(
+            AgentStep("1/1 영향 분석", "impact_prompt.txt", isApplyable = false)
         )
     }
 
