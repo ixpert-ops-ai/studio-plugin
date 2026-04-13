@@ -98,6 +98,42 @@ object EditorApplyService {
     }
 
     /**
+     * LLM의 Search/Replace 포맷 응답을 원본 코드에 적용하여 최종 코드를 반환합니다.
+     *
+     * 포맷:
+     * ```
+     * <<<<<<< SEARCH
+     * (원본과 정확히 일치하는 코드)
+     * =======
+     * (대체할 코드)
+     * >>>>>>> REPLACE
+     * ```
+     *
+     * @return 병합된 전체 코드, 또는 파싱/매칭 실패 시 null (fallback 유도)
+     */
+    fun applySearchReplace(original: String, llmResponse: String): String? {
+        val pattern = Regex(
+            """<<<<<<< SEARCH\n(.*?)\n=======\n(.*?)\n>>>>>>> REPLACE""",
+            setOf(RegexOption.DOT_MATCHES_ALL)
+        )
+        val blocks = pattern.findAll(llmResponse).toList()
+        if (blocks.isEmpty()) return null
+
+        var result = original
+        for (block in blocks) {
+            val search  = block.groupValues[1]
+            val replace = block.groupValues[2]
+            if (!result.contains(search)) {
+                logger.warn("applySearchReplace: SEARCH 블록 매칭 실패 → fallback")
+                return null
+            }
+            result = result.replaceFirst(search, replace)
+        }
+        logger.info("applySearchReplace: ${blocks.size}개 블록 적용 완료 (결과 길이=${result.length})")
+        return result
+    }
+
+    /**
      * LLM 응답에서 코드 블록(``` ... ```)을 추출합니다.
      *
      * - 코드 블록이 여러 개일 경우 **가장 긴 블록**을 반환합니다.

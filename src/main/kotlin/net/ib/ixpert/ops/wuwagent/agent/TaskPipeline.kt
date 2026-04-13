@@ -30,6 +30,9 @@ sealed class TaskPipeline {
         val modifiedCode: String?,
         val applyScope: String,
         val llmResponse: String,
+        /** UI 표시 전 전처리가 된 llmResponse와 달리, 파이프라인 내부 전달용 원문 응답.
+         *  예: [IMPROVE_TARGETS] 블록이 포함된 Step1 전체 응답 → Step2 parseImproveTargets에서 사용 */
+        val rawLlmResponse: String = llmResponse,
         val extractedCode: String,
         val isSuccess: Boolean = true
     )
@@ -51,13 +54,6 @@ sealed class TaskPipeline {
         private val logger = Logger.getInstance(AgentStep::class.java)
 
         /**
-         * Improve step 전용 userMessage 조립.
-         * - "다음 코드를 수정하라." 지시를 최상단에 배치
-         * - 이전 단계 분석 결과를 [수정 요구사항]으로 포함
-         * - 원본 코드를 [원본 코드] 블록으로 마지막에 배치
-         * - 코드 외 출력 금지 경고를 마지막에 추가
-         */
-        /**
          * 부분 코드 여부 판단.
          * 아래 조건 중 하나라도 만족하면 부분 코드로 간주한다.
          * 1. 길이가 원본의 80% 미만
@@ -71,20 +67,57 @@ sealed class TaskPipeline {
             return lengthRatio < 0.8 || (!hasClass && hasFun)
         }
 
-        private fun buildImproveUserMessage(prevAnalysis: String, code: String): String = buildString {
-            appendLine("다음 코드를 수정하라.")
-            if (prevAnalysis.isNotBlank()) {
+        /**
+         * Step 1 분석 결과에서 [IMPROVE_TARGETS] 블록을 파싱한다.
+         * @return Pair(isFullFile, functionList)
+         *   - isFullFile=true  : FULL_FILE 또는 블록 없음 → 전체 개선
+         *   - isFullFile=false : 특정 함수 목록 반환
+         */
+        private fun parseImproveTargets(prevAnalysis: String): Pair<Boolean, List<String>> {
+            val regex = Regex("""\[IMPROVE_TARGETS](.*?)\[/IMPROVE_TARGETS]""", RegexOption.DOT_MATCHES_ALL)
+            val match = regex.find(prevAnalysis)
+                ?: return Pair(true, emptyList())          // 블록 없음 → 전체 개선
+
+            val content = match.groupValues[1].trim()
+            if (content == "FULL_FILE") return Pair(true, emptyList())
+
+            val functions = content.lines()
+                .map { it.trim().removePrefix("-").trim() }
+                .filter { it.isNotBlank() }
+
+            return if (functions.isEmpty()) Pair(true, emptyList())
+            else Pair(false, functions)
+        }
+
+        /**
+         * Improve step 전용 userMessage 조립.
+         *
+         * - FULL_FILE 또는 타깃 미지정: 전체 코드 Search/Replace 개선 요청
+         * - 특정 함수 목록: 함수명만 compact하게 삽입, 분석 전문 제거 (컨텍스트 절약)
+         */
+        private fun buildImproveUserMessage(prevAnalysis: String, code: String): String {
+            val (isFullFile, functions) = parseImproveTargets(prevAnalysis)
+            logger.info("buildImproveUserMessage: isFullFile=$isFullFile, targets=${functions.joinToString()}")
+
+            return buildString {
+                appendLine("다음 코드를 수정하라.")
                 appendLine()
-                appendLine("[수정 요구사항]")
-                appendLine(prevAnalysis)
+                if (isFullFile) {
+                    appendLine("[수정 요구사항]")
+                    appendLine("전체 파일 구조 개선")
+                } else {
+                    appendLine("[수정 요구사항]")
+                    appendLine("개선 대상 함수: [${functions.joinToString(", ")}]")
+                    appendLine("위 함수들을 Search/Replace 포맷으로 반환하라.")
+                }
+                appendLine()
+                appendLine("[원본 코드]")
+                appendLine("---CODE START---")
+                appendLine(code)
+                appendLine("---CODE END---")
+                appendLine()
+                append("IMPORTANT:\n코드 외 텍스트를 출력하면 실패로 간주한다.")
             }
-            appendLine()
-            appendLine("[원본 코드]")
-            appendLine("---CODE START---")
-            appendLine(code)
-            appendLine("---CODE END---")
-            appendLine()
-            append("IMPORTANT:\n코드 외 텍스트를 출력하면 실패로 간주한다.")
         }
 
         /**
@@ -192,12 +225,63 @@ sealed class TaskPipeline {
 
             logger.warn("AgentStep[${label}] INPUT: originalCode 길이=${originalCode.length}, userMessage 길이=${userMessage.length}, prevContext 포함=${prevContext.isNotBlank()}")
             logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=${applyScope.ifBlank { "file-search" }}, stream=${onChunk != null})")
-            val response    = client.callChatApiStream(systemPrompt, userMessage, onChunk)
-            val llmResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
+
+            // ── [IMPROVE_TARGETS] 블록 스트리밍 필터 ────────────────────────────
+            // 분석 step(isImproveStep=false)에서 [IMPROVE_TARGETS] 블록이 UI로 스트리밍되지 않도록 차단.
+            // lookahead 버퍼로 태그 경계를 안전하게 감지한 뒤, 태그 이전까지만 전송한다.
+            val IMPROVE_TAG = "[IMPROVE_TARGETS]"
+            val filteredOnChunk: ((String) -> Unit)? = if (onChunk != null && !isImproveStep) {
+                val lookahead = IMPROVE_TAG.length
+                val pending   = StringBuilder()
+                var suppressed = false
+                { chunk ->
+                    if (!suppressed) {
+                        pending.append(chunk)
+                        val idx = pending.indexOf(IMPROVE_TAG)
+                        if (idx >= 0) {
+                            suppressed = true
+                            // 태그 이전까지만 전송 (뒤따르는 빈 줄/공백 제거)
+                            val before = pending.substring(0, idx).trimEnd()
+                            if (before.isNotEmpty()) onChunk(before)
+                            logger.info("AgentStep[${label}] 청크 필터: [IMPROVE_TARGETS] 감지 → 이후 청크 차단")
+                        } else {
+                            // 태그 미감지 — lookahead 버퍼 유지하며 안전 구간 전송
+                            val safeLen = maxOf(0, pending.length - lookahead)
+                            if (safeLen > 0) {
+                                onChunk(pending.substring(0, safeLen))
+                                pending.delete(0, safeLen)
+                            }
+                        }
+                    }
+                }
+            } else onChunk
+            // ──────────────────────────────────────────────────────────────────────
+
+            val response    = client.callChatApiStream(systemPrompt, userMessage, filteredOnChunk)
+            val rawLlmResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
+
+            // UI 표시용 llmResponse: [IMPROVE_TARGETS] 블록 제거
+            val llmResponse = rawLlmResponse
+                .replace(Regex("""\s*\[IMPROVE_TARGETS].*?\[/IMPROVE_TARGETS]""", RegexOption.DOT_MATCHES_ALL), "")
+                .trimEnd()
 
             // Ollama 가 타임아웃 등으로 "[Error]..." 반환 시 오류로 간주
             val isErrorResponse = llmResponse.startsWith("[오류]") || llmResponse.startsWith("[Error]")
-            var extractedCode = if (isErrorResponse) "" else EditorApplyService.extractCodeBlock(llmResponse)
+            var extractedCode = if (isErrorResponse) {
+                ""
+            } else if (isImproveStep && originalCode.isNotBlank()) {
+                // Improve step: Search/Replace 병합 우선 시도 → 실패 시 기존 extractCodeBlock fallback
+                val merged = EditorApplyService.applySearchReplace(originalCode, llmResponse)
+                if (merged != null) {
+                    logger.info("AgentStep[${label}] Search/Replace 병합 성공 (길이=${merged.length})")
+                    merged
+                } else {
+                    logger.warn("AgentStep[${label}] Search/Replace 파싱 실패 → fallback")
+                    EditorApplyService.extractCodeBlock(llmResponse)
+                }
+            } else {
+                EditorApplyService.extractCodeBlock(llmResponse)
+            }
 
             logger.warn("AgentStep[${label}] OUTPUT: llmResponse 길이=${llmResponse.length}, extractedCode 길이=${extractedCode.length}")
             logger.warn("AgentStep[${label}] extractedCode 앞 300자: ${extractedCode.take(300)}")
@@ -255,7 +339,8 @@ sealed class TaskPipeline {
                 originalCode = if (hasCodeDiff) originalCode else null,
                 modifiedCode = if (hasCodeDiff) extractedCode else null,
                 applyScope = applyScope,
-                llmResponse = llmResponse,
+                llmResponse = llmResponse,         // UI 표시용 ([IMPROVE_TARGETS] 제거됨)
+                rawLlmResponse = rawLlmResponse,   // 파이프라인 내부 전달용 (원문 그대로)
                 extractedCode = extractedCode,
                 isSuccess = isActuallySuccess
             )

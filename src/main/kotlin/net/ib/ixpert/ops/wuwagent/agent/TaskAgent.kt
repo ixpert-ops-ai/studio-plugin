@@ -90,8 +90,8 @@ class TaskAgent(
                         }
 
                         logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료 (success=${result.isSuccess})")
-                        // 다음 단계 문맥 전달을 위해 현재 단계 LLM 응답 보관
-                        previousStepResult = result.llmResponse
+                        // 다음 단계 문맥 전달을 위해 원문 응답 보관 ([IMPROVE_TARGETS] 블록 포함)
+                        previousStepResult = result.rawLlmResponse
                         onStep(step.label, result, step.isApplyable, messageId)
 
                         // ❌ 에러 발생 시 파이프라인 즉시 중단 및 에러 신호 전송
