@@ -51,6 +51,43 @@ sealed class TaskPipeline {
         private val logger = Logger.getInstance(AgentStep::class.java)
 
         /**
+         * Improve step 전용 userMessage 조립.
+         * - "다음 코드를 수정하라." 지시를 최상단에 배치
+         * - 이전 단계 분석 결과를 [수정 요구사항]으로 포함
+         * - 원본 코드를 [원본 코드] 블록으로 마지막에 배치
+         * - 코드 외 출력 금지 경고를 마지막에 추가
+         */
+        /**
+         * 부분 코드 여부 판단.
+         * 아래 조건 중 하나라도 만족하면 부분 코드로 간주한다.
+         * 1. 길이가 원본의 80% 미만
+         * 2. class 키워드가 없는데 fun 키워드는 있음 (함수 단위 응답)
+         */
+        private fun isPartialCode(extracted: String, original: String): Boolean {
+            if (original.isBlank()) return false
+            val lengthRatio = extracted.length.toDouble() / original.length
+            val hasClass = extracted.contains(Regex("\\bclass\\b|\\bobject\\b|\\binterface\\b"))
+            val hasFun   = extracted.contains(Regex("\\bfun\\b"))
+            return lengthRatio < 0.8 || (!hasClass && hasFun)
+        }
+
+        private fun buildImproveUserMessage(prevAnalysis: String, code: String): String = buildString {
+            appendLine("다음 코드를 수정하라.")
+            if (prevAnalysis.isNotBlank()) {
+                appendLine()
+                appendLine("[수정 요구사항]")
+                appendLine(prevAnalysis)
+            }
+            appendLine()
+            appendLine("[원본 코드]")
+            appendLine("---CODE START---")
+            appendLine(code)
+            appendLine("---CODE END---")
+            appendLine()
+            append("IMPORTANT:\n코드 외 텍스트를 출력하면 실패로 간주한다.")
+        }
+
+        /**
          * OllamaClient를 직접 사용해 동기적(blocking)으로 LLM을 호출합니다.
          * TaskAgent의 단일 Backgroundable 블록 안에서 호출됩니다.
          *
@@ -69,9 +106,10 @@ sealed class TaskPipeline {
             var userMessage: String
 
             val payload = context.payloadText.trim()
-            // 이전 단계 결과가 있으면 userMessage에 포함할 문맥 블록 생성
-            val prevContext = if (!previousStepResult.isNullOrBlank())
-                "\n\n[이전 단계 분석 결과]\n$previousStepResult"
+            val prevAnalysis = previousStepResult?.takeIf { it.isNotBlank() } ?: ""
+            // isImproveStep이 아닌 일반 step에서는 기존 방식의 문맥 블록 사용
+            val prevContext = if (prevAnalysis.isNotBlank() && !isImproveStep)
+                "\n\n[이전 단계 분석 결과]\n$prevAnalysis"
             else ""
 
             // ① 파일명 패턴 추출 (대문자로 시작하는 단어 또는 확장자 포함 단어)
@@ -86,7 +124,13 @@ sealed class TaskPipeline {
                 if (matchedFile != null) {
                     val fileContent = FileSearchService.readFileContent(matchedFile)
                     logger.info("AgentStep[${label}]: 명시적 파일 검색 히트 → ${matchedFile.name}")
-                    userMessage = "사용자 요청: $payload$prevContext\n\n// 파일: ${matchedFile.name}\n```\n$fileContent\n```"
+                    if (isImproveStep) {
+                        originalCode = fileContent
+                        applyScope   = matchedFile.name
+                        userMessage  = buildImproveUserMessage(prevAnalysis, originalCode)
+                    } else {
+                        userMessage = "사용자 요청: $payload$prevContext\n\n// 파일: ${matchedFile.name}\n```\n$fileContent\n```"
+                    }
                 } else {
                     // ❌ 파일을 찾지 못한 경우 에디터 폴백 없이 에러 반환
                     logger.warn("AgentStep[${label}]: 명시적 파일($potentialFileName)을 찾을 수 없음")
@@ -107,13 +151,17 @@ sealed class TaskPipeline {
                         originalCode = extraction.code
                         applyScope   = if (extraction.isSelection) "선택 영역" else "전체 파일"
                     }
-                    userMessage = when {
-                        originalCode.isNotBlank() && payload.isNotBlank() ->
-                            "사용자 요청: $payload$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
-                        originalCode.isNotBlank() && prevContext.isNotBlank() ->
-                            "$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
-                        originalCode.isNotBlank() -> originalCode
-                        else -> payload
+                    userMessage = if (isImproveStep && originalCode.isNotBlank()) {
+                        buildImproveUserMessage(prevAnalysis, originalCode)
+                    } else {
+                        when {
+                            originalCode.isNotBlank() && payload.isNotBlank() ->
+                                "사용자 요청: $payload$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
+                            originalCode.isNotBlank() && prevContext.isNotBlank() ->
+                                "$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
+                            originalCode.isNotBlank() -> originalCode
+                            else -> payload
+                        }
                     }
                 } else {
                     // 에디터도 없으면 마지막 수단으로 전체 검색 (기존 로직 유지)
@@ -149,10 +197,46 @@ sealed class TaskPipeline {
 
             // Ollama 가 타임아웃 등으로 "[Error]..." 반환 시 오류로 간주
             val isErrorResponse = llmResponse.startsWith("[오류]") || llmResponse.startsWith("[Error]")
-            val extractedCode = if (isErrorResponse) "" else EditorApplyService.extractCodeBlock(llmResponse)
+            var extractedCode = if (isErrorResponse) "" else EditorApplyService.extractCodeBlock(llmResponse)
 
             logger.warn("AgentStep[${label}] OUTPUT: llmResponse 길이=${llmResponse.length}, extractedCode 길이=${extractedCode.length}")
             logger.warn("AgentStep[${label}] extractedCode 앞 300자: ${extractedCode.take(300)}")
+
+            // ── Improve step 전용: 부분 코드 감지 → 1회 재요청 ──────────────────
+            if (isImproveStep && !isErrorResponse && originalCode.isNotBlank() && extractedCode.isNotBlank()) {
+                val isPartial = isPartialCode(extractedCode, originalCode)
+                logger.warn("AgentStep[${label}] 부분코드 판단: $isPartial (original=${originalCode.length}, extracted=${extractedCode.length}, ratio=${"%.0f".format(extractedCode.length * 100.0 / originalCode.length)}%)")
+
+                if (isPartial) {
+                    logger.warn("AgentStep[${label}] ⚠️ 부분 코드 감지 → 전체 코드 강제 재요청 (1회)")
+                    val retryMessage = buildString {
+                        append(userMessage)
+                        appendLine()
+                        appendLine()
+                        append("반드시 전체 파일 단위의 코드를 반환하라. 일부 함수만 반환하면 실패로 간주한다.")
+                    }
+                    // 재요청은 스트리밍 없이 블로킹 호출 (UI 청크 중복 방지)
+                    val retryResponse = client.callChatApiStream(systemPrompt, retryMessage, null)
+                    val retryContent  = retryResponse?.message?.content ?: ""
+                    val retryIsError  = retryContent.startsWith("[오류]") || retryContent.startsWith("[Error]")
+
+                    if (!retryIsError && retryContent.isNotBlank()) {
+                        val retryExtracted = EditorApplyService.extractCodeBlock(retryContent)
+                        val retryIsPartial = isPartialCode(retryExtracted, originalCode)
+                        logger.warn("AgentStep[${label}] 재요청 결과: extracted 길이=${retryExtracted.length}, 부분코드=${retryIsPartial}")
+
+                        if (!retryIsPartial && retryExtracted.isNotBlank()) {
+                            extractedCode = retryExtracted
+                            logger.warn("AgentStep[${label}] ✅ 재요청 결과 채택 (길이=${extractedCode.length})")
+                        } else {
+                            logger.warn("AgentStep[${label}] ❌ 재요청도 부분 코드 → 원본 결과 유지")
+                        }
+                    } else {
+                        logger.warn("AgentStep[${label}] ❌ 재요청 실패 또는 빈 응답 → 원본 결과 유지")
+                    }
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────────
 
             // 코드 개선(Improve) step 시, 원본과 동일하거나 비정상 응답이면 실패로 처리
             val hasCodeDiff = isApplyable &&

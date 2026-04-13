@@ -26,17 +26,13 @@ WuwAgent는 IntelliJ / Android Studio 환경에서
 
 ## 🚀 Quick Start
 
-```bash id="m2b1pg"
 ./gradlew runIde
-```
 
 ---
 
 ## 🎯 핵심 구조
 
-```text id="y0f2x8"
 Action → Agent → Service → LLM → UI
-```
 
 ---
 
