@@ -43,18 +43,33 @@
 
             <action id="IxpertAiAssistant.ExplainAction"
                     class="net.ib.ixpert.ops.wuwagent.action.ExplainAction"
-                    text="Explain Code"
+                    text="Explain This Code (코드 설명)"
                     description="선택한 코드를 AI가 분석/설명합니다."/>
 
             <action id="IxpertAiAssistant.ReviewAction"
                     class="net.ib.ixpert.ops.wuwagent.action.ReviewAction"
-                    text="Review Code"
+                    text="Review This Code (코드 리뷰)"
                     description="선택한 코드를 AI가 리뷰합니다."/>
+
+            <action id="IxpertAiAssistant.ImpactAnalysisAction"
+                    class="net.ib.ixpert.ops.wuwagent.action.ImpactAnalysisAction"
+                    text="Impact Analysis (영향도 분석)"
+                    description="선택한 코드의 변경 영향 범위를 AI가 분석합니다."/>
+
+            <action id="IxpertAiAssistant.QueryValidationAction"
+                    class="net.ib.ixpert.ops.wuwagent.action.QueryValidationAction"
+                    text="Query Validation (쿼리 검증)"
+                    description="선택한 쿼리를 AI가 유효성 검증합니다."/>
 
             <action id="IxpertAiAssistant.ImproveAction"
                     class="net.ib.ixpert.ops.wuwagent.action.ImproveAction"
-                    text="Improve Code"
+                    text="Improve This Code (코드 개선)"
                     description="선택한 코드를 AI가 개선합니다."/>
+
+            <action id="IxpertAiAssistant.GenerateTestAction"
+                    class="net.ib.ixpert.ops.wuwagent.action.GenerateTestAction"
+                    text="Generate Test (테스트 생성)"
+                    description="선택한 코드의 단위 테스트를 AI가 생성합니다."/>
         </group>
     </actions>
 </idea-plugin>

@@ -18,8 +18,8 @@ class SettingsState : PersistentStateComponent<SettingsState.State> {
         var apiKey: String = "ollama",
         var model: String = "qwen3-coder:30b",
         var temperature: Float = 0.1f,
-        var timeoutSeconds: Int = 60,
-        var contextWindow: Int = 4096
+        var timeoutSeconds: Int = 300,
+        var contextWindow: Int = 32768
     )
 
     private var myState = State()

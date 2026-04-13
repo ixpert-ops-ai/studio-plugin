@@ -30,6 +30,9 @@ sealed class TaskPipeline {
         val modifiedCode: String?,
         val applyScope: String,
         val llmResponse: String,
+        /** UI 표시 전 전처리가 된 llmResponse와 달리, 파이프라인 내부 전달용 원문 응답.
+         *  예: [IMPROVE_TARGETS] 블록이 포함된 Step1 전체 응답 → Step2 parseImproveTargets에서 사용 */
+        val rawLlmResponse: String = llmResponse,
         val extractedCode: String,
         val isSuccess: Boolean = true
     )
@@ -37,22 +40,98 @@ sealed class TaskPipeline {
     /**
      * 파이프라인의 각 실행 단위.
      *
-     * @param label      UI에 표시될 단계 이름 (예: "1/3 코드 개선")
-     * @param promptFile 사용할 시스템 프롬프트 파일명
-     * @param isApplyable 결과에 Apply 버튼을 표시할지 여부
+     * @param label         UI에 표시될 단계 이름 (예: "1/3 코드 개선")
+     * @param promptFile    사용할 시스템 프롬프트 파일명
+     * @param isApplyable   결과에 Apply 버튼을 표시할지 여부
+     * @param isImproveStep 코드 변경 diff 검증을 수행할지 여부 (Improve 전용, prompt 이름에 의존하지 않음)
      */
     data class AgentStep(
         val label: String,
         val promptFile: String,
-        val isApplyable: Boolean = false
+        val isApplyable: Boolean = false,
+        val isImproveStep: Boolean = false
     ) {
         private val logger = Logger.getInstance(AgentStep::class.java)
 
         /**
+         * 부분 코드 여부 판단.
+         * 아래 조건 중 하나라도 만족하면 부분 코드로 간주한다.
+         * 1. 길이가 원본의 80% 미만
+         * 2. class 키워드가 없는데 fun 키워드는 있음 (함수 단위 응답)
+         */
+        private fun isPartialCode(extracted: String, original: String): Boolean {
+            if (original.isBlank()) return false
+            val lengthRatio = extracted.length.toDouble() / original.length
+            val hasClass = extracted.contains(Regex("\\bclass\\b|\\bobject\\b|\\binterface\\b"))
+            val hasFun   = extracted.contains(Regex("\\bfun\\b"))
+            return lengthRatio < 0.8 || (!hasClass && hasFun)
+        }
+
+        /**
+         * Step 1 분석 결과에서 [IMPROVE_TARGETS] 블록을 파싱한다.
+         * @return Pair(isFullFile, functionList)
+         *   - isFullFile=true  : FULL_FILE 또는 블록 없음 → 전체 개선
+         *   - isFullFile=false : 특정 함수 목록 반환
+         */
+        private fun parseImproveTargets(prevAnalysis: String): Pair<Boolean, List<String>> {
+            val regex = Regex("""\[IMPROVE_TARGETS](.*?)\[/IMPROVE_TARGETS]""", RegexOption.DOT_MATCHES_ALL)
+            val match = regex.find(prevAnalysis)
+                ?: return Pair(true, emptyList())          // 블록 없음 → 전체 개선
+
+            val content = match.groupValues[1].trim()
+            if (content == "FULL_FILE") return Pair(true, emptyList())
+
+            val functions = content.lines()
+                .map { it.trim().removePrefix("-").trim() }
+                .filter { it.isNotBlank() }
+
+            return if (functions.isEmpty()) Pair(true, emptyList())
+            else Pair(false, functions)
+        }
+
+        /**
+         * Improve step 전용 userMessage 조립.
+         *
+         * - FULL_FILE 또는 타깃 미지정: 전체 코드 Search/Replace 개선 요청
+         * - 특정 함수 목록: 함수명만 compact하게 삽입, 분석 전문 제거 (컨텍스트 절약)
+         */
+        private fun buildImproveUserMessage(prevAnalysis: String, code: String): String {
+            val (isFullFile, functions) = parseImproveTargets(prevAnalysis)
+            logger.info("buildImproveUserMessage: isFullFile=$isFullFile, targets=${functions.joinToString()}")
+
+            return buildString {
+                appendLine("다음 코드를 수정하라.")
+                appendLine()
+                if (isFullFile) {
+                    appendLine("[수정 요구사항]")
+                    appendLine("전체 파일 구조 개선")
+                } else {
+                    appendLine("[수정 요구사항]")
+                    appendLine("개선 대상 함수: [${functions.joinToString(", ")}]")
+                    appendLine("위 함수들을 Search/Replace 포맷으로 반환하라.")
+                }
+                appendLine()
+                appendLine("[원본 코드]")
+                appendLine("---CODE START---")
+                appendLine(code)
+                appendLine("---CODE END---")
+                appendLine()
+                append("IMPORTANT:\n코드 외 텍스트를 출력하면 실패로 간주한다.")
+            }
+        }
+
+        /**
          * OllamaClient를 직접 사용해 동기적(blocking)으로 LLM을 호출합니다.
          * TaskAgent의 단일 Backgroundable 블록 안에서 호출됩니다.
+         *
+         * @param previousStepResult 이전 단계의 LLM 응답 텍스트 (2단계 이상 파이프라인에서 문맥 전달용)
          */
-        fun executeSync(context: AgentContext, client: OllamaClient, onChunk: ((String) -> Unit)? = null): StepResult {
+        fun executeSync(
+            context: AgentContext,
+            client: OllamaClient,
+            onChunk: ((String) -> Unit)? = null,
+            previousStepResult: String? = null
+        ): StepResult {
             val systemPrompt = PromptManager.loadPrompt(promptFile)
 
             var originalCode = ""
@@ -60,7 +139,12 @@ sealed class TaskPipeline {
             var userMessage: String
 
             val payload = context.payloadText.trim()
-            
+            val prevAnalysis = previousStepResult?.takeIf { it.isNotBlank() } ?: ""
+            // isImproveStep이 아닌 일반 step에서는 기존 방식의 문맥 블록 사용
+            val prevContext = if (prevAnalysis.isNotBlank() && !isImproveStep)
+                "\n\n[이전 단계 분석 결과]\n$prevAnalysis"
+            else ""
+
             // ① 파일명 패턴 추출 (대문자로 시작하는 단어 또는 확장자 포함 단어)
             // (예: "MainActivity", "utils.kt", "ApiService.java")
             val filePattern = Regex("\\b([A-Z][a-zA-Z0-9]*|\\w+\\.(kt|java|xml|gradle))\\b")
@@ -69,11 +153,17 @@ sealed class TaskPipeline {
             if (potentialFileName != null) {
                 // [CASE A] 파일명이 명시된 경우 → "파일 검색" 우선, 에디터 폴백 금지
                 val matchedFile = FileSearchService.searchFiles(context.project, potentialFileName).firstOrNull()
-                
+
                 if (matchedFile != null) {
                     val fileContent = FileSearchService.readFileContent(matchedFile)
                     logger.info("AgentStep[${label}]: 명시적 파일 검색 히트 → ${matchedFile.name}")
-                    userMessage = "사용자 요청: $payload\n\n// 파일: ${matchedFile.name}\n```\n$fileContent\n```"
+                    if (isImproveStep) {
+                        originalCode = fileContent
+                        applyScope   = matchedFile.name
+                        userMessage  = buildImproveUserMessage(prevAnalysis, originalCode)
+                    } else {
+                        userMessage = "사용자 요청: $payload$prevContext\n\n// 파일: ${matchedFile.name}\n```\n$fileContent\n```"
+                    }
                 } else {
                     // ❌ 파일을 찾지 못한 경우 에디터 폴백 없이 에러 반환
                     logger.warn("AgentStep[${label}]: 명시적 파일($potentialFileName)을 찾을 수 없음")
@@ -94,11 +184,17 @@ sealed class TaskPipeline {
                         originalCode = extraction.code
                         applyScope   = if (extraction.isSelection) "선택 영역" else "전체 파일"
                     }
-                    userMessage = when {
-                        originalCode.isNotBlank() && payload.isNotBlank() ->
-                            "사용자 요청: $payload\n\n참조 코드:\n```\n$originalCode\n```"
-                        originalCode.isNotBlank() -> originalCode
-                        else -> payload
+                    userMessage = if (isImproveStep && originalCode.isNotBlank()) {
+                        buildImproveUserMessage(prevAnalysis, originalCode)
+                    } else {
+                        when {
+                            originalCode.isNotBlank() && payload.isNotBlank() ->
+                                "사용자 요청: $payload$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
+                            originalCode.isNotBlank() && prevContext.isNotBlank() ->
+                                "$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
+                            originalCode.isNotBlank() -> originalCode
+                            else -> payload
+                        }
                     }
                 } else {
                     // 에디터도 없으면 마지막 수단으로 전체 검색 (기존 로직 유지)
@@ -109,9 +205,9 @@ sealed class TaskPipeline {
                     if (firstFile != null) {
                         val fileContent = FileSearchService.readFileContent(firstFile)
                         logger.info("AgentStep[${label}]: 일반 검색 히트 → ${firstFile.name}")
-                        userMessage = "사용자 요청: $payload\n\n// 파일: ${firstFile.name}\n```\n$fileContent\n```"
+                        userMessage = "사용자 요청: $payload$prevContext\n\n// 파일: ${firstFile.name}\n```\n$fileContent\n```"
                     } else {
-                        userMessage = payload
+                        userMessage = payload + prevContext
                     }
                 }
             }
@@ -127,16 +223,106 @@ sealed class TaskPipeline {
                 )
             }
 
+            logger.warn("AgentStep[${label}] INPUT: originalCode 길이=${originalCode.length}, userMessage 길이=${userMessage.length}, prevContext 포함=${prevContext.isNotBlank()}")
             logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=${applyScope.ifBlank { "file-search" }}, stream=${onChunk != null})")
-            val response      = client.callChatApiStream(systemPrompt, userMessage, onChunk)
-            val llmResponse   = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
-            
+
+            // ── [IMPROVE_TARGETS] 블록 스트리밍 필터 ────────────────────────────
+            // 분석 step(isImproveStep=false)에서 [IMPROVE_TARGETS] 블록이 UI로 스트리밍되지 않도록 차단.
+            // lookahead 버퍼로 태그 경계를 안전하게 감지한 뒤, 태그 이전까지만 전송한다.
+            val IMPROVE_TAG = "[IMPROVE_TARGETS]"
+            val filteredOnChunk: ((String) -> Unit)? = if (onChunk != null && !isImproveStep) {
+                val lookahead = IMPROVE_TAG.length
+                val pending   = StringBuilder()
+                var suppressed = false
+                { chunk ->
+                    if (!suppressed) {
+                        pending.append(chunk)
+                        val idx = pending.indexOf(IMPROVE_TAG)
+                        if (idx >= 0) {
+                            suppressed = true
+                            // 태그 이전까지만 전송 (뒤따르는 빈 줄/공백 제거)
+                            val before = pending.substring(0, idx).trimEnd()
+                            if (before.isNotEmpty()) onChunk(before)
+                            logger.info("AgentStep[${label}] 청크 필터: [IMPROVE_TARGETS] 감지 → 이후 청크 차단")
+                        } else {
+                            // 태그 미감지 — lookahead 버퍼 유지하며 안전 구간 전송
+                            val safeLen = maxOf(0, pending.length - lookahead)
+                            if (safeLen > 0) {
+                                onChunk(pending.substring(0, safeLen))
+                                pending.delete(0, safeLen)
+                            }
+                        }
+                    }
+                }
+            } else onChunk
+            // ──────────────────────────────────────────────────────────────────────
+
+            val response    = client.callChatApiStream(systemPrompt, userMessage, filteredOnChunk)
+            val rawLlmResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
+
+            // UI 표시용 llmResponse: [IMPROVE_TARGETS] 블록 제거
+            val llmResponse = rawLlmResponse
+                .replace(Regex("""\s*\[IMPROVE_TARGETS].*?\[/IMPROVE_TARGETS]""", RegexOption.DOT_MATCHES_ALL), "")
+                .trimEnd()
+
             // Ollama 가 타임아웃 등으로 "[Error]..." 반환 시 오류로 간주
             val isErrorResponse = llmResponse.startsWith("[오류]") || llmResponse.startsWith("[Error]")
-            val extractedCode = if (isErrorResponse) "" else EditorApplyService.extractCodeBlock(llmResponse)
-            
-            // 코드 개선(Improve) 시, 원본과 동일하거나 비정상 응답이면 실패로 처리
-            val isPromptImprove = promptFile.contains("improve")
+            var extractedCode = if (isErrorResponse) {
+                ""
+            } else if (isImproveStep && originalCode.isNotBlank()) {
+                // Improve step: Search/Replace 병합 우선 시도 → 실패 시 기존 extractCodeBlock fallback
+                val merged = EditorApplyService.applySearchReplace(originalCode, llmResponse)
+                if (merged != null) {
+                    logger.info("AgentStep[${label}] Search/Replace 병합 성공 (길이=${merged.length})")
+                    merged
+                } else {
+                    logger.warn("AgentStep[${label}] Search/Replace 파싱 실패 → fallback")
+                    EditorApplyService.extractCodeBlock(llmResponse)
+                }
+            } else {
+                EditorApplyService.extractCodeBlock(llmResponse)
+            }
+
+            logger.warn("AgentStep[${label}] OUTPUT: llmResponse 길이=${llmResponse.length}, extractedCode 길이=${extractedCode.length}")
+            logger.warn("AgentStep[${label}] extractedCode 앞 300자: ${extractedCode.take(300)}")
+
+            // ── Improve step 전용: 부분 코드 감지 → 1회 재요청 ──────────────────
+            if (isImproveStep && !isErrorResponse && originalCode.isNotBlank() && extractedCode.isNotBlank()) {
+                val isPartial = isPartialCode(extractedCode, originalCode)
+                logger.warn("AgentStep[${label}] 부분코드 판단: $isPartial (original=${originalCode.length}, extracted=${extractedCode.length}, ratio=${"%.0f".format(extractedCode.length * 100.0 / originalCode.length)}%)")
+
+                if (isPartial) {
+                    logger.warn("AgentStep[${label}] ⚠️ 부분 코드 감지 → 전체 코드 강제 재요청 (1회)")
+                    val retryMessage = buildString {
+                        append(userMessage)
+                        appendLine()
+                        appendLine()
+                        append("반드시 전체 파일 단위의 코드를 반환하라. 일부 함수만 반환하면 실패로 간주한다.")
+                    }
+                    // 재요청은 스트리밍 없이 블로킹 호출 (UI 청크 중복 방지)
+                    val retryResponse = client.callChatApiStream(systemPrompt, retryMessage, null)
+                    val retryContent  = retryResponse?.message?.content ?: ""
+                    val retryIsError  = retryContent.startsWith("[오류]") || retryContent.startsWith("[Error]")
+
+                    if (!retryIsError && retryContent.isNotBlank()) {
+                        val retryExtracted = EditorApplyService.extractCodeBlock(retryContent)
+                        val retryIsPartial = isPartialCode(retryExtracted, originalCode)
+                        logger.warn("AgentStep[${label}] 재요청 결과: extracted 길이=${retryExtracted.length}, 부분코드=${retryIsPartial}")
+
+                        if (!retryIsPartial && retryExtracted.isNotBlank()) {
+                            extractedCode = retryExtracted
+                            logger.warn("AgentStep[${label}] ✅ 재요청 결과 채택 (길이=${extractedCode.length})")
+                        } else {
+                            logger.warn("AgentStep[${label}] ❌ 재요청도 부분 코드 → 원본 결과 유지")
+                        }
+                    } else {
+                        logger.warn("AgentStep[${label}] ❌ 재요청 실패 또는 빈 응답 → 원본 결과 유지")
+                    }
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────────
+
+            // 코드 개선(Improve) step 시, 원본과 동일하거나 비정상 응답이면 실패로 처리
             val hasCodeDiff = isApplyable &&
                 !isErrorResponse &&
                 originalCode.isNotBlank() &&
@@ -145,7 +331,7 @@ sealed class TaskPipeline {
 
             val isActuallySuccess = when {
                 isErrorResponse -> false
-                isPromptImprove && !hasCodeDiff -> false // 개선 요청인데 변경된 게 없으면 실패
+                isImproveStep && !hasCodeDiff -> false // 코드 개선 step인데 변경된 게 없으면 실패
                 else -> true
             }
 
@@ -153,7 +339,8 @@ sealed class TaskPipeline {
                 originalCode = if (hasCodeDiff) originalCode else null,
                 modifiedCode = if (hasCodeDiff) extractedCode else null,
                 applyScope = applyScope,
-                llmResponse = llmResponse,
+                llmResponse = llmResponse,         // UI 표시용 ([IMPROVE_TARGETS] 제거됨)
+                rawLlmResponse = rawLlmResponse,   // 파이프라인 내부 전달용 (원문 그대로)
                 extractedCode = extractedCode,
                 isSuccess = isActuallySuccess
             )
@@ -166,21 +353,31 @@ sealed class TaskPipeline {
 
     /**
      * 분석 → 코드 개선
-     * - 1/2 영향 분석: 참고용 텍스트 (isApplyable = false)
-     * - 2/2 코드 개선: Diff 대상 (isApplyable = true)
+     * - 1/2 개선 분석: 참고용 텍스트 (isApplyable = false)
+     * - 2/2 코드 개선: Diff 대상 (isApplyable = true, isImproveStep = true)
      */
     object Improve : TaskPipeline() {
         override val steps = listOf(
-            AgentStep("1/2 영향 분석", "impact_prompt.txt",  isApplyable = false),
-            AgentStep("2/2 코드 개선", "improve_prompt.txt", isApplyable = true)
+            AgentStep("1/2 개선 분석", "improve_analysis_prompt.txt", isApplyable = false),
+            AgentStep("2/2 코드 개선", "improve_prompt.txt",          isApplyable = true, isImproveStep = true)
         )
     }
 
     /** 코드 리뷰 → 개선 제안 */
     object Review : TaskPipeline() {
         override val steps = listOf(
-            AgentStep("1/2 코드 리뷰",   "review_prompt.txt",  isApplyable = false),
-            AgentStep("2/2 개선 제안",   "improve_prompt.txt", isApplyable = true)
+            AgentStep("1/2 코드 리뷰", "review_prompt.txt",         isApplyable = false),
+            AgentStep("2/2 개선 제안", "review_improve_prompt.txt", isApplyable = true, isImproveStep = true)
+        )
+    }
+
+    /**
+     * 영향 분석 (단독 파이프라인)
+     * - ImpactAnalysisAction 및 직접 파이프라인 실행 시 사용
+     */
+    object Impact : TaskPipeline() {
+        override val steps = listOf(
+            AgentStep("1/1 영향 분석", "impact_prompt.txt", isApplyable = false)
         )
     }
 

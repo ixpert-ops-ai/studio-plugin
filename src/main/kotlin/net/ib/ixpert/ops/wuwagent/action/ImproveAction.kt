@@ -14,11 +14,7 @@ import com.intellij.openapi.diagnostic.Logger
  * 에디터 우클릭 → "Improve Code" 액션.
  * TaskAgent 파이프라인을 통해 코드 개선(Analyze → Improve)을 실행합니다.
  */
-class ImproveAction : AnAction(
-    "Improve Code",
-    "선택한 코드를 AI가 개선합니다.",
-    com.intellij.icons.AllIcons.Actions.SuggestedRefactoringBulb
-) {
+class ImproveAction : AnAction() {
     private val logger = Logger.getInstance(ImproveAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {

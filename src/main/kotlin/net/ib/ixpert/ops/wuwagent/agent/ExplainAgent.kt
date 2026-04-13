@@ -28,8 +28,9 @@ class ExplainAgent : BaseAgent() {
         }
 
         // 2. PromptManager: 프롬프트 세팅
-        val systemPrompt = PromptManager.loadPrompt("explain_prompt.txt")
-
+        val promptName = "explain_prompt.txt"
+        val systemPrompt = PromptManager.loadPrompt(promptName)
+ 
         // 3. BaseAgent의 스트리밍 호출 메서드를 사용하여 구동 위임
         callLlmStreamAsync(
             context.project, 
