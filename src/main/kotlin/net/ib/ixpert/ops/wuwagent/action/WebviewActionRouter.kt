@@ -63,7 +63,10 @@ class WebviewActionRouter(private val project: Project) {
                         },
                         onError = { errorMsg ->
                             ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("error", errorMsg, messageId)
+                                // "__cancelled__" 는 /cancel 핸들러에서 이미 task_cancelled 전송 완료 → 중복 방지
+                                if (errorMsg != "__cancelled__") {
+                                    bridge.sendMessage("error", errorMsg, messageId)
+                                }
                             }
                         }
                     )
@@ -90,7 +93,10 @@ class WebviewActionRouter(private val project: Project) {
                         },
                         onError = { errorMsg ->
                             ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("error", errorMsg, messageId)
+                                // "__cancelled__" 는 /cancel 핸들러에서 이미 task_cancelled 전송 완료 → 중복 방지
+                                if (errorMsg != "__cancelled__") {
+                                    bridge.sendMessage("error", errorMsg, messageId)
+                                }
                             }
                         }
                     )
@@ -295,11 +301,13 @@ class WebviewActionRouter(private val project: Project) {
                     }
                 }
 
-                // ── Cancel: 실행 중인 Task 취소 ──────────────
+                // ── Cancel: 실행 중인 요청 취소 ──────────────
                 "/cancel" -> {
-                    logger.info("Router: /cancel → TaskCancellationToken.cancel()")
+                    // activeMessageId를 먼저 읽어둔 뒤 cancel — 취소 후에는 null로 초기화되므로 순서 중요
+                    val activeId = TaskCancellationToken.activeMessageId
+                    logger.info("Router: /cancel → TaskCancellationToken.cancel() (activeMessageId=$activeId)")
                     TaskCancellationToken.cancel()
-                    bridge.sendMessage("task_cancelled", "⛔ 작업이 취소되었습니다.")
+                    bridge.sendMessage("task_cancelled", "⛔ 작업이 취소되었습니다.", activeId)
                 }
 
                 // ── Settings: 네이티브 설정 창 열기 ──────────────

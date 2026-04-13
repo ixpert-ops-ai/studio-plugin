@@ -335,6 +335,7 @@ body {
   font-size: 13px;
   min-height: 80px;
   outline: none;
+  border-top-right-radius: 4px;
 }
 
 .input-footer {

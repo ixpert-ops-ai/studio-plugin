@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "webview-dev",
+      "runtimeExecutable": "/Users/jeongjunlee/Workspace/ai-plugin-androidstudio/build/nodejs/node-v20.11.1-darwin-arm64/bin/node",
+      "runtimeArgs": ["webview/node_modules/.bin/vite", "webview", "--port", "5173"],
+      "port": 5173
+    },
+    {
+      "name": "plugin-run",
+      "runtimeExecutable": "./gradlew",
+      "runtimeArgs": ["runIde"],
+      "port": null
+    },
+    {
+      "name": "plugin-ui-tests",
+      "runtimeExecutable": "./gradlew",
+      "runtimeArgs": ["runIdeForUiTests"],
+      "port": null
+    }
+  ]
+}

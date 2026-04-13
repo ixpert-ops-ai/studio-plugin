@@ -4,10 +4,10 @@ import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
 import net.ib.ixpert.ops.wuwagent.service.EditorContextService
 
 /** JUnit 테스트 코드를 자동 생성하는 Agent */
-class TestAgent : BaseAgent() {
+class GenerateTestAgent : BaseAgent() {
     override fun execute(
-        context: AgentContext, 
-        onSuccess: (String) -> Unit, 
+        context: AgentContext,
+        onSuccess: (String) -> Unit,
         onChunk: ((String) -> Unit)?,
         onError: (String) -> Unit
     ) {
@@ -17,6 +17,6 @@ class TestAgent : BaseAgent() {
         val code = EditorContextService.extractCode(editor, context.project)
         if (code.isBlank()) { onError("[알림] 분석할 코드를 도출하지 못했습니다."); return }
         callLlmAsync(context.project, "WuwAgent: Generating Tests",
-            PromptManager.loadPrompt("test_prompt.txt"), code, onSuccess, onError)
+            PromptManager.loadPrompt("generate_test_prompt.txt"), code, onSuccess, onError)
     }
 }

@@ -134,8 +134,8 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         state.apiKey = String(apiKeyField?.password ?: charArrayOf())
         state.model = modelComboBox?.selectedItem as? String ?: ""
         state.temperature = temperatureSpinner?.text?.toFloatOrNull() ?: 0.1f
-        state.timeoutSeconds = timeoutSpinner?.text?.toIntOrNull() ?: 60
-        state.contextWindow = contextWindowSpinner?.text?.toIntOrNull() ?: 4096
+        state.timeoutSeconds = timeoutSpinner?.text?.toIntOrNull() ?: 300
+        state.contextWindow = contextWindowSpinner?.text?.toIntOrNull() ?: 32768
 
         // 변경된 모델 정보를 모든 열린 프로젝트의 WebView로 동기화
         com.intellij.openapi.project.ProjectManager.getInstance().openProjects.forEach { project ->

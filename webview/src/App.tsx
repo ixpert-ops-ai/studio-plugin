@@ -198,6 +198,7 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<string>('Loading...');
   const chatListRef = useRef<HTMLDivElement>(null);
   const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적
+  const isComposing = useRef(false); // 한글 IME composition 상태 추적 (JCEF 자모 분리 방지)
 
   // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화
   useEffect(() => {
@@ -434,7 +435,19 @@ function App() {
             placeholder="메시지를 입력하세요..."
             value={inputText}
             onChange={e => setInputText(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            onCompositionStart={() => { isComposing.current = true; }}
+            onCompositionEnd={e => {
+              isComposing.current = false;
+              // composition 종료 시점에 최종 조합 완료 값을 state에 반영
+              setInputText((e.target as HTMLTextAreaElement).value);
+            }}
+            onKeyDown={e => {
+              // composition 진행 중 Enter는 무시 (한글 확정 전 전송 방지)
+              if (e.key === 'Enter' && !e.shiftKey && !isComposing.current) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
           />
           <div className="input-footer">
             <span className="helper-text">Shift+Enter : 줄바꿈 / Enter : 전송</span>
