@@ -1,9 +1,9 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
-/**
- * SQL / Query 유효성 검증 Agent.
- * TODO: 실제 LLM 프롬프트 연동 구현 필요 (query_validation_prompt.txt)
- */
+import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
+import net.ib.ixpert.ops.wuwagent.service.EditorContextService
+
+/** SQL / Query 유효성 검증 Agent */
 class QueryValidationAgent : BaseAgent() {
     override fun execute(
         context: AgentContext,
@@ -11,7 +11,20 @@ class QueryValidationAgent : BaseAgent() {
         onChunk: ((String) -> Unit)?,
         onError: (String) -> Unit
     ) {
-        // Placeholder: 기능 준비 중
-        onSuccess("Query Validation 기능 준비 중입니다.\n\n선택한 코드(쿼리)를 분석하여 문법 오류, 성능 문제, 보안 취약점을 검토하는 기능이 추가될 예정입니다.")
+        val editor = context.editor ?: run {
+            onError("[상태 이상] 에디터 컨텍스트가 주어지지 않았습니다."); return
+        }
+        val code = EditorContextService.extractCode(editor, context.project)
+        if (code.isBlank()) { onError("[알림] 분석할 코드를 도출하지 못했습니다."); return }
+
+        callLlmStreamAsync(
+            context.project,
+            "WuwAgent: Validating Query",
+            PromptManager.loadPrompt("query_validation_prompt.txt"),
+            code,
+            onSuccess,
+            onChunk,
+            onError
+        )
     }
 }
