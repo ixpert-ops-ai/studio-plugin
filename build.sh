@@ -31,6 +31,7 @@ print_usage() {
     echo -e "  ${GREEN}webview${NC}      웹뷰만 빌드"
     echo -e "  ${GREEN}clean${NC}        빌드 캐시 정리"
     echo -e "  ${GREEN}rebuild${NC}      클린 후 전체 빌드"
+    echo -e "  ${GREEN}buildrun${NC}     전체 빌드 후 IDE 샌드박스 실행"
     echo -e "  ${GREEN}run${NC}          IDE 샌드박스에서 플러그인 실행"
     echo -e "  ${GREEN}release${NC}      릴리즈 파일 위치 확인"
     echo -e "  ${GREEN}verify${NC}       플러그인 검증 (verifyPlugin)"
@@ -79,6 +80,12 @@ cmd_rebuild() {
     cmd_build
 }
 
+cmd_buildrun() {
+    cmd_build
+    log_step "IDE 샌드박스에서 플러그인 실행..."
+    $GRADLEW runIde
+}
+
 cmd_run() {
     log_step "IDE 샌드박스에서 플러그인 실행..."
     $GRADLEW runIde
@@ -115,8 +122,9 @@ case "${1:-}" in
     plugin)  cmd_plugin ;;
     webview) cmd_webview ;;
     clean)   cmd_clean ;;
-    rebuild) cmd_rebuild ;;
-    run)     cmd_run ;;
+    rebuild)  cmd_rebuild ;;
+    buildrun) cmd_buildrun ;;
+    run)      cmd_run ;;
     release) cmd_release ;;
     verify)  cmd_verify ;;
     *)       print_usage ;;

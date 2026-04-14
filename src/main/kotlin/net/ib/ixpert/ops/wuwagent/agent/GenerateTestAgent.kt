@@ -16,7 +16,26 @@ class GenerateTestAgent : BaseAgent() {
         }
         val code = EditorContextService.extractCode(editor, context.project)
         if (code.isBlank()) { onError("[알림] 분석할 코드를 도출하지 못했습니다."); return }
-        callLlmAsync(context.project, "WuwAgent: Generating Tests",
-            PromptManager.loadPrompt("generate_test_prompt.txt"), code, onSuccess, onError)
+
+        val fileName = EditorContextService.extractFileName(editor)
+        val ext = fileName.substringAfterLast('.', "")
+        val langHint = when (ext.lowercase()) {
+            "kt", "kts" -> "Kotlin"
+            "java"      -> "Java"
+            "ts", "tsx"  -> "TypeScript"
+            "js", "jsx"  -> "JavaScript"
+            "py"        -> "Python"
+            "go"        -> "Go"
+            "rs"        -> "Rust"
+            "swift"     -> "Swift"
+            "dart"      -> "Dart"
+            else        -> ext.ifBlank { "Unknown" }
+        }
+
+        val basePrompt = PromptManager.loadPrompt("generate_test_prompt.txt")
+        val systemPrompt = "$basePrompt\n\n[Source File: $fileName]\n[Source Language: $langHint]"
+
+        callLlmStreamAsync(context.project, "WuwAgent: Generating Tests",
+            systemPrompt, code, onSuccess, onChunk, onError)
     }
 }

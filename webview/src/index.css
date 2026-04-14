@@ -561,3 +561,35 @@ body {
 .markdown-body a:hover {
   text-decoration: underline;
 }
+
+/* ─── 테스트 결과 말풍선 스타일 ─── */
+.msg-ai.test-result {
+  border-left: 4px solid #4ec9b0;
+  background: rgba(78, 201, 176, 0.05);
+}
+
+.msg-ai.test-result .msg-ai-header {
+  color: #4ec9b0;
+}
+
+.test-actions {
+  gap: 6px;
+}
+
+.btn-copy-code {
+  color: #e8c87a !important;
+  border-color: rgba(232, 200, 122, 0.3) !important;
+}
+
+.btn-copy-code:hover {
+  background: rgba(232, 200, 122, 0.12) !important;
+}
+
+.btn-create-file {
+  color: #4ec9b0 !important;
+  border-color: rgba(78, 201, 176, 0.3) !important;
+}
+
+.btn-create-file:hover {
+  background: rgba(78, 201, 176, 0.12) !important;
+}

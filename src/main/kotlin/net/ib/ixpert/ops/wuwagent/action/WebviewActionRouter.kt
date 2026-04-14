@@ -28,6 +28,43 @@ import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 class WebviewActionRouter(private val project: Project) {
     private val logger = Logger.getInstance(WebviewActionRouter::class.java)
 
+    /**
+     * 소스 파일 경로로부터 테스트 파일 경로를 추론합니다.
+     * - src/main/kotlin/... → src/test/kotlin/...Test.kt
+     * - src/main/java/...   → src/test/java/...Test.java
+     * - *.tsx / *.ts / *.js → *.test.tsx / *.test.ts / *.test.js
+     */
+    private fun resolveTestFilePath(basePath: String, sourceFileName: String): String {
+        val ext = sourceFileName.substringAfterLast('.', "")
+        val nameWithoutExt = sourceFileName.substringBeforeLast('.')
+
+        // JS/TS 계열: 같은 디렉터리에 .test.ext 패턴
+        if (ext in listOf("ts", "tsx", "js", "jsx")) {
+            return "$basePath/src/__tests__/${nameWithoutExt}.test.$ext"
+        }
+
+        // JVM 계열: src/main → src/test 치환 + Test 접미사
+        // 현재 에디터에서 열린 파일의 프로젝트 내 상대 경로를 찾아야 하지만,
+        // sourceFileName만 있으므로 관례적 경로를 사용
+        val testSuffix = when (ext) {
+            "kt", "kts" -> "Test.kt"
+            "java"      -> "Test.java"
+            "py"        -> "_test.py"
+            "go"        -> "_test.go"
+            else        -> "Test.$ext"
+        }
+
+        val testDir = when (ext) {
+            "kt", "kts" -> "$basePath/src/test/kotlin"
+            "java"      -> "$basePath/src/test/java"
+            "py"        -> "$basePath/tests"
+            "go"        -> "$basePath"
+            else        -> "$basePath/src/test"
+        }
+
+        return "$testDir/${nameWithoutExt}$testSuffix"
+    }
+
     fun handleCommand(command: String, payload: Map<String, String>) {
         ApplicationManager.getApplication().invokeLater {
             val bridge = JcefBridge.getInstance(project)
@@ -297,6 +334,63 @@ class WebviewActionRouter(private val project: Project) {
                                 logger.error("Router: Markdown 저장 실패", e)
                                 bridge.sendMessage("error", "파일 저장 중 오류가 발생했습니다: ${e.message}")
                             }
+                        }
+                    }
+                }
+
+                // ── CreateTestFile: 테스트 코드를 파일로 생성 ──────────────
+                "/createTestFile" -> {
+                    logger.info("Router: /createTestFile 분기")
+                    val code = payload["code"] ?: ""
+                    val sourceFile = payload["sourceFile"] ?: ""
+                    val messageId = payload["id"] ?: ""
+
+                    if (code.isBlank()) {
+                        bridge.sendMessage("error", "생성할 테스트 코드가 없습니다.", messageId)
+                        return@invokeLater
+                    }
+
+                    val basePath = project.basePath
+                    if (basePath == null) {
+                        bridge.sendMessage("error", "프로젝트 경로를 찾을 수 없습니다.", messageId)
+                        return@invokeLater
+                    }
+
+                    // 소스 파일로부터 테스트 파일 경로 추론
+                    val testFilePath = resolveTestFilePath(basePath, sourceFile)
+
+                    ApplicationManager.getApplication().invokeLater {
+                        val testFile = java.io.File(testFilePath)
+
+                        // 이미 존재하면 확인 다이얼로그
+                        if (testFile.exists()) {
+                            val result = com.intellij.openapi.ui.Messages.showYesNoDialog(
+                                project,
+                                "테스트 파일이 이미 존재합니다:\n${testFile.name}\n\n덮어쓰시겠습니까?",
+                                "테스트 파일 생성",
+                                com.intellij.openapi.ui.Messages.getQuestionIcon()
+                            )
+                            if (result != com.intellij.openapi.ui.Messages.YES) return@invokeLater
+                        }
+
+                        try {
+                            testFile.parentFile?.mkdirs()
+                            testFile.writeText(code)
+
+                            // VFS refresh 후 에디터에서 열기
+                            com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                                .refreshAndFindFileByPath(testFilePath)?.let { vFile ->
+                                    com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+                                        .openFile(vFile, true)
+                                }
+
+                            val relativePath = testFilePath.removePrefix("$basePath/")
+                            bridge.sendMessage("test_file_created",
+                                "테스트 파일이 생성되었습니다: $relativePath", messageId)
+                            logger.info("Router: 테스트 파일 생성 완료 → $testFilePath")
+                        } catch (e: Exception) {
+                            logger.error("Router: 테스트 파일 생성 실패", e)
+                            bridge.sendMessage("error", "테스트 파일 생성 중 오류: ${e.message}", messageId)
                         }
                     }
                 }
