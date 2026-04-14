@@ -81,3 +81,14 @@ git push origin --delete feature/기능이름
 
 ### 💡 주의사항: 충돌(Conflict) 해결
 병합 중 동일한 파일의 같은 위치가 수정되어 충돌이 발생하면, 에러 메시지가 나타납니다. 이때는 IDE(IntelliJ 등)의 **Merge Tool**을 사용하여 남길 코드를 선택한 후, 다시 `add` - `commit` 과정을 거쳐 병합을 완료하세요.
+
+### 브랜치에서 작업하다가 커밋하지 않고 임시 저장후 main 브랜치 이동.
+```bash
+git stash (수정 사항을 별도의 임시 공간에 보관)
+
+git checkout main (브랜치 이동 - 이제 main은 깨끗함)
+
+(main 작업 완료 후) git checkout /feature/generate_test
+
+git stash pop (보관했던 수정 사항 다시 불러오기)
+```

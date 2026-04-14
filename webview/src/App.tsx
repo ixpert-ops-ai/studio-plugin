@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Settings, Edit, RotateCcw, Square, Terminal } from 'lucide-react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
+import 'highlight.js/styles/github-dark.css';
 import './index.css';
 
 declare global {
@@ -160,7 +164,13 @@ const MessageItem = ({ msg }: { msg: Message }) => {
       </div>
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
-        {msg.content && <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>}
+        {msg.content && (
+          <div className="markdown-body">
+            <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+              {msg.content}
+            </Markdown>
+          </div>
+        )}
 
         {msg.isLoading && (
           <div className="inline-loading-area" style={{ marginTop: msg.content ? '12px' : '0' }}>
