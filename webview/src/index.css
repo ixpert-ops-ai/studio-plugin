@@ -149,18 +149,23 @@ body {
   border: 1px solid var(--danger-color);
 }
 
-.msg-ai-header {
-  font-weight: 700;
+.msg-ai-header-tag {
+  background: #1a2a3a;
+  color: #4a7aaa;
+  border: 1px solid #2a3a4a;
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-block;
   margin-bottom: 10px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  opacity: 0.8;
+  font-weight: 600;
 }
 
-.msg-ai.analysis .msg-ai-header { color: var(--text-muted); }
-.msg-ai.improvement .msg-ai-header { color: var(--text-blue); }
-.msg-ai.error .msg-ai-header { color: var(--danger-color); }
+.msg-ai.error .msg-ai-header-tag {
+  background: rgba(207, 102, 121, 0.1);
+  color: var(--danger-color);
+  border-color: rgba(207, 102, 121, 0.2);
+}
 
 .msg-ai-content {
   line-height: 1.6;
@@ -318,11 +323,17 @@ body {
 
 .textarea-wrapper {
   background: #333;
-  border: 1px solid #444;
+  border: 1px solid #3a3b3e; /* default border per design */
   border-radius: 8px;
   padding: 8px;
   display: flex;
   flex-direction: column;
+  transition: border-color 0.15s, box-shadow 0.15s; /* transition animation */
+}
+
+.textarea-wrapper:focus-within {
+  border-color: #7c6af7; /* purple outline */
+  box-shadow: 0 0 0 2px rgba(124, 106, 247, 0.15); /* purple glow */
 }
 
 .textarea-wrapper textarea {
@@ -355,6 +366,36 @@ body {
 .btn-primary:hover { background: var(--accent-hover); }
 
 .btn-danger { background: #cf6679; color: #fff; border: none; padding: 6px 16px; border-radius: 4px; }
+
+/* Dynamic Send/Stop Custom Action Button */
+.btn-action-primary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 4px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+}
+
+.btn-action-primary.send {
+  background: #2f6bbd;
+  color: #fff;
+}
+.btn-action-primary.send:hover {
+  background: #3a7eca;
+}
+
+.btn-action-primary.stop {
+  background: #3a2020;
+  border-color: #7a3030;
+  color: #e07070;
+}
+.btn-action-primary.stop:hover {
+  background: #4a2828;
+}
 
 /* Model Status Footer */
 .model-status-footer {

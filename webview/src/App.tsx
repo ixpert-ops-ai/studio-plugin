@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Settings, Edit, RotateCcw, Square, Terminal } from 'lucide-react';
+import { Settings, Edit, Square, Terminal, Play } from 'lucide-react';
 import './index.css';
 
 declare global {
@@ -130,7 +130,9 @@ const MessageItem = ({ msg }: { msg: Message }) => {
   if (msg.subType === 'task_code') {
     return (
       <div className="msg-ai improvement">
-        <div className="msg-ai-header">💡 코드 개선 제안</div>
+        <div className="msg-ai-header-tag">
+          💡 코드 개선 제안
+        </div>
         <div className="msg-ai-content">
           {msg.isLoading && (
             <div className="inline-loading-area">
@@ -155,8 +157,8 @@ const MessageItem = ({ msg }: { msg: Message }) => {
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
     <div className={`msg-ai ${isError ? 'error' : 'analysis'}`}>
-      <div className="msg-ai-header">
-        {isError ? '❌ Error' : '📋 분석 & 결과'}
+      <div className="msg-ai-header-tag">
+        {isError ? 'Error' : '분석 완료'}
       </div>
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
@@ -172,14 +174,14 @@ const MessageItem = ({ msg }: { msg: Message }) => {
         {isError && <div className="error-badge" style={{ marginTop: '12px' }}>ERROR</div>}
       </div>
 
-      {/* Copy / Save 버튼 (텍스트 말풍선에만 표시, 완료 후) */}
-      {!isError && !msg.isLoading && msg.content && (
+      {/* Copy / Save 버튼 (텍스트 말풍선에만 표시, 완료 후, 초기 인사말 제외) */}
+      {!isError && !msg.isLoading && msg.content && msg.id !== '1' && (
         <div className="msg-text-actions">
           <button className="btn-text-action" onClick={handleCopy} title="클립보드에 복사">
-            📋 Copy
+            Copy
           </button>
           <button className="btn-text-action" onClick={handleSave} title="Markdown 파일로 저장">
-            💾 Save .md
+            Save .md
           </button>
         </div>
       )}
@@ -411,7 +413,7 @@ function App() {
   return (
     <div id="root">
       <header className="header flex justify-between items-center">
-        <span className="title">iXpert AI Assistant</span>
+        <span className="title">New Chat</span>
         <div className="flex gap-2">
           <button className="icon-btn"><Terminal size={14} /></button>
           <button className="icon-btn"><Edit size={14} /></button>
@@ -452,13 +454,15 @@ function App() {
           <div className="input-footer">
             <span className="helper-text">Shift+Enter : 줄바꿈 / Enter : 전송</span>
             <div className="flex gap-2">
-              <button className="btn-small" style={{ borderColor: 'transparent' }} onClick={() => window.sendToIde?.(JSON.stringify({ command: '/undo' }))}>
-                <RotateCcw size={12} />
-              </button>
-              <button className="btn-small" style={{ background: 'var(--danger-color)', border: 'none' }} onClick={() => window.sendToIde?.(JSON.stringify({ command: '/cancel' }))}>
-                <Square size={10} fill="currentColor" /> Stop
-              </button>
-              <button className="btn-primary" onClick={handleSend}>전송</button>
+              {messages.some(m => m.isLoading || m.isStreaming) ? (
+                <button className="btn-action-primary stop" onClick={() => window.sendToIde?.(JSON.stringify({ command: '/cancel' }))}>
+                  <Square size={10} fill="currentColor" /> Stop
+                </button>
+              ) : (
+                <button className="btn-action-primary send" onClick={handleSend}>
+                  <Play size={10} fill="currentColor" /> 전송
+                </button>
+              )}
             </div>
           </div>
         </div>
