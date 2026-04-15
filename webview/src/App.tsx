@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Settings, Edit, RotateCcw, Square, Terminal } from 'lucide-react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
+import 'highlight.js/styles/github-dark.css';
 import './index.css';
 
 declare global {
@@ -24,10 +28,19 @@ interface Message {
   extractedCode?: string;
   applyScope?: string;
   applied?: boolean;
+  sourceFile?: string;
   isLoading?: boolean;
   isError?: boolean;
   isStreaming?: boolean;
   currentStatus?: string;
+}
+
+// ─────────────────────────────────────────────
+//  유틸: 마크다운에서 코드 블록만 추출
+// ─────────────────────────────────────────────
+function extractCodeBlocks(markdown: string): string {
+  const blocks = [...markdown.matchAll(/```[\w]*\n([\s\S]*?)```/g)];
+  return blocks.map(m => m[1].trim()).join('\n\n');
 }
 
 // ─────────────────────────────────────────────
@@ -152,15 +165,41 @@ const MessageItem = ({ msg }: { msg: Message }) => {
     );
   }
 
+  // ── 테스트 결과 여부 판별 ────────────────────────────────────────
+  const isTestResult = msg.subType === 'test' || msg.subType === 'test_start' || msg.subType === 'task_chunk' && !!msg.sourceFile;
+
+  const handleCopyCode = () => {
+    const codeOnly = extractCodeBlocks(msg.content);
+    navigator.clipboard.writeText(codeOnly || msg.content).catch(() => {});
+  };
+
+  const handleCreateFile = () => {
+    if (window.sendToIde) {
+      const codeOnly = extractCodeBlocks(msg.content);
+      window.sendToIde(JSON.stringify({
+        command: '/createTestFile',
+        code: codeOnly || msg.content,
+        sourceFile: msg.sourceFile || '',
+        id: msg.id
+      }));
+    }
+  };
+
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
-    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`}>
+    <div className={`msg-ai ${isError ? 'error' : isTestResult ? 'test-result' : 'analysis'}`}>
       <div className="msg-ai-header">
-        {isError ? '❌ Error' : '📋 분석 & 결과'}
+        {isError ? '❌ Error' : isTestResult ? '🧪 테스트 생성 결과' : '📋 분석 & 결과'}
       </div>
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
-        {msg.content && <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>}
+        {msg.content && (
+          <div className="markdown-body">
+            <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+              {msg.content}
+            </Markdown>
+          </div>
+        )}
 
         {msg.isLoading && (
           <div className="inline-loading-area" style={{ marginTop: msg.content ? '12px' : '0' }}>
@@ -172,8 +211,23 @@ const MessageItem = ({ msg }: { msg: Message }) => {
         {isError && <div className="error-badge" style={{ marginTop: '12px' }}>ERROR</div>}
       </div>
 
-      {/* Copy / Save 버튼 (텍스트 말풍선에만 표시, 완료 후) */}
-      {!isError && !msg.isLoading && msg.content && (
+      {/* 테스트 결과 전용 버튼 */}
+      {!isError && !msg.isLoading && msg.content && isTestResult && (
+        <div className="msg-text-actions test-actions">
+          <button className="btn-text-action btn-copy-code" onClick={handleCopyCode} title="테스트 코드만 클립보드에 복사">
+            📋 Copy Code
+          </button>
+          <button className="btn-text-action btn-create-file" onClick={handleCreateFile} title="테스트 파일을 프로젝트에 생성">
+            📁 Create File
+          </button>
+          <button className="btn-text-action" onClick={handleSave} title="전체 결과를 Markdown 파일로 저장">
+            💾 Save .md
+          </button>
+        </div>
+      )}
+
+      {/* 일반 결과 버튼 (Copy / Save) */}
+      {!isError && !msg.isLoading && msg.content && !isTestResult && (
         <div className="msg-text-actions">
           <button className="btn-text-action" onClick={handleCopy} title="클립보드에 복사">
             📋 Copy
@@ -316,6 +370,16 @@ function App() {
                 isLoading = false;
                 isStreaming = false;
                 break;
+              case 'test':
+                // 스트리밍으로 이미 청크가 쌓였으면 기존 content 유지
+                // (onSuccess의 done=true 응답은 content가 비어있을 수 있음)
+                newContent = existing.isStreaming ? existing.content : (data.content || existing.content);
+                isLoading = false;
+                isStreaming = false;
+                break;
+              case 'test_file_created':
+                // 파일 생성 완료 알림 — 기존 메시지 유지하고 상태만 갱신
+                break;
             }
 
             updated[index] = {
@@ -326,6 +390,7 @@ function App() {
               isError:      isError,
               isStreaming:  isStreaming,
               subType:      data.subType,
+              sourceFile:   data.sourceFile || existing.sourceFile,
               // ✅ 코드 카드 메타데이터: applyable=true인 Step 완료 시에만 갱신
               ...(data.subType === 'task_step' && data.applyable === 'true' ? {
                 applyable:    true,
@@ -381,7 +446,8 @@ function App() {
             content: '',  // 로딩 문구는 content에 넣지 않음
             subType: data.subType,
             isLoading: true,
-            currentStatus: data.content  // 로딩 문구는 UI 상태로만 관리
+            currentStatus: data.content,  // 로딩 문구는 UI 상태로만 관리
+            sourceFile: data.sourceFile   // test_start 시 소스파일명 저장
           };
           return [...prev, newMsg];
         });

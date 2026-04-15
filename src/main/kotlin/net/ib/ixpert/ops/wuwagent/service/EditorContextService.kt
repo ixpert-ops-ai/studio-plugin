@@ -24,6 +24,17 @@ object EditorContextService {
      * 코드와 함께 "선택 영역인지 여부"를 함께 반환합니다.
      * Diff 기반 Apply를 위해 추가되었습니다.
      */
+    /**
+     * 현재 에디터에서 열린 파일의 이름을 반환합니다.
+     * 파일을 찾을 수 없는 경우 빈 문자열을 반환합니다.
+     */
+    fun extractFileName(editor: Editor): String {
+        return ApplicationManager.getApplication().runReadAction(Computable {
+            com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+                .getFile(editor.document)?.name ?: ""
+        })
+    }
+
     fun extractCodeWithScope(editor: Editor, @Suppress("UNUSED_PARAMETER") project: Project): CodeExtractionResult {
         return ApplicationManager.getApplication().runReadAction(Computable {
             val selectionModel = editor.selectionModel
