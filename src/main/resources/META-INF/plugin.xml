@@ -14,9 +14,8 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- Add your extensions here -->
-        
         <!-- ToolWindow Example: WuwAgent Chat window -->
-        <toolWindow id="WhatUWant?"
+        <toolWindow id="iXpert AI Assistant"
                     anchor="right"
                     icon="AllIcons.General.Robot"
                     factoryClass="net.ib.ixpert.ops.wuwagent.ui.WuwToolWindowFactory"/>

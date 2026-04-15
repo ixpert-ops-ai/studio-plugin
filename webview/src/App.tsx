@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Settings, Edit, RotateCcw, Square, Terminal } from 'lucide-react';
+import { Settings, Edit, Square, Terminal, Send } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -33,7 +33,31 @@ interface Message {
   isError?: boolean;
   isStreaming?: boolean;
   currentStatus?: string;
+  stepNotiStatus?: 'started' | 'completed' | 'failed';
 }
+
+// ─────────────────────────────────────────────
+//  컴포넌트: StepNotiItem (스텝 진행 알림 카드)
+// ─────────────────────────────────────────────
+const StepNotiItem = ({ msg }: { msg: Message }) => {
+  const isStarted   = msg.stepNotiStatus === 'started';
+  const isCompleted = msg.stepNotiStatus === 'completed';
+  const isFailed    = msg.stepNotiStatus === 'failed';
+
+  return (
+    <div className={`step-noti ${msg.stepNotiStatus ?? ''}`}>
+      <span className="step-noti-icon">
+        {isCompleted && '✓'}
+        {isFailed    && '✗'}
+        {isStarted   && <span className="step-noti-spinner" />}
+      </span>
+      <span className="step-noti-label">{msg.content}</span>
+      <span className="step-noti-badge">
+        {isCompleted ? '완료' : isFailed ? '실패' : '진행 중'}
+      </span>
+    </div>
+  );
+};
 
 // ─────────────────────────────────────────────
 //  유틸: 마크다운에서 코드 블록만 추출
@@ -94,6 +118,11 @@ const ActionCard = ({ msg, onApply }: { msg: Message; onApply: () => void }) => 
 const MessageItem = ({ msg }: { msg: Message }) => {
   const isApplied = msg.applied === true;
 
+  // 0. Step 알림 카드
+  if (msg.subType === 'step_noti') {
+    return <StepNotiItem msg={msg} />;
+  }
+
   // 1. Tool / Status 메시지
   if (msg.role === 'tool') {
     return (
@@ -143,7 +172,6 @@ const MessageItem = ({ msg }: { msg: Message }) => {
   if (msg.subType === 'task_code') {
     return (
       <div className="msg-ai improvement">
-        <div className="msg-ai-header">💡 코드 개선 제안</div>
         <div className="msg-ai-content">
           {msg.isLoading && (
             <div className="inline-loading-area">
@@ -188,9 +216,6 @@ const MessageItem = ({ msg }: { msg: Message }) => {
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
     <div className={`msg-ai ${isError ? 'error' : isTestResult ? 'test-result' : 'analysis'}`}>
-      <div className="msg-ai-header">
-        {isError ? '❌ Error' : isTestResult ? '🧪 테스트 생성 결과' : '📋 분석 & 결과'}
-      </div>
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
         {msg.content && (
@@ -226,14 +251,14 @@ const MessageItem = ({ msg }: { msg: Message }) => {
         </div>
       )}
 
-      {/* 일반 결과 버튼 (Copy / Save) */}
-      {!isError && !msg.isLoading && msg.content && !isTestResult && (
+      {/* 일반 결과 버튼 (Copy / Save, 초기 인사말 제외) */}
+      {!isError && !msg.isLoading && msg.content && !isTestResult && msg.id !== '1' && (
         <div className="msg-text-actions">
           <button className="btn-text-action" onClick={handleCopy} title="클립보드에 복사">
-            📋 Copy
+            Copy
           </button>
           <button className="btn-text-action" onClick={handleSave} title="Markdown 파일로 저장">
-            💾 Save .md
+            Save .md
           </button>
         </div>
       )}
@@ -283,6 +308,28 @@ function App() {
       }
 
       const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
+
+      if (data.subType === 'step_noti') {
+        if (messageId) {
+          setMessages(prev => {
+            const index = prev.findIndex(m => m.id === messageId);
+            if (index !== -1) {
+              const updated = [...prev];
+              updated[index] = { ...prev[index], stepNotiStatus: data.status };
+              return updated;
+            }
+            return [...prev, {
+              id: messageId,
+              role: 'ai' as const,
+              subType: 'step_noti',
+              content: data.content,
+              stepNotiStatus: data.status as 'started' | 'completed' | 'failed',
+              isLoading: false,
+            }];
+          });
+        }
+        return;
+      }
 
       if (data.subType === 'apply_success') {
         if (messageId) {
@@ -477,7 +524,7 @@ function App() {
   return (
     <div id="root">
       <header className="header flex justify-between items-center">
-        <span className="title">iXpert AI Assistant</span>
+        <span className="title">New Chat</span>
         <div className="flex gap-2">
           <button className="icon-btn"><Terminal size={14} /></button>
           <button className="icon-btn"><Edit size={14} /></button>
@@ -498,7 +545,7 @@ function App() {
         </div>
         <div className="textarea-wrapper">
           <textarea
-            placeholder="메시지를 입력하세요..."
+            placeholder="Ask me what U want..."
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onCompositionStart={() => { isComposing.current = true; }}
@@ -515,18 +562,15 @@ function App() {
               }
             }}
           />
-          <div className="input-footer">
-            <span className="helper-text">Shift+Enter : 줄바꿈 / Enter : 전송</span>
-            <div className="flex gap-2">
-              <button className="btn-small" style={{ borderColor: 'transparent' }} onClick={() => window.sendToIde?.(JSON.stringify({ command: '/undo' }))}>
-                <RotateCcw size={12} />
-              </button>
-              <button className="btn-small" style={{ background: 'var(--danger-color)', border: 'none' }} onClick={() => window.sendToIde?.(JSON.stringify({ command: '/cancel' }))}>
-                <Square size={10} fill="currentColor" /> Stop
-              </button>
-              <button className="btn-primary" onClick={handleSend}>전송</button>
-            </div>
-          </div>
+          {messages.some(m => m.isLoading || m.isStreaming) ? (
+            <button className="btn-circle stop" onClick={() => window.sendToIde?.(JSON.stringify({ command: '/cancel' }))}>
+              <Square size={14} fill="currentColor" />
+            </button>
+          ) : (
+            <button className="btn-circle send" onClick={handleSend}>
+              <Send size={14} />
+            </button>
+          )}
         </div>
         <div className="model-status-footer">
           <Terminal size={10} className="inline mr-1 opacity-60" />
