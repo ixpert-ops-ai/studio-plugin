@@ -2,6 +2,7 @@ package net.ib.ixpert.ops.wuwagent.agent
 
 import com.intellij.openapi.diagnostic.Logger
 import java.io.InputStream
+import java.net.HttpURLConnection
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -30,6 +31,13 @@ object TaskCancellationToken {
     @Volatile
     var activeInputStream: InputStream? = null
 
+    /**
+     * OllamaClient 비스트리밍 HttpURLConnection — cancel() 시 disconnect()로 블로킹 강제 해제.
+     * getInputStream() 자체가 블로킹이므로 inputStream 등록이 불가 → 상위 connection 레벨로 처리.
+     */
+    @Volatile
+    var activeHttpConnection: HttpURLConnection? = null
+
     /** 현재 실행 중인 요청의 messageId — /cancel 응답 시 UI 말풍선 특정에 사용 */
     @Volatile
     var activeMessageId: String? = null
@@ -46,11 +54,8 @@ object TaskCancellationToken {
         isCancelled.set(true)
         if (messageId != null) cancelledIds[messageId] = true
         backgroundThread?.interrupt()
-        try {
-            activeInputStream?.close()
-        } catch (_: Exception) {
-            // 스트림이 이미 닫혀 있는 경우 무시
-        }
+        try { activeInputStream?.close()      } catch (_: Exception) {}
+        try { activeHttpConnection?.disconnect() } catch (_: Exception) {}
     }
 
     /** messageId 또는 전역 플래그로 취소 여부 확인 */
@@ -66,6 +71,7 @@ object TaskCancellationToken {
         if (messageId != null) cancelledIds.remove(messageId) else cancelledIds.clear()
         backgroundThread = null
         activeInputStream = null
+        activeHttpConnection = null
         activeMessageId = null
     }
 }
