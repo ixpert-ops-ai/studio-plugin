@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Settings, Edit, Square, Terminal, Play } from 'lucide-react';
+import { Settings, Edit, Square, Terminal, Send } from 'lucide-react';
 import './index.css';
 
 declare global {
@@ -130,9 +130,6 @@ const MessageItem = ({ msg }: { msg: Message }) => {
   if (msg.subType === 'task_code') {
     return (
       <div className="msg-ai improvement">
-        <div className="msg-ai-header-tag">
-          💡 코드 개선 제안
-        </div>
         <div className="msg-ai-content">
           {msg.isLoading && (
             <div className="inline-loading-area">
@@ -157,9 +154,6 @@ const MessageItem = ({ msg }: { msg: Message }) => {
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
     <div className={`msg-ai ${isError ? 'error' : 'analysis'}`}>
-      <div className="msg-ai-header-tag">
-        {isError ? 'Error' : '분석 완료'}
-      </div>
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
         {msg.content && <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>}
@@ -434,7 +428,7 @@ function App() {
         </div>
         <div className="textarea-wrapper">
           <textarea
-            placeholder="메시지를 입력하세요..."
+            placeholder="Ask me what U want..."
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onCompositionStart={() => { isComposing.current = true; }}
@@ -451,20 +445,15 @@ function App() {
               }
             }}
           />
-          <div className="input-footer">
-            <span className="helper-text">Shift+Enter : 줄바꿈 / Enter : 전송</span>
-            <div className="flex gap-2">
-              {messages.some(m => m.isLoading || m.isStreaming) ? (
-                <button className="btn-action-primary stop" onClick={() => window.sendToIde?.(JSON.stringify({ command: '/cancel' }))}>
-                  <Square size={10} fill="currentColor" /> Stop
-                </button>
-              ) : (
-                <button className="btn-action-primary send" onClick={handleSend}>
-                  <Play size={10} fill="currentColor" /> 전송
-                </button>
-              )}
-            </div>
-          </div>
+          {messages.some(m => m.isLoading || m.isStreaming) ? (
+            <button className="btn-circle stop" onClick={() => window.sendToIde?.(JSON.stringify({ command: '/cancel' }))}>
+              <Square size={14} fill="currentColor" />
+            </button>
+          ) : (
+            <button className="btn-circle send" onClick={handleSend}>
+              <Send size={14} />
+            </button>
+          )}
         </div>
         <div className="model-status-footer">
           <Terminal size={10} className="inline mr-1 opacity-60" />

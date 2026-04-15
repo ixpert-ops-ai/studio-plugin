@@ -149,23 +149,6 @@ body {
   border: 1px solid var(--danger-color);
 }
 
-.msg-ai-header-tag {
-  background: #1a2a3a;
-  color: #4a7aaa;
-  border: 1px solid #2a3a4a;
-  font-size: 10px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  display: inline-block;
-  margin-bottom: 10px;
-  font-weight: 600;
-}
-
-.msg-ai.error .msg-ai-header-tag {
-  background: rgba(207, 102, 121, 0.1);
-  color: var(--danger-color);
-  border-color: rgba(207, 102, 121, 0.2);
-}
 
 .msg-ai-content {
   line-height: 1.6;
@@ -329,6 +312,7 @@ body {
   display: flex;
   flex-direction: column;
   transition: border-color 0.15s, box-shadow 0.15s; /* transition animation */
+  position: relative;
 }
 
 .textarea-wrapper:focus-within {
@@ -343,6 +327,7 @@ body {
   color: #fff;
   resize: none;
   padding: 8px;
+  padding-bottom: 40px;
   font-size: 13px;
   min-height: 80px;
   outline: none;
@@ -367,34 +352,35 @@ body {
 
 .btn-danger { background: #cf6679; color: #fff; border: none; padding: 6px 16px; border-radius: 4px; }
 
-/* Dynamic Send/Stop Custom Action Button */
-.btn-action-primary {
+/* Overlay Circular Send/Stop Button */
+.btn-circle {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 6px;
-  padding: 6px 16px;
-  border-radius: 4px;
-  font-weight: 500;
+  border: none;
   cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.2s;
-}
-
-.btn-action-primary.send {
-  background: #2f6bbd;
+  transition: all 0.2s ease-in-out;
   color: #fff;
 }
-.btn-action-primary.send:hover {
-  background: #3a7eca;
+
+.btn-circle.send {
+  background-color: #5c8aff;
+}
+.btn-circle.send:hover {
+  background-color: #4a6ee0;
 }
 
-.btn-action-primary.stop {
-  background: #3a2020;
-  border-color: #7a3030;
-  color: #e07070;
+.btn-circle.stop {
+  background-color: #f472b6;
 }
-.btn-action-primary.stop:hover {
-  background: #4a2828;
+.btn-circle.stop:hover {
+  background-color: #ec4899;
 }
 
 /* Model Status Footer */
