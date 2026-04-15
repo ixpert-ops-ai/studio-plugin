@@ -94,10 +94,14 @@ class TaskAgent(
                         previousStepResult = result.rawLlmResponse
                         onStep(step.label, result, step.isApplyable, messageId)
 
-                        // ❌ 에러 발생 시 파이프라인 즉시 중단 및 에러 신호 전송
+                        // ❌ 에러 발생 시 파이프라인 즉시 중단
                         if (!result.isSuccess) {
                             logger.warn("TaskAgent: ${step.label} 실패 → 파이프라인 중단")
-                            onError(result.llmResponse) // 상세 에러 메시지 전달
+                            if (!step.isApplyable) {
+                                // Step1 등 분석 step 실패: 기존 말풍선에 에러 표시
+                                onError(result.llmResponse)
+                            }
+                            // isApplyable step(Step2+) 실패: onStep에서 이미 별도 에러 카드를 생성했으므로 onError 생략
                             return
                         }
 

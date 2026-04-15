@@ -90,14 +90,78 @@ sealed class TaskPipeline {
         }
 
         /**
+         * [IMPROVE_TARGETS]에 나열된 함수명 기준으로 원본 코드에서 해당 함수 블록만 추출한다.
+         *
+         * - 함수 선언 라인(수식어 포함) 탐색 → 위쪽 어노테이션 포함 → 중괄호 depth 추적으로 끝 결정
+         * - Expression body(`fun f() = ...`)는 중괄호 없음 → 선언 라인만 포함
+         * - 함수를 찾지 못하면 warn 후 skip
+         * - 여러 함수는 빈 줄 하나("\n\n")로 구분하여 join
+         */
+        private fun extractFunctionBlocks(code: String, functions: List<String>): String {
+            val lines = code.lines()
+            val blocks = mutableListOf<String>()
+
+            for (funcName in functions) {
+                val funRegex = Regex(
+                    """^\s*(?:(?:private|public|protected|internal|override|suspend|inline|open|abstract|operator|infix|tailrec|external|actual|expect)\s+)*fun\s+${Regex.escape(funcName)}\s*[(<]"""
+                )
+                val startLine = lines.indexOfFirst { funRegex.containsMatchIn(it) }
+                if (startLine == -1) {
+                    logger.warn("extractFunctionBlocks: '$funcName' 함수 미발견 → skip")
+                    continue
+                }
+
+                // 선언 라인 위쪽의 어노테이션 라인 포함
+                var blockStart = startLine
+                while (blockStart > 0 && lines[blockStart - 1].trim().startsWith("@")) blockStart--
+
+                // 중괄호 depth 추적으로 함수 끝 탐색
+                var depth = 0
+                var braceFound = false
+                var blockEnd = startLine
+                outer@ for (i in startLine until lines.size) {
+                    for (ch in lines[i]) {
+                        when (ch) {
+                            '{' -> { depth++; braceFound = true }
+                            '}' -> {
+                                depth--
+                                if (braceFound && depth == 0) { blockEnd = i; break@outer }
+                            }
+                        }
+                    }
+                }
+                // braceFound=false → expression body, startLine만 포함 (blockEnd=startLine 유지)
+
+                blocks.add(lines.subList(blockStart, blockEnd + 1).joinToString("\n"))
+                logger.info("extractFunctionBlocks: '$funcName' 추출 완료 (라인 $blockStart~$blockEnd)")
+            }
+
+            return blocks.joinToString("\n\n")
+        }
+
+        /**
          * Improve step 전용 userMessage 조립.
          *
-         * - FULL_FILE 또는 타깃 미지정: 전체 코드 Search/Replace 개선 요청
-         * - 특정 함수 목록: 함수명만 compact하게 삽입, 분석 전문 제거 (컨텍스트 절약)
+         * - FULL_FILE 또는 타깃 미지정: 전체 코드 전달
+         * - 특정 함수 목록: 해당 함수 블록만 추출하여 전달 (컨텍스트 대폭 절약)
+         *   → 병합(applySearchReplace)은 여전히 전체 originalCode 기준으로 수행
          */
         private fun buildImproveUserMessage(prevAnalysis: String, code: String): String {
             val (isFullFile, functions) = parseImproveTargets(prevAnalysis)
             logger.info("buildImproveUserMessage: isFullFile=$isFullFile, targets=${functions.joinToString()}")
+
+            val codeForLlm = if (!isFullFile && functions.isNotEmpty()) {
+                val extracted = extractFunctionBlocks(code, functions)
+                if (extracted.isNotBlank()) {
+                    logger.info("buildImproveUserMessage: 함수 블록 추출 성공 (${extracted.length}자 / 원본 ${code.length}자)")
+                    extracted
+                } else {
+                    logger.warn("buildImproveUserMessage: 함수 블록 추출 실패 → 전체 코드 fallback")
+                    code
+                }
+            } else {
+                code
+            }
 
             return buildString {
                 appendLine("다음 코드를 수정하라.")
@@ -113,7 +177,7 @@ sealed class TaskPipeline {
                 appendLine()
                 appendLine("[원본 코드]")
                 appendLine("---CODE START---")
-                appendLine(code)
+                appendLine(codeForLlm)
                 appendLine("---CODE END---")
                 appendLine()
                 append("IMPORTANT:\n코드 외 텍스트를 출력하면 실패로 간주한다.")
@@ -157,9 +221,10 @@ sealed class TaskPipeline {
                 if (matchedFile != null) {
                     val fileContent = FileSearchService.readFileContent(matchedFile)
                     logger.info("AgentStep[${label}]: 명시적 파일 검색 히트 → ${matchedFile.name}")
+                    // isImproveStep 여부와 관계없이 originalCode 항상 세팅 (Step1 요약 계산용)
+                    originalCode = fileContent
+                    applyScope   = matchedFile.name
                     if (isImproveStep) {
-                        originalCode = fileContent
-                        applyScope   = matchedFile.name
                         userMessage  = buildImproveUserMessage(prevAnalysis, originalCode)
                     } else {
                         userMessage = "사용자 요청: $payload$prevContext\n\n// 파일: ${matchedFile.name}\n```\n$fileContent\n```"
@@ -261,9 +326,25 @@ sealed class TaskPipeline {
             val rawLlmResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
 
             // UI 표시용 llmResponse: [IMPROVE_TARGETS] 블록 제거
-            val llmResponse = rawLlmResponse
+            var llmResponse = rawLlmResponse
                 .replace(Regex("""\s*\[IMPROVE_TARGETS].*?\[/IMPROVE_TARGETS]""", RegexOption.DOT_MATCHES_ALL), "")
                 .trimEnd()
+
+            // ── Step1 분석 말풍선 요약 줄 추가 ───────────────────────────────────
+            // [IMPROVE_TARGETS] 블록이 있는 분석 step + originalCode 확보된 경우에만 표시.
+            // 형식: [대상 함수: 함수명1, 함수명2 / 전달 코드: XXX자]
+            if (promptFile == "improve_analysis_prompt.txt" && originalCode.isNotBlank() && rawLlmResponse.contains("[IMPROVE_TARGETS]")) {
+                val (isFullFile, functions) = parseImproveTargets(rawLlmResponse)
+                val codeLen = if (!isFullFile && functions.isNotEmpty()) {
+                    val extracted = extractFunctionBlocks(originalCode, functions)
+                    if (extracted.isNotBlank()) extracted.length else originalCode.length
+                } else {
+                    originalCode.length
+                }
+                val targetLabel = if (isFullFile || functions.isEmpty()) "전체 파일" else functions.joinToString(", ")
+                llmResponse += "\n\n[대상 함수: $targetLabel / 전달 코드: ${codeLen}자]"
+            }
+            // ──────────────────────────────────────────────────────────────────────
 
             // Ollama 가 타임아웃 등으로 "[Error]..." 반환 시 오류로 간주
             val isErrorResponse = llmResponse.startsWith("[오류]") || llmResponse.startsWith("[Error]")

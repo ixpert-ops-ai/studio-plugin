@@ -123,45 +123,59 @@ class WebviewActionRouter(private val project: Project) {
 
                     // Step 완료 시 결과 전송
                     val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, stepMsgId: String ->
-                        logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, scope=${result.applyScope})")
+                        logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, success=${result.isSuccess}, scope=${result.applyScope})")
 
-                        if (isApplyable && result.isSuccess) {
-                            // ── 코드 말풍선 (Step 2: Improve) ──────────────────────
-                            // 별도 messageId로 새 말풍선 생성 → 텍스트 말풍선과 완전 분리
-                            val codeMessageId = "${messageId}_code"
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage(
-                                    subType = "task_code",
-                                    content = "",  // 코드 말풍선에는 설명 텍스트 없음
-                                    messageId = codeMessageId,
-                                    meta = mapOf(
-                                        "stepLabel" to stepLabel,
-                                        "applyable" to "true",
-                                        "originalCode" to result.originalCode.orEmpty(),
-                                        "modifiedCode" to result.modifiedCode.orEmpty(),
-                                        "extractedCode" to result.extractedCode,
-                                        "applyScope" to result.applyScope,
-                                        "isSuccess" to "true"
+                        when {
+                            isApplyable && result.isSuccess -> {
+                                // ── 코드 말풍선 (Step 2 성공) ──────────────────────────
+                                // 별도 messageId로 새 말풍선 생성 → 텍스트 말풍선과 완전 분리
+                                val codeMessageId = "${messageId}_code"
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage(
+                                        subType = "task_code",
+                                        content = "",
+                                        messageId = codeMessageId,
+                                        meta = mapOf(
+                                            "stepLabel" to stepLabel,
+                                            "applyable" to "true",
+                                            "originalCode" to result.originalCode.orEmpty(),
+                                            "modifiedCode" to result.modifiedCode.orEmpty(),
+                                            "extractedCode" to result.extractedCode,
+                                            "applyScope" to result.applyScope,
+                                            "isSuccess" to "true"
+                                        )
                                     )
-                                )
+                                }
                             }
-                        } else {
-                            // ── 텍스트 말풍선 (Step 1: Analyze / Explain) ───────────
-                            // 코드 블록 제거 후 설명 텍스트만 기존 말풍선에 누적
-                            val displayContent = result.llmResponse
-                                .replace(Regex("```[\\w]*\\n?[\\s\\S]*?```"), "")
-                                .trim()
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage(
-                                    subType = "task_step",
-                                    content = displayContent,
-                                    messageId = messageId,
-                                    meta = mapOf(
-                                        "stepLabel" to stepLabel,
-                                        "applyable" to "false",
-                                        "isSuccess" to result.isSuccess.toString()
+                            isApplyable && !result.isSuccess -> {
+                                // ── Step2 에러: Step1 말풍선 유지 + 별도 에러 카드 ──────
+                                // Step1 말풍선의 로딩 상태만 종료하고 내용은 건드리지 않는다.
+                                // 에러는 새 messageId(_err)로 별도 카드 생성.
+                                val errMessageId = "${messageId}_err"
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                    bridge.sendMessage("task_start", "", errMessageId)
+                                    bridge.sendMessage("error", result.llmResponse, errMessageId)
+                                }
+                            }
+                            else -> {
+                                // ── 텍스트 말풍선 (Step 1: Analyze / Explain) ───────────
+                                // 코드 블록 제거 후 설명 텍스트만 기존 말풍선에 누적
+                                val displayContent = result.llmResponse
+                                    .replace(Regex("```[\\w]*\\n?[\\s\\S]*?```"), "")
+                                    .trim()
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage(
+                                        subType = "task_step",
+                                        content = displayContent,
+                                        messageId = messageId,
+                                        meta = mapOf(
+                                            "stepLabel" to stepLabel,
+                                            "applyable" to "false",
+                                            "isSuccess" to result.isSuccess.toString()
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     }
