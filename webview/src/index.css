@@ -120,6 +120,59 @@ body {
   box-shadow: 0 0 4px var(--text-blue);
 }
 
+/* ── Step Notification Card ─────────────────── */
+.step-noti {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border-left: 3px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 11px;
+  width: fit-content;
+  max-width: 95%;
+  margin: 2px 0;
+  transition: border-color 0.2s ease;
+}
+.step-noti.started   { border-left-color: var(--text-blue); }
+.step-noti.completed { border-left-color: var(--text-success); }
+.step-noti.failed    { border-left-color: var(--danger-color); }
+
+.step-noti-icon {
+  width: 12px;
+  text-align: center;
+  font-size: 10px;
+}
+.step-noti.completed .step-noti-icon { color: var(--text-success); }
+.step-noti.failed    .step-noti-icon { color: var(--danger-color); }
+
+.step-noti-spinner {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid rgba(126, 184, 247, 0.3);
+  border-top-color: var(--text-blue);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.step-noti-label {
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+  flex: 1;
+}
+.step-noti-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+}
+.step-noti.completed .step-noti-badge { color: var(--text-success); }
+.step-noti.failed    .step-noti-badge { color: var(--danger-color); }
+
 /* AI Bubble (Refactored for UX) */
 .msg-ai {
   align-self: flex-start;

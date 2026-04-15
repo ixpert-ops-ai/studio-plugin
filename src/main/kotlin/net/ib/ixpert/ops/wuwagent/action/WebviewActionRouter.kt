@@ -114,16 +114,29 @@ class WebviewActionRouter(private val project: Project) {
                     }
 
                     // Step 시작 시 즉각 UI 피드백
+                    val stepNotiIdx = intArrayOf(0)
                     val onStepStart = { stepLabel: String ->
                         logger.info("Router: Step 시작 알림 → $stepLabel")
+                        val notiId = "${messageId}_noti_${stepNotiIdx[0]}"
+                        stepNotiIdx[0]++
                         ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage("step_noti", stepLabel, notiId, mapOf("status" to "started"))
                             bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
                         }
                     }
 
                     // Step 완료 시 결과 전송
+                    val stepNotiDoneIdx = intArrayOf(0)
                     val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, stepMsgId: String ->
                         logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, success=${result.isSuccess}, scope=${result.applyScope})")
+                        val notiId = "${messageId}_noti_${stepNotiDoneIdx[0]}"
+                        stepNotiDoneIdx[0]++
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage(
+                                "step_noti", stepLabel, notiId,
+                                mapOf("status" to if (result.isSuccess) "completed" else "failed")
+                            )
+                        }
 
                         when {
                             isApplyable && result.isSuccess -> {

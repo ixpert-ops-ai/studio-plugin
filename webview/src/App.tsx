@@ -28,7 +28,31 @@ interface Message {
   isError?: boolean;
   isStreaming?: boolean;
   currentStatus?: string;
+  stepNotiStatus?: 'started' | 'completed' | 'failed';
 }
+
+// ─────────────────────────────────────────────
+//  컴포넌트: StepNotiItem (스텝 진행 알림 카드)
+// ─────────────────────────────────────────────
+const StepNotiItem = ({ msg }: { msg: Message }) => {
+  const isStarted   = msg.stepNotiStatus === 'started';
+  const isCompleted = msg.stepNotiStatus === 'completed';
+  const isFailed    = msg.stepNotiStatus === 'failed';
+
+  return (
+    <div className={`step-noti ${msg.stepNotiStatus ?? ''}`}>
+      <span className="step-noti-icon">
+        {isCompleted && '✓'}
+        {isFailed    && '✗'}
+        {isStarted   && <span className="step-noti-spinner" />}
+      </span>
+      <span className="step-noti-label">{msg.content}</span>
+      <span className="step-noti-badge">
+        {isCompleted ? '완료' : isFailed ? '실패' : '진행 중'}
+      </span>
+    </div>
+  );
+};
 
 // ─────────────────────────────────────────────
 //  컴포넌트: ActionCard (코드 제안 카드)
@@ -80,6 +104,11 @@ const ActionCard = ({ msg, onApply }: { msg: Message; onApply: () => void }) => 
 // ─────────────────────────────────────────────
 const MessageItem = ({ msg }: { msg: Message }) => {
   const isApplied = msg.applied === true;
+
+  // 0. Step 알림 카드
+  if (msg.subType === 'step_noti') {
+    return <StepNotiItem msg={msg} />;
+  }
 
   // 1. Tool / Status 메시지
   if (msg.role === 'tool') {
@@ -225,6 +254,28 @@ function App() {
       }
 
       const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
+
+      if (data.subType === 'step_noti') {
+        if (messageId) {
+          setMessages(prev => {
+            const index = prev.findIndex(m => m.id === messageId);
+            if (index !== -1) {
+              const updated = [...prev];
+              updated[index] = { ...prev[index], stepNotiStatus: data.status };
+              return updated;
+            }
+            return [...prev, {
+              id: messageId,
+              role: 'ai' as const,
+              subType: 'step_noti',
+              content: data.content,
+              stepNotiStatus: data.status as 'started' | 'completed' | 'failed',
+              isLoading: false,
+            }];
+          });
+        }
+        return;
+      }
 
       if (data.subType === 'apply_success') {
         if (messageId) {
