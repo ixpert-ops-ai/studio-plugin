@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import net.ib.ixpert.ops.wuwagent.agent.AgentContext
 import net.ib.ixpert.ops.wuwagent.agent.GenerateTestAgent
+import net.ib.ixpert.ops.wuwagent.service.EditorContextService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
 /** 에디터 우클릭 → "Generate Test" 액션 */
@@ -17,16 +18,19 @@ class GenerateTestAction : AnAction() {
         val bridge = JcefBridge.getInstance(project)
         val context = AgentContext(project, editor, "")
         val messageId = "msg_${System.currentTimeMillis()}"
+        val sourceFile = EditorContextService.extractFileName(editor)
 
         ApplicationManager.getApplication().invokeLater {
-            bridge.sendMessage("explain_start", "🧪 테스트 코드를 생성하고 있습니다...", messageId)
+            bridge.sendMessage("test_start", "🧪 테스트 코드를 생성하고 있습니다...", messageId,
+                meta = mapOf("sourceFile" to sourceFile))
         }
 
         GenerateTestAgent().execute(
             context,
             onSuccess = { resultText ->
                 ApplicationManager.getApplication().invokeLater {
-                    bridge.sendMessage("explain", resultText, messageId)
+                    bridge.sendMessage("test", resultText, messageId,
+                        meta = mapOf("sourceFile" to sourceFile))
                 }
             },
             onChunk = { chunk ->
@@ -36,7 +40,9 @@ class GenerateTestAction : AnAction() {
             },
             onError = { errorMsg ->
                 ApplicationManager.getApplication().invokeLater {
-                    bridge.sendMessage("error", errorMsg, messageId)
+                    if (errorMsg != "__cancelled__") {
+                        bridge.sendMessage("error", errorMsg, messageId)
+                    }
                 }
             }
         )
