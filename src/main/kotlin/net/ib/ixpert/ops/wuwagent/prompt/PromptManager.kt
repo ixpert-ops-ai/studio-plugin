@@ -26,4 +26,15 @@ object PromptManager {
             "You are a helpful coding assistant. Please answer the user's question."
         }
     }
+
+    /**
+     * 프롬프트 파일을 읽고 `{{KEY}}` 형식의 플레이스홀더를 치환합니다.
+     */
+    fun loadPromptWithVars(fileName: String, vars: Map<String, String>): String {
+        var template = loadPrompt(fileName)
+        for ((key, value) in vars) {
+            template = template.replace("{{$key}}", value)
+        }
+        return template
+    }
 }

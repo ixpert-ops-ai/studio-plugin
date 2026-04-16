@@ -83,7 +83,7 @@ class WebviewActionRouter(private val project: Project) {
                     }
                     val messageId = "msg_${System.currentTimeMillis()}"
                     // 🛎 즉시 자리 만들기 (로딩 표시 유도)
-                    bridge.sendMessage("explain_start", "🔍 코드를 분석하고 있습니다...", messageId)
+                    bridge.sendMessage("explain_start", "🔍 코드 구조를 분석하고 있습니다...", messageId)
 
                     val context = AgentContext(project, editor, textBody)
                     ExplainAgent().execute(
