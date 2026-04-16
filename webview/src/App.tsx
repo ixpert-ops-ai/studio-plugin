@@ -3,8 +3,15 @@ import { Settings, Edit, Square, Terminal, Send } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import mermaid from 'mermaid';
 import 'highlight.js/styles/github-dark.css';
 import './index.css';
+
+// Mermaid 글로벌 초기 설정
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'dark'
+});
 
 declare global {
   interface Window {
@@ -66,6 +73,40 @@ function extractCodeBlocks(markdown: string): string {
   const blocks = [...markdown.matchAll(/```[\w]*\n([\s\S]*?)```/g)];
   return blocks.map(m => m[1].trim()).join('\n\n');
 }
+
+// ─────────────────────────────────────────────
+//  컴포넌트: MermaidChart (플로우차트 렌더링)
+// ─────────────────────────────────────────────
+const MermaidChart = ({ chart }: { chart: string }) => {
+  const [svg, setSvg] = useState<string>('');
+  // 고유 id 보장 (동시 렌더링 충돌 회피)
+  const [id] = useState(() => `mermaid-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+
+  useEffect(() => {
+    let mounted = true;
+    if (chart) {
+      mermaid.render(id, chart)
+        .then((result) => {
+          if (mounted) setSvg(result.svg);
+        })
+        .catch((err) => {
+          console.error("Mermaid parsing error:", err);
+          if (mounted) setSvg(`<pre class="error-text" style="font-size:11px">Mermaid Error: ${err?.message || 'Syntax Error'}</pre>`);
+        });
+    }
+    return () => { mounted = false; };
+  }, [chart, id]);
+
+  if (!svg) {
+    return (
+      <div className="mermaid-loading inline-loading-area" style={{ margin: '16px 0', padding: '12px' }}>
+        <div className="typing-dots"><span></span><span></span><span></span></div>
+        <span className="status-text">차트 렌더링 중...</span>
+      </div>
+    );
+  }
+  return <div className="mermaid-chart flex justify-center" dangerouslySetInnerHTML={{ __html: svg }} />;
+};
 
 // ─────────────────────────────────────────────
 //  컴포넌트: ActionCard (코드 제안 카드)
@@ -220,7 +261,20 @@ const MessageItem = ({ msg }: { msg: Message }) => {
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
         {msg.content && (
           <div className="markdown-body">
-            <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+            <Markdown 
+              remarkPlugins={[remarkGfm]} 
+              rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
+              components={{
+                code(props: any) {
+                  const { children, className, node, ...rest } = props;
+                  const match = /language-(\w+)/.exec(className || '');
+                  if (match && match[1] === 'mermaid') {
+                    return <MermaidChart chart={String(children).replace(/\n$/, '')} />;
+                  }
+                  return <code className={className} {...rest}>{children}</code>;
+                }
+              }}
+            >
               {msg.content}
             </Markdown>
           </div>

@@ -39,7 +39,8 @@ class OllamaClient {
             stream = (onChunk != null),
             options = mapOf(
                 "temperature" to settings.temperature,
-                "num_ctx" to settings.contextWindow
+                "num_ctx" to settings.contextWindow,
+                "num_predict" to 8192
             )
         )
         val jsonPayload = gson.toJson(requestBody)
