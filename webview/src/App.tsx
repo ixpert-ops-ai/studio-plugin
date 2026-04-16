@@ -376,19 +376,14 @@ function App() {
                 break;
               case 'task_step':
                 if (data.applyable === 'true') {
-                  // 개선 Step: 코드 카드 데이터 설정 (content는 덕려쓰지 않음)
+                  // 개선 Step: 코드 카드 데이터 설정 (content는 건드리지 않음)
                   isLoading = true;
                   isStreaming = false;
                   currentStatus = undefined;
                 } else {
-                  // 분석 Step: 스트리밍으로 이미 콘텐츠가 쌓였으면 다시 append 안 함
-                  if (!existing.isStreaming) {
-                    // 스트리밍이 없었던 케이스 (fallback): 전체 텍스트 사용
-                    newContent = data.content || existing.content;
-                  }
-                  // 스트리밍이 쬄 케이스: content 기존 유지 (chunk로 이미 쌓임)
+                  // 분석 Step: content와 isStreaming은 기존 상태 그대로 유지
+                  // (chunk로 쌓인 content를 덮어쓰지 않고, isStreaming도 변경하지 않음)
                   isLoading = true;
-                  isStreaming = false;
                   currentStatus = undefined;
                 }
                 break;
@@ -413,7 +408,11 @@ function App() {
                 break;
               case 'chat':
               case 'explain':
-                newContent = data.isStreaming ? existing.content : data.content;
+                // chunk로 이미 content가 쌓인 경우(isStreaming=true) 덮어쓰지 않음
+                // data.content가 비어있으면 기존 content 유지 (완료 신호로 빈 값이 올 때 방어)
+                if (!existing.isStreaming) {
+                  newContent = data.content || existing.content;
+                }
                 isLoading = false;
                 isStreaming = false;
                 break;
