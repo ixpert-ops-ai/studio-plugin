@@ -47,4 +47,60 @@ object EditorContextService {
             }
         })
     }
+
+    /**
+     * 파일의 언어 ID를 반환합니다 (예: "JAVA", "kotlin").
+     */
+    fun extractLanguageId(editor: Editor, project: Project): String {
+        return ApplicationManager.getApplication().runReadAction(Computable {
+            val psiFile = com.intellij.psi.PsiDocumentManager.getInstance(project)
+                .getPsiFile(editor.document)
+            psiFile?.language?.id ?: "Unknown"
+        })
+    }
+
+    /**
+     * PSI 파일 객체를 반환합니다.
+     */
+    fun extractPsiFile(editor: Editor, project: Project): com.intellij.psi.PsiFile? {
+        return ApplicationManager.getApplication().runReadAction(Computable {
+            com.intellij.psi.PsiDocumentManager.getInstance(project)
+                .getPsiFile(editor.document)
+        })
+    }
+
+    /**
+     * Document 객체를 반환합니다.
+     */
+    fun extractDocument(editor: Editor): com.intellij.openapi.editor.Document {
+        return editor.document
+    }
+
+    /**
+     * 선택 영역의 시작/끝 줄 번호를 반환합니다. 선택이 없으면 null.
+     */
+    fun extractLineRange(editor: Editor): Pair<Int, Int>? {
+        return ApplicationManager.getApplication().runReadAction(Computable {
+            val selectionModel = editor.selectionModel
+            if (selectionModel.hasSelection()) {
+                val startLine = editor.document.getLineNumber(selectionModel.selectionStart) + 1
+                val endLine = editor.document.getLineNumber(selectionModel.selectionEnd) + 1
+                Pair(startLine, endLine)
+            } else {
+                null
+            }
+        })
+    }
+
+    /**
+     * 커서 위치의 PsiElement를 반환합니다.
+     */
+    fun extractElementAtCaret(editor: Editor, project: Project): com.intellij.psi.PsiElement? {
+        return ApplicationManager.getApplication().runReadAction(Computable {
+            val psiFile = com.intellij.psi.PsiDocumentManager.getInstance(project)
+                .getPsiFile(editor.document) ?: return@Computable null
+            val offset = editor.caretModel.offset
+            psiFile.findElementAt(offset)
+        })
+    }
 }

@@ -1,7 +1,83 @@
-You are a senior Android/Kotlin engineer specializing in impact analysis.
-Given the provided code, analyze:
-1. Which other classes or modules might be affected if this code changes
-2. Potential breaking changes (API, data contracts, side effects)
-3. Test coverage needed for safe refactoring
-Be concise and specific. Use bullet points.
-Always answer in Korean.
+당신은 소프트웨어 아키텍처 분석 전문가입니다.
+아래 {{LANGUAGE}} 코드와 영향도 분석 결과를 기반으로,
+코드 수정 시 영향 범위와 필요한 테스트 범위를 빠짐없이 가이드해 주세요.
+
+모든 응답은 한국어로 작성하세요.
+
+[분석 대상 코드]
+```{{LANGUAGE_ID}}
+{{CODE}}
+```
+
+[분석 대상 정보]
+시그니처: {{TARGET_SIGNATURE}}
+위치: {{TARGET_LOCATION}}
+타입: {{TARGET_TYPE}}
+
+[분석 전략]
+분석 단위: {{STRATEGY_NAME}}
+{{STRATEGY_LABEL}}
+
+[영향도 통계]
+직접 호출처: {{DIRECT_COUNT}}개
+간접 호출처: {{INDIRECT_COUNT}}개
+다형성 관련 영향: {{POLYMORPHIC_COUNT}}개
+데이터 흐름 영향: {{DATA_FLOW_COUNT}}개
+총 영향 요소: {{TOTAL_AFFECTED}}개
+최대 호출 깊이: {{MAX_DEPTH}}
+
+[호출 계층 트리]
+{{CALL_HIERARCHY}}
+
+[아키텍처 계층 분류]
+{{LAYER_SUMMARY}}
+
+[다형성 영향 정보]
+{{POLYMORPHISM_INFO}}
+
+[데이터 흐름 영향 정보]
+{{DATA_FLOW_INFO}}
+
+[영향받는 전체 요소 목록]
+{{AFFECTED_SIGNATURES}}
+
+[분석 요청 항목]
+
+1. 호출 계층 분석
+위 호출 계층 트리와 아키텍처 계층 분류를 기반으로, 각 계층별 영향받는 컴포넌트를 정리해 주세요.
+Controller → Service → Repository 흐름에서 어느 계층까지 영향이 전파되는지 명시해 주세요.
+직접 호출과 간접 호출을 구분하여 설명해 주세요.
+
+2. 영향 범위 분석
+직접 영향: 이 메서드를 직접 호출하는 모든 곳
+간접 영향: 호출 체인을 통해 간접적으로 영향받는 곳
+다형성 영향: 오버라이드/인터페이스 구현으로 영향받는 곳
+데이터 흐름 영향: 필드 값 변경으로 간접 영향받는 곳
+외부 영향: API 엔드포인트, 메시지 큐, 배치 작업 등 외부 시스템 영향 여부
+
+3. 위험도 평가
+수정 위험도를 HIGH / MEDIUM / LOW로 평가해 주세요.
+판단 근거를 호출 계층 깊이, 영향 범위 수, 다형성 여부, 데이터 흐름 영향 등을 기반으로 설명해 주세요.
+
+4. 테스트 범위 추천
+필수 테스트: 반드시 검증해야 하는 시나리오 (영향받는 전체 요소 목록 기반)
+권장 테스트: 추가로 권장하는 테스트 시나리오
+회귀 테스트: 기존 기능이 깨지지 않았는지 확인해야 할 범위
+각 테스트 시나리오에 대해 관련된 구체적인 클래스/메서드명을 명시해 주세요.
+
+5. 수정 시 주의사항
+하위 호환성 유지 방안
+인터페이스/추상 메서드 변경 시 모든 구현체 동시 수정 필요 여부
+트랜잭션/동시성 고려사항
+안전한 수정 전략 제안
+
+6. Mermaid 시각화
+직접 호출: 실선 화살표 -->
+다형성 호출: 점선 화살표 -.->
+데이터 흐름: 굵은 화살표 ==>
+계층별로 subgraph로 그룹핑하세요.
+
+[Mermaid 작성 규칙]
+모든 노드는 고유 ID와 대괄호 텍스트를 사용하세요. 예: A["시작"] --> B["처리"]
+노드 텍스트 안에 괄호, 세미콜론, 앰퍼샌드 등 특수문자를 넣지 마세요.
+한글과 영문만 사용하고 간결하게 작성하세요.
