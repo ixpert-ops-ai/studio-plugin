@@ -27,8 +27,13 @@ class ExplainAgent : BaseAgent() {
         }
 
         // 1. 코드 & 메타데이터 획득
-        val codeResult = EditorContextService.extractCodeWithScope(editor, context.project)
-        if (codeResult.code.isBlank()) {
+        val isPartial = context.payloadText.isNotBlank()
+        
+        // 파이프라인(구조 추출)은 문맥 파악을 위해 항상 전체 코드를 기반으로 구문 분석을 수행해야 함
+        val fullCode = EditorContextService.extractCodeWithScope(editor, context.project).code
+        val partialCode = if (isPartial) context.payloadText else fullCode
+        
+        if (partialCode.isBlank()) {
             onError("[알림] 분석할 코드를 도출하지 못했습니다.")
             return
         }
@@ -37,25 +42,29 @@ class ExplainAgent : BaseAgent() {
         val fileName = EditorContextService.extractFileName(editor)
         val psiFile = EditorContextService.extractPsiFile(editor, context.project)
         val document = EditorContextService.extractDocument(editor)
-        val lineRange = EditorContextService.extractLineRange(editor)
-        val isPartial = codeResult.isSelection
+        
+        // Context에 저장된 캡처된 selection bounds를 최우선으로 사용
+        val startLine = context.startLine ?: EditorContextService.extractLineRange(editor)?.first
+        val endLine = context.endLine ?: EditorContextService.extractLineRange(editor)?.second
+
+        logger.info("ExplainAgent 캡처 확인: isPartial=$isPartial, startLine=$startLine, endLine=$endLine, payloadLength=${context.payloadText.length}")
 
         // 2. 파이프라인을 통한 구조 추출 (PSI → Regex → Raw fallback)
         val structure: ExtractedStructure = try {
             val analysisInput = CodeAnalysisPipeline.AnalysisInput(
-                code = codeResult.code,
+                code = fullCode, // 구조 추출에는 항상 전체 코드가 들어갑니다. (내부에서 startLine/endLine으로 필터링됨)
                 languageId = languageId,
                 fileName = fileName,
                 document = document,
                 psiFile = psiFile,
                 isPartial = isPartial,
-                startLine = lineRange?.first,
-                endLine = lineRange?.second
+                startLine = startLine,
+                endLine = endLine
             )
             pipeline.extractStructure(analysisInput)
         } catch (e: Exception) {
             logger.warn("구조 추출 실패, 원문 사용: ${e.message}")
-            ExtractedStructure.rawOnly(codeResult.code)
+            ExtractedStructure.rawOnly(partialCode)
         }
 
         logger.info(
@@ -75,25 +84,48 @@ class ExplainAgent : BaseAgent() {
                 language = languageId,
                 fileName = fileName,
                 isPartial = isPartial,
-                startLine = lineRange?.first,
-                endLine = lineRange?.second
+                startLine = startLine,
+                endLine = endLine,
+                partialCode = partialCode
             )
             systemPrompt = PromptManager.loadPromptWithVars("explain_structured_prompt.txt", vars)
             userPrompt = "위 구조 정보를 바탕으로 코드를 분석해 주세요."
         } else {
             systemPrompt = PromptManager.loadPrompt("explain_prompt.txt")
-            userPrompt = codeResult.code
+            userPrompt = partialCode
         }
 
-        // 4. LLM 스트리밍 호출
+        var isFirstChunk = true
+        var finalContentWithBanner = ""
+
+        val wrappedOnChunk: (String) -> Unit = { chunk ->
+            if (isFirstChunk) {
+                val banner = if (isPartial && startLine != null && endLine != null) {
+                    "### 🎯 분석 대상: `${fileName}` (Line $startLine ~ $endLine)\n\n"
+                } else {
+                    "### 🎯 분석 대상: `${fileName}` (전체)\n\n"
+                }
+                val firstChunkWithBanner = banner + chunk
+                finalContentWithBanner = firstChunkWithBanner
+                onChunk?.invoke(firstChunkWithBanner)
+                isFirstChunk = false
+            } else {
+                finalContentWithBanner += chunk
+                onChunk?.invoke(chunk)
+            }
+        }
+
+        // 5. LLM 스트리밍 호출
         callLlmStreamAsync(
             context.project, 
             "WuwAgent: Explaining Code", 
             systemPrompt, 
             userPrompt, 
-            onSuccess, 
-            onChunk,
-            onError
+            onSuccess = { _ ->
+                onSuccess(finalContentWithBanner)
+            },
+            onChunk = wrappedOnChunk,
+            onError = onError
         )
     }
 }
