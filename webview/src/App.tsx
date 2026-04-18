@@ -435,9 +435,19 @@ function App() {
                   isStreaming = false;
                   currentStatus = undefined;
                 } else {
-                  // 분석 Step: content와 isStreaming은 기존 상태 그대로 유지
-                  // (chunk로 쌓인 content를 덮어쓰지 않고, isStreaming도 변경하지 않음)
-                  isLoading = true;
+                  // 분석 Step: 스트리밍 여부로 경로 구분
+                  if (existing.isStreaming) {
+                    // 스트리밍 완료 후 온 task_step
+                    // → data.content(디버그 줄 포함 전체 텍스트)로 교체
+                    newContent = data.content || existing.content;
+                  } else if (data.content) {
+                    // 스트리밍 없이 온 task_step (fallback)
+                    // → data.content 그대로 사용
+                    newContent = data.content;
+                  }
+                  // isStreaming → false: 로딩 스피너 종료, Copy/Save 버튼 활성화
+                  isLoading = false;
+                  isStreaming = false;
                   currentStatus = undefined;
                 }
                 break;

@@ -82,7 +82,7 @@ sealed class TaskPipeline {
             if (content == "FULL_FILE") return Pair(true, emptyList())
 
             val functions = content.lines()
-                .map { it.trim().removePrefix("-").trim() }
+                .map { it.trim().removePrefix("-").trim().substringBefore("//").trim() }
                 .filter { it.isNotBlank() }
 
             return if (functions.isEmpty()) Pair(true, emptyList())
