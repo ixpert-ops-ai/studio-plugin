@@ -123,13 +123,18 @@ object StructureFormatter {
     }
 
     /**
-     * 핵심 메서드 본문을 포맷팅합니다 (토큰 절약을 위해 상위 N개만).
+     * 핵심 메서드 본문을 포맷팅합니다.
+     * 부분 선택인 경우(isPartial=true)에는 선택된 코드 자체를 출력합니다.
      */
-    fun formatKeyCode(structure: ExtractedStructure, maxSymbols: Int = 5): String {
+    fun formatKeyCode(structure: ExtractedStructure, maxSymbols: Int = 5, isPartial: Boolean = false, partialCode: String? = null): String {
+        if (isPartial && partialCode != null) {
+            return "## 선택 영역 소스 코드\n<ib_source>\n${escapeSourceTag(partialCode)}\n</ib_source>"
+        }
+
         val keySymbols = structure.getKeySymbols(maxSymbols)
         if (keySymbols.isEmpty()) {
             return if (structure.rawCode != null) {
-                "## 소스 코드\n<ib_source>\n${escapeSourceTag(structure.rawCode)}\n</ib_source>"
+                "## 전체 소스 코드\n<ib_source>\n${escapeSourceTag(structure.rawCode)}\n</ib_source>"
             } else ""
         }
 
@@ -154,7 +159,8 @@ object StructureFormatter {
         fileName: String,
         isPartial: Boolean,
         startLine: Int? = null,
-        endLine: Int? = null
+        endLine: Int? = null,
+        partialCode: String? = null
     ): Map<String, String> {
         val langNames = mapOf(
             "java" to "Java", "JAVA" to "Java",
@@ -174,6 +180,51 @@ object StructureFormatter {
 
         val analysisMode = if (isPartial) "선택 영역 분석" else "파일 전체 분석"
 
+        val patternGuide = if (!isPartial) {
+            "\n- 디자인 패턴(Singleton, Factory, Observer 등)이 명확히 관찰될 경우\n  패턴명과 구현 위치를 기술하세요."
+        } else ""
+
+        val nonCodeLanguages = setOf("json", "xml", "yaml", "css", "scss", "html", "markdown")
+        val isNonCode = nonCodeLanguages.contains(language.lowercase()) ||
+                nonCodeLanguages.any { langNames[it]?.equals(language, ignoreCase = true) == true }
+
+        val nonCodeNotice = if (isNonCode) {
+            "- 함수/메서드가 존재하지 않는 파일의 경우 이 섹션은 \"해당 없음\"으로 표기하세요.\n"
+        } else ""
+
+        val hasThymeleaf = structure.thymeleafStructure != null
+        val thymeleafNotice = if (hasThymeleaf) {
+            """- Thymeleaf 파일의 경우 위 "Thymeleaf 구조 정보"의 바인딩을 아래 형식으로 정리하세요.
+
+| 분류 | 위치 | 표현식 | 역할 요약 |
+| :--- | :--- | :--- | :--- |
+| 조건부 렌더링 | L행번호 <태그> | th:if="표현식" | 1문장 요약 |
+| 반복 | L행번호 <태그> | th:each="표현식" | 1문장 요약 |
+| 데이터 바인딩 | L행번호 <태그> | th:text="표현식" | 1문장 요약 |
+| 폼 처리 | L행번호 <태그> | th:action="표현식" | 1문장 요약 |
+"""
+        } else ""
+
+        val functionGuide = if (!isPartial) {
+            """${nonCodeNotice}위 "IDE 추출 구조 정보"에 나열된 함수/메서드 목록을 그대로 사용하세요.
+목록을 새로 추출하거나 누락/추가하지 말고, 각 항목의 역할을 자연어로 설명하는 데 집중하세요.
+분류 기준: [진입점, 핵심 로직, 외부 연동, 보조]
+
+| 분류 | 함수/메서드명 | 역할 요약 |
+| :--- | :--- | :--- |
+| <분류명> | `식별자(파라미터)` | 1문장으로 요약된 기능 |
+$thymeleafNotice"""
+        } else {
+            """${nonCodeNotice}- 코드에 등장하는 순서대로 추출하세요.
+- 대상: function, method, 생성자/소멸자, 이벤트 핸들러, 로직이 있는 getter/setter.
+- 제외: 로직 없는 단순 필드 반환/설정자, 프레임워크 자동 생성 코드.
+- 분류 기준: [진입점, 핵심 로직, 외부 연동, 보조]
+
+| 분류 | 함수/메서드명 | 역할 요약 |
+| :--- | :--- | :--- |
+| <분류명> | `식별자(파라미터)` | 1문장으로 요약된 기능 |"""
+        }
+
         return mapOf(
             "LANGUAGE" to langName,
             "ANALYSIS_MODE" to analysisMode,
@@ -181,7 +232,9 @@ object StructureFormatter {
             "EXTRACTION_METHOD" to structure.extractionMethod.displayName,
             "STRUCTURE_INFO" to formatStructureInfo(structure),
             "THYMELEAF_INFO" to formatThymeleafInfo(structure),
-            "KEY_CODE" to formatKeyCode(structure)
+            "KEY_CODE" to formatKeyCode(structure, isPartial = isPartial, partialCode = partialCode),
+            "PATTERN_GUIDE" to patternGuide,
+            "FUNCTION_GUIDE" to functionGuide
         )
     }
 
