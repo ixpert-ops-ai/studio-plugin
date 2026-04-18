@@ -94,8 +94,45 @@ class ImpactAgent : BaseAgent() {
                 val summaryHeader = ImpactFormatter.buildSummaryHeader(analysisResult)
                 val userMessage = "$summaryHeader\n\n위 분석 결과를 바탕으로 상세한 영향도 분석을 수행해 주세요."
 
-                // Step 3: LLM 스트리밍 호출
-                val response = ollamaClient.callChatApiStream(systemPrompt, userMessage, onChunk)
+                // Step 3: 사용자 중심의 분석 범위 배너 생성
+                val total = analysisResult.statistics.totalAffected
+                val type = analysisResult.targetType
+                val typeIcon = when (type.lowercase()) {
+                    "method", "constructor" -> "🔹"
+                    "class", "interface", "enum", "annotation" -> "📦"
+                    "field" -> "📝"
+                    else -> "🔍"
+                }
+
+                val banner = if (codeResult.isSelection && codeResult.startLine != null && codeResult.endLine != null) {
+                    val fileName = EditorContextService.extractFileName(editor)
+                    "### 🔍 코드 변경 영향도 리포트\n" +
+                    "**분석 범위:** `$fileName` (Line ${codeResult.startLine} ~ ${codeResult.endLine})\n" +
+                    "**파급 규모:** 총 **${total}개** 요소에 파급 효과 예상\n\n---\n"
+                } else {
+                    "### 🔍 코드 변경 영향도 리포트\n" +
+                    "**분석 대상:** $typeIcon [$type] `${analysisResult.targetLocation}`\n" +
+                    "**식별자:** `${analysisResult.targetSignature}`\n" +
+                    "**파급 규모:** 총 **${total}개** 요소에 파급 효과 예상\n\n---\n"
+                }
+
+                // Step 4: LLM 스트리밍 호출 (배너 유지 로직 포함)
+                var isFirstChunk = true
+                var finalContentWithBanner = ""
+
+                val wrappedOnChunk: (String) -> Unit = { chunk ->
+                    if (isFirstChunk) {
+                        val firstChunkWithBanner = banner + chunk
+                        finalContentWithBanner = firstChunkWithBanner
+                        onChunk?.invoke(firstChunkWithBanner)
+                        isFirstChunk = false
+                    } else {
+                        finalContentWithBanner += chunk
+                        onChunk?.invoke(chunk)
+                    }
+                }
+
+                val response = ollamaClient.callChatApiStream(systemPrompt, userMessage, wrappedOnChunk)
 
                 if (TaskCancellationToken.isCancelled.get()) {
                     onError("__cancelled__")
@@ -106,7 +143,8 @@ class ImpactAgent : BaseAgent() {
                 if (resultText.startsWith("[Error]")) {
                     onError(resultText)
                 } else {
-                    onSuccess(resultText)
+                    // LLM의 날것(resultText)이 아닌, 배너가 포함된 누적본을 최종 전달하여 덮어쓰기 방지
+                    onSuccess(finalContentWithBanner)
                 }
             }
         })

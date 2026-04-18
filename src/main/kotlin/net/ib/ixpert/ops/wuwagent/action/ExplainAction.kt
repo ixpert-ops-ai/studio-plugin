@@ -18,11 +18,16 @@ class ExplainAction : AnAction() {
         val project = e.project ?: return
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
         
+        // ★ 우클릭 시점에 선택 텍스트 및 라인 번호를 즉시 캡처 (메뉴 열리면서 사라질 수 있으므로)
+        val extracted = net.ib.ixpert.ops.wuwagent.service.EditorContextService.extractCodeWithScope(editor, project)
+        val selectedText = if (extracted.isSelection) extracted.code else ""
+        
         // UI 통신망(브릿지) 인스턴스 획득
         val bridge = JcefBridge.getInstance(project)
         
         // 다형성을 지원하는 공통 컨텍스트 생성
-        val context = AgentContext(project, editor, "")
+        // selectedText가 있으면 textBody에 전달하여 Agent가 활용할 수 있도록 함
+        val context = AgentContext(project, editor, selectedText, extracted.startLine, extracted.endLine)
 
         // Agent 실행 (에이전트로부터 받는 청크를 브릿지로 즉시 전달)
         val agent = ExplainAgent()
@@ -30,7 +35,7 @@ class ExplainAction : AnAction() {
 
         // 🛎 즉시 자리 만들기 (로딩 표시 유도)
         ApplicationManager.getApplication().invokeLater {
-            bridge.sendMessage("explain_start", "🔍 코드를 분석하고 있습니다...", messageId)
+            bridge.sendMessage("explain_start", "🔍 코드 구조를 분석하고 있습니다...", messageId)
         }
 
         agent.execute(

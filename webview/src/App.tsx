@@ -260,7 +260,7 @@ const MessageItem = ({ msg }: { msg: Message }) => {
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
         {msg.content && (
-          <div className="markdown-body">
+          <div className="markdown-body" style={{ maxWidth: '100%', overflowX: 'hidden' }}>
             <Markdown 
               remarkPlugins={[remarkGfm]} 
               rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}

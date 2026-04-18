@@ -1,4 +1,4 @@
-﻿// analysis/CodeAnalysisPipeline.kt
+// analysis/CodeAnalysisPipeline.kt
 package net.ib.ixpert.ops.wuwagent.service.analysis
 
 import com.intellij.openapi.diagnostic.Logger
@@ -41,7 +41,12 @@ class CodeAnalysisPipeline {
         val baseStructure = tryExtractWithBestMethod(input, langId)
 
         // 2단계: Thymeleaf 감지 및 보강
-        val enriched = enrichWithThymeleaf(input.code, langId, baseStructure)
+        var enriched = enrichWithThymeleaf(input.code, langId, baseStructure)
+
+        // 3단계: 부분 선택 시 구조 필터링 (선택 영역과 겹치는 심볼/클래스만 유지)
+        if (input.isPartial && input.startLine != null && input.endLine != null) {
+            enriched = filterStructureByRange(enriched, input.startLine, input.endLine)
+        }
 
         log.info(
             "구조 추출 완료: method=${enriched.extractionMethod.displayName}, " +
@@ -50,6 +55,31 @@ class CodeAnalysisPipeline {
         )
 
         return enriched
+    }
+
+    private fun filterStructureByRange(
+        structure: ExtractedStructure,
+        startLine: Int,
+        endLine: Int
+    ): ExtractedStructure {
+        val filteredSymbols = structure.symbols.filter { sym ->
+            // 교집합이 있는지 확인 (sym 영역이 선택 영역과 겹치는가)
+            val symStart = sym.startLine
+            val symEnd = sym.endLine
+            !(symEnd < startLine || symStart > endLine)
+        }
+
+        val filteredClasses = structure.classes.filter { cls ->
+            val clsLine = cls.line
+            clsLine in startLine..endLine
+        }
+        
+        // 원문은 선택된 코드 자체로 교체 (선택 부분 분석을 위해)
+        return structure.copy(
+            symbols = filteredSymbols,
+            classes = filteredClasses,
+            rawCode = null // rawCode는 StructureFormatter에서 선택코드가 주입되도록 변경할 예정이므로 일단 null
+        )
     }
 
     /**

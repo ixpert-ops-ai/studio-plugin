@@ -9,7 +9,9 @@ import com.intellij.openapi.project.Project
 data class AgentContext(
     val project: Project,
     val editor: Editor? = null,
-    val payloadText: String = ""
+    val payloadText: String = "",
+    val startLine: Int? = null,
+    val endLine: Int? = null
 )
 
 interface WuwAgent {
