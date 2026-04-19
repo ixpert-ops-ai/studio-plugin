@@ -27,6 +27,8 @@ class ReviewAction : AnAction() {
 
         val bridge = JcefBridge.getInstance(project)
         val messageId = "task_${System.currentTimeMillis()}"
+        val fileName = editor.virtualFile?.name ?: ""
+        val hasSelection = editor.selectionModel.hasSelection()
 
         // 리뷰 요청 텍스트 (라우터가 intent 분석 후 ReviewPipeline으로 실행)
         val reviewRequest = "/review 선택된 코드를 검토하고 개선 사항을 제안해주세요."
@@ -37,6 +39,7 @@ class ReviewAction : AnAction() {
         }
 
         val stepNotiIdx = intArrayOf(0)
+        var reviewHeaderSent = false
         val onStepStart = { stepLabel: String ->
             logger.info("ReviewAction: Step 시작 → $stepLabel")
             val notiId = "${messageId}_noti_${stepNotiIdx[0]}"
@@ -44,6 +47,11 @@ class ReviewAction : AnAction() {
             ApplicationManager.getApplication().invokeLater {
                 bridge.sendMessage("step_noti", stepLabel, notiId, mapOf("status" to "started"))
                 bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
+                if (!reviewHeaderSent) {
+                    reviewHeaderSent = true
+                    val scopeText = if (hasSelection) "선택 영역" else "전체 파일"
+                    bridge.sendMessageChunk(messageId, "### 🔍 리뷰 대상: `$fileName` ($scopeText)\n\n")
+                }
             }
         }
 
@@ -59,50 +67,47 @@ class ReviewAction : AnAction() {
                 )
             }
 
-            when {
-                isApplyable && result.isSuccess -> {
-                    val codeMessageId = "${messageId}_code"
-                    ApplicationManager.getApplication().invokeLater {
-                        bridge.sendMessage(
-                            subType = "task_code",
-                            content = "",
-                            messageId = codeMessageId,
-                            meta = mapOf(
-                                "stepLabel" to stepLabel,
-                                "applyable" to "true",
-                                "originalCode" to result.originalCode.orEmpty(),
-                                "modifiedCode" to result.modifiedCode.orEmpty(),
-                                "extractedCode" to result.extractedCode,
-                                "applyScope" to result.applyScope,
-                                "isSuccess" to "true"
-                            )
+            if (isApplyable && result.isSuccess) {
+                val codeMessageId = "${messageId}_code"
+                ApplicationManager.getApplication().invokeLater {
+                    bridge.sendMessage(
+                        subType = "task_code",
+                        content = "",
+                        messageId = codeMessageId,
+                        meta = mapOf(
+                            "stepLabel" to stepLabel,
+                            "applyable" to "true",
+                            "originalCode" to result.originalCode.orEmpty(),
+                            "modifiedCode" to result.modifiedCode.orEmpty(),
+                            "extractedCode" to result.extractedCode,
+                            "applyScope" to result.applyScope,
+                            "isSuccess" to "true"
                         )
-                    }
+                    )
                 }
-                isApplyable && !result.isSuccess -> {
-                    val errMessageId = "${messageId}_err"
-                    ApplicationManager.getApplication().invokeLater {
-                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
-                        bridge.sendMessage("task_start", "", errMessageId)
-                        bridge.sendMessage("error", result.llmResponse, errMessageId)
-                    }
+            } else {
+                val fileLabel = when {
+                    result.applyScope == "선택 영역" -> "`$fileName` (선택 영역)"
+                    result.applyScope == "전체 파일" -> "`$fileName` (전체 파일)"
+                    result.applyScope.isNotBlank()   -> "`${result.applyScope}`"
+                    fileName.isNotBlank()            -> "`$fileName`"
+                    else -> ""
                 }
-                else -> {
-                    val displayContent = result.llmResponse
-                        .replace(Regex("```[\\w]*\\n?[\\s\\S]*?```"), "")
-                        .trim()
-                    ApplicationManager.getApplication().invokeLater {
-                        bridge.sendMessage(
-                            subType = "task_step",
-                            content = displayContent,
-                            messageId = messageId,
-                            meta = mapOf(
-                                "stepLabel" to stepLabel,
-                                "applyable" to "false",
-                                "isSuccess" to result.isSuccess.toString()
-                            )
+                val header = if (fileLabel.isNotBlank()) "### 🔍 리뷰 대상: $fileLabel\n\n" else ""
+                val displayContent = header + result.llmResponse
+                    .replace(Regex("```[\\w]*\\n?[\\s\\S]*?```"), "")
+                    .trim()
+                ApplicationManager.getApplication().invokeLater {
+                    bridge.sendMessage(
+                        subType = "task_step",
+                        content = displayContent,
+                        messageId = messageId,
+                        meta = mapOf(
+                            "stepLabel" to stepLabel,
+                            "applyable" to "false",
+                            "isSuccess" to result.isSuccess.toString()
                         )
-                    }
+                    )
                 }
             }
         }

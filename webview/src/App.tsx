@@ -490,24 +490,24 @@ function App() {
                 break;
               case 'task_progress':
                 currentStatus = data.content;
-                isLoading = true;
+                // 이미 스트리밍 내용이 있으면 인라인 로딩 숨김 (step_noti가 진행 상태 담당)
+                isLoading = existing.content.trim() === '';
                 isStreaming = false;
                 break;
               case 'task_step':
                 if (data.applyable === 'true') {
                   // 개선 Step: 코드 카드 데이터 설정 (content는 건드리지 않음)
-                  isLoading = true;
+                  isLoading = false;
                   isStreaming = false;
                   currentStatus = undefined;
                 } else {
                   // 분석 Step: 스트리밍 여부로 경로 구분
                   if (existing.isStreaming) {
                     // 스트리밍 완료 후 온 task_step
-                    // → data.content(디버그 줄 포함 전체 텍스트)로 교체
-                    newContent = data.content || existing.content;
+                    // → 이미 헤더+전체 내용이 청크로 쌓여 있으므로 기존 content 유지
+                    newContent = existing.content;
                   } else if (data.content) {
                     // 스트리밍 없이 온 task_step (fallback)
-                    // → data.content 그대로 사용
                     newContent = data.content;
                   }
                   // isStreaming → false: 로딩 스피너 종료, Copy/Save 버튼 활성화
@@ -909,11 +909,13 @@ function App() {
           />
           {messages.some(m => m.isLoading || m.isStreaming) ? (
             <button className="btn-circle stop" onClick={() => {
-              setMessages(prev => prev.map(m =>
-                (m.isLoading || m.isStreaming)
-                  ? { ...m, isLoading: false, isStreaming: false, currentStatus: undefined }
-                  : m
-              ));
+              setMessages(prev => prev.map(m => {
+                if (m.isLoading || m.isStreaming)
+                  return { ...m, isLoading: false, isStreaming: false, currentStatus: undefined };
+                if (m.subType === 'step_noti' && m.stepNotiStatus === 'started')
+                  return { ...m, stepNotiStatus: 'failed' as const };
+                return m;
+              }));
               window.sendToIde?.(JSON.stringify({ command: '/cancel' }));
             }}>
               <Square size={14} fill="currentColor" />
