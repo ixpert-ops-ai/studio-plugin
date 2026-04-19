@@ -466,9 +466,33 @@ class WebviewActionRouter(private val project: Project) {
                     val baseUrl = payload["baseUrl"] ?: settings.baseUrl
                     val apiKey = payload["apiKey"] ?: settings.apiKey
                     logger.info("Router: /fetchModels 실행 (baseUrl=$baseUrl)")
-                    net.ib.ixpert.ops.wuwagent.service.WuwLlmService.fetchModels(null, baseUrl, apiKey) { models ->
-                        // 조회 성공 시 WebView로 다시 전달하거나 로그만 남김 (현재는 네이티브 팝업이 주 목적)
-                        logger.info("Router: Models fetched successfully: $models")
+                    
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        val models = net.ib.ixpert.ops.wuwagent.agent.SettingsAgent.fetchModelsSilent(baseUrl, apiKey)
+                        ApplicationManager.getApplication().invokeLater {
+                            val bridge = JcefBridge.getInstance(project)
+                            if (models != null) {
+                                bridge.sendMessage("fetched_models", models.joinToString(","))
+                            } else {
+                                bridge.sendMessage("fetched_models_error", "모델 조회 실패")
+                            }
+                        }
+                    }
+                }
+
+                // ── Change Model: 즉시 모델명 변경 ──────────────
+                "/changeModel" -> {
+                    val targetModel = payload["model"]
+                    if (targetModel.isNullOrBlank()) {
+                        bridge.sendMessage("fetched_models_error", "변경할 모델명이 없습니다.")
+                        return@invokeLater
+                    }
+                    val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+                    settings.model = targetModel
+                    logger.info("Router: 모델 변경 성공 → $targetModel")
+
+                    com.intellij.openapi.project.ProjectManager.getInstance().openProjects.forEach { p ->
+                        net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(p).sendMessage("selected_model", targetModel)
                     }
                 }
 

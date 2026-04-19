@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Settings, Edit, Square, Terminal, Send } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -325,13 +325,21 @@ const MessageItem = ({ msg }: { msg: Message }) => {
 // ─────────────────────────────────────────────
 function App() {
   const [messages, setMessages] = useState<Message[]>([{
-    id: '1', role: 'ai', content: '무엇을 도와드릴까요? (/explain, /chat, /task 등을 지원합니다.)'
+    id: '1', role: 'ai', content: '무엇을 도와드릴까요?'
   }]);
   const [inputText, setInputText] = useState('');
   const [selectedModel, setSelectedModel] = useState<string>('Loading...');
   const chatListRef = useRef<HTMLDivElement>(null);
   const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적
   const isComposing = useRef(false); // 한글 IME composition 상태 추적 (JCEF 자모 분리 방지)
+
+  // 슬래시 커맨드 팝업을 위한 상태
+  const [showCommandPopup, setShowCommandPopup] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [modelsError, setModelsError] = useState('');
+  const [popupSelectedIndex, setPopupSelectedIndex] = useState(0);
+  const commandPopupRef = useRef<HTMLDivElement>(null);
 
   // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화
   useEffect(() => {
@@ -343,6 +351,19 @@ function App() {
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
   }, []);
+
+  // 외부 클릭 시 팝업 닫기
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (commandPopupRef.current && !commandPopupRef.current.contains(event.target as Node)) {
+        setShowCommandPopup(false);
+      }
+    };
+    if (showCommandPopup) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showCommandPopup]);
 
   // 메시지 변경 시 하단 근처인 경우에만 자동 스크롤
   useEffect(() => {
@@ -358,6 +379,20 @@ function App() {
 
       if (data.subType === 'selected_model') {
         setSelectedModel(data.content);
+        return;
+      }
+
+      if (data.subType === 'fetched_models') {
+        const modelsArray = data.content ? data.content.split(',') : [];
+        setFetchedModels(modelsArray.filter((m: string) => m.trim() !== ''));
+        setIsFetchingModels(false);
+        setModelsError('');
+        return;
+      }
+
+      if (data.subType === 'fetched_models_error') {
+        setIsFetchingModels(false);
+        setModelsError(data.content || "모델 조회 실패");
         return;
       }
 
@@ -581,7 +616,78 @@ function App() {
     if (!text || !window.sendToIde) return;
     setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text }]);
     setInputText('');
+    setShowCommandPopup(false);
     window.sendToIde(JSON.stringify({ command: text.startsWith('/') ? text.split(' ')[0] : '/task', text }));
+  };
+
+  // 팝업 아이템 로직 (모델 및 명령어 조합)
+  const popupItems = useMemo(() => {
+    const items: Array<{type: string, cmd: string, desc?: string, index: number}> = [];
+    let idx = 0;
+    fetchedModels.forEach(m => items.push({ type: 'model', cmd: m, index: idx++ }));
+    const cmds = [
+      { cmd: '/explain', desc: '코드를 설명해줘' },
+      { cmd: '/review', desc: '코드를 리뷰해줘' },
+      { cmd: '/improve', desc: '코드를 개선해줘' },
+      { cmd: '/test', desc: '테스트 코드를 생성해줘' },
+      { cmd: '/analyze', desc: '영향도를 분석해줘' },
+      { cmd: '/query', desc: '쿼리를 검증해줘' }
+    ];
+    cmds.forEach(c => items.push({ type: 'cmd', cmd: c.cmd, desc: c.desc, index: idx++ }));
+    return items;
+  }, [fetchedModels]);
+
+  const applyPopupSelection = (item: {type: string, cmd: string}) => {
+    if (item.type === 'model') {
+      window.sendToIde?.(JSON.stringify({ command: '/changeModel', model: item.cmd }));
+      setShowCommandPopup(false);
+      return;
+    }
+
+    const newText = item.cmd + ' ';
+    setInputText(newText);
+    setShowCommandPopup(false);
+    
+    setTimeout(() => {
+      const el = document.querySelector('.textarea-wrapper textarea') as HTMLTextAreaElement;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(newText.length, newText.length);
+      }
+    }, 10);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showCommandPopup) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setPopupSelectedIndex(prev => (prev + 1) % popupItems.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setPopupSelectedIndex(prev => (prev - 1 + popupItems.length) % popupItems.length);
+        return;
+      }
+      if (e.key === 'Enter' && !isComposing.current) {
+        e.preventDefault();
+        const selected = popupItems[popupSelectedIndex];
+        if (selected) {
+          applyPopupSelection(selected);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowCommandPopup(false);
+        return;
+      }
+    }
+    // 기본 엔터 처리
+    if (e.key === 'Enter' && !e.shiftKey && !isComposing.current) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   return (
@@ -604,26 +710,82 @@ function App() {
       <div className="chat-input-area">
         <div className="input-toolbar">
           <button className="toolbar-btn">@ 파일 첨부</button>
-          <button className="toolbar-btn">/ 명령어</button>
+          <button 
+            className="toolbar-btn" 
+            onClick={() => {
+              setShowCommandPopup(!showCommandPopup);
+              if (!showCommandPopup && fetchedModels.length === 0) {
+                setIsFetchingModels(true);
+                window.sendToIde?.(JSON.stringify({ command: '/fetchModels' }));
+              }
+            }}
+          >
+            / 명령어
+          </button>
         </div>
         <div className="textarea-wrapper">
+          {showCommandPopup && (
+            <div className="command-popup" ref={commandPopupRef}>
+              <div className="popup-section">
+                <div className="popup-section-title">모델 변경</div>
+                {isFetchingModels ? (
+                  <div className="popup-loading">로딩 중...</div>
+                ) : modelsError ? (
+                  <div className="popup-loading error-text">{modelsError}</div>
+                ) : (
+                  popupItems.filter(item => item.type === 'model').map(item => (
+                    <button 
+                      key={item.cmd} 
+                      className={`popup-item ${popupSelectedIndex === item.index ? 'selected' : ''}`}
+                      onClick={() => applyPopupSelection(item)}
+                      onMouseEnter={() => setPopupSelectedIndex(item.index)}
+                    >
+                      <span className="popup-item-command">{item.cmd}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="popup-section">
+                <div className="popup-section-title">명령어</div>
+                {popupItems.filter(item => item.type === 'cmd').map(item => (
+                  <button 
+                    key={item.cmd} 
+                    className={`popup-item ${popupSelectedIndex === item.index ? 'selected' : ''}`}
+                    onClick={() => applyPopupSelection(item)}
+                    onMouseEnter={() => setPopupSelectedIndex(item.index)}
+                  >
+                    <span className="popup-item-command">{item.cmd}</span>
+                    <span className="popup-item-desc">{item.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <textarea
-            placeholder="Ask me what U want..."
+            placeholder="무엇을 도와드릴까요?"
             value={inputText}
-            onChange={e => setInputText(e.target.value)}
+            onChange={e => {
+              const val = e.target.value;
+              setInputText(val);
+              if (val === '/' || val.endsWith(' /') || val.endsWith('\n/')) {
+                setShowCommandPopup(true);
+                setPopupSelectedIndex(0);
+                if (fetchedModels.length === 0) {
+                  setIsFetchingModels(true);
+                  setModelsError('');
+                  window.sendToIde?.(JSON.stringify({ command: '/fetchModels' }));
+                }
+              } else if (!val.includes('/')) {
+                setShowCommandPopup(false);
+              }
+            }}
             onCompositionStart={() => { isComposing.current = true; }}
             onCompositionEnd={e => {
               isComposing.current = false;
               // composition 종료 시점에 최종 조합 완료 값을 state에 반영
               setInputText((e.target as HTMLTextAreaElement).value);
             }}
-            onKeyDown={e => {
-              // composition 진행 중 Enter는 무시 (한글 확정 전 전송 방지)
-              if (e.key === 'Enter' && !e.shiftKey && !isComposing.current) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
+            onKeyDown={handleKeyDown}
           />
           {messages.some(m => m.isLoading || m.isStreaming) ? (
             <button className="btn-circle stop" onClick={() => window.sendToIde?.(JSON.stringify({ command: '/cancel' }))}>

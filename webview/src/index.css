@@ -1,7 +1,7 @@
 :root {
   --bg-main: #2b2b2b;
   --bg-sidebar: #3c3f41;
-  --bg-bubble-user: #3a5b8a;
+  --bg-bubble-user: #3d59a1;
   --bg-bubble-ai: #3c3f41;
   --bg-tool: #2b2b2b;
   --bg-card-action: #3c3f41;
@@ -11,7 +11,7 @@
   
   --text-main: #cccccc;
   --text-muted: #888888;
-  --text-blue: #7eb8f7;
+  --text-blue: #7aa2f7;
   --text-success: #6abf69;
   
   --accent-color: #4b6eaf;
@@ -91,7 +91,7 @@ body {
   background-color: var(--bg-bubble-user);
   color: #fff;
   padding: 10px 14px;
-  border-radius: var(--radius-bubble);
+  border-radius: 12px;
   max-width: 85%;
   word-wrap: break-word;
   line-height: 1.5;
@@ -177,8 +177,8 @@ body {
 .msg-ai {
   align-self: flex-start;
   background-color: var(--bg-bubble-ai);
-  border-radius: var(--radius-bubble);
-  padding: 14px;
+  border-radius: 12px;
+  padding: 10px 14px;
   max-width: 90%;
   width: fit-content;
   min-width: 300px;
@@ -187,19 +187,18 @@ body {
 }
 
 .msg-ai.analysis {
-  border-left: 4px solid var(--text-muted);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .msg-ai.improvement {
-  border-left: 4px solid var(--accent-color);
-  background: rgba(75, 110, 175, 0.05);
+  background: rgba(75, 110, 175, 0.08);
+  border-color: rgba(75, 110, 175, 0.3);
 }
 
 .msg-ai.error {
-  border-left: 4px solid var(--danger-color);
-  background: rgba(207, 102, 121, 0.05);
-  border: 1px solid var(--danger-color);
+  background: rgba(207, 102, 121, 0.08);
+  border-color: rgba(207, 102, 121, 0.3);
 }
 
 
@@ -369,8 +368,8 @@ body {
 }
 
 .textarea-wrapper:focus-within {
-  border-color: #7c6af7; /* purple outline */
-  box-shadow: 0 0 0 2px rgba(124, 106, 247, 0.15); /* purple glow */
+  border-color: var(--text-blue);
+  box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.15); /* #7aa2f7 glow */
 }
 
 .textarea-wrapper textarea {
@@ -644,8 +643,8 @@ body {
 
 /* ─── 테스트 결과 말풍선 스타일 ─── */
 .msg-ai.test-result {
-  border-left: 4px solid #4ec9b0;
-  background: rgba(78, 201, 176, 0.05);
+  background: rgba(78, 201, 176, 0.08);
+  border-color: rgba(78, 201, 176, 0.3);
 }
 
 .msg-ai.test-result .msg-ai-header {
@@ -672,4 +671,77 @@ body {
 
 .btn-create-file:hover {
   background: rgba(78, 201, 176, 0.12) !important;
+}
+
+/* ─── Slash Command 팝업 스타일 ─── */
+.command-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: 300px;
+  background-color: #1a1b2e;
+  border: 1px solid #4a4d4f;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  margin-bottom: 8px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+
+.popup-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.popup-section:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.popup-section-title {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.popup-item {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #e0e0e0;
+  background: transparent;
+  border: none;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.popup-item:hover, .popup-item.selected {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.popup-item-command {
+  font-weight: 600;
+  color: var(--text-blue);
+  min-width: 70px;
+}
+
+.popup-item-desc {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.popup-loading {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
 }
