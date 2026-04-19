@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Settings, Edit, Square, Terminal, Send } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -325,13 +325,28 @@ const MessageItem = ({ msg }: { msg: Message }) => {
 // ─────────────────────────────────────────────
 function App() {
   const [messages, setMessages] = useState<Message[]>([{
-    id: '1', role: 'ai', content: '무엇을 도와드릴까요? (/explain, /chat, /task 등을 지원합니다.)'
+    id: '1', role: 'ai', content: '무엇을 도와드릴까요?'
   }]);
   const [inputText, setInputText] = useState('');
   const [selectedModel, setSelectedModel] = useState<string>('Loading...');
   const chatListRef = useRef<HTMLDivElement>(null);
   const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적
   const isComposing = useRef(false); // 한글 IME composition 상태 추적 (JCEF 자모 분리 방지)
+
+  // 슬래시 커맨드 팝업을 위한 상태
+  const [showCommandPopup, setShowCommandPopup] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [modelsError, setModelsError] = useState('');
+  const [popupSelectedIndex, setPopupSelectedIndex] = useState(0);
+  const commandPopupRef = useRef<HTMLDivElement>(null);
+
+  // @ 파일 팝업을 위한 상태
+  const [showFilePopup, setShowFilePopup] = useState(false);
+  const [openTabs, setOpenTabs] = useState<Array<{name: string, path: string}>>([]);
+  const [selectedFiles, setSelectedFiles] = useState<Array<{name: string, path: string}>>([]);
+  const [isLoadingTabs, setIsLoadingTabs] = useState(false);
+  const filePopupRef = useRef<HTMLDivElement>(null);
 
   // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화
   useEffect(() => {
@@ -343,6 +358,31 @@ function App() {
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
   }, []);
+
+  // 외부 클릭 시 팝업 닫기
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (commandPopupRef.current && !commandPopupRef.current.contains(event.target as Node)) {
+        setShowCommandPopup(false);
+      }
+    };
+    if (showCommandPopup) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showCommandPopup]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (filePopupRef.current && !filePopupRef.current.contains(event.target as Node)) {
+        setShowFilePopup(false);
+      }
+    };
+    if (showFilePopup) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showFilePopup]);
 
   // 메시지 변경 시 하단 근처인 경우에만 자동 스크롤
   useEffect(() => {
@@ -358,6 +398,30 @@ function App() {
 
       if (data.subType === 'selected_model') {
         setSelectedModel(data.content);
+        return;
+      }
+
+      if (data.subType === 'fetched_models') {
+        const modelsArray = data.content ? data.content.split(',') : [];
+        setFetchedModels(modelsArray.filter((m: string) => m.trim() !== ''));
+        setIsFetchingModels(false);
+        setModelsError('');
+        return;
+      }
+
+      if (data.subType === 'fetched_models_error') {
+        setIsFetchingModels(false);
+        setModelsError(data.content || "모델 조회 실패");
+        return;
+      }
+
+      if (data.subType === 'openTabs') {
+        try {
+          setOpenTabs(JSON.parse(data.content));
+        } catch {
+          setOpenTabs([]);
+        }
+        setIsLoadingTabs(false);
         return;
       }
 
@@ -427,6 +491,7 @@ function App() {
               case 'task_progress':
                 currentStatus = data.content;
                 isLoading = true;
+                isStreaming = false;
                 break;
               case 'task_step':
                 if (data.applyable === 'true') {
@@ -435,9 +500,19 @@ function App() {
                   isStreaming = false;
                   currentStatus = undefined;
                 } else {
-                  // 분석 Step: content와 isStreaming은 기존 상태 그대로 유지
-                  // (chunk로 쌓인 content를 덮어쓰지 않고, isStreaming도 변경하지 않음)
-                  isLoading = true;
+                  // 분석 Step: 스트리밍 여부로 경로 구분
+                  if (existing.isStreaming) {
+                    // 스트리밍 완료 후 온 task_step
+                    // → data.content(디버그 줄 포함 전체 텍스트)로 교체
+                    newContent = data.content || existing.content;
+                  } else if (data.content) {
+                    // 스트리밍 없이 온 task_step (fallback)
+                    // → data.content 그대로 사용
+                    newContent = data.content;
+                  }
+                  // isStreaming → false: 로딩 스피너 종료, Copy/Save 버튼 활성화
+                  isLoading = false;
+                  isStreaming = false;
                   currentStatus = undefined;
                 }
                 break;
@@ -569,9 +644,129 @@ function App() {
   const handleSend = () => {
     const text = inputText.trim();
     if (!text || !window.sendToIde) return;
-    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text }]);
+    const filesToSend = [...selectedFiles];
+    const fileLabels = filesToSend.map(f => `📎 ${f.name}`).join('  ');
+    const displayText = fileLabels ? `${text}\n${fileLabels}` : text;
+    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: displayText }]);
     setInputText('');
-    window.sendToIde(JSON.stringify({ command: text.startsWith('/') ? text.split(' ')[0] : '/task', text }));
+    setShowCommandPopup(false);
+    setShowFilePopup(false);
+    setSelectedFiles([]);
+    let command = '/chat';
+    let payload = text;
+    if (text === '/explain' || text.startsWith('/explain ')) {
+      command = '/explain';
+      payload = text.startsWith('/explain ') ? text.slice(9).trim() : '';
+    } else if (text === '/review' || text.startsWith('/review ')) {
+      command = '/task';
+      payload = '/review 선택된 코드를 검토하고 개선 사항을 제안해주세요.';
+    } else if (text === '/improve' || text.startsWith('/improve ')) {
+      command = '/task';
+      payload = '코드를 개선해주세요.';
+    } else if (text === '/analyze' || text.startsWith('/analyze ')) {
+      command = '/task';
+      payload = '영향도를 분석해주세요.';
+    } else if (text === '/query' || text.startsWith('/query ')) {
+      command = '/task';
+      payload = '쿼리를 검증해주세요.';
+    } else if (text === '/test' || text.startsWith('/test ')) {
+      command = '/task';
+      payload = '테스트 코드를 생성해주세요.';
+    }
+    window.sendToIde(JSON.stringify({
+      command,
+      text: payload,
+      ...(filesToSend.length > 0 ? { files: JSON.stringify(filesToSend) } : {})
+    }));
+  };
+
+  // 팝업 아이템 로직 (모델 및 명령어 조합)
+  const popupItems = useMemo(() => {
+    const items: Array<{type: string, cmd: string, desc?: string, index: number}> = [];
+    let idx = 0;
+    fetchedModels.forEach(m => items.push({ type: 'model', cmd: m, index: idx++ }));
+    const cmds = [
+      { cmd: '/explain', desc: '코드를 설명해줘' },
+      { cmd: '/review', desc: '코드를 리뷰해줘' },
+      { cmd: '/improve', desc: '코드를 개선해줘' },
+      { cmd: '/test', desc: '테스트 코드를 생성해줘' },
+      { cmd: '/analyze', desc: '영향도를 분석해줘' },
+      { cmd: '/query', desc: '쿼리를 검증해줘' }
+    ];
+    cmds.forEach(c => items.push({ type: 'cmd', cmd: c.cmd, desc: c.desc, index: idx++ }));
+    return items;
+  }, [fetchedModels]);
+
+  const applyPopupSelection = (item: {type: string, cmd: string}) => {
+    if (item.type === 'model') {
+      window.sendToIde?.(JSON.stringify({ command: '/changeModel', model: item.cmd }));
+      setShowCommandPopup(false);
+      return;
+    }
+
+    const newText = item.cmd + ' ';
+    setInputText(newText);
+    setShowCommandPopup(false);
+    
+    setTimeout(() => {
+      const el = document.querySelector('.textarea-wrapper textarea') as HTMLTextAreaElement;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(newText.length, newText.length);
+      }
+    }, 10);
+  };
+
+  const handleFileButtonClick = () => {
+    const opening = !showFilePopup;
+    setShowFilePopup(opening);
+    if (opening) {
+      setShowCommandPopup(false);
+      setIsLoadingTabs(true);
+      window.sendToIde?.(JSON.stringify({ command: '/openTabs' }));
+    }
+  };
+
+  const toggleFileSelection = (file: {name: string, path: string}) => {
+    setSelectedFiles(prev => {
+      const isSelected = prev.some(f => f.path === file.path);
+      if (isSelected) return prev.filter(f => f.path !== file.path);
+      if (prev.length >= 3) return prev;
+      return [...prev, file];
+    });
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showCommandPopup) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setPopupSelectedIndex(prev => (prev + 1) % popupItems.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setPopupSelectedIndex(prev => (prev - 1 + popupItems.length) % popupItems.length);
+        return;
+      }
+      if (e.key === 'Enter' && !isComposing.current) {
+        e.preventDefault();
+        const selected = popupItems[popupSelectedIndex];
+        if (selected) {
+          applyPopupSelection(selected);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowCommandPopup(false);
+        return;
+      }
+    }
+    // 기본 엔터 처리
+    if (e.key === 'Enter' && !e.shiftKey && !isComposing.current) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   return (
@@ -593,30 +788,134 @@ function App() {
 
       <div className="chat-input-area">
         <div className="input-toolbar">
-          <button className="toolbar-btn">@ 파일 첨부</button>
-          <button className="toolbar-btn">/ 명령어</button>
+          <button className="toolbar-btn" onClick={handleFileButtonClick}>@ 파일</button>
+          <button 
+            className="toolbar-btn" 
+            onClick={() => {
+              setShowCommandPopup(!showCommandPopup);
+              if (!showCommandPopup && fetchedModels.length === 0) {
+                setIsFetchingModels(true);
+                window.sendToIde?.(JSON.stringify({ command: '/fetchModels' }));
+              }
+            }}
+          >
+            / 명령어
+          </button>
         </div>
+        {selectedFiles.length > 0 && (
+          <div className="selected-files-chips">
+            {selectedFiles.map(f => (
+              <span key={f.path} className="file-chip">
+                📎 {f.name}
+                <button className="chip-remove" onClick={() => toggleFileSelection(f)}>×</button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="textarea-wrapper">
+          {showFilePopup && (
+            <div className="command-popup" ref={filePopupRef}>
+              <div className="popup-section">
+                <div className="popup-section-title">
+                  열린 파일{selectedFiles.length > 0 ? ` (${selectedFiles.length}/3 선택됨)` : ''}
+                </div>
+                {isLoadingTabs ? (
+                  <div className="popup-loading">로딩 중...</div>
+                ) : openTabs.length === 0 ? (
+                  <div className="popup-loading">열린 파일이 없습니다.</div>
+                ) : (
+                  openTabs.map(tab => {
+                    const isSelected = selectedFiles.some(f => f.path === tab.path);
+                    const isDisabled = !isSelected && selectedFiles.length >= 3;
+                    return (
+                      <button
+                        key={tab.path}
+                        className={`popup-item ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}`}
+                        onClick={() => { if (!isDisabled) toggleFileSelection(tab); }}
+                      >
+                        <span className="popup-item-command">📄 {tab.name}</span>
+                        <span className="popup-item-desc">
+                          {isSelected ? '✓ 선택됨' : isDisabled ? '최대 3개' : ''}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+          {showCommandPopup && (
+            <div className="command-popup" ref={commandPopupRef}>
+              <div className="popup-section">
+                <div className="popup-section-title">모델 변경</div>
+                {isFetchingModels ? (
+                  <div className="popup-loading">로딩 중...</div>
+                ) : modelsError ? (
+                  <div className="popup-loading error-text">{modelsError}</div>
+                ) : (
+                  popupItems.filter(item => item.type === 'model').map(item => (
+                    <button 
+                      key={item.cmd} 
+                      className={`popup-item ${popupSelectedIndex === item.index ? 'selected' : ''}`}
+                      onClick={() => applyPopupSelection(item)}
+                      onMouseEnter={() => setPopupSelectedIndex(item.index)}
+                    >
+                      <span className="popup-item-command">{item.cmd}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="popup-section">
+                <div className="popup-section-title">명령어</div>
+                {popupItems.filter(item => item.type === 'cmd').map(item => (
+                  <button 
+                    key={item.cmd} 
+                    className={`popup-item ${popupSelectedIndex === item.index ? 'selected' : ''}`}
+                    onClick={() => applyPopupSelection(item)}
+                    onMouseEnter={() => setPopupSelectedIndex(item.index)}
+                  >
+                    <span className="popup-item-command">{item.cmd}</span>
+                    <span className="popup-item-desc">{item.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <textarea
-            placeholder="Ask me what U want..."
+            placeholder="무엇을 도와드릴까요?"
             value={inputText}
-            onChange={e => setInputText(e.target.value)}
+            onChange={e => {
+              const val = e.target.value;
+              setInputText(val);
+              if (val === '/' || val.endsWith(' /') || val.endsWith('\n/')) {
+                setShowCommandPopup(true);
+                setPopupSelectedIndex(0);
+                if (fetchedModels.length === 0) {
+                  setIsFetchingModels(true);
+                  setModelsError('');
+                  window.sendToIde?.(JSON.stringify({ command: '/fetchModels' }));
+                }
+              } else if (!val.includes('/')) {
+                setShowCommandPopup(false);
+              }
+            }}
             onCompositionStart={() => { isComposing.current = true; }}
             onCompositionEnd={e => {
               isComposing.current = false;
               // composition 종료 시점에 최종 조합 완료 값을 state에 반영
               setInputText((e.target as HTMLTextAreaElement).value);
             }}
-            onKeyDown={e => {
-              // composition 진행 중 Enter는 무시 (한글 확정 전 전송 방지)
-              if (e.key === 'Enter' && !e.shiftKey && !isComposing.current) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
+            onKeyDown={handleKeyDown}
           />
           {messages.some(m => m.isLoading || m.isStreaming) ? (
-            <button className="btn-circle stop" onClick={() => window.sendToIde?.(JSON.stringify({ command: '/cancel' }))}>
+            <button className="btn-circle stop" onClick={() => {
+              setMessages(prev => prev.map(m =>
+                (m.isLoading || m.isStreaming)
+                  ? { ...m, isLoading: false, isStreaming: false, currentStatus: undefined }
+                  : m
+              ));
+              window.sendToIde?.(JSON.stringify({ command: '/cancel' }));
+            }}>
               <Square size={14} fill="currentColor" />
             </button>
           ) : (

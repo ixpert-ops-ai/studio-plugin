@@ -65,6 +65,30 @@ class WebviewActionRouter(private val project: Project) {
         return "$testDir/${nameWithoutExt}$testSuffix"
     }
 
+    private fun buildAttachedFileContext(filesJson: String): String {
+        if (filesJson.isBlank()) return ""
+        return try {
+            val entries = Regex("""\{"name":"([^"]+)","path":"([^"]+)"\}""").findAll(filesJson)
+            val blocks = entries.mapNotNull { match ->
+                val name = match.groupValues[1]
+                val path = match.groupValues[2].replace("\\\\", "\\")
+                val vFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(path)
+                    ?: return@mapNotNull null
+                val content = ApplicationManager.getApplication().runReadAction(
+                    com.intellij.openapi.util.Computable {
+                        com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+                            .getDocument(vFile)?.text
+                    }
+                ) ?: return@mapNotNull null
+                "// 파일: $name\n```\n$content\n```"
+            }.toList()
+            if (blocks.isEmpty()) "" else "[첨부 파일]\n${blocks.joinToString("\n\n")}"
+        } catch (e: Exception) {
+            logger.warn("Router: 첨부 파일 읽기 실패", e)
+            ""
+        }
+    }
+
     fun handleCommand(command: String, payload: Map<String, String>) {
         ApplicationManager.getApplication().invokeLater {
             val bridge = JcefBridge.getInstance(project)
@@ -109,6 +133,17 @@ class WebviewActionRouter(private val project: Project) {
                     )
                 }
 
+                "/openTabs" -> {
+                    logger.info("Router: /openTabs 분기")
+                    val openFiles = FileEditorManager.getInstance(project).openFiles
+                    val jsonArray = openFiles.joinToString(separator = ",", prefix = "[", postfix = "]") { vFile ->
+                        val name = vFile.name.replace("\\", "\\\\").replace("\"", "\\\"")
+                        val path = vFile.path.replace("\\", "\\\\").replace("\"", "\\\"")
+                        """{"name":"$name","path":"$path"}"""
+                    }
+                    bridge.sendMessage("openTabs", jsonArray)
+                }
+
                 "/chat" -> {
                     logger.info("Router: /chat 분기")
                     val messageId = "msg_${System.currentTimeMillis()}"
@@ -142,8 +177,14 @@ class WebviewActionRouter(private val project: Project) {
                 // ── TaskAgent (오케스트레이터) ────────────────
                 "/task" -> {
                     logger.info("Router: /task 분기 → TaskAgent 시작")
+                    if (editor == null) {
+                        bridge.sendMessage("error", "활성화된 에디터가 없어 작업을 실행할 수 없습니다.")
+                        return@invokeLater
+                    }
                     val messageId = "task_${System.currentTimeMillis()}"
-                    val context = AgentContext(project, editor, textBody)
+                    val fileContext = buildAttachedFileContext(payload["files"] ?: "")
+                    val enhancedText = if (fileContext.isNotBlank()) "$textBody\n\n$fileContext" else textBody
+                    val context = AgentContext(project, editor, enhancedText)
 
                     // 🛎 즉시 시작 알림 (UI 스레드 큐로 보냄)
                     ApplicationManager.getApplication().invokeLater {
@@ -466,9 +507,33 @@ class WebviewActionRouter(private val project: Project) {
                     val baseUrl = payload["baseUrl"] ?: settings.baseUrl
                     val apiKey = payload["apiKey"] ?: settings.apiKey
                     logger.info("Router: /fetchModels 실행 (baseUrl=$baseUrl)")
-                    net.ib.ixpert.ops.wuwagent.service.WuwLlmService.fetchModels(null, baseUrl, apiKey) { models ->
-                        // 조회 성공 시 WebView로 다시 전달하거나 로그만 남김 (현재는 네이티브 팝업이 주 목적)
-                        logger.info("Router: Models fetched successfully: $models")
+                    
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        val models = net.ib.ixpert.ops.wuwagent.agent.SettingsAgent.fetchModelsSilent(baseUrl, apiKey)
+                        ApplicationManager.getApplication().invokeLater {
+                            val bridge = JcefBridge.getInstance(project)
+                            if (models != null) {
+                                bridge.sendMessage("fetched_models", models.joinToString(","))
+                            } else {
+                                bridge.sendMessage("fetched_models_error", "모델 조회 실패")
+                            }
+                        }
+                    }
+                }
+
+                // ── Change Model: 즉시 모델명 변경 ──────────────
+                "/changeModel" -> {
+                    val targetModel = payload["model"]
+                    if (targetModel.isNullOrBlank()) {
+                        bridge.sendMessage("fetched_models_error", "변경할 모델명이 없습니다.")
+                        return@invokeLater
+                    }
+                    val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+                    settings.model = targetModel
+                    logger.info("Router: 모델 변경 성공 → $targetModel")
+
+                    com.intellij.openapi.project.ProjectManager.getInstance().openProjects.forEach { p ->
+                        net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(p).sendMessage("selected_model", targetModel)
                     }
                 }
 
