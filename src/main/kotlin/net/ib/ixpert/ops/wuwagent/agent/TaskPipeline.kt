@@ -54,17 +54,88 @@ sealed class TaskPipeline {
         private val logger = Logger.getInstance(AgentStep::class.java)
 
         /**
-         * 부분 코드 여부 판단.
-         * 아래 조건 중 하나라도 만족하면 부분 코드로 간주한다.
-         * 1. 길이가 원본의 80% 미만
-         * 2. class 키워드가 없는데 fun 키워드는 있음 (함수 단위 응답)
+         * SEARCH 블록 앞뒤 빈 줄 정규화 (들여쓰기는 유지, 상하단 공백 줄만 제거).
          */
-        private fun isPartialCode(extracted: String, original: String): Boolean {
-            if (original.isBlank()) return false
-            val lengthRatio = extracted.length.toDouble() / original.length
-            val hasClass = extracted.contains(Regex("\\bclass\\b|\\bobject\\b|\\binterface\\b"))
-            val hasFun   = extracted.contains(Regex("\\bfun\\b"))
-            return lengthRatio < 0.8 || (!hasClass && hasFun)
+        private fun normalizeSrBlocks(response: String): String {
+            val pattern = Regex(
+                """<<<<<<< SEARCH\r?\n(.*?)\r?\n=======\r?\n(.*?)\r?\n>>>>>>> REPLACE""",
+                setOf(RegexOption.DOT_MATCHES_ALL)
+            )
+            return pattern.replace(response) { m ->
+                val search  = m.groupValues[1].trimStart('\n', '\r').trimEnd('\n', '\r')
+                val replace = m.groupValues[2]
+                "<<<<<<< SEARCH\n$search\n=======\n$replace\n>>>>>>> REPLACE"
+            }
+        }
+
+        /**
+         * 함수 시그니처 첫 줄로 위치를 찾아 블록 전체를 교체하는 부분 매칭 fallback.
+         */
+        private fun partialMatchApply(originalCode: String, llmResponse: String): String? {
+            val pattern = Regex(
+                """<<<<<<< SEARCH\r?\n(.*?)\r?\n=======\r?\n(.*?)\r?\n>>>>>>> REPLACE""",
+                setOf(RegexOption.DOT_MATCHES_ALL)
+            )
+            val blocks = pattern.findAll(llmResponse).toList()
+            if (blocks.isEmpty()) return null
+
+            var result = originalCode
+            var anyApplied = false
+
+            for (match in blocks) {
+                val searchBlock  = match.groupValues[1].trim()
+                val replaceBlock = match.groupValues[2]
+                val sigLine = searchBlock.lines().firstOrNull { it.isNotBlank() }?.trimEnd() ?: continue
+
+                val lines  = result.lines()
+                val sigIdx = lines.indexOfFirst { it.trimEnd() == sigLine }
+                if (sigIdx == -1) {
+                    logger.warn("partialMatchApply: 시그니처 매칭 실패 → '${sigLine.take(80)}'")
+                    continue
+                }
+
+                var blockStart = sigIdx
+                while (blockStart > 0 && lines[blockStart - 1].trim().startsWith("@")) blockStart--
+
+                var depth = 0; var braceFound = false; var blockEnd = sigIdx
+                outer@ for (i in sigIdx until lines.size) {
+                    for (ch in lines[i]) {
+                        when (ch) {
+                            '{' -> { depth++; braceFound = true }
+                            '}' -> { depth--; if (braceFound && depth == 0) { blockEnd = i; break@outer } }
+                        }
+                    }
+                }
+
+                result = (lines.subList(0, blockStart) + replaceBlock.lines() +
+                          lines.subList(blockEnd + 1, lines.size)).joinToString("\n")
+                anyApplied = true
+                logger.info("partialMatchApply: 부분 매칭 성공 → '${sigLine.take(80)}'")
+            }
+            return if (anyApplied) result else null
+        }
+
+        /**
+         * SEARCH/REPLACE 병합 3단계 전략:
+         * 1) 직접 매칭 → 2) SEARCH 블록 빈 줄 정규화 후 재시도 → 3) 시그니처 첫 줄 부분 매칭
+         */
+        private fun flexibleApplySearchReplace(originalCode: String, llmResponse: String): String? {
+            EditorApplyService.applySearchReplace(originalCode, llmResponse)?.let { return it }
+
+            val normalized = normalizeSrBlocks(llmResponse)
+            if (normalized != llmResponse) {
+                EditorApplyService.applySearchReplace(originalCode, normalized)?.let {
+                    logger.info("AgentStep[${label}] Search/Replace 정규화 후 매칭 성공")
+                    return it
+                }
+            }
+
+            partialMatchApply(originalCode, llmResponse)?.let {
+                logger.info("AgentStep[${label}] Search/Replace 부분 매칭 성공")
+                return it
+            }
+
+            return null
         }
 
         /**
@@ -143,8 +214,8 @@ sealed class TaskPipeline {
          * Improve step 전용 userMessage 조립.
          *
          * - FULL_FILE 또는 타깃 미지정: 전체 코드 전달
-         * - 특정 함수 목록: 해당 함수 블록만 추출하여 전달 (컨텍스트 대폭 절약)
-         *   → 병합(applySearchReplace)은 여전히 전체 originalCode 기준으로 수행
+         * - 특정 함수 목록: 해당 함수 블록만 추출하여 전달 (컨텍스트 절약)
+         *   → 병합(flexibleApplySearchReplace)은 여전히 전체 originalCode 기준으로 수행
          */
         private fun buildImproveUserMessage(prevAnalysis: String, code: String): String {
             val (isFullFile, functions) = parseImproveTargets(prevAnalysis)
@@ -351,8 +422,7 @@ sealed class TaskPipeline {
             var extractedCode = if (isErrorResponse) {
                 ""
             } else if (isImproveStep && originalCode.isNotBlank()) {
-                // Improve step: Search/Replace 병합 우선 시도 → 실패 시 기존 extractCodeBlock fallback
-                val merged = EditorApplyService.applySearchReplace(originalCode, llmResponse)
+                val merged = flexibleApplySearchReplace(originalCode, llmResponse)
                 if (merged != null) {
                     logger.info("AgentStep[${label}] Search/Replace 병합 성공 (길이=${merged.length})")
                     merged
@@ -365,43 +435,6 @@ sealed class TaskPipeline {
             }
 
             logger.warn("AgentStep[${label}] OUTPUT: llmResponse 길이=${llmResponse.length}, extractedCode 길이=${extractedCode.length}")
-            logger.warn("AgentStep[${label}] extractedCode 앞 300자: ${extractedCode.take(300)}")
-
-            // ── Improve step 전용: 부분 코드 감지 → 1회 재요청 ──────────────────
-            if (isImproveStep && !isErrorResponse && originalCode.isNotBlank() && extractedCode.isNotBlank()) {
-                val isPartial = isPartialCode(extractedCode, originalCode)
-                logger.warn("AgentStep[${label}] 부분코드 판단: $isPartial (original=${originalCode.length}, extracted=${extractedCode.length}, ratio=${"%.0f".format(extractedCode.length * 100.0 / originalCode.length)}%)")
-
-                if (isPartial) {
-                    logger.warn("AgentStep[${label}] ⚠️ 부분 코드 감지 → 전체 코드 강제 재요청 (1회)")
-                    val retryMessage = buildString {
-                        append(userMessage)
-                        appendLine()
-                        appendLine()
-                        append("반드시 전체 파일 단위의 코드를 반환하라. 일부 함수만 반환하면 실패로 간주한다.")
-                    }
-                    // 재요청은 스트리밍 없이 블로킹 호출 (UI 청크 중복 방지)
-                    val retryResponse = client.callChatApiStream(systemPrompt, retryMessage, null)
-                    val retryContent  = retryResponse?.message?.content ?: ""
-                    val retryIsError  = retryContent.startsWith("[오류]") || retryContent.startsWith("[Error]")
-
-                    if (!retryIsError && retryContent.isNotBlank()) {
-                        val retryExtracted = EditorApplyService.extractCodeBlock(retryContent)
-                        val retryIsPartial = isPartialCode(retryExtracted, originalCode)
-                        logger.warn("AgentStep[${label}] 재요청 결과: extracted 길이=${retryExtracted.length}, 부분코드=${retryIsPartial}")
-
-                        if (!retryIsPartial && retryExtracted.isNotBlank()) {
-                            extractedCode = retryExtracted
-                            logger.warn("AgentStep[${label}] ✅ 재요청 결과 채택 (길이=${extractedCode.length})")
-                        } else {
-                            logger.warn("AgentStep[${label}] ❌ 재요청도 부분 코드 → 원본 결과 유지")
-                        }
-                    } else {
-                        logger.warn("AgentStep[${label}] ❌ 재요청 실패 또는 빈 응답 → 원본 결과 유지")
-                    }
-                }
-            }
-            // ─────────────────────────────────────────────────────────────────────
 
             // 코드 개선(Improve) step 시, 원본과 동일하거나 비정상 응답이면 실패로 처리
             val hasCodeDiff = isApplyable &&
@@ -420,8 +453,8 @@ sealed class TaskPipeline {
                 originalCode = if (hasCodeDiff) originalCode else null,
                 modifiedCode = if (hasCodeDiff) extractedCode else null,
                 applyScope = applyScope,
-                llmResponse = llmResponse,         // UI 표시용 ([IMPROVE_TARGETS] 제거됨)
-                rawLlmResponse = rawLlmResponse,   // 파이프라인 내부 전달용 (원문 그대로)
+                llmResponse = llmResponse,
+                rawLlmResponse = rawLlmResponse,
                 extractedCode = extractedCode,
                 isSuccess = isActuallySuccess
             )

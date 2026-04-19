@@ -341,6 +341,13 @@ function App() {
   const [popupSelectedIndex, setPopupSelectedIndex] = useState(0);
   const commandPopupRef = useRef<HTMLDivElement>(null);
 
+  // @ 파일 팝업을 위한 상태
+  const [showFilePopup, setShowFilePopup] = useState(false);
+  const [openTabs, setOpenTabs] = useState<Array<{name: string, path: string}>>([]);
+  const [selectedFiles, setSelectedFiles] = useState<Array<{name: string, path: string}>>([]);
+  const [isLoadingTabs, setIsLoadingTabs] = useState(false);
+  const filePopupRef = useRef<HTMLDivElement>(null);
+
   // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화
   useEffect(() => {
     const el = chatListRef.current;
@@ -364,6 +371,18 @@ function App() {
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showCommandPopup]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (filePopupRef.current && !filePopupRef.current.contains(event.target as Node)) {
+        setShowFilePopup(false);
+      }
+    };
+    if (showFilePopup) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showFilePopup]);
 
   // 메시지 변경 시 하단 근처인 경우에만 자동 스크롤
   useEffect(() => {
@@ -393,6 +412,16 @@ function App() {
       if (data.subType === 'fetched_models_error') {
         setIsFetchingModels(false);
         setModelsError(data.content || "모델 조회 실패");
+        return;
+      }
+
+      if (data.subType === 'openTabs') {
+        try {
+          setOpenTabs(JSON.parse(data.content));
+        } catch {
+          setOpenTabs([]);
+        }
+        setIsLoadingTabs(false);
         return;
       }
 
@@ -462,6 +491,7 @@ function App() {
               case 'task_progress':
                 currentStatus = data.content;
                 isLoading = true;
+                isStreaming = false;
                 break;
               case 'task_step':
                 if (data.applyable === 'true') {
@@ -614,10 +644,40 @@ function App() {
   const handleSend = () => {
     const text = inputText.trim();
     if (!text || !window.sendToIde) return;
-    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text }]);
+    const filesToSend = [...selectedFiles];
+    const fileLabels = filesToSend.map(f => `📎 ${f.name}`).join('  ');
+    const displayText = fileLabels ? `${text}\n${fileLabels}` : text;
+    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: displayText }]);
     setInputText('');
     setShowCommandPopup(false);
-    window.sendToIde(JSON.stringify({ command: text.startsWith('/') ? text.split(' ')[0] : '/task', text }));
+    setShowFilePopup(false);
+    setSelectedFiles([]);
+    let command = '/chat';
+    let payload = text;
+    if (text === '/explain' || text.startsWith('/explain ')) {
+      command = '/explain';
+      payload = text.startsWith('/explain ') ? text.slice(9).trim() : '';
+    } else if (text === '/review' || text.startsWith('/review ')) {
+      command = '/task';
+      payload = '/review 선택된 코드를 검토하고 개선 사항을 제안해주세요.';
+    } else if (text === '/improve' || text.startsWith('/improve ')) {
+      command = '/task';
+      payload = '코드를 개선해주세요.';
+    } else if (text === '/analyze' || text.startsWith('/analyze ')) {
+      command = '/task';
+      payload = '영향도를 분석해주세요.';
+    } else if (text === '/query' || text.startsWith('/query ')) {
+      command = '/task';
+      payload = '쿼리를 검증해주세요.';
+    } else if (text === '/test' || text.startsWith('/test ')) {
+      command = '/task';
+      payload = '테스트 코드를 생성해주세요.';
+    }
+    window.sendToIde(JSON.stringify({
+      command,
+      text: payload,
+      ...(filesToSend.length > 0 ? { files: JSON.stringify(filesToSend) } : {})
+    }));
   };
 
   // 팝업 아이템 로직 (모델 및 명령어 조합)
@@ -655,6 +715,25 @@ function App() {
         el.setSelectionRange(newText.length, newText.length);
       }
     }, 10);
+  };
+
+  const handleFileButtonClick = () => {
+    const opening = !showFilePopup;
+    setShowFilePopup(opening);
+    if (opening) {
+      setShowCommandPopup(false);
+      setIsLoadingTabs(true);
+      window.sendToIde?.(JSON.stringify({ command: '/openTabs' }));
+    }
+  };
+
+  const toggleFileSelection = (file: {name: string, path: string}) => {
+    setSelectedFiles(prev => {
+      const isSelected = prev.some(f => f.path === file.path);
+      if (isSelected) return prev.filter(f => f.path !== file.path);
+      if (prev.length >= 3) return prev;
+      return [...prev, file];
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -709,7 +788,7 @@ function App() {
 
       <div className="chat-input-area">
         <div className="input-toolbar">
-          <button className="toolbar-btn">@ 파일 첨부</button>
+          <button className="toolbar-btn" onClick={handleFileButtonClick}>@ 파일</button>
           <button 
             className="toolbar-btn" 
             onClick={() => {
@@ -723,7 +802,48 @@ function App() {
             / 명령어
           </button>
         </div>
+        {selectedFiles.length > 0 && (
+          <div className="selected-files-chips">
+            {selectedFiles.map(f => (
+              <span key={f.path} className="file-chip">
+                📎 {f.name}
+                <button className="chip-remove" onClick={() => toggleFileSelection(f)}>×</button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="textarea-wrapper">
+          {showFilePopup && (
+            <div className="command-popup" ref={filePopupRef}>
+              <div className="popup-section">
+                <div className="popup-section-title">
+                  열린 파일{selectedFiles.length > 0 ? ` (${selectedFiles.length}/3 선택됨)` : ''}
+                </div>
+                {isLoadingTabs ? (
+                  <div className="popup-loading">로딩 중...</div>
+                ) : openTabs.length === 0 ? (
+                  <div className="popup-loading">열린 파일이 없습니다.</div>
+                ) : (
+                  openTabs.map(tab => {
+                    const isSelected = selectedFiles.some(f => f.path === tab.path);
+                    const isDisabled = !isSelected && selectedFiles.length >= 3;
+                    return (
+                      <button
+                        key={tab.path}
+                        className={`popup-item ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}`}
+                        onClick={() => { if (!isDisabled) toggleFileSelection(tab); }}
+                      >
+                        <span className="popup-item-command">📄 {tab.name}</span>
+                        <span className="popup-item-desc">
+                          {isSelected ? '✓ 선택됨' : isDisabled ? '최대 3개' : ''}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
           {showCommandPopup && (
             <div className="command-popup" ref={commandPopupRef}>
               <div className="popup-section">
@@ -788,7 +908,14 @@ function App() {
             onKeyDown={handleKeyDown}
           />
           {messages.some(m => m.isLoading || m.isStreaming) ? (
-            <button className="btn-circle stop" onClick={() => window.sendToIde?.(JSON.stringify({ command: '/cancel' }))}>
+            <button className="btn-circle stop" onClick={() => {
+              setMessages(prev => prev.map(m =>
+                (m.isLoading || m.isStreaming)
+                  ? { ...m, isLoading: false, isStreaming: false, currentStatus: undefined }
+                  : m
+              ));
+              window.sendToIde?.(JSON.stringify({ command: '/cancel' }));
+            }}>
               <Square size={14} fill="currentColor" />
             </button>
           ) : (

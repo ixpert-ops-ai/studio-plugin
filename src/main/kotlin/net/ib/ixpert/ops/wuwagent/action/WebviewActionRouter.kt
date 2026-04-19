@@ -65,6 +65,30 @@ class WebviewActionRouter(private val project: Project) {
         return "$testDir/${nameWithoutExt}$testSuffix"
     }
 
+    private fun buildAttachedFileContext(filesJson: String): String {
+        if (filesJson.isBlank()) return ""
+        return try {
+            val entries = Regex("""\{"name":"([^"]+)","path":"([^"]+)"\}""").findAll(filesJson)
+            val blocks = entries.mapNotNull { match ->
+                val name = match.groupValues[1]
+                val path = match.groupValues[2].replace("\\\\", "\\")
+                val vFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(path)
+                    ?: return@mapNotNull null
+                val content = ApplicationManager.getApplication().runReadAction(
+                    com.intellij.openapi.util.Computable {
+                        com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+                            .getDocument(vFile)?.text
+                    }
+                ) ?: return@mapNotNull null
+                "// 파일: $name\n```\n$content\n```"
+            }.toList()
+            if (blocks.isEmpty()) "" else "[첨부 파일]\n${blocks.joinToString("\n\n")}"
+        } catch (e: Exception) {
+            logger.warn("Router: 첨부 파일 읽기 실패", e)
+            ""
+        }
+    }
+
     fun handleCommand(command: String, payload: Map<String, String>) {
         ApplicationManager.getApplication().invokeLater {
             val bridge = JcefBridge.getInstance(project)
@@ -109,6 +133,17 @@ class WebviewActionRouter(private val project: Project) {
                     )
                 }
 
+                "/openTabs" -> {
+                    logger.info("Router: /openTabs 분기")
+                    val openFiles = FileEditorManager.getInstance(project).openFiles
+                    val jsonArray = openFiles.joinToString(separator = ",", prefix = "[", postfix = "]") { vFile ->
+                        val name = vFile.name.replace("\\", "\\\\").replace("\"", "\\\"")
+                        val path = vFile.path.replace("\\", "\\\\").replace("\"", "\\\"")
+                        """{"name":"$name","path":"$path"}"""
+                    }
+                    bridge.sendMessage("openTabs", jsonArray)
+                }
+
                 "/chat" -> {
                     logger.info("Router: /chat 분기")
                     val messageId = "msg_${System.currentTimeMillis()}"
@@ -142,8 +177,14 @@ class WebviewActionRouter(private val project: Project) {
                 // ── TaskAgent (오케스트레이터) ────────────────
                 "/task" -> {
                     logger.info("Router: /task 분기 → TaskAgent 시작")
+                    if (editor == null) {
+                        bridge.sendMessage("error", "활성화된 에디터가 없어 작업을 실행할 수 없습니다.")
+                        return@invokeLater
+                    }
                     val messageId = "task_${System.currentTimeMillis()}"
-                    val context = AgentContext(project, editor, textBody)
+                    val fileContext = buildAttachedFileContext(payload["files"] ?: "")
+                    val enhancedText = if (fileContext.isNotBlank()) "$textBody\n\n$fileContext" else textBody
+                    val context = AgentContext(project, editor, enhancedText)
 
                     // 🛎 즉시 시작 알림 (UI 스레드 큐로 보냄)
                     ApplicationManager.getApplication().invokeLater {
