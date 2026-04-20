@@ -519,35 +519,33 @@ class WebviewActionRouter(private val project: Project) {
 
                     val testFilePath = TestFileService.resolveTestFilePath(basePath, sourceFile, code)
 
-                    ApplicationManager.getApplication().invokeLater {
-                        val testFile = java.io.File(testFilePath)
+                    val testFile = java.io.File(testFilePath)
 
-                        // 이미 존재하면 확인 다이얼로그
-                        if (testFile.exists()) {
-                            val result = com.intellij.openapi.ui.Messages.showYesNoDialog(
-                                project,
-                                "테스트 파일이 이미 존재합니다:\n${testFile.name}\n\n덮어쓰시겠습니까?",
-                                "테스트 파일 생성",
-                                com.intellij.openapi.ui.Messages.getQuestionIcon()
-                            )
-                            if (result != com.intellij.openapi.ui.Messages.YES) return@invokeLater
+                    // 이미 존재하면 확인 다이얼로그
+                    if (testFile.exists()) {
+                        val result = com.intellij.openapi.ui.Messages.showYesNoDialog(
+                            project,
+                            "테스트 파일이 이미 존재합니다:\n${testFile.name}\n\n덮어쓰시겠습니까?",
+                            "테스트 파일 생성",
+                            com.intellij.openapi.ui.Messages.getQuestionIcon()
+                        )
+                        if (result != com.intellij.openapi.ui.Messages.YES) return@invokeLater
+                    }
+
+                    try {
+                        val vFile = TestFileService.saveTestFile(testFilePath, code)
+                        vFile?.let {
+                            com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+                                .openFile(it, true)
                         }
 
-                        try {
-                            val vFile = TestFileService.saveTestFile(testFilePath, code)
-                            vFile?.let {
-                                com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
-                                    .openFile(it, true)
-                            }
-
-                            val relativePath = testFilePath.removePrefix("$basePath/")
-                            bridge.sendMessage("test_file_created",
-                                "테스트 파일이 생성되었습니다: $relativePath", messageId)
-                            logger.info("Router: 테스트 파일 생성 완료 → $testFilePath")
-                        } catch (e: Exception) {
-                            logger.error("Router: 테스트 파일 생성 실패", e)
-                            bridge.sendMessage("error", "테스트 파일 생성 중 오류: ${e.message}", messageId)
-                        }
+                        val relativePath = testFilePath.removePrefix("$basePath/")
+                        bridge.sendMessage("test_file_created",
+                            "테스트 파일이 생성되었습니다: $relativePath", messageId)
+                        logger.info("Router: 테스트 파일 생성 완료 → $testFilePath")
+                    } catch (e: Exception) {
+                        logger.error("Router: 테스트 파일 생성 실패", e)
+                        bridge.sendMessage("error", "테스트 파일 생성 중 오류: ${e.message}", messageId)
                     }
                 }
 
@@ -599,7 +597,6 @@ class WebviewActionRouter(private val project: Project) {
                     ApplicationManager.getApplication().executeOnPooledThread {
                         val models = net.ib.ixpert.ops.wuwagent.agent.SettingsAgent.fetchModelsSilent(baseUrl, apiKey)
                         ApplicationManager.getApplication().invokeLater {
-                            val bridge = JcefBridge.getInstance(project)
                             if (models != null) {
                                 bridge.sendMessage("fetched_models", models.joinToString(","))
                             } else {

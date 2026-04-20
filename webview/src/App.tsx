@@ -236,7 +236,6 @@ const MessageItem = ({ msg }: { msg: Message }) => {
 
   // ── 테스트 결과 여부 판별 ────────────────────────────────────────
   const isTestResult = msg.subType === 'test' || msg.subType === 'test_start' || msg.subType === 'task_chunk' && !!msg.sourceFile;
-  const isTestExecReport = msg.subType === 'test_execution_start' || msg.subType === 'testExecutionResult';
 
   const handleCopyCode = () => {
     const codeOnly = extractCodeBlocks(msg.content);
