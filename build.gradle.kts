@@ -39,8 +39,8 @@ tasks {
     }
 
     patchPluginXml {
-        sinceBuild.set("232")
-        untilBuild.set("253.*") // 2023.2 부터 2025.3 (Android Studio 최신 빌드 등)까지 호환 기능 확대
+        sinceBuild.set("231")
+        untilBuild.set("")
     }
 
     // 웹앱 의존성 설치
