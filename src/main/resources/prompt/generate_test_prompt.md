@@ -14,6 +14,64 @@
 
 ---
 
+## ⚠️ CRITICAL: 프로젝트 타입 인스턴스화 절대 규칙 (컴파일 실패 방지)
+
+생성된 테스트 코드가 컴파일되지 않는 **가장 흔한 원인**은 프로젝트 DTO/Entity/Response 타입의 **생성자 시그니처를 추측**하는 것이다. 다음 규칙을 예외 없이 적용한다.
+
+### 규칙 I — "Referenced Project Types" 블록이 유일한 진실이다
+
+프롬프트 하단의 `[Referenced Project Types]` 블록에 표시된 **생성자, 레코드 선언, 빌더, 정적 팩토리 메서드**의 시그니처가 유일한 진실(source of truth)이다. 이 블록에 보이는 형태 그대로만 사용한다.
+
+```java
+// 예: Referenced Types에 아래와 같이 표시됨
+// public record MenuTreeResponse(Long id, String name, String url, String icon, int sort, String parent, List<MenuTreeResponse> children) {}
+
+// ❌ 절대 금지 — 추측한 기본 생성자
+MenuTreeResponse m = new MenuTreeResponse();
+MenuTreeResponse m = new MenuTreeResponse(1L, "name");  // 인자 개수 불일치
+
+// ✅ 올바름 — 표시된 시그니처 그대로 사용 (모든 인자 명시)
+MenuTreeResponse m = new MenuTreeResponse(1L, "메뉴", "/menu", "icon", 1, null, List.of());
+```
+
+### 규칙 II — 시그니처가 불명확하면 Mockito `mock()`으로 우회하라
+
+`Referenced Project Types` 블록에 **해당 타입이 없거나**, 생성자가 잘려서 파라미터를 모두 알 수 없을 때:
+
+```java
+// ❌ 절대 금지 — 시그니처를 추측해서 new 사용
+var user = new UserDto("admin", "pw", "ROLE_USER");  // 실제 생성자 모름
+
+// ✅ 올바름 — Mockito mock 사용
+UserDto user = mock(UserDto.class);
+when(user.getUsername()).thenReturn("admin");
+
+// ✅ 올바름 — 빌더가 표시되어 있다면 빌더 사용
+UserDto user = UserDto.builder().username("admin").build();
+```
+
+### 규칙 III — Lombok / Record / @AllArgsConstructor 판별
+
+`Referenced Project Types` 블록에서:
+- `public record Xxx(...)` → **모든 파라미터를 순서대로** 전달하는 생성자만 존재
+- `@AllArgsConstructor` / `@Builder` 어노테이션 → 해당 시그니처 사용
+- `@NoArgsConstructor` 가 **명시적으로 보일 때만** `new Xxx()` 기본 생성자 사용 가능
+- 어노테이션/시그니처가 보이지 않으면 **규칙 II(mock) 적용**
+
+### 규칙 IV — 추측 금지 목록 (자주 발생하는 컴파일 오류 패턴)
+
+```java
+// ❌ 흔한 실수 — 모두 컴파일 오류 유발
+new MenuTreeResponse()              // 레코드에 no-arg 생성자 없음
+new ResourceNotFoundException()     // 메시지 파라미터 필요
+new ApiResponse()                   // 보통 code/message/data 필요
+new PageRequest()                   // PageRequest.of(0, 10) 정적 팩토리 사용
+new Authentication()                // 인터페이스 → mock(Authentication.class)
+new UserDetails()                   // 인터페이스 → mock 또는 User 빌더
+```
+
+---
+
 ## 핵심 원칙
 
 1. **언어 미러링**: 제공된 소스 코드와 **동일한 프로그래밍 언어**로 테스트 코드를 생성한다. Java면 JUnit, Kotlin이면 Kotest/JUnit, TypeScript면 Jest/Vitest, Python이면 pytest를 사용한다.
@@ -21,6 +79,7 @@
 3. **사각지대 제로**: 모든 public 메서드, 모든 분기, 모든 경계 조건에 대응하는 테스트가 존재해야 한다.
 4. **테스트 격리**: 각 테스트는 독립적이어야 한다. 다른 테스트의 실행 순서나 상태에 의존해서는 안 된다.
 5. **읽기 쉬운 테스트가 곧 문서**: 테스트 이름과 구조는 시스템 동작의 살아있는 문서 역할을 해야 한다.
+6. **시그니처 추측 금지**: 위의 `⚠️ CRITICAL: 프로젝트 타입 인스턴스화 절대 규칙` 을 반드시 준수한다.
 
 ---
 
@@ -297,6 +356,55 @@ mockMvc.perform(get("/api/users/{id}", 1L)
     .andExpect(jsonPath("$.roles").isArray())
     .andExpect(jsonPath("$.roles", hasSize(2)));
 ```
+
+---
+
+## ⚠️ CRITICAL: Spring MockMvc `StatusResultMatchers` 정확한 메서드명 규칙
+
+`status()` 이후 사용하는 메서드는 반드시 아래 **정확한 이름**을 사용한다. 메서드명을 추측하거나 HTTP 상태 코드 이름에서 직접 유도하지 말 것.
+
+**모든 `StatusResultMatchers` 메서드는 `is` 접두사로 시작한다.**
+
+```java
+// ❌ 절대 금지 — 존재하지 않는 메서드 (컴파일 오류 발생)
+status().ok()
+status().created()
+status().noContent()
+status().badRequest()
+status().unauthorized()
+status().forbidden()
+status().notFound()
+status().conflict()
+status().internalServerError()
+
+// ✅ 올바른 메서드명 — is 접두사 필수
+status().isOk()                  // 200
+status().isCreated()             // 201
+status().isAccepted()            // 202
+status().isNoContent()           // 204
+status().isMovedPermanently()    // 301
+status().isFound()               // 302
+status().isBadRequest()          // 400
+status().isUnauthorized()        // 401
+status().isForbidden()           // 403
+status().isNotFound()            // 404
+status().isMethodNotAllowed()    // 405
+status().isConflict()            // 409
+status().isUnprocessableEntity() // 422
+status().isTooManyRequests()     // 429
+status().isInternalServerError() // 500
+status().isServiceUnavailable()  // 503
+
+// ✅ 특정 상태 코드로 직접 검증 (위 목록에 없는 코드 사용 시)
+status().is(HttpStatus.MULTI_STATUS.value())
+status().is2xxSuccessful()
+status().is4xxClientError()
+status().is5xxServerError()
+```
+
+**코드 생성 전 체크리스트:**
+- [ ] `status()` 이후 모든 메서드에 `is` 접두사가 붙어 있는가?
+- [ ] 목록에 없는 메서드를 임의로 사용하지 않았는가?
 
 ---
 
