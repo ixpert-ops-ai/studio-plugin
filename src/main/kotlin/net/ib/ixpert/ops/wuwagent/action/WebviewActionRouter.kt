@@ -7,9 +7,14 @@ import com.intellij.openapi.project.Project
 import net.ib.ixpert.ops.wuwagent.agent.AgentContext
 import net.ib.ixpert.ops.wuwagent.agent.ChatAgent
 import net.ib.ixpert.ops.wuwagent.agent.ExplainAgent
+import net.ib.ixpert.ops.wuwagent.agent.GenerateTestAgent
+import net.ib.ixpert.ops.wuwagent.agent.ImpactAgent
+import net.ib.ixpert.ops.wuwagent.agent.IntentAnalyzer
+import net.ib.ixpert.ops.wuwagent.agent.QueryValidationAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.agent.TaskPipeline
+import net.ib.ixpert.ops.wuwagent.client.OllamaClient
 import net.ib.ixpert.ops.wuwagent.service.EditorApplyService
 import net.ib.ixpert.ops.wuwagent.service.EditorDiffService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
@@ -271,21 +276,109 @@ class WebviewActionRouter(private val project: Project) {
                         }
                     }
 
-                    val agent = TaskAgent(messageId, onStep, onStepStart)
-                    agent.execute(
-                        context, 
-                        onSuccess = { _ -> 
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("task_success", "완료되었습니다.", messageId)
-                            }
-                        },
-                        onChunk = null,
-                        onError = { errorMsg ->
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("error", errorMsg, messageId)
-                            }
+                    // IntentAnalyzer 키워드 매핑 (LLM 호출 없이 즉시 반환)
+                    val client = OllamaClient()
+                    when (IntentAnalyzer.analyze(enhancedText, client)) {
+
+                        TaskPipeline.ExplainTask -> {
+                            ExplainAgent().execute(context,
+                                onSuccess = { _ ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                    }
+                                },
+                                onChunk = { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
+                                },
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        if (errorMsg != "__cancelled__") bridge.sendMessage("error", errorMsg, messageId)
+                                    }
+                                }
+                            )
                         }
-                    )
+
+                        TaskPipeline.Impact -> {
+                            ImpactAgent().execute(context,
+                                onSuccess = { _ ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                    }
+                                },
+                                onChunk = { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
+                                },
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("error", errorMsg, messageId)
+                                    }
+                                }
+                            )
+                        }
+
+                        TaskPipeline.QueryValidation -> {
+                            QueryValidationAgent().execute(context,
+                                onSuccess = { _ ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                    }
+                                },
+                                onChunk = { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
+                                },
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("error", errorMsg, messageId)
+                                    }
+                                }
+                            )
+                        }
+
+                        TaskPipeline.GenerateTest -> {
+                            val sourceFile = editor.virtualFile?.name ?: ""
+                            GenerateTestAgent().execute(context,
+                                onSuccess = { _ ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("test", "", messageId, mapOf("sourceFile" to sourceFile))
+                                    }
+                                },
+                                onChunk = { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
+                                },
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("error", errorMsg, messageId)
+                                    }
+                                }
+                            )
+                        }
+
+                        else -> {
+                            val agent = TaskAgent(messageId, onStep, onStepStart)
+                            agent.execute(
+                                context,
+                                onSuccess = { _ ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                    }
+                                },
+                                onChunk = null,
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("error", errorMsg, messageId)
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
 
                 // ── Apply: 에디터에 코드 쓰기 ────────────────
