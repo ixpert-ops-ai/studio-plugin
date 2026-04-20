@@ -682,7 +682,7 @@ function App() {
 
   // 팝업 아이템 로직 (모델 및 명령어 조합)
   const popupItems = useMemo(() => {
-    const items: Array<{type: string, cmd: string, desc?: string, index: number}> = [];
+    const items: Array<{type: string, cmd: string, desc?: string, label?: string, index: number}> = [];
     let idx = 0;
     fetchedModels.forEach(m => items.push({ type: 'model', cmd: m, index: idx++ }));
     const cmds = [
@@ -694,12 +694,18 @@ function App() {
       { cmd: '/query', desc: '쿼리를 검증해줘' }
     ];
     cmds.forEach(c => items.push({ type: 'cmd', cmd: c.cmd, desc: c.desc, index: idx++ }));
+    items.push({ type: 'settings', cmd: '/openSettings', label: '설정', index: idx++ });
     return items;
   }, [fetchedModels]);
 
   const applyPopupSelection = (item: {type: string, cmd: string}) => {
     if (item.type === 'model') {
       window.sendToIde?.(JSON.stringify({ command: '/changeModel', model: item.cmd }));
+      setShowCommandPopup(false);
+      return;
+    }
+    if (item.type === 'settings') {
+      window.sendToIde?.(JSON.stringify({ command: '/openSettings' }));
       setShowCommandPopup(false);
       return;
     }
@@ -866,10 +872,24 @@ function App() {
                 )}
               </div>
               <div className="popup-section">
+                <div className="popup-section-title">기타</div>
+                {popupItems.filter(item => item.type === 'settings').map(item => (
+                  <button
+                    key={item.cmd}
+                    className={`popup-item ${popupSelectedIndex === item.index ? 'selected' : ''}`}
+                    onClick={() => applyPopupSelection(item)}
+                    onMouseEnter={() => setPopupSelectedIndex(item.index)}
+                  >
+                    <span className="popup-item-command">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+              {/* 명령어 섹션 숨김 처리 (기능 유지, UI에서만 미노출) */}
+              {false && <div className="popup-section">
                 <div className="popup-section-title">명령어</div>
                 {popupItems.filter(item => item.type === 'cmd').map(item => (
-                  <button 
-                    key={item.cmd} 
+                  <button
+                    key={item.cmd}
                     className={`popup-item ${popupSelectedIndex === item.index ? 'selected' : ''}`}
                     onClick={() => applyPopupSelection(item)}
                     onMouseEnter={() => setPopupSelectedIndex(item.index)}
@@ -878,7 +898,7 @@ function App() {
                     <span className="popup-item-desc">{item.desc}</span>
                   </button>
                 ))}
-              </div>
+              </div>}
             </div>
           )}
           <textarea
@@ -895,7 +915,7 @@ function App() {
                   setModelsError('');
                   window.sendToIde?.(JSON.stringify({ command: '/fetchModels' }));
                 }
-              } else if (!val.includes('/')) {
+              } else {
                 setShowCommandPopup(false);
               }
             }}
