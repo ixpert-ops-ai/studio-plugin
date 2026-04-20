@@ -12,6 +12,7 @@ import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.agent.TaskPipeline
 import net.ib.ixpert.ops.wuwagent.service.EditorApplyService
 import net.ib.ixpert.ops.wuwagent.service.EditorDiffService
+import net.ib.ixpert.ops.wuwagent.service.TestFileService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
 /**
@@ -27,43 +28,6 @@ import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
  */
 class WebviewActionRouter(private val project: Project) {
     private val logger = Logger.getInstance(WebviewActionRouter::class.java)
-
-    /**
-     * 소스 파일 경로로부터 테스트 파일 경로를 추론합니다.
-     * - src/main/kotlin/... → src/test/kotlin/...Test.kt
-     * - src/main/java/...   → src/test/java/...Test.java
-     * - *.tsx / *.ts / *.js → *.test.tsx / *.test.ts / *.test.js
-     */
-    private fun resolveTestFilePath(basePath: String, sourceFileName: String): String {
-        val ext = sourceFileName.substringAfterLast('.', "")
-        val nameWithoutExt = sourceFileName.substringBeforeLast('.')
-
-        // JS/TS 계열: 같은 디렉터리에 .test.ext 패턴
-        if (ext in listOf("ts", "tsx", "js", "jsx")) {
-            return "$basePath/src/__tests__/${nameWithoutExt}.test.$ext"
-        }
-
-        // JVM 계열: src/main → src/test 치환 + Test 접미사
-        // 현재 에디터에서 열린 파일의 프로젝트 내 상대 경로를 찾아야 하지만,
-        // sourceFileName만 있으므로 관례적 경로를 사용
-        val testSuffix = when (ext) {
-            "kt", "kts" -> "Test.kt"
-            "java"      -> "Test.java"
-            "py"        -> "_test.py"
-            "go"        -> "_test.go"
-            else        -> "Test.$ext"
-        }
-
-        val testDir = when (ext) {
-            "kt", "kts" -> "$basePath/src/test/kotlin"
-            "java"      -> "$basePath/src/test/java"
-            "py"        -> "$basePath/tests"
-            "go"        -> "$basePath"
-            else        -> "$basePath/src/test"
-        }
-
-        return "$testDir/${nameWithoutExt}$testSuffix"
-    }
 
     fun handleCommand(command: String, payload: Map<String, String>) {
         ApplicationManager.getApplication().invokeLater {
@@ -322,14 +286,13 @@ class WebviewActionRouter(private val project: Project) {
                         val result = dialog.save(projectBase, "analysis_result.md")
                         if (result != null) {
                             try {
-                                result.getVirtualFile(true)?.let { vFile ->
-                                    com.intellij.openapi.vfs.VfsUtil.saveText(vFile, content)
-                                    logger.info("Router: Markdown 저장 완료 → ${vFile.path}")
-                                } ?: run {
-                                    val file = result.file
-                                    file.writeText(content)
-                                    logger.info("Router: Markdown 저장 완료 (fallback) → ${file.absolutePath}")
-                                }
+                                // 사용자가 선택한 외부 파일이므로 VFS 대신 java.io.File 로 직접 쓴다.
+                                // (VfsUtil.saveText 는 write-action 요구 → EDT 에서 예외 → 빈 파일 남음)
+                                val file = result.file
+                                file.parentFile?.mkdirs()
+                                file.writeText(content, Charsets.UTF_8)
+                                com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
+                                logger.info("Router: Markdown 저장 완료 → ${file.absolutePath} (${content.length}자)")
                             } catch (e: Exception) {
                                 logger.error("Router: Markdown 저장 실패", e)
                                 bridge.sendMessage("error", "파일 저장 중 오류가 발생했습니다: ${e.message}")
@@ -356,8 +319,7 @@ class WebviewActionRouter(private val project: Project) {
                         return@invokeLater
                     }
 
-                    // 소스 파일로부터 테스트 파일 경로 추론
-                    val testFilePath = resolveTestFilePath(basePath, sourceFile)
+                    val testFilePath = TestFileService.resolveTestFilePath(basePath, sourceFile, code)
 
                     ApplicationManager.getApplication().invokeLater {
                         val testFile = java.io.File(testFilePath)
@@ -374,15 +336,11 @@ class WebviewActionRouter(private val project: Project) {
                         }
 
                         try {
-                            testFile.parentFile?.mkdirs()
-                            testFile.writeText(code)
-
-                            // VFS refresh 후 에디터에서 열기
-                            com.intellij.openapi.vfs.LocalFileSystem.getInstance()
-                                .refreshAndFindFileByPath(testFilePath)?.let { vFile ->
-                                    com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
-                                        .openFile(vFile, true)
-                                }
+                            val vFile = TestFileService.saveTestFile(testFilePath, code)
+                            vFile?.let {
+                                com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+                                    .openFile(it, true)
+                            }
 
                             val relativePath = testFilePath.removePrefix("$basePath/")
                             bridge.sendMessage("test_file_created",
