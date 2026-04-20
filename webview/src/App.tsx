@@ -236,6 +236,7 @@ const MessageItem = ({ msg }: { msg: Message }) => {
 
   // ── 테스트 결과 여부 판별 ────────────────────────────────────────
   const isTestResult = msg.subType === 'test' || msg.subType === 'test_start' || msg.subType === 'task_chunk' && !!msg.sourceFile;
+  const isTestExecReport = msg.subType === 'test_execution_start' || msg.subType === 'testExecutionResult';
 
   const handleCopyCode = () => {
     const codeOnly = extractCodeBlocks(msg.content);
@@ -554,6 +555,13 @@ function App() {
                 break;
               case 'test_file_created':
                 // 파일 생성 완료 알림 — 기존 메시지 유지하고 상태만 갱신
+                break;
+              case 'testExecutionResult':
+                // 테스트 실행 최종 결과(Markdown) — 로딩 버블을 리포트로 교체
+                newContent = data.content;
+                isLoading = false;
+                isStreaming = false;
+                currentStatus = undefined;
                 break;
             }
 

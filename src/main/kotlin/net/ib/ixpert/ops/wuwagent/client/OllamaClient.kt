@@ -104,9 +104,13 @@ class OllamaClient {
                             TaskCancellationToken.activeInputStream = null
                         }
 
-                        // 부분 누적 내용으로 안전하게 반환 (취소 시에도 crash 없음)
-                        lastResponse ?: OllamaChatResponse(
-                            null, null, OllamaMessage("assistant", fullContent), true
+                        // Ollama done 청크는 content가 비어있으므로 누적된 fullContent로 교체하여 반환
+                        // (취소 시 lastResponse가 null이면 fullContent만으로 안전하게 반환)
+                        OllamaChatResponse(
+                            model = lastResponse?.model,
+                            createdAt = lastResponse?.createdAt,
+                            message = OllamaMessage("assistant", fullContent),
+                            done = true
                         )
                     } else {
                         // ── 비스트리밍 취소 처리 ────────────────────────────────────────
