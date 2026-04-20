@@ -130,8 +130,7 @@ class ReviewAction : AnAction() {
     }
 
     override fun update(e: AnActionEvent) {
-        val project = e.project
-        val editor = e.getData(CommonDataKeys.EDITOR)
-        e.presentation.isEnabledAndVisible = project != null && editor != null
+        // 숨김 처리 (기능 유지, 컨텍스트 메뉴에서만 미노출)
+        e.presentation.isVisible = false
     }
 }

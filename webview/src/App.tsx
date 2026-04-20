@@ -236,7 +236,6 @@ const MessageItem = ({ msg }: { msg: Message }) => {
 
   // ── 테스트 결과 여부 판별 ────────────────────────────────────────
   const isTestResult = msg.subType === 'test' || msg.subType === 'test_start' || msg.subType === 'task_chunk' && !!msg.sourceFile;
-  const isTestExecReport = msg.subType === 'test_execution_start' || msg.subType === 'testExecutionResult';
 
   const handleCopyCode = () => {
     const codeOnly = extractCodeBlocks(msg.content);
@@ -331,8 +330,10 @@ function App() {
   const [inputText, setInputText] = useState('');
   const [selectedModel, setSelectedModel] = useState<string>('Loading...');
   const chatListRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적
   const isComposing = useRef(false); // 한글 IME composition 상태 추적 (JCEF 자모 분리 방지)
+  const atTriggerPos = useRef<number>(-1); // @ 타이핑으로 팝업 열린 경우 @ 위치
 
   // 슬래시 커맨드 팝업을 위한 상태
   const [showCommandPopup, setShowCommandPopup] = useState(false);
@@ -347,6 +348,7 @@ function App() {
   const [openTabs, setOpenTabs] = useState<Array<{name: string, path: string}>>([]);
   const [selectedFiles, setSelectedFiles] = useState<Array<{name: string, path: string}>>([]);
   const [isLoadingTabs, setIsLoadingTabs] = useState(false);
+  const [filePopupSelectedIndex, setFilePopupSelectedIndex] = useState(0);
   const filePopupRef = useRef<HTMLDivElement>(null);
 
   // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화
@@ -653,9 +655,7 @@ function App() {
     const text = inputText.trim();
     if (!text || !window.sendToIde) return;
     const filesToSend = [...selectedFiles];
-    const fileLabels = filesToSend.map(f => `📎 ${f.name}`).join('  ');
-    const displayText = fileLabels ? `${text}\n${fileLabels}` : text;
-    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: displayText }]);
+    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text }]);
     setInputText('');
     setShowCommandPopup(false);
     setShowFilePopup(false);
@@ -680,6 +680,18 @@ function App() {
     } else if (text === '/test' || text.startsWith('/test ')) {
       command = '/task';
       payload = '테스트 코드를 생성해주세요.';
+    } else if (/개선|리팩토링|리팩|refactor|improve|최적화|optimize/i.test(text)) {
+      command = '/task';
+    } else if (/리뷰|review|검토|점검/i.test(text)) {
+      command = '/task';
+    } else if (/설명|explain|어떻게 동작|이게 뭐야/i.test(text)) {
+      command = '/task';
+    } else if (/영향 분석|영향도|impact|analyze|분석/i.test(text)) {
+      command = '/task';
+    } else if (/쿼리|query|sql|검증/i.test(text)) {
+      command = '/task';
+    } else if (/테스트|test|생성/i.test(text)) {
+      command = '/task';
     }
     window.sendToIde(JSON.stringify({
       command,
@@ -690,7 +702,7 @@ function App() {
 
   // 팝업 아이템 로직 (모델 및 명령어 조합)
   const popupItems = useMemo(() => {
-    const items: Array<{type: string, cmd: string, desc?: string, index: number}> = [];
+    const items: Array<{type: string, cmd: string, desc?: string, label?: string, index: number}> = [];
     let idx = 0;
     fetchedModels.forEach(m => items.push({ type: 'model', cmd: m, index: idx++ }));
     const cmds = [
@@ -702,12 +714,18 @@ function App() {
       { cmd: '/query', desc: '쿼리를 검증해줘' }
     ];
     cmds.forEach(c => items.push({ type: 'cmd', cmd: c.cmd, desc: c.desc, index: idx++ }));
+    items.push({ type: 'settings', cmd: '/openSettings', label: '설정', index: idx++ });
     return items;
   }, [fetchedModels]);
 
   const applyPopupSelection = (item: {type: string, cmd: string}) => {
     if (item.type === 'model') {
       window.sendToIde?.(JSON.stringify({ command: '/changeModel', model: item.cmd }));
+      setShowCommandPopup(false);
+      return;
+    }
+    if (item.type === 'settings') {
+      window.sendToIde?.(JSON.stringify({ command: '/openSettings' }));
       setShowCommandPopup(false);
       return;
     }
@@ -725,26 +743,74 @@ function App() {
     }, 10);
   };
 
+  const openFilePopup = (triggerPos: number = -1) => {
+    atTriggerPos.current = triggerPos;
+    setFilePopupSelectedIndex(0);
+    setShowFilePopup(true);
+    setShowCommandPopup(false);
+    setIsLoadingTabs(true);
+    window.sendToIde?.(JSON.stringify({ command: '/openTabs' }));
+  };
+
   const handleFileButtonClick = () => {
-    const opening = !showFilePopup;
-    setShowFilePopup(opening);
-    if (opening) {
-      setShowCommandPopup(false);
-      setIsLoadingTabs(true);
-      window.sendToIde?.(JSON.stringify({ command: '/openTabs' }));
-    }
+    if (showFilePopup) { setShowFilePopup(false); return; }
+    openFilePopup(-1);
   };
 
   const toggleFileSelection = (file: {name: string, path: string}) => {
-    setSelectedFiles(prev => {
-      const isSelected = prev.some(f => f.path === file.path);
-      if (isSelected) return prev.filter(f => f.path !== file.path);
-      if (prev.length >= 3) return prev;
-      return [...prev, file];
-    });
+    const textarea = textareaRef.current;
+    const insertText = `@${file.name} `;
+    let newText: string;
+    let newCursorPos: number;
+
+    if (atTriggerPos.current >= 0) {
+      // @ 타이핑으로 팝업 열린 경우: @ 자리부터 교체
+      const pos = atTriggerPos.current;
+      newText = inputText.slice(0, pos) + insertText + inputText.slice(pos + 1);
+      newCursorPos = pos + insertText.length;
+    } else {
+      // 버튼으로 팝업 열린 경우: 현재 커서 위치에 삽입
+      const pos = textarea?.selectionStart ?? inputText.length;
+      newText = inputText.slice(0, pos) + insertText + inputText.slice(pos);
+      newCursorPos = pos + insertText.length;
+    }
+
+    setInputText(newText);
+    setSelectedFiles(prev => prev.some(f => f.path === file.path) ? prev : [...prev, file]);
+    setShowFilePopup(false);
+    atTriggerPos.current = -1;
+
+    setTimeout(() => {
+      if (textarea) {
+        textarea.focus();
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 10);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showFilePopup && !isLoadingTabs && openTabs.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setFilePopupSelectedIndex(prev => (prev + 1) % openTabs.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setFilePopupSelectedIndex(prev => (prev - 1 + openTabs.length) % openTabs.length);
+        return;
+      }
+      if (e.key === 'Enter' && !isComposing.current) {
+        e.preventDefault();
+        toggleFileSelection(openTabs[filePopupSelectedIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowFilePopup(false);
+        return;
+      }
+    }
     if (showCommandPopup) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -810,44 +876,26 @@ function App() {
             / 명령어
           </button>
         </div>
-        {selectedFiles.length > 0 && (
-          <div className="selected-files-chips">
-            {selectedFiles.map(f => (
-              <span key={f.path} className="file-chip">
-                📎 {f.name}
-                <button className="chip-remove" onClick={() => toggleFileSelection(f)}>×</button>
-              </span>
-            ))}
-          </div>
-        )}
         <div className="textarea-wrapper">
           {showFilePopup && (
             <div className="command-popup" ref={filePopupRef}>
               <div className="popup-section">
-                <div className="popup-section-title">
-                  열린 파일{selectedFiles.length > 0 ? ` (${selectedFiles.length}/3 선택됨)` : ''}
-                </div>
+                <div className="popup-section-title">열린 파일</div>
                 {isLoadingTabs ? (
                   <div className="popup-loading">로딩 중...</div>
                 ) : openTabs.length === 0 ? (
                   <div className="popup-loading">열린 파일이 없습니다.</div>
                 ) : (
-                  openTabs.map(tab => {
-                    const isSelected = selectedFiles.some(f => f.path === tab.path);
-                    const isDisabled = !isSelected && selectedFiles.length >= 3;
-                    return (
-                      <button
-                        key={tab.path}
-                        className={`popup-item ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}`}
-                        onClick={() => { if (!isDisabled) toggleFileSelection(tab); }}
-                      >
-                        <span className="popup-item-command">📄 {tab.name}</span>
-                        <span className="popup-item-desc">
-                          {isSelected ? '✓ 선택됨' : isDisabled ? '최대 3개' : ''}
-                        </span>
-                      </button>
-                    );
-                  })
+                  openTabs.map((tab, idx) => (
+                    <button
+                      key={tab.path}
+                      className={`popup-item ${filePopupSelectedIndex === idx ? 'selected' : ''}`}
+                      onClick={() => toggleFileSelection(tab)}
+                      onMouseEnter={() => setFilePopupSelectedIndex(idx)}
+                    >
+                      <span className="popup-item-command">📄 {tab.name}</span>
+                    </button>
+                  ))
                 )}
               </div>
             </div>
@@ -874,10 +922,24 @@ function App() {
                 )}
               </div>
               <div className="popup-section">
+                <div className="popup-section-title">기타</div>
+                {popupItems.filter(item => item.type === 'settings').map(item => (
+                  <button
+                    key={item.cmd}
+                    className={`popup-item ${popupSelectedIndex === item.index ? 'selected' : ''}`}
+                    onClick={() => applyPopupSelection(item)}
+                    onMouseEnter={() => setPopupSelectedIndex(item.index)}
+                  >
+                    <span className="popup-item-command">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+              {/* 명령어 섹션 숨김 처리 (기능 유지, UI에서만 미노출) */}
+              {false && <div className="popup-section">
                 <div className="popup-section-title">명령어</div>
                 {popupItems.filter(item => item.type === 'cmd').map(item => (
-                  <button 
-                    key={item.cmd} 
+                  <button
+                    key={item.cmd}
                     className={`popup-item ${popupSelectedIndex === item.index ? 'selected' : ''}`}
                     onClick={() => applyPopupSelection(item)}
                     onMouseEnter={() => setPopupSelectedIndex(item.index)}
@@ -886,15 +948,21 @@ function App() {
                     <span className="popup-item-desc">{item.desc}</span>
                   </button>
                 ))}
-              </div>
+              </div>}
             </div>
           )}
           <textarea
+            ref={textareaRef}
             placeholder="무엇을 도와드릴까요?"
             value={inputText}
             onChange={e => {
               const val = e.target.value;
               setInputText(val);
+              // @ 타이핑 감지: 커서 바로 앞 글자가 @이면 파일 팝업 오픈
+              const cursorPos = e.target.selectionStart;
+              if (val[cursorPos - 1] === '@' && !showFilePopup) {
+                openFilePopup(cursorPos - 1);
+              }
               if (val === '/' || val.endsWith(' /') || val.endsWith('\n/')) {
                 setShowCommandPopup(true);
                 setPopupSelectedIndex(0);
@@ -903,7 +971,7 @@ function App() {
                   setModelsError('');
                   window.sendToIde?.(JSON.stringify({ command: '/fetchModels' }));
                 }
-              } else if (!val.includes('/')) {
+              } else {
                 setShowCommandPopup(false);
               }
             }}
