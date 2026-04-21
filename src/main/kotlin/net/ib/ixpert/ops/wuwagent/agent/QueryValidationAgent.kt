@@ -50,7 +50,10 @@ class QueryValidationAgent : BaseAgent() {
             }
         }
 
-        val schemaInfo = schemaRef.get() ?: return  // null이면 취소 → 종료
+        val schemaInfo = schemaRef.get() ?: run {
+            onError("분석이 취소되었습니다.")
+            return
+        }
 
         logger.info("QueryValidationAgent: schemaInfo='$schemaInfo'")
 
