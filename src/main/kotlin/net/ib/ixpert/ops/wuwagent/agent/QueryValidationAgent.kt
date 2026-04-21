@@ -1,6 +1,7 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
@@ -10,6 +11,7 @@ import net.ib.ixpert.ops.wuwagent.service.EditorContextService
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.event.ActionEvent
+import java.util.concurrent.atomic.AtomicReference
 import javax.swing.Action
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -36,66 +38,21 @@ class QueryValidationAgent : BaseAgent() {
             return
         }
 
-        // EDT에서 스키마 입력 다이얼로그 표시 (백그라운드 스레드 → EDT 동기 대기)
-        var schemaInfo = ""
-        var cancelled = false
+        // AtomicReference 사용: null = 취소됨, "" = 건너뛰기, 나머지 = 입력된 스키마
+        val schemaRef = AtomicReference<String?>(null)
 
         ApplicationManager.getApplication().invokeAndWait {
-            val dialog = object : DialogWrapper(context.project) {
-                val textArea = JBTextArea(10, 60).apply {
-                    lineWrap = true
-                    wrapStyleWord = true
-                    emptyText.text =
-                        "예) CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100));\nCREATE INDEX idx_name ON users(name);"
-                }
-                private var skipped = false
-
-                init {
-                    title = "쿼리 분석 - 스키마 정보 입력"
-                    setOKButtonText("분석 시작")
-                    setCancelButtonText("취소")
-                    init()
-                }
-
-                override fun createCenterPanel(): JComponent {
-                    val panel = JPanel(BorderLayout(0, 8))
-                    panel.add(
-                        JBLabel("분석에 사용할 테이블, 인덱스 정보를 입력해주세요. (없으면 건너뛰기)"),
-                        BorderLayout.NORTH
-                    )
-                    val scroll = JBScrollPane(textArea).apply {
-                        preferredSize = Dimension(600, 200)
-                    }
-                    panel.add(scroll, BorderLayout.CENTER)
-                    return panel
-                }
-
-                override fun createLeftSideActions(): Array<Action> {
-                    val skipAction = object : DialogWrapperAction("건너뛰기") {
-                        override fun doAction(e: ActionEvent?) {
-                            skipped = true
-                            close(OK_EXIT_CODE)
-                        }
-                    }
-                    return arrayOf(skipAction)
-                }
-
-                fun getSchema(): String = if (skipped) "" else textArea.text.trim()
-                fun isCancelled(): Boolean = !isOK && !skipped
-
-                // showAndGet() 후 결과를 바깥으로 전달
-                fun runDialog() {
-                    if (!showAndGet() && isCancelled()) {
-                        cancelled = true
-                        return
-                    }
-                    schemaInfo = getSchema()
-                }
+            val dialog = SchemaInputDialog(context.project)
+            when {
+                !dialog.showAndGet() -> schemaRef.set(null)   // Cancel / X → 취소
+                dialog.isSkipped()   -> schemaRef.set("")     // 건너뛰기 → 스키마 없이 진행
+                else                 -> schemaRef.set(dialog.getSchema())
             }
-            dialog.runDialog()
         }
 
-        if (cancelled) return
+        val schemaInfo = schemaRef.get() ?: return  // null이면 취소 → 종료
+
+        logger.info("QueryValidationAgent: schemaInfo='$schemaInfo'")
 
         val userMessage = buildString {
             append(code)
@@ -111,7 +68,7 @@ class QueryValidationAgent : BaseAgent() {
             }
         }
         val wrappedOnSuccess: (String) -> Unit = { resultText ->
-            val finalContent = if (resultText.isBlank() && accumulated.isNotBlank()) {
+            val finalContent = if (resultText.isBlank() && accumulated.isNotEmpty()) {
                 accumulated.toString()
             } else {
                 resultText
@@ -129,4 +86,51 @@ class QueryValidationAgent : BaseAgent() {
             onError
         )
     }
+}
+
+/**
+ * 쿼리 분석 전 스키마 정보를 입력받는 다이얼로그.
+ */
+private class SchemaInputDialog(project: Project) : DialogWrapper(project) {
+
+    private val textArea = JBTextArea(10, 60).apply {
+        lineWrap = true
+        wrapStyleWord = true
+        emptyText.text =
+            "예) CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100));\nCREATE INDEX idx_name ON users(name);"
+    }
+    private var skipped = false
+
+    init {
+        title = "쿼리 분석 - 스키마 정보 입력"
+        setOKButtonText("분석 시작")
+        setCancelButtonText("취소")
+        init()
+    }
+
+    override fun createCenterPanel(): JComponent {
+        val panel = JPanel(BorderLayout(0, 8))
+        panel.add(
+            JBLabel("분석에 사용할 테이블, 인덱스 정보를 입력해주세요. (없으면 건너뛰기)"),
+            BorderLayout.NORTH
+        )
+        val scroll = JBScrollPane(textArea).apply {
+            preferredSize = Dimension(600, 200)
+        }
+        panel.add(scroll, BorderLayout.CENTER)
+        return panel
+    }
+
+    override fun createLeftSideActions(): Array<Action> {
+        val skipAction = object : DialogWrapperAction("건너뛰기") {
+            override fun doAction(e: ActionEvent?) {
+                skipped = true
+                close(OK_EXIT_CODE)
+            }
+        }
+        return arrayOf(skipAction)
+    }
+
+    fun isSkipped(): Boolean = skipped
+    fun getSchema(): String = textArea.text.trim()
 }
