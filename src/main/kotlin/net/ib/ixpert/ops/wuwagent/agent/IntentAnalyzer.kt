@@ -18,8 +18,11 @@ object IntentAnalyzer {
     // 키워드 → Pipeline 매핑 (순서 중요: 더 구체적인 것 먼저)
     private val keywordMap: List<Pair<List<String>, TaskPipeline>> = listOf(
         listOf("개선", "리팩토링", "리팩", "refactor", "improve", "최적화", "optimize") to TaskPipeline.Improve,
-        listOf("리뷰", "review", "검토", "점검", "코드 품질")                          to TaskPipeline.Review,
-        listOf("설명", "explain", "이게 뭐야", "어떻게 동작", "알려줘")                 to TaskPipeline.ExplainTask
+        listOf("리뷰", "review", "검토", "코드 품질")                                   to TaskPipeline.Review,
+        listOf("설명", "explain")                                                       to TaskPipeline.ExplainTask,
+        listOf("영향 분석", "영향도", "impact analyze")                                 to TaskPipeline.Impact,
+        listOf("쿼리 검증", "query validation", "sql 검증")                             to TaskPipeline.QueryValidation,
+        listOf("테스트 생성", "test 생성", "generate test")                             to TaskPipeline.GenerateTest
     )
 
     fun analyze(userInput: String, client: OllamaClient): TaskPipeline {

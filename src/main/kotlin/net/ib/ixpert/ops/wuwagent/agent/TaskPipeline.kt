@@ -502,6 +502,20 @@ sealed class TaskPipeline {
         )
     }
 
+    /** 쿼리 / SQL 검증 (QueryValidationAgent 직접 호출) */
+    object QueryValidation : TaskPipeline() {
+        override val steps = listOf(
+            AgentStep("1/1 쿼리 검증", "query_validation_prompt.txt", isApplyable = false)
+        )
+    }
+
+    /** 테스트 코드 생성 (GenerateTestAgent 직접 호출) */
+    object GenerateTest : TaskPipeline() {
+        override val steps = listOf(
+            AgentStep("1/1 테스트 생성", "generate_test_prompt.txt", isApplyable = false)
+        )
+    }
+
     /** 일반 대화 (폴백) */
     object Chat : TaskPipeline() {
         override val steps = listOf(

@@ -23,7 +23,8 @@ print_header() {
 
 print_usage() {
     print_header
-    echo -e "사용법: ${GREEN}./build.sh${NC} ${YELLOW}<command>${NC}"
+    echo -e "사용법: ${GREEN}./build.sh${NC} ${YELLOW}[command]${NC}"
+    echo -e "  command 없이 실행하면 ${GREEN}buildrun${NC} 이 기본으로 실행됩니다."
     echo ""
     echo -e "${YELLOW}명령어:${NC}"
     echo -e "  ${GREEN}build${NC}        전체 빌드 (webview + plugin + release 복사)"
@@ -35,6 +36,7 @@ print_usage() {
     echo -e "  ${GREEN}run${NC}          IDE 샌드박스에서 플러그인 실행"
     echo -e "  ${GREEN}release${NC}      릴리즈 파일 위치 확인"
     echo -e "  ${GREEN}verify${NC}       플러그인 검증 (verifyPlugin)"
+    echo -e "  ${GREEN}help${NC}         사용법 출력"
     echo ""
 }
 
@@ -118,14 +120,16 @@ cmd_verify() {
 
 # 메인
 case "${1:-}" in
-    build)   cmd_build ;;
-    plugin)  cmd_plugin ;;
-    webview) cmd_webview ;;
-    clean)   cmd_clean ;;
+    build)    cmd_build ;;
+    plugin)   cmd_plugin ;;
+    webview)  cmd_webview ;;
+    clean)    cmd_clean ;;
     rebuild)  cmd_rebuild ;;
     buildrun) cmd_buildrun ;;
     run)      cmd_run ;;
-    release) cmd_release ;;
-    verify)  cmd_verify ;;
-    *)       print_usage ;;
+    release)  cmd_release ;;
+    verify)   cmd_verify ;;
+    help)     print_usage ;;
+    "")       cmd_buildrun ;;
+    *)        log_error "알 수 없는 명령어: $1"; echo ""; print_usage ;;
 esac

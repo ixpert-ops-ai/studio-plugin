@@ -39,9 +39,19 @@ class WuwSettingsConfigurable : SearchableConfigurable {
                         .component
                 }
                 row("API Key:") {
-                    apiKeyField = passwordField()
+                    val pwdField = passwordField()
                         .columns(COLUMNS_MEDIUM)
                         .component
+                    apiKeyField = pwdField
+
+                    val defaultEchoChar = pwdField.echoChar
+                    var isVisible = false
+
+                    button("Show") {
+                        isVisible = !isVisible
+                        pwdField.echoChar = if (isVisible) 0.toChar() else defaultEchoChar
+                        (it.source as? javax.swing.JButton)?.text = if (isVisible) "Hide" else "Show"
+                    }
                 }
                 row("Model:") {
                     modelComboBox = comboBox(DefaultComboBoxModel<String>(arrayOf(settings.state.model)))
