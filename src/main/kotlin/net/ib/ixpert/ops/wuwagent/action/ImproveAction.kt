@@ -30,6 +30,20 @@ class ImproveAction : AnAction() {
         val improveRequest = "/improve 선택된 코드를 분석하고 최선의 방법으로 개선해주세요."
         val context = AgentContext(project, editor, improveRequest)
 
+        // 선택 영역 없이 전체 파일이 1500줄 이상인 경우 사전 안내 말풍선 출력
+        if (!hasSelection && editor.document.lineCount >= 1500) {
+            val warnMsgId = "${messageId}_warn"
+            ApplicationManager.getApplication().invokeLater {
+                bridge.sendMessage("task_start", "", warnMsgId)
+                bridge.sendMessage(
+                    subType = "task_step",
+                    content = "코드가 1500줄 이상입니다. 전체 개선 시 결과가 불완전할 수 있습니다.\n드래그로 범위를 지정하여 실행하는 것을 권장합니다.",
+                    messageId = warnMsgId,
+                    meta = mapOf("applyable" to "false", "isSuccess" to "true")
+                )
+            }
+        }
+
         ApplicationManager.getApplication().invokeLater {
             bridge.sendMessage("task_start", "코드 개선을 시작합니다...", messageId)
         }
