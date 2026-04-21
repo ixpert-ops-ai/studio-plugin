@@ -463,6 +463,25 @@ class WebviewActionRouter(private val project: Project) {
                     EditorDiffService.showDiff(project, targetFile, rightFullText, "AI 코드 개선 제안 ($scope)")
                 }
 
+                // [이전 코드 백업 - 선택 영역 SimpleDiff 2-way 비교, 드래그 케이스도 3-way Diff로 대체됨]
+                // "/viewDiffSimple" -> {
+                //     logger.info("Router: /viewDiffSimple 분기 → SimpleDiffRequest")
+                //     val originalCode = payload["originalCode"] ?: ""
+                //     // SEARCH/REPLACE 적용 시도 → 코드 블록 추출 → 원문 순으로 fallback
+                //     val rightText = EditorApplyService.applySearchReplace(originalCode, textBody)
+                //         ?: EditorApplyService.extractCodeBlock(textBody).takeIf { it.isNotBlank() }
+                //         ?: textBody
+                //     val factory = com.intellij.diff.DiffContentFactory.getInstance()
+                //     val request = com.intellij.diff.requests.SimpleDiffRequest(
+                //         "AI 코드 개선 제안 (선택 영역)",
+                //         factory.create(originalCode),
+                //         factory.create(rightText),
+                //         "원본 선택 코드",
+                //         "개선된 코드"
+                //     )
+                //     com.intellij.diff.DiffManager.getInstance().showDiff(project, request)
+                // }
+
                 // ── Undo: IDE 기본 Undo 실행 (단축키 Ctrl+Z와 동일) ──────────────
                 "/undo" -> {
                     logger.info("Router: /undo 분기 → IDE 기본 Undo (UndoManager) 실행")

@@ -37,6 +37,9 @@ interface Message {
   applied?: boolean;
   sourceFile?: string;
   filePath?: string;
+  hasSelection?: boolean;
+  selectedText?: string;
+  modifiedFullCode?: string;
   isLoading?: boolean;
   isError?: boolean;
   isStreaming?: boolean;
@@ -146,9 +149,19 @@ const MessageItem = ({ msg }: { msg: Message }) => {
   };
 
   const handleDiff = () => {
-    if (window.sendToIde && msg.filePath) {
-      window.sendToIde(JSON.stringify({ command: '/viewDiff', text: msg.content, filePath: msg.filePath }));
-    }
+    if (!window.sendToIde || !msg.filePath) return;
+    // [이전 코드 백업 - 선택 케이스는 SimpleDiff 2-way 방식 사용]
+    // if (msg.hasSelection) {
+    //   window.sendToIde(JSON.stringify({ command: '/viewDiffSimple', text: msg.content, originalCode: msg.selectedText ?? '' }));
+    // } else {
+    //   window.sendToIde(JSON.stringify({ command: '/viewDiff', text: msg.content, filePath: msg.filePath }));
+    // }
+    // 선택 케이스도 3-way Diff로 처리: ImproveAction에서 미리 계산한 modifiedFullCode 사용
+    window.sendToIde(JSON.stringify({
+      command: '/viewDiff',
+      text: msg.modifiedFullCode || msg.content,
+      filePath: msg.filePath
+    }));
   };
 
   // ── 테스트 결과 여부 판별 ────────────────────────────────────────
@@ -402,6 +415,7 @@ function App() {
             let isLoading = existing.isLoading;
             let isError = existing.isError;
             let isStreaming = existing.isStreaming;
+            let modifiedFullCode = existing.modifiedFullCode;
 
             // 서브타입별 업데이트 정책
             switch (data.subType) {
@@ -426,6 +440,7 @@ function App() {
                 } else if (data.content) {
                   newContent = data.content;
                 }
+                if (data.modifiedFullCode) modifiedFullCode = data.modifiedFullCode;
                 isLoading = false;
                 isStreaming = false;
                 currentStatus = undefined;
@@ -480,14 +495,15 @@ function App() {
 
             updated[index] = {
               ...existing,
-              content:      newContent,
-              currentStatus: currentStatus,
-              isLoading:    isLoading,
-              isError:      isError,
-              isStreaming:  isStreaming,
-              subType:      data.subType,
-              sourceFile:   data.sourceFile || existing.sourceFile,
-              isSuccess: data.isSuccess !== 'false' ? true : existing.isSuccess,
+              content:         newContent,
+              currentStatus:   currentStatus,
+              isLoading:       isLoading,
+              isError:         isError,
+              isStreaming:     isStreaming,
+              subType:         data.subType,
+              sourceFile:      data.sourceFile || existing.sourceFile,
+              isSuccess:       data.isSuccess !== 'false' ? true : existing.isSuccess,
+              modifiedFullCode: modifiedFullCode,
             };
             return updated;
           }
@@ -522,7 +538,9 @@ function App() {
             isLoading: true,
             currentStatus: data.content,  // 로딩 문구는 UI 상태로만 관리
             sourceFile: data.sourceFile,  // test_start 시 소스파일명 저장
-            filePath: data.filePath       // Improve Step2 시작 시 원본 파일 경로 저장 (Diff 버튼용)
+            filePath: data.filePath,      // Improve Step2 시작 시 원본 파일 경로 저장 (Diff 버튼용)
+            hasSelection: data.hasSelection === 'true',
+            selectedText: data.selectedText
           };
           return [...prev, newMsg];
         });
