@@ -199,17 +199,21 @@ class WebviewActionRouter(private val project: Project) {
 
                     // Step 시작 시 즉각 UI 피드백
                     val stepNotiIdx = intArrayOf(0)
-                    val onStepStart = { stepLabel: String ->
-                        logger.info("Router: Step 시작 알림 → $stepLabel")
+                    val onStepStart = { stepLabel: String, stepMsgId: String, isApplyable: Boolean ->
+                        logger.info("Router: Step 시작 알림 → $stepLabel (stepMsgId=$stepMsgId, isApplyable=$isApplyable)")
                         val notiId = "${messageId}_noti_${stepNotiIdx[0]}"
                         stepNotiIdx[0]++
                         ApplicationManager.getApplication().invokeLater {
                             bridge.sendMessage("step_noti", stepLabel, notiId, mapOf("status" to "started"))
-                            bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
+                            when {
+                                stepMsgId == messageId -> bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId)
+                                !isApplyable -> bridge.sendMessage("task_start", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId)
+                                else -> bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
+                            }
                         }
                     }
 
-                    // Step 완료 시 결과 전송
+                    // Step 완료 시 결과 전송 (stepMsgId: Step별 독립 말풍선 ID)
                     val stepNotiDoneIdx = intArrayOf(0)
                     val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, stepMsgId: String ->
                         logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, success=${result.isSuccess}, scope=${result.applyScope})")
@@ -256,16 +260,11 @@ class WebviewActionRouter(private val project: Project) {
                                 }
                             }
                             else -> {
-                                // ── 텍스트 말풍선 (Step 1: Analyze / Explain) ───────────
-                                // 코드 블록 제거 후 설명 텍스트만 기존 말풍선에 누적
-                                val displayContent = result.llmResponse
-                                    .replace(Regex("```[\\w]*\\n?[\\s\\S]*?```"), "")
-                                    .trim()
                                 ApplicationManager.getApplication().invokeLater {
                                     bridge.sendMessage(
                                         subType = "task_step",
-                                        content = displayContent,
-                                        messageId = messageId,
+                                        content = result.llmResponse,
+                                        messageId = stepMsgId,
                                         meta = mapOf(
                                             "stepLabel" to stepLabel,
                                             "applyable" to "false",

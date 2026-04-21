@@ -36,25 +36,33 @@ class ImproveAction : AnAction() {
 
         val stepNotiIdx = intArrayOf(0)
         var analysisHeaderSent = false
-        val onStepStart = { stepLabel: String ->
-            logger.info("ImproveAction: Step 시작 → $stepLabel")
+        val onStepStart = { stepLabel: String, stepMsgId: String, isApplyable: Boolean ->
+            logger.info("ImproveAction: Step 시작 → $stepLabel (stepMsgId=$stepMsgId, isApplyable=$isApplyable)")
             val notiId = "${messageId}_noti_${stepNotiIdx[0]}"
             stepNotiIdx[0]++
             ApplicationManager.getApplication().invokeLater {
                 bridge.sendMessage("step_noti", stepLabel, notiId, mapOf("status" to "started"))
-                bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
-                // 분석 Step(1단계) 시작 시 파일명/범위 헤더를 첫 청크로 즉시 전송
-                if (!analysisHeaderSent) {
-                    analysisHeaderSent = true
-                    val scopeText = if (hasSelection) "선택 영역" else "전체 파일"
-                    bridge.sendMessageChunk(messageId, "### 🎯 분석 대상: `$fileName` ($scopeText)\n\n")
+                if (stepMsgId == messageId) {
+                    // Step 1: 기존 말풍선에 진행 상태 업데이트 + 파일명/범위 헤더 즉시 전송
+                    bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId)
+                    if (!analysisHeaderSent) {
+                        analysisHeaderSent = true
+                        val scopeText = if (hasSelection) "선택 영역" else "전체 파일"
+                        bridge.sendMessageChunk(messageId, "### 🎯 분석 대상: `$fileName` ($scopeText)\n\n")
+                    }
+                } else if (!isApplyable) {
+                    // Step 2+, 텍스트 스트리밍 step: 새 말풍선 생성
+                    bridge.sendMessage("task_start", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId)
+                } else {
+                    // Step 2+, 코드 카드 step: 진행 상태만 기존 말풍선에 업데이트
+                    bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
                 }
             }
         }
 
         val stepNotiDoneIdx = intArrayOf(0)
-        val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, _: String ->
-            logger.info("ImproveAction: Step 완료 → $stepLabel (applyable=$isApplyable)")
+        val onStep = { stepLabel: String, result: TaskPipeline.StepResult, _: Boolean, stepMsgId: String ->
+            logger.info("ImproveAction: Step 완료 → $stepLabel (stepMsgId=$stepMsgId)")
             val notiId = "${messageId}_noti_${stepNotiDoneIdx[0]}"
             stepNotiDoneIdx[0]++
             ApplicationManager.getApplication().invokeLater {
@@ -62,50 +70,16 @@ class ImproveAction : AnAction() {
                     "step_noti", stepLabel, notiId,
                     mapOf("status" to if (result.isSuccess) "completed" else "failed")
                 )
-            }
-
-            if (isApplyable && result.isSuccess) {
-                val codeMessageId = "${messageId}_code"
-                ApplicationManager.getApplication().invokeLater {
-                    bridge.sendMessage(
-                        subType = "task_code",
-                        content = "",
-                        messageId = codeMessageId,
-                        meta = mapOf(
-                            "stepLabel" to stepLabel,
-                            "applyable" to "true",
-                            "originalCode" to result.originalCode.orEmpty(),
-                            "modifiedCode" to result.modifiedCode.orEmpty(),
-                            "extractedCode" to result.extractedCode,
-                            "applyScope" to result.applyScope,
-                            "isSuccess" to "true"
-                        )
+                bridge.sendMessage(
+                    subType = "task_step",
+                    content = result.llmResponse,
+                    messageId = stepMsgId,
+                    meta = mapOf(
+                        "stepLabel" to stepLabel,
+                        "applyable" to "false",
+                        "isSuccess" to result.isSuccess.toString()
                     )
-                }
-            } else {
-                val fileLabel = when {
-                    result.applyScope == "선택 영역" -> "`$fileName` (선택 영역)"
-                    result.applyScope == "전체 파일" -> "`$fileName` (전체 파일)"
-                    result.applyScope.isNotBlank()   -> "`${result.applyScope}`"
-                    fileName.isNotBlank()            -> "`$fileName`"
-                    else -> ""
-                }
-                val header = if (fileLabel.isNotBlank()) "### 🎯 분석 대상: $fileLabel\n\n" else ""
-                val displayContent = header + result.llmResponse
-                    .replace(Regex("```[\\w]*\\n?[\\s\\S]*?```"), "")
-                    .trim()
-                ApplicationManager.getApplication().invokeLater {
-                    bridge.sendMessage(
-                        subType = "task_step",
-                        content = displayContent,
-                        messageId = messageId,
-                        meta = mapOf(
-                            "stepLabel" to stepLabel,
-                            "applyable" to "false",
-                            "isSuccess" to result.isSuccess.toString()
-                        )
-                    )
-                }
+                )
             }
         }
 
@@ -117,7 +91,11 @@ class ImproveAction : AnAction() {
                     bridge.sendMessage("task_success", "코드 개선이 완료되었습니다.", messageId)
                 }
             },
-            onChunk = null,
+            onChunk = { chunk ->
+                ApplicationManager.getApplication().invokeLater {
+                    bridge.sendMessageChunk(messageId, chunk)
+                }
+            },
             onError = { errorMsg ->
                 ApplicationManager.getApplication().invokeLater {
                     bridge.sendMessage("error", errorMsg, messageId)
