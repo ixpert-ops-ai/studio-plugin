@@ -65,8 +65,9 @@ class ImproveAction : AnAction() {
                         bridge.sendMessageChunk(messageId, "### 분석 대상: `$fileName` ($scopeText)\n\n")
                     }
                 } else if (!isApplyable) {
-                    // Step 2+, 텍스트 스트리밍 step: 새 말풍선 생성
-                    bridge.sendMessage("task_start", "$stepLabel LLM 응답 대기 중...", stepMsgId)
+                    // Step 2+, 텍스트 스트리밍 step: 새 말풍선 생성 + 원본 파일 경로 전달 (Diff 버튼 활성화용)
+                    bridge.sendMessage("task_start", "$stepLabel LLM 응답 대기 중...", stepMsgId,
+                        mapOf("filePath" to (editor.virtualFile?.path ?: "")))
                 } else {
                     // Step 2+, 코드 카드 step: 진행 상태만 기존 말풍선에 업데이트
                     bridge.sendMessage("task_progress", "$stepLabel LLM 응답 대기 중...", messageId)

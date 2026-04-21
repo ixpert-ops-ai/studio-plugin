@@ -398,41 +398,68 @@ class WebviewActionRouter(private val project: Project) {
 
                 // ── Diff: IDE 내장 Diff 창 띄우기 (블록 단위 적용 << 지원) ─────────────
                 "/viewDiff" -> {
+                    val filePath = payload["filePath"] ?: ""
+
+                    if (filePath.isNotBlank()) {
+                        // ── filePath 기반 경로: Improve Step2 Diff 버튼 ──────────────────
+                        // Step2 LLM 응답(SEARCH/REPLACE 또는 풀코드)을 원본 파일에 적용하여 Diff 표시
+                        logger.info("Router: /viewDiff (filePath 기반) → $filePath")
+                        val localFs = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                        val vFile = localFs.findFileByPath(filePath)
+                        if (vFile == null) {
+                            bridge.sendMessage("error", "파일을 찾을 수 없습니다: $filePath")
+                            return@invokeLater
+                        }
+                        // 닫혀 있으면 다시 열기
+                        FileEditorManager.getInstance(project).openFile(vFile, false)
+                        val document = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(vFile)
+                        if (document == null) {
+                            bridge.sendMessage("error", "파일 내용을 읽을 수 없습니다.")
+                            return@invokeLater
+                        }
+                        val originalText = document.text
+                        // SEARCH/REPLACE 적용 → 실패 시 코드 블록 추출 → 최후엔 원문 그대로
+                        val rightFullText = EditorApplyService.applySearchReplace(originalText, textBody)
+                            ?: EditorApplyService.extractCodeBlock(textBody).takeIf { it.isNotBlank() }
+                            ?: textBody
+                        EditorDiffService.showDiff(project, vFile, rightFullText, "AI 코드 개선 제안 (${vFile.name})")
+                        return@invokeLater
+                    }
+
+                    // ── 기존 scope 기반 경로 ───────────────────────────────────────────
                     val original = payload["original"] ?: ""
                     val modified = payload["modified"] ?: ""
                     val scope    = payload["scope"] ?: "File"
-                    
+
                     if (original == modified && original.isNotBlank()) {
                         logger.warn("Router: /viewDiff 무시됨 → original과 modified가 완벽히 동일합니다.")
                         bridge.sendMessage("task_progress", "⚠️ 원본과 개선된 코드가 동일하여 Diff를 열 수 없습니다.")
                         return@invokeLater
                     }
-                    
+
                     val fileEditorManager = FileEditorManager.getInstance(project)
                     val targetFile = fileEditorManager.openFiles.firstOrNull { it.name == scope }
                         ?: fileEditorManager.selectedTextEditor?.virtualFile
-                        
+
                     if (targetFile == null) {
                         logger.warn("Router: /viewDiff 대상을 찾을 수 없음 (scope=$scope)")
                         bridge.sendMessage("error", "적용 대상 파일($scope)을 찾을 수 없어 Diff 뷰어를 열 수 없습니다.")
                         return@invokeLater
                     }
-                    
+
                     val document = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(targetFile)
                     if (document == null) {
                         bridge.sendMessage("error", "해당 파일의 내용을 읽을 수 없습니다.")
                         return@invokeLater
                     }
 
-                    // 선택 영역 단위의 Diff일 경우 전체 문서 내에서 해당 영역만 교체하여 Full Text를 생성합니다.
                     val fullOriginalText = document.text
                     val rightFullText = if (original.isNotBlank() && original != modified) {
-                        // 문서 전체에서 original을 modified로 치환 (첫 번째 일치 항목 안전 교체)
                         fullOriginalText.replaceFirst(original, modified)
                     } else {
                         modified
                     }
-                    
+
                     EditorDiffService.showDiff(project, targetFile, rightFullText, "AI 코드 개선 제안 ($scope)")
                 }
 

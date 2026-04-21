@@ -36,6 +36,7 @@ interface Message {
   applyScope?: string;
   applied?: boolean;
   sourceFile?: string;
+  filePath?: string;
   isLoading?: boolean;
   isError?: boolean;
   isStreaming?: boolean;
@@ -144,6 +145,12 @@ const MessageItem = ({ msg }: { msg: Message }) => {
     }
   };
 
+  const handleDiff = () => {
+    if (window.sendToIde && msg.filePath) {
+      window.sendToIde(JSON.stringify({ command: '/viewDiff', text: msg.content, filePath: msg.filePath }));
+    }
+  };
+
   // ── 테스트 결과 여부 판별 ────────────────────────────────────────
   const isTestResult = msg.subType === 'test' || msg.subType === 'test_start' || msg.subType === 'task_chunk' && !!msg.sourceFile;
 
@@ -215,7 +222,7 @@ const MessageItem = ({ msg }: { msg: Message }) => {
         </div>
       )}
 
-      {/* 일반 결과 버튼 (Copy / Save, 초기 인사말 제외) */}
+      {/* 일반 결과 버튼 (Copy / Save / Diff 보기, 초기 인사말 제외) */}
       {!isError && !msg.isLoading && msg.content && !isTestResult && msg.id !== '1' && (
         <div className="msg-text-actions">
           <button className="btn-text-action" onClick={handleCopy} title="클립보드에 복사">
@@ -224,6 +231,11 @@ const MessageItem = ({ msg }: { msg: Message }) => {
           <button className="btn-text-action" onClick={handleSave} title="Markdown 파일로 저장">
             Save .md
           </button>
+          {msg.filePath && (
+            <button className="btn-text-action" onClick={handleDiff} title="원본 파일과 개선 결과 비교">
+              Diff 보기
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -509,7 +521,8 @@ function App() {
             subType: data.subType,
             isLoading: true,
             currentStatus: data.content,  // 로딩 문구는 UI 상태로만 관리
-            sourceFile: data.sourceFile   // test_start 시 소스파일명 저장
+            sourceFile: data.sourceFile,  // test_start 시 소스파일명 저장
+            filePath: data.filePath       // Improve Step2 시작 시 원본 파일 경로 저장 (Diff 버튼용)
           };
           return [...prev, newMsg];
         });
