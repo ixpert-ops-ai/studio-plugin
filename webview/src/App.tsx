@@ -109,56 +109,9 @@ const MermaidChart = ({ chart }: { chart: string }) => {
 };
 
 // ─────────────────────────────────────────────
-//  컴포넌트: ActionCard (코드 제안 카드)
-// ─────────────────────────────────────────────
-const ActionCard = ({ msg, onApply }: { msg: Message; onApply: () => void }) => {
-  const hasOriginal = !!msg.originalCode && msg.originalCode.trim() !== '';
-  const hasModified = !!msg.modifiedCode && msg.modifiedCode.trim() !== '';
-  const canShowDiff = msg.isSuccess === true && hasOriginal && hasModified;
-
-  const handleApply = () => {
-    onApply();
-  };
-
-  const handleViewDiff = () => {
-    if (window.sendToIde) {
-      window.sendToIde(JSON.stringify({ 
-        command: '/viewDiff', 
-        original: msg.originalCode,
-        modified: msg.modifiedCode,
-        scope: msg.applyScope
-      }));
-    }
-  };
-
-
-
-  return (
-    <div className="action-card">
-      <div className="action-card-header">
-        <span className="title">✨ 코드 개선 제안</span>
-        <span className="filename">{msg.applyScope || 'MainActivity.kt'}</span>
-      </div>
-      <div className="action-card-body">
-        {canShowDiff && (
-          <button className="btn-action btn-diff" onClick={handleViewDiff}>
-            🔍 Diff 보기
-          </button>
-        )}
-        <button className="btn-action btn-apply" onClick={handleApply}>
-          Apply
-        </button>
-      </div>
-    </div>
-  );
-};
-
-// ─────────────────────────────────────────────
 //  컴포넌트: MessageItem (역할별 분기)
 // ─────────────────────────────────────────────
 const MessageItem = ({ msg }: { msg: Message }) => {
-  const isApplied = msg.applied === true;
-
   // 0. Step 알림 카드
   if (msg.subType === 'step_noti') {
     return <StepNotiItem msg={msg} />;
@@ -181,24 +134,6 @@ const MessageItem = ({ msg }: { msg: Message }) => {
 
   const isError = msg.isError === true;
 
-  const handleApply = () => {
-    if (window.sendToIde) {
-      window.sendToIde(JSON.stringify({
-        command: '/apply',
-        id: msg.id,
-        text: msg.modifiedCode || msg.extractedCode || msg.content,
-        scope: msg.applyScope || '',
-        original: msg.originalCode || ''
-      }));
-    }
-  };
-
-  const handleUndo = () => {
-    if (window.sendToIde) {
-      window.sendToIde(JSON.stringify({ command: '/undo', id: msg.id }));
-    }
-  };
-
   const handleCopy = () => {
     navigator.clipboard.writeText(msg.content).catch(() => {});
   };
@@ -208,31 +143,6 @@ const MessageItem = ({ msg }: { msg: Message }) => {
       window.sendToIde(JSON.stringify({ command: '/saveMarkdown', content: msg.content }));
     }
   };
-
-  // ── 코드 말풍선 (task_code): Diff 카드만 표시 ────────────────────
-  if (msg.subType === 'task_code') {
-    return (
-      <div className="msg-ai improvement">
-        <div className="msg-ai-content">
-          {msg.isLoading && (
-            <div className="inline-loading-area">
-              <div className="typing-dots"><span></span><span></span><span></span></div>
-              <span className="status-text">개선 코드 생성 중...</span>
-            </div>
-          )}
-        </div>
-        {!isApplied && !isError && msg.applyable && (
-          <ActionCard msg={msg} onApply={handleApply} />
-        )}
-        {isApplied && (
-          <div className="applied-info">
-            <span>✓ 코드가 에디터에 적용되었습니다.</span>
-            <button className="btn-undo-link" onClick={handleUndo}>Undo</button>
-          </div>
-        )}
-      </div>
-    );
-  }
 
   // ── 테스트 결과 여부 판별 ────────────────────────────────────────
   const isTestResult = msg.subType === 'test' || msg.subType === 'test_start' || msg.subType === 'task_chunk' && !!msg.sourceFile;
@@ -498,26 +408,15 @@ function App() {
                 isStreaming = false;
                 break;
               case 'task_step':
-                if (data.applyable === 'true') {
-                  // 개선 Step: 코드 카드 데이터 설정 (content는 건드리지 않음)
-                  isLoading = false;
-                  isStreaming = false;
-                  currentStatus = undefined;
-                } else {
-                  // 분석 Step: 스트리밍 여부로 경로 구분
-                  if (existing.isStreaming) {
-                    // 스트리밍 완료 후 온 task_step
-                    // → 이미 헤더+전체 내용이 청크로 쌓여 있으므로 기존 content 유지
-                    newContent = existing.content;
-                  } else if (data.content) {
-                    // 스트리밍 없이 온 task_step (fallback)
-                    newContent = data.content;
-                  }
-                  // isStreaming → false: 로딩 스피너 종료, Copy/Save 버튼 활성화
-                  isLoading = false;
-                  isStreaming = false;
-                  currentStatus = undefined;
+                // 스트리밍 완료 후 온 경우 기존 content 유지, 아니면 data.content 사용
+                if (existing.isStreaming) {
+                  newContent = existing.content;
+                } else if (data.content) {
+                  newContent = data.content;
                 }
+                isLoading = false;
+                isStreaming = false;
+                currentStatus = undefined;
                 break;
               case 'task_success':
                 isLoading = false;
@@ -576,42 +475,20 @@ function App() {
               isStreaming:  isStreaming,
               subType:      data.subType,
               sourceFile:   data.sourceFile || existing.sourceFile,
-              // ✅ 코드 카드 메타데이터: applyable=true인 Step 완료 시에만 갱신
-              ...(data.subType === 'task_step' && data.applyable === 'true' ? {
-                applyable:    true,
-                isSuccess:    data.isSuccess !== 'false',
-                applyScope:   data.applyScope || existing.applyScope,
-                originalCode: data.originalCode || existing.originalCode,
-                modifiedCode: data.modifiedCode || existing.modifiedCode,
-                extractedCode: data.extractedCode || existing.extractedCode,
-              } : {
-                // 분석 Step 완료 시 코드 카드 상태를 건드리지 않음
-                applyable:    existing.applyable,
-                isSuccess:    existing.isSuccess,
-                applyScope:   existing.applyScope,
-                originalCode: existing.originalCode,
-                modifiedCode: existing.modifiedCode,
-                extractedCode: existing.extractedCode,
-              }),
+              isSuccess: data.isSuccess !== 'false' ? true : existing.isSuccess,
             };
             return updated;
           }
 
           // 2. 신규 메시지 생성 (Create)
           if (data.subType === 'task_code') {
-            // 코드 말풍선: Diff 카드에 필요한 메타데이터를 즉시 설정
             const codeMsg: Message = {
               id: messageId,
               role: 'ai',
               subType: 'task_code',
-              content: '',
+              content: data.extractedCode || data.modifiedCode || '',
               isLoading: false,
-              applyable: data.applyable === 'true',
               isSuccess: data.isSuccess !== 'false',
-              applyScope: data.applyScope,
-              originalCode: data.originalCode,
-              modifiedCode: data.modifiedCode,
-              extractedCode: data.extractedCode,
             };
             return [...prev, codeMsg];
           }

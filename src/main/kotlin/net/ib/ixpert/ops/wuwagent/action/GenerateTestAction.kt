@@ -21,7 +21,7 @@ class GenerateTestAction : AnAction() {
         val sourceFile = EditorContextService.extractFileName(editor)
 
         ApplicationManager.getApplication().invokeLater {
-            bridge.sendMessage("test_start", "🧪 테스트 코드를 생성하고 있습니다...", messageId,
+            bridge.sendMessage("test_start", "테스트 코드를 생성하고 있습니다...", messageId,
                 meta = mapOf("sourceFile" to sourceFile))
         }
 

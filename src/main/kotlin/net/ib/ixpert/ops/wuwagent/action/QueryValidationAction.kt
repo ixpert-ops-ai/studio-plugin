@@ -19,7 +19,7 @@ class QueryValidationAction : AnAction() {
         val messageId = "msg_${System.currentTimeMillis()}"
 
         ApplicationManager.getApplication().invokeLater {
-            bridge.sendMessage("explain_start", "🧪 쿼리를 검증하고 있습니다...", messageId)
+            bridge.sendMessage("explain_start", "쿼리를 검증하고 있습니다...", messageId)
         }
 
         QueryValidationAgent().execute(
