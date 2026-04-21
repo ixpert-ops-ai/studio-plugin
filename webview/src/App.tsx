@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Edit, Square, Terminal, Send } from 'lucide-react';
+import { Settings, Edit, Square, Terminal, Send, ArrowDown } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -267,6 +267,7 @@ function App() {
   const chatListRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적
+  const [isAtBottom, setIsAtBottom] = useState(true); // UI 렌더링을 위한 스크롤 하단 여부 상태
   const isComposing = useRef(false); // 한글 IME composition 상태 추적 (JCEF 자모 분리 방지)
   const atTriggerPos = useRef<number>(-1); // @ 타이핑으로 팝업 열린 경우 @ 위치
 
@@ -286,16 +287,23 @@ function App() {
   const [filePopupSelectedIndex, setFilePopupSelectedIndex] = useState(0);
   const filePopupRef = useRef<HTMLDivElement>(null);
 
-  // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화
+  // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화 및 버튼 숨김 처리
   useEffect(() => {
     const el = chatListRef.current;
     if (!el) return;
     const handleScroll = () => {
-      isNearBottom.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 50;
+      const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 50;
+      isNearBottom.current = nearBottom;
+      setIsAtBottom(nearBottom);
     };
     el.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll(); // 마운트 시 초기 확인
     return () => el.removeEventListener('scroll', handleScroll);
   }, []);
+
+  const scrollToBottom = () => {
+    chatListRef.current?.scrollTo({ top: chatListRef.current.scrollHeight, behavior: 'smooth' });
+  };
 
   // 외부 클릭 시 팝업 닫기
   useEffect(() => {
@@ -769,6 +777,11 @@ function App() {
       </div>
 
       <div className="chat-input-area">
+        {(!isAtBottom || messages.some(m => m.isStreaming)) && (
+          <button className="scroll-bottom-btn" onClick={scrollToBottom}>
+            <ArrowDown size={14} />
+          </button>
+        )}
         <div className="input-toolbar">
           <button className="toolbar-btn" onClick={handleFileButtonClick}>@ 파일</button>
           <button 
