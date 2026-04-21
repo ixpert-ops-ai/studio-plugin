@@ -35,7 +35,7 @@ class ExplainAction : AnAction() {
 
         // 🛎 즉시 자리 만들기 (로딩 표시 유도)
         ApplicationManager.getApplication().invokeLater {
-            bridge.sendMessage("explain_start", "🔍 코드 구조를 분석하고 있습니다...", messageId)
+            bridge.sendMessage("explain_start", "코드 구조를 분석하고 있습니다...", messageId)
         }
 
         agent.execute(

@@ -19,7 +19,7 @@ class ImpactAnalysisAction : AnAction() {
         val messageId = "msg_${System.currentTimeMillis()}"
 
         ApplicationManager.getApplication().invokeLater {
-            bridge.sendMessage("explain_start", "🔍 영향 범위를 분석하고 있습니다...", messageId)
+            bridge.sendMessage("explain_start", "영향 범위를 분석하고 있습니다...", messageId)
         }
 
         ImpactAgent().execute(
