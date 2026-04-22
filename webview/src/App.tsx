@@ -266,8 +266,8 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<string>('Loading...');
   const chatListRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적
-  const [isAtBottom, setIsAtBottom] = useState(true); // UI 렌더링을 위한 스크롤 하단 여부 상태
+  const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적 (자동 스크롤용)
+  const [showScrollButton, setShowScrollButton] = useState(false); // 스크롤 하단 이동 버튼 노출 여부
   const isComposing = useRef(false); // 한글 IME composition 상태 추적 (JCEF 자모 분리 방지)
   const atTriggerPos = useRef<number>(-1); // @ 타이핑으로 팝업 열린 경우 @ 위치
 
@@ -287,18 +287,41 @@ function App() {
   const [filePopupSelectedIndex, setFilePopupSelectedIndex] = useState(0);
   const filePopupRef = useRef<HTMLDivElement>(null);
 
-  // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화 및 버튼 숨김 처리
+  // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화 및 버튼 표시 여부 업데이트
   useEffect(() => {
     const el = chatListRef.current;
     if (!el) return;
+    
     const handleScroll = () => {
-      const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 50;
-      isNearBottom.current = nearBottom;
-      setIsAtBottom(nearBottom);
+      // 자동 스크롤을 위한 근접 여부 (50px 오차 허용)
+      isNearBottom.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 50;
+
+      // 버튼 노출 조건: 
+      // 1. 스크롤 내용이 화면보다 크고 (scrollHeight > clientHeight)
+      // 2. 현재 스크롤이 최하단이 아닐 때 (오차 10px 허용)
+      const hasScroll = el.scrollHeight > el.clientHeight;
+      const notAtBottom = el.scrollTop + el.clientHeight < el.scrollHeight - 10;
+      
+      setShowScrollButton(hasScroll && notAtBottom);
     };
+
     el.addEventListener('scroll', handleScroll, { passive: true });
-    handleScroll(); // 마운트 시 초기 확인
-    return () => el.removeEventListener('scroll', handleScroll);
+    
+    // 내부 컨텐츠(메시지) 크기 변경 감지
+    const resizeObserver = new ResizeObserver(() => {
+      handleScroll();
+    });
+    // Array.from(el.children) 처럼 특정요소를 관찰할지, el 자체를 할지.
+    // el 내부 콘텐츠 크기이므로 el 자체 스크롤 높이 변경 확인
+    resizeObserver.observe(el);
+
+    // 컴포넌트 마운트 초기화
+    setTimeout(handleScroll, 50);
+
+    return () => {
+      el.removeEventListener('scroll', handleScroll);
+      resizeObserver.disconnect();
+    };
   }, []);
 
   const scrollToBottom = () => {
@@ -777,7 +800,7 @@ function App() {
       </div>
 
       <div className="chat-input-area">
-        {(!isAtBottom || messages.some(m => m.isStreaming)) && (
+        {showScrollButton && (
           <button className="scroll-bottom-btn" onClick={scrollToBottom}>
             <ArrowDown size={14} />
           </button>
