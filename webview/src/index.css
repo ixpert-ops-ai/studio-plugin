@@ -331,11 +331,39 @@ body {
   background: var(--accent-hover);
 }
 
+/* Scroll to Bottom Button */
+.scroll-bottom-btn {
+  position: absolute;
+  top: -40px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background-color: rgba(26, 27, 46, 0.85); /* #1a1b2e */
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #fff;
+  cursor: pointer;
+  z-index: 10;
+  backdrop-filter: blur(4px);
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.scroll-bottom-btn:hover {
+  background-color: rgba(40, 42, 70, 0.95);
+  transform: translateX(-50%) translateY(-2px);
+}
+
 /* Chat Input Area */
 .chat-input-area {
   padding: 16px;
   background-color: var(--bg-main);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
+  position: relative;
 }
 
 .input-toolbar {

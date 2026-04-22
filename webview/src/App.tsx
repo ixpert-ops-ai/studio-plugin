@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Edit, Square, Terminal, Send } from 'lucide-react';
+import { Settings, Edit, Square, Terminal, Send, ArrowDown } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -36,6 +36,10 @@ interface Message {
   applyScope?: string;
   applied?: boolean;
   sourceFile?: string;
+  filePath?: string;
+  hasSelection?: boolean;
+  selectedText?: string;
+  modifiedFullCode?: string;
   isLoading?: boolean;
   isError?: boolean;
   isStreaming?: boolean;
@@ -144,6 +148,22 @@ const MessageItem = ({ msg }: { msg: Message }) => {
     }
   };
 
+  const handleDiff = () => {
+    if (!window.sendToIde || !msg.filePath) return;
+    // [이전 코드 백업 - 선택 케이스는 SimpleDiff 2-way 방식 사용]
+    // if (msg.hasSelection) {
+    //   window.sendToIde(JSON.stringify({ command: '/viewDiffSimple', text: msg.content, originalCode: msg.selectedText ?? '' }));
+    // } else {
+    //   window.sendToIde(JSON.stringify({ command: '/viewDiff', text: msg.content, filePath: msg.filePath }));
+    // }
+    // 선택 케이스도 3-way Diff로 처리: ImproveAction에서 미리 계산한 modifiedFullCode 사용
+    window.sendToIde(JSON.stringify({
+      command: '/viewDiff',
+      text: msg.modifiedFullCode || msg.content,
+      filePath: msg.filePath
+    }));
+  };
+
   // ── 테스트 결과 여부 판별 ────────────────────────────────────────
   const isTestResult = msg.subType === 'test' || msg.subType === 'test_start' || msg.subType === 'task_chunk' && !!msg.sourceFile;
 
@@ -215,7 +235,7 @@ const MessageItem = ({ msg }: { msg: Message }) => {
         </div>
       )}
 
-      {/* 일반 결과 버튼 (Copy / Save, 초기 인사말 제외) */}
+      {/* 일반 결과 버튼 (Copy / Save / Diff 보기, 초기 인사말 제외) */}
       {!isError && !msg.isLoading && msg.content && !isTestResult && msg.id !== '1' && (
         <div className="msg-text-actions">
           <button className="btn-text-action" onClick={handleCopy} title="클립보드에 복사">
@@ -224,6 +244,11 @@ const MessageItem = ({ msg }: { msg: Message }) => {
           <button className="btn-text-action" onClick={handleSave} title="Markdown 파일로 저장">
             Save .md
           </button>
+          {msg.filePath && (
+            <button className="btn-text-action" onClick={handleDiff} title="원본 파일과 개선 결과 비교">
+              Diff 보기
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -241,7 +266,8 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<string>('Loading...');
   const chatListRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적
+  const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적 (자동 스크롤용)
+  const [showScrollButton, setShowScrollButton] = useState(false); // 스크롤 하단 이동 버튼 노출 여부
   const isComposing = useRef(false); // 한글 IME composition 상태 추적 (JCEF 자모 분리 방지)
   const atTriggerPos = useRef<number>(-1); // @ 타이핑으로 팝업 열린 경우 @ 위치
 
@@ -261,16 +287,46 @@ function App() {
   const [filePopupSelectedIndex, setFilePopupSelectedIndex] = useState(0);
   const filePopupRef = useRef<HTMLDivElement>(null);
 
-  // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화
+  // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화 및 버튼 표시 여부 업데이트
   useEffect(() => {
     const el = chatListRef.current;
     if (!el) return;
+    
     const handleScroll = () => {
+      // 자동 스크롤을 위한 근접 여부 (50px 오차 허용)
       isNearBottom.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 50;
+
+      // 버튼 노출 조건: 
+      // 1. 스크롤 내용이 화면보다 크고 (scrollHeight > clientHeight)
+      // 2. 현재 스크롤이 최하단이 아닐 때 (오차 10px 허용)
+      const hasScroll = el.scrollHeight > el.clientHeight;
+      const notAtBottom = el.scrollTop + el.clientHeight < el.scrollHeight - 10;
+      
+      setShowScrollButton(hasScroll && notAtBottom);
     };
+
     el.addEventListener('scroll', handleScroll, { passive: true });
-    return () => el.removeEventListener('scroll', handleScroll);
+    
+    // 내부 컨텐츠(메시지) 크기 변경 감지
+    const resizeObserver = new ResizeObserver(() => {
+      handleScroll();
+    });
+    // Array.from(el.children) 처럼 특정요소를 관찰할지, el 자체를 할지.
+    // el 내부 콘텐츠 크기이므로 el 자체 스크롤 높이 변경 확인
+    resizeObserver.observe(el);
+
+    // 컴포넌트 마운트 초기화
+    setTimeout(handleScroll, 50);
+
+    return () => {
+      el.removeEventListener('scroll', handleScroll);
+      resizeObserver.disconnect();
+    };
   }, []);
+
+  const scrollToBottom = () => {
+    chatListRef.current?.scrollTo({ top: chatListRef.current.scrollHeight, behavior: 'smooth' });
+  };
 
   // 외부 클릭 시 팝업 닫기
   useEffect(() => {
@@ -390,6 +446,7 @@ function App() {
             let isLoading = existing.isLoading;
             let isError = existing.isError;
             let isStreaming = existing.isStreaming;
+            let modifiedFullCode = existing.modifiedFullCode;
 
             // 서브타입별 업데이트 정책
             switch (data.subType) {
@@ -414,6 +471,7 @@ function App() {
                 } else if (data.content) {
                   newContent = data.content;
                 }
+                if (data.modifiedFullCode) modifiedFullCode = data.modifiedFullCode;
                 isLoading = false;
                 isStreaming = false;
                 currentStatus = undefined;
@@ -468,14 +526,15 @@ function App() {
 
             updated[index] = {
               ...existing,
-              content:      newContent,
-              currentStatus: currentStatus,
-              isLoading:    isLoading,
-              isError:      isError,
-              isStreaming:  isStreaming,
-              subType:      data.subType,
-              sourceFile:   data.sourceFile || existing.sourceFile,
-              isSuccess: data.isSuccess !== 'false' ? true : existing.isSuccess,
+              content:         newContent,
+              currentStatus:   currentStatus,
+              isLoading:       isLoading,
+              isError:         isError,
+              isStreaming:     isStreaming,
+              subType:         data.subType,
+              sourceFile:      data.sourceFile || existing.sourceFile,
+              isSuccess:       data.isSuccess !== 'false' ? true : existing.isSuccess,
+              modifiedFullCode: modifiedFullCode,
             };
             return updated;
           }
@@ -509,7 +568,10 @@ function App() {
             subType: data.subType,
             isLoading: true,
             currentStatus: data.content,  // 로딩 문구는 UI 상태로만 관리
-            sourceFile: data.sourceFile   // test_start 시 소스파일명 저장
+            sourceFile: data.sourceFile,  // test_start 시 소스파일명 저장
+            filePath: data.filePath,      // Improve Step2 시작 시 원본 파일 경로 저장 (Diff 버튼용)
+            hasSelection: data.hasSelection === 'true',
+            selectedText: data.selectedText
           };
           return [...prev, newMsg];
         });
@@ -738,6 +800,11 @@ function App() {
       </div>
 
       <div className="chat-input-area">
+        {showScrollButton && (
+          <button className="scroll-bottom-btn" onClick={scrollToBottom}>
+            <ArrowDown size={14} />
+          </button>
+        )}
         <div className="input-toolbar">
           <button className="toolbar-btn" onClick={handleFileButtonClick}>@ 파일</button>
           <button 
