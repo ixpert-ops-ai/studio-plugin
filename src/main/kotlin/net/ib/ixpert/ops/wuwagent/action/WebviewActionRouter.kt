@@ -192,6 +192,15 @@ class WebviewActionRouter(private val project: Project) {
                     val enhancedText = if (fileContext.isNotBlank()) "$textBody\n\n$fileContext" else textBody
                     val context = AgentContext(project, editor, enhancedText)
 
+                    // @ 첨부 파일이 있으면 첫 번째 파일 경로, 없으면 에디터 파일 경로 (Improve Diff 버튼용)
+                    val firstAttachedFilePath: String = run {
+                        val filesJson = payload["files"] ?: ""
+                        if (filesJson.isBlank()) ""
+                        else Regex(""""path":"([^"]+)"""").find(filesJson)
+                            ?.groupValues?.get(1)?.replace("\\\\", "\\") ?: ""
+                    }
+                    val improveFilePath = firstAttachedFilePath.ifBlank { editor.virtualFile?.path ?: "" }
+
                     // 🛎 즉시 시작 알림 (UI 스레드 큐로 보냄)
                     ApplicationManager.getApplication().invokeLater {
                         bridge.sendMessage("task_start", "✅ 의도를 분석하고 있습니다...", messageId)
@@ -207,7 +216,13 @@ class WebviewActionRouter(private val project: Project) {
                             bridge.sendMessage("step_noti", stepLabel, notiId, mapOf("status" to "started"))
                             when {
                                 stepMsgId == messageId -> bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId)
-                                !isApplyable -> bridge.sendMessage("task_start", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId)
+                                !isApplyable -> bridge.sendMessage(
+                                    "task_start", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId,
+                                    mapOf(
+                                        "filePath"     to improveFilePath,
+                                        "hasSelection" to "false"
+                                    )
+                                )
                                 else -> bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
                             }
                         }
