@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew tasks:*)",
+      "Bash(./gradlew help:*)",
+      "Bash(git pull:*)",
+      "Bash(wc -l /Users/jeongjunlee/Workspace/ai-plugin-androidstudio/src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/*.kt)",
+      "Bash(./gradlew buildPlugin)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(command -v npm)",
+      "Read(//Users/jeongjunlee/.nvm/versions/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//usr/local/bin/**)",
+      "Read(//Users/jeongjunlee/.volta/bin/**)",
+      "Read(//opt/homebrew/opt/**)",
+      "Read(//usr/local/**)",
+      "Read(//Users/jeongjunlee/**)",
+      "Bash(./gradlew compileKotlin)",
+      "Bash(gh api:*)",
+      "Bash(grep -E \"\\\\.\\(kt|java\\)$\")",
+      "Bash(brew list:*)",
+      "Bash(python3 -c \"import sys,json; [print\\(f['name'], f['type']\\) for f in json.load\\(sys.stdin\\)]\")",
+      "Bash(gh repo *)",
+      "WebFetch(domain:github.com)",
+      "Bash(./build.sh webview *)",
+      "Bash(./gradlew copyWebviewToResources)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(npx tsc *)",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(xargs ls *)",
+      "Bash(node -e \"require\\('typescript'\\); console.log\\('ts ok'\\)\")",
+      "Bash(/usr/local/bin/npx tsc *)",
+      "Bash(bash build.sh webview)"
+    ]
+  }
+}

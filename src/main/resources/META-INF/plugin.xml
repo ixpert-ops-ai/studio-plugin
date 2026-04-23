@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>net.ib.ixpert.ops.wuwagent</id>
     <name>iXpert AI Assistant</name>
-    <vendor email="admin@jodongik.cloud" url="http://jodongik.cloud">Jodongik Cloud</vendor>
+    <vendor email="admin@jodongik.cloud" url="http://jodongik.cloud">IB iXpert Ops</vendor>
     <description><![CDATA[
       iXpert AI Assistant is an on-premise AI Coding Assistant plugin powered by Ollama.
       Provides code explain, review, refactoring, PMD analysis, Impact Analysis, and Generate Test.
@@ -14,11 +14,10 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- Add your extensions here -->
-        
         <!-- ToolWindow Example: WuwAgent Chat window -->
-        <toolWindow id="WhatUWant?"
+        <toolWindow id="iXpert AI Assistant"
                     anchor="right"
-                    icon="AllIcons.General.Robot"
+                    icon="net.ib.ixpert.ops.wuwagent.IxpertIcons.ToolWindow"
                     factoryClass="net.ib.ixpert.ops.wuwagent.ui.WuwToolWindowFactory"/>
                     
         <notificationGroup id="WhatUWantNotification"
@@ -39,7 +38,7 @@
                text="iXpert AI Assistant"
                description="iXpert AI Assistant actions"
                popup="true">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
 
             <action id="IxpertAiAssistant.ExplainAction"
                     class="net.ib.ixpert.ops.wuwagent.action.ExplainAction"

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="13" height="13">
+  <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="28" ry="28"
+        fill="#1a1b2e" stroke="#565f89" stroke-width="1.5"/>
+  <text x="64" y="64"
+        font-family="Segoe UI, sans-serif"
+        font-weight="700"
+        font-size="74"
+        text-anchor="middle"
+        dominant-baseline="central">
+    <tspan fill="#7aa2f7">i</tspan><tspan fill="#bb9af7">X</tspan>
+  </text>
+</svg>

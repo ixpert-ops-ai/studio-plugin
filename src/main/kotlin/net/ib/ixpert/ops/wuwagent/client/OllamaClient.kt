@@ -39,7 +39,8 @@ class OllamaClient {
             stream = (onChunk != null),
             options = mapOf(
                 "temperature" to settings.temperature,
-                "num_ctx" to settings.contextWindow
+                "num_ctx" to settings.contextWindow,
+                "num_predict" to 12000
             )
         )
         val jsonPayload = gson.toJson(requestBody)
@@ -103,14 +104,36 @@ class OllamaClient {
                             TaskCancellationToken.activeInputStream = null
                         }
 
-                        // 부분 누적 내용으로 안전하게 반환 (취소 시에도 crash 없음)
-                        lastResponse ?: OllamaChatResponse(
-                            null, null, OllamaMessage("assistant", fullContent), true
+                        // Ollama done 청크는 content가 비어있으므로 누적된 fullContent로 교체하여 반환
+                        // (취소 시 lastResponse가 null이면 fullContent만으로 안전하게 반환)
+                        OllamaChatResponse(
+                            model = lastResponse?.model,
+                            createdAt = lastResponse?.createdAt,
+                            message = OllamaMessage("assistant", fullContent),
+                            done = true
                         )
                     } else {
-                        val responseString = request.readString()
-                        logger.info("Ollama API Raw Response: $responseString")
-                        gson.fromJson(responseString, OllamaChatResponse::class.java)
+                        // ── 비스트리밍 취소 처리 ────────────────────────────────────────
+                        // getInputStream() 자체가 LLM 추론 완료 때까지 블로킹되므로
+                        // inputStream 등록은 불가. 그 전에 HttpURLConnection 레퍼런스를 저장하고
+                        // cancel() 시 disconnect()로 소켓을 강제 닫아 블로킹을 IOException으로 깨운다.
+                        val httpConn = request.connection as? java.net.HttpURLConnection
+                        TaskCancellationToken.activeHttpConnection = httpConn
+                        try {
+                            val responseString = request.readString()
+                            logger.info("Ollama API Raw Response (len=${responseString.length})")
+                            gson.fromJson(responseString, OllamaChatResponse::class.java)
+                        } catch (e: IOException) {
+                            if (TaskCancellationToken.isCancelled.get()) {
+                                logger.info("OllamaClient: 비스트리밍 취소로 인한 IOException (정상) — ${e.message}")
+                                OllamaChatResponse(null, null, OllamaMessage("assistant", "__cancelled__"), true)
+                            } else {
+                                throw e
+                            }
+                        } finally {
+                            TaskCancellationToken.activeHttpConnection = null
+                        }
+                        // ─────────────────────────────────────────────────────────────────
                     }
                 }
         } catch (e: IOException) {

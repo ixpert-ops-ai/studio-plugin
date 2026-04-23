@@ -1,42 +1,37 @@
 #!/bin/bash
 
-#########################################
-# 스크립트 사용법
-# ./git_sync.sh [커밋 메시지]
-#     예)./git_sync.sh "git 동기화 스크립트 수정"
-
-
-# 1. 인자값(커밋 메시지) 체크
+# 인자값(커밋 메시지) 체크
 if [ -z "$1" ]; then
     echo "❌ 에러: 커밋 메시지를 입력해주세요."
-    echo "사용법: ./git_sync.sh \"커밋 메시지 내용\""
+    echo "사용법: ./merge_to_dev.sh \"메시지\""
     exit 1
 fi
 
 COMMIT_MSG=$1
-BRANCH_NAME="feature/generate_test"
+SOURCE_BRANCH="feature/generate_test"
+TARGET_BRANCH="develop"
 
-echo "🚀 Git 자동화 프로세스를 시작합니다... (Target Branch: $BRANCH_NAME)"
+echo "🚀 작업을 $TARGET_BRANCH 브랜치로 병합합니다..."
 
-# 2. 작업 브랜치로 이동 및 변경사항 추가
-git checkout $BRANCH_NAME
+# 1. 작업 브랜치에서 커밋 및 푸시
+git checkout $SOURCE_BRANCH
 git add .
-
-# 3. 커밋 및 작업 브랜치 푸시
 git commit -m "$COMMIT_MSG"
-git push origin $BRANCH_NAME
+git push origin $SOURCE_BRANCH
 
-# 4. 메인 브랜치로 이동 후 최신화
-git checkout main
-git pull origin main
+# 2. develop 브랜치로 이동 및 최신화
+# 만약 로컬에 develop이 없다면 생성하고 가져옵니다.
+git checkout $TARGET_BRANCH 2>/dev/null || git checkout -b $TARGET_BRANCH
+git pull origin $TARGET_BRANCH
 
-# 5. 병합(Merge) 및 메인 푸시
-git merge $BRANCH_NAME
-git push origin main
+# 3. 병합 (충돌 시 develop 브랜치 내용 우선)
+echo "🔄 $SOURCE_BRANCH -> $TARGET_BRANCH 병합 중..."
+git merge -X ours $SOURCE_BRANCH
 
-# 6. 다시 작업 브랜치로 복귀
-git checkout $BRANCH_NAME
+# 4. 서버에 푸시
+git push origin $TARGET_BRANCH
 
-echo "✅ 모든 작업이 완료되었습니다! 현재 브랜치: $(git branch --show-current)"
+# 5. 다시 작업 브랜치로 복귀
+git checkout $SOURCE_BRANCH
 
-
+echo "✅ 모든 과정이 완료되었습니다!"

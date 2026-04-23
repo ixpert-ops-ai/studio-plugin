@@ -27,24 +27,55 @@ class ReviewAction : AnAction() {
 
         val bridge = JcefBridge.getInstance(project)
         val messageId = "task_${System.currentTimeMillis()}"
+        val fileName = editor.virtualFile?.name ?: ""
+        val hasSelection = editor.selectionModel.hasSelection()
 
         // 리뷰 요청 텍스트 (라우터가 intent 분석 후 ReviewPipeline으로 실행)
         val reviewRequest = "/review 선택된 코드를 검토하고 개선 사항을 제안해주세요."
         val context = AgentContext(project, editor, reviewRequest)
 
         ApplicationManager.getApplication().invokeLater {
-            bridge.sendMessage("task_start", "🔍 코드를 리뷰하고 있습니다...", messageId)
+            bridge.sendMessage("task_start", "코드를 리뷰하고 있습니다...", messageId)
         }
 
-        val onStepStart = { stepLabel: String ->
-            logger.info("ReviewAction: Step 시작 → $stepLabel")
+        val stepNotiIdx = intArrayOf(0)
+        var reviewHeaderSent = false
+        val onStepStart = { stepLabel: String, stepMsgId: String, isApplyable: Boolean ->
+            logger.info("ReviewAction: Step 시작 → $stepLabel (stepMsgId=$stepMsgId, isApplyable=$isApplyable)")
+            val notiId = "${messageId}_noti_${stepNotiIdx[0]}"
+            stepNotiIdx[0]++
             ApplicationManager.getApplication().invokeLater {
-                bridge.sendMessage("task_progress", "⚙️ $stepLabel 분석 중...", messageId)
+                bridge.sendMessage("step_noti", stepLabel, notiId, mapOf("status" to "started"))
+                if (stepMsgId == messageId) {
+                    // Step 1: 기존 말풍선에 진행 상태 업데이트 + 파일명/범위 헤더 즉시 전송
+                    bridge.sendMessage("task_progress", "$stepLabel LLM 응답 대기 중...", stepMsgId)
+                    if (!reviewHeaderSent) {
+                        reviewHeaderSent = true
+                        val scopeText = if (hasSelection) "선택 영역" else "전체 파일"
+                        bridge.sendMessageChunk(messageId, "### 리뷰 대상: `$fileName` ($scopeText)\n\n")
+                    }
+                } else if (!isApplyable) {
+                    // Step 2+, 텍스트 스트리밍 step: 새 말풍선 생성
+                    bridge.sendMessage("task_start", "$stepLabel LLM 응답 대기 중...", stepMsgId)
+                } else {
+                    // Step 2+, 코드 카드 step: 진행 상태만 기존 말풍선에 업데이트
+                    bridge.sendMessage("task_progress", "$stepLabel LLM 응답 대기 중...", messageId)
+                }
             }
         }
 
-        val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, _: String ->
-            logger.info("ReviewAction: Step 완료 → $stepLabel (applyable=$isApplyable)")
+        val stepNotiDoneIdx = intArrayOf(0)
+        val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, stepMsgId: String ->
+            logger.info("ReviewAction: Step 완료 → $stepLabel (applyable=$isApplyable, stepMsgId=$stepMsgId)")
+            val notiId = "${messageId}_noti_${stepNotiDoneIdx[0]}"
+            stepNotiDoneIdx[0]++
+            ApplicationManager.getApplication().invokeLater {
+                bridge.sendMessage(
+                    "step_noti", stepLabel, notiId,
+                    mapOf("status" to if (result.isSuccess) "completed" else "failed")
+                )
+            }
+
             if (isApplyable && result.isSuccess) {
                 val codeMessageId = "${messageId}_code"
                 ApplicationManager.getApplication().invokeLater {
@@ -64,14 +95,24 @@ class ReviewAction : AnAction() {
                     )
                 }
             } else {
-                val displayContent = result.llmResponse
+                val fileLabel = when {
+                    result.applyScope == "선택 영역" -> "`$fileName` (선택 영역)"
+                    result.applyScope == "전체 파일" -> "`$fileName` (전체 파일)"
+                    result.applyScope.isNotBlank()   -> "`${result.applyScope}`"
+                    fileName.isNotBlank()            -> "`$fileName`"
+                    else -> ""
+                }
+                val header = if (fileLabel.isNotBlank()) "### 리뷰 대상: $fileLabel\n\n" else ""
+                val displayContent = header + result.llmResponse
                     .replace(Regex("```[\\w]*\\n?[\\s\\S]*?```"), "")
                     .trim()
+                // isApplyable step 실패 시 새 버블이 없으므로 messageId로 fallback
+                val targetMsgId = if (isApplyable) messageId else stepMsgId
                 ApplicationManager.getApplication().invokeLater {
                     bridge.sendMessage(
                         subType = "task_step",
                         content = displayContent,
-                        messageId = messageId,
+                        messageId = targetMsgId,
                         meta = mapOf(
                             "stepLabel" to stepLabel,
                             "applyable" to "false",
@@ -100,8 +141,7 @@ class ReviewAction : AnAction() {
     }
 
     override fun update(e: AnActionEvent) {
-        val project = e.project
-        val editor = e.getData(CommonDataKeys.EDITOR)
-        e.presentation.isEnabledAndVisible = project != null && editor != null
+        // 숨김 처리 (기능 유지, 컨텍스트 메뉴에서만 미노출)
+        e.presentation.isVisible = false
     }
 }

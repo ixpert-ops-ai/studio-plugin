@@ -20,7 +20,7 @@ import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 class TaskAgent(
     private val messageId: String, // 통합 관리를 위한 단일 ID 주입
     private val onStep: (stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, messageId: String) -> Unit,
-    private val onStepStart: (stepLabel: String) -> Unit = {}
+    private val onStepStart: (stepLabel: String, stepMessageId: String, isApplyable: Boolean) -> Unit = { _, _, _ -> }
 ) : WuwAgent {
 
     private val logger = Logger.getInstance(TaskAgent::class.java)
@@ -63,20 +63,19 @@ class TaskAgent(
                         return
                     }
 
-                    logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 시작 (previousResult 있음=${previousStepResult != null})")
+                    // Step 0은 주입된 messageId, 이후 Step은 별도 ID로 분리 → 각 Step이 독립된 말풍선에 스트리밍됨
+                    val stepMsgId = if (idx == 0) messageId else "${messageId}_s${idx + 1}"
+
+                    logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 시작 (stepMsgId=$stepMsgId, previousResult 있음=${previousStepResult != null})")
                     indicator.text = "${step.label} 실행 중..."
-                    onStepStart(step.label)
+                    onStepStart(step.label, stepMsgId, step.isApplyable)
 
                     val bridge = JcefBridge.getInstance(context.project)
-                    // ❌ 더 이상 매 Step마다 ID를 생성하지 않음. 주입받은 messageId 사용.
 
                     // 텍스트 기반 에이전트(isApplyable=false)인 경우에만 스트리밍 활성화
+                    // sendMessageChunk 내부에 이미 invokeLater가 있으므로 여기서 중복 래핑 금지
                     val stepChunkHandler: ((String) -> Unit)? = if (!step.isApplyable) {
-                        { chunk ->
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessageChunk(messageId, chunk)
-                            }
-                        }
+                        { chunk -> bridge.sendMessageChunk(stepMsgId, chunk) }
                     } else null
 
                     try {
@@ -92,12 +91,16 @@ class TaskAgent(
                         logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료 (success=${result.isSuccess})")
                         // 다음 단계 문맥 전달을 위해 원문 응답 보관 ([IMPROVE_TARGETS] 블록 포함)
                         previousStepResult = result.rawLlmResponse
-                        onStep(step.label, result, step.isApplyable, messageId)
+                        onStep(step.label, result, step.isApplyable, stepMsgId)
 
-                        // ❌ 에러 발생 시 파이프라인 즉시 중단 및 에러 신호 전송
+                        // ❌ 에러 발생 시 파이프라인 즉시 중단
                         if (!result.isSuccess) {
                             logger.warn("TaskAgent: ${step.label} 실패 → 파이프라인 중단")
-                            onError(result.llmResponse) // 상세 에러 메시지 전달
+                            if (!step.isApplyable) {
+                                // Step1 등 분석 step 실패: 기존 말풍선에 에러 표시
+                                onError(result.llmResponse)
+                            }
+                            // isApplyable step(Step2+) 실패: onStep에서 이미 별도 에러 카드를 생성했으므로 onError 생략
                             return
                         }
 

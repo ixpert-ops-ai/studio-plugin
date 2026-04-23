@@ -140,18 +140,22 @@ AI는 다음을 만족해야 한다:
 
 ## 11. AI Role Constraints
 
-### Codex
+### 작업 유형별 권장 도구
 
-* 기능 구현만 수행
+| 작업 유형 | 권장 도구 |
+|---|---|
+| 메인 구조 작업 / 대용량 코드 처리 | Gemini Pro |
+| 기능 단위 구현 / 코드 수정 | Claude Code / Gemini Flash |
+| 빠른 반복 수정 / 디버깅 | Gemini Flash / Claude Code |
+| 코드 리뷰 / 검수 | Gemini Pro |
+
+### 공통 금지 사항 (도구 무관)
+
 * 구조 변경 금지
+* Action 수정 금지
+* 타 기능 코드 수정 금지
 * Agent 흐름 변경 금지
-* Action 수정 금지
-
-### Gemini
-
-* 코드 리뷰 및 검수만 수행
-* 구조 변경 제안 금지
-* Action 수정 금지
+* Service에서 LLM 호출 금지
 
 ---
 

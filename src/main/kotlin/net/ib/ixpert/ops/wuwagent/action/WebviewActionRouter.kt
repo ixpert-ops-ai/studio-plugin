@@ -7,11 +7,17 @@ import com.intellij.openapi.project.Project
 import net.ib.ixpert.ops.wuwagent.agent.AgentContext
 import net.ib.ixpert.ops.wuwagent.agent.ChatAgent
 import net.ib.ixpert.ops.wuwagent.agent.ExplainAgent
+import net.ib.ixpert.ops.wuwagent.agent.GenerateTestAgent
+import net.ib.ixpert.ops.wuwagent.agent.ImpactAgent
+import net.ib.ixpert.ops.wuwagent.agent.IntentAnalyzer
+import net.ib.ixpert.ops.wuwagent.agent.QueryValidationAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.agent.TaskPipeline
+import net.ib.ixpert.ops.wuwagent.client.OllamaClient
 import net.ib.ixpert.ops.wuwagent.service.EditorApplyService
 import net.ib.ixpert.ops.wuwagent.service.EditorDiffService
+import net.ib.ixpert.ops.wuwagent.service.TestFileService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
 /**
@@ -65,6 +71,30 @@ class WebviewActionRouter(private val project: Project) {
         return "$testDir/${nameWithoutExt}$testSuffix"
     }
 
+    private fun buildAttachedFileContext(filesJson: String): String {
+        if (filesJson.isBlank()) return ""
+        return try {
+            val entries = Regex("""\{"name":"([^"]+)","path":"([^"]+)"\}""").findAll(filesJson)
+            val blocks = entries.mapNotNull { match ->
+                val name = match.groupValues[1]
+                val path = match.groupValues[2].replace("\\\\", "\\")
+                val vFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(path)
+                    ?: return@mapNotNull null
+                val content = ApplicationManager.getApplication().runReadAction(
+                    com.intellij.openapi.util.Computable {
+                        com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+                            .getDocument(vFile)?.text
+                    }
+                ) ?: return@mapNotNull null
+                "// 파일: $name\n```\n$content\n```"
+            }.toList()
+            if (blocks.isEmpty()) "" else "[첨부 파일]\n${blocks.joinToString("\n\n")}"
+        } catch (e: Exception) {
+            logger.warn("Router: 첨부 파일 읽기 실패", e)
+            ""
+        }
+    }
+
     fun handleCommand(command: String, payload: Map<String, String>) {
         ApplicationManager.getApplication().invokeLater {
             val bridge = JcefBridge.getInstance(project)
@@ -83,7 +113,7 @@ class WebviewActionRouter(private val project: Project) {
                     }
                     val messageId = "msg_${System.currentTimeMillis()}"
                     // 🛎 즉시 자리 만들기 (로딩 표시 유도)
-                    bridge.sendMessage("explain_start", "🔍 코드를 분석하고 있습니다...", messageId)
+                    bridge.sendMessage("explain_start", "🔍 코드 구조를 분석하고 있습니다...", messageId)
 
                     val context = AgentContext(project, editor, textBody)
                     ExplainAgent().execute(
@@ -107,6 +137,17 @@ class WebviewActionRouter(private val project: Project) {
                             }
                         }
                     )
+                }
+
+                "/openTabs" -> {
+                    logger.info("Router: /openTabs 분기")
+                    val openFiles = FileEditorManager.getInstance(project).openFiles
+                    val jsonArray = openFiles.joinToString(separator = ",", prefix = "[", postfix = "]") { vFile ->
+                        val name = vFile.name.replace("\\", "\\\\").replace("\"", "\\\"")
+                        val path = vFile.path.replace("\\", "\\\\").replace("\"", "\\\"")
+                        """{"name":"$name","path":"$path"}"""
+                    }
+                    bridge.sendMessage("openTabs", jsonArray)
                 }
 
                 "/chat" -> {
@@ -142,8 +183,23 @@ class WebviewActionRouter(private val project: Project) {
                 // ── TaskAgent (오케스트레이터) ────────────────
                 "/task" -> {
                     logger.info("Router: /task 분기 → TaskAgent 시작")
+                    if (editor == null) {
+                        bridge.sendMessage("error", "활성화된 에디터가 없어 작업을 실행할 수 없습니다.")
+                        return@invokeLater
+                    }
                     val messageId = "task_${System.currentTimeMillis()}"
-                    val context = AgentContext(project, editor, textBody)
+                    val fileContext = buildAttachedFileContext(payload["files"] ?: "")
+                    val enhancedText = if (fileContext.isNotBlank()) "$textBody\n\n$fileContext" else textBody
+                    val context = AgentContext(project, editor, enhancedText)
+
+                    // @ 첨부 파일이 있으면 첫 번째 파일 경로, 없으면 에디터 파일 경로 (Improve Diff 버튼용)
+                    val firstAttachedFilePath: String = run {
+                        val filesJson = payload["files"] ?: ""
+                        if (filesJson.isBlank()) ""
+                        else Regex(""""path":"([^"]+)"""").find(filesJson)
+                            ?.groupValues?.get(1)?.replace("\\\\", "\\") ?: ""
+                    }
+                    val improveFilePath = firstAttachedFilePath.ifBlank { editor.virtualFile?.path ?: "" }
 
                     // 🛎 즉시 시작 알림 (UI 스레드 큐로 보냄)
                     ApplicationManager.getApplication().invokeLater {
@@ -151,73 +207,193 @@ class WebviewActionRouter(private val project: Project) {
                     }
 
                     // Step 시작 시 즉각 UI 피드백
-                    val onStepStart = { stepLabel: String ->
-                        logger.info("Router: Step 시작 알림 → $stepLabel")
+                    val stepNotiIdx = intArrayOf(0)
+                    val onStepStart = { stepLabel: String, stepMsgId: String, isApplyable: Boolean ->
+                        logger.info("Router: Step 시작 알림 → $stepLabel (stepMsgId=$stepMsgId, isApplyable=$isApplyable)")
+                        val notiId = "${messageId}_noti_${stepNotiIdx[0]}"
+                        stepNotiIdx[0]++
                         ApplicationManager.getApplication().invokeLater {
-                            bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
+                            bridge.sendMessage("step_noti", stepLabel, notiId, mapOf("status" to "started"))
+                            when {
+                                stepMsgId == messageId -> bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId)
+                                !isApplyable -> bridge.sendMessage(
+                                    "task_start", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId,
+                                    mapOf(
+                                        "filePath"     to improveFilePath,
+                                        "hasSelection" to "false"
+                                    )
+                                )
+                                else -> bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
+                            }
                         }
                     }
 
-                    // Step 완료 시 결과 전송
+                    // Step 완료 시 결과 전송 (stepMsgId: Step별 독립 말풍선 ID)
+                    val stepNotiDoneIdx = intArrayOf(0)
                     val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, stepMsgId: String ->
-                        logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, scope=${result.applyScope})")
+                        logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, success=${result.isSuccess}, scope=${result.applyScope})")
+                        val notiId = "${messageId}_noti_${stepNotiDoneIdx[0]}"
+                        stepNotiDoneIdx[0]++
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage(
+                                "step_noti", stepLabel, notiId,
+                                mapOf("status" to if (result.isSuccess) "completed" else "failed")
+                            )
+                        }
 
-                        if (isApplyable && result.isSuccess) {
-                            // ── 코드 말풍선 (Step 2: Improve) ──────────────────────
-                            // 별도 messageId로 새 말풍선 생성 → 텍스트 말풍선과 완전 분리
-                            val codeMessageId = "${messageId}_code"
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage(
-                                    subType = "task_code",
-                                    content = "",  // 코드 말풍선에는 설명 텍스트 없음
-                                    messageId = codeMessageId,
-                                    meta = mapOf(
-                                        "stepLabel" to stepLabel,
-                                        "applyable" to "true",
-                                        "originalCode" to result.originalCode.orEmpty(),
-                                        "modifiedCode" to result.modifiedCode.orEmpty(),
-                                        "extractedCode" to result.extractedCode,
-                                        "applyScope" to result.applyScope,
-                                        "isSuccess" to "true"
+                        when {
+                            isApplyable && result.isSuccess -> {
+                                // ── 코드 말풍선 (Step 2 성공) ──────────────────────────
+                                // 별도 messageId로 새 말풍선 생성 → 텍스트 말풍선과 완전 분리
+                                val codeMessageId = "${messageId}_code"
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage(
+                                        subType = "task_code",
+                                        content = "",
+                                        messageId = codeMessageId,
+                                        meta = mapOf(
+                                            "stepLabel" to stepLabel,
+                                            "applyable" to "true",
+                                            "originalCode" to result.originalCode.orEmpty(),
+                                            "modifiedCode" to result.modifiedCode.orEmpty(),
+                                            "extractedCode" to result.extractedCode,
+                                            "applyScope" to result.applyScope,
+                                            "isSuccess" to "true"
+                                        )
                                     )
-                                )
+                                }
                             }
-                        } else {
-                            // ── 텍스트 말풍선 (Step 1: Analyze / Explain) ───────────
-                            // 코드 블록 제거 후 설명 텍스트만 기존 말풍선에 누적
-                            val displayContent = result.llmResponse
-                                .replace(Regex("```[\\w]*\\n?[\\s\\S]*?```"), "")
-                                .trim()
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage(
-                                    subType = "task_step",
-                                    content = displayContent,
-                                    messageId = messageId,
-                                    meta = mapOf(
-                                        "stepLabel" to stepLabel,
-                                        "applyable" to "false",
-                                        "isSuccess" to result.isSuccess.toString()
+                            isApplyable && !result.isSuccess -> {
+                                // ── Step2 에러: Step1 말풍선 유지 + 별도 에러 카드 ──────
+                                // Step1 말풍선의 로딩 상태만 종료하고 내용은 건드리지 않는다.
+                                // 에러는 새 messageId(_err)로 별도 카드 생성.
+                                val errMessageId = "${messageId}_err"
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                    bridge.sendMessage("task_start", "", errMessageId)
+                                    bridge.sendMessage("error", result.llmResponse, errMessageId)
+                                }
+                            }
+                            else -> {
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage(
+                                        subType = "task_step",
+                                        content = result.llmResponse,
+                                        messageId = stepMsgId,
+                                        meta = mapOf(
+                                            "stepLabel" to stepLabel,
+                                            "applyable" to "false",
+                                            "isSuccess" to result.isSuccess.toString()
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     }
 
-                    val agent = TaskAgent(messageId, onStep, onStepStart)
-                    agent.execute(
-                        context, 
-                        onSuccess = { _ -> 
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("task_success", "완료되었습니다.", messageId)
-                            }
-                        },
-                        onChunk = null,
-                        onError = { errorMsg ->
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("error", errorMsg, messageId)
-                            }
+                    // IntentAnalyzer 키워드 매핑 (LLM 호출 없이 즉시 반환)
+                    val client = OllamaClient()
+                    when (IntentAnalyzer.analyze(enhancedText, client)) {
+
+                        TaskPipeline.ExplainTask -> {
+                            ExplainAgent().execute(context,
+                                onSuccess = { _ ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                    }
+                                },
+                                onChunk = { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
+                                },
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        if (errorMsg != "__cancelled__") bridge.sendMessage("error", errorMsg, messageId)
+                                    }
+                                }
+                            )
                         }
-                    )
+
+                        TaskPipeline.Impact -> {
+                            ImpactAgent().execute(context,
+                                onSuccess = { _ ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                    }
+                                },
+                                onChunk = { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
+                                },
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("error", errorMsg, messageId)
+                                    }
+                                }
+                            )
+                        }
+
+                        TaskPipeline.QueryValidation -> {
+                            QueryValidationAgent().execute(context,
+                                onSuccess = { _ ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                    }
+                                },
+                                onChunk = { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
+                                },
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("error", errorMsg, messageId)
+                                    }
+                                }
+                            )
+                        }
+
+                        TaskPipeline.GenerateTest -> {
+                            val sourceFile = editor.virtualFile?.name ?: ""
+                            GenerateTestAgent().execute(context,
+                                onSuccess = { _ ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("test", "", messageId, mapOf("sourceFile" to sourceFile))
+                                    }
+                                },
+                                onChunk = { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
+                                },
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("error", errorMsg, messageId)
+                                    }
+                                }
+                            )
+                        }
+
+                        else -> {
+                            val agent = TaskAgent(messageId, onStep, onStepStart)
+                            agent.execute(
+                                context,
+                                onSuccess = { _ ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                    }
+                                },
+                                onChunk = null,
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("error", errorMsg, messageId)
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
 
                 // ── Apply: 에디터에 코드 쓰기 ────────────────
@@ -237,43 +413,89 @@ class WebviewActionRouter(private val project: Project) {
 
                 // ── Diff: IDE 내장 Diff 창 띄우기 (블록 단위 적용 << 지원) ─────────────
                 "/viewDiff" -> {
+                    val filePath = payload["filePath"] ?: ""
+
+                    if (filePath.isNotBlank()) {
+                        // ── filePath 기반 경로: Improve Step2 Diff 버튼 ──────────────────
+                        // Step2 LLM 응답(SEARCH/REPLACE 또는 풀코드)을 원본 파일에 적용하여 Diff 표시
+                        logger.info("Router: /viewDiff (filePath 기반) → $filePath")
+                        val localFs = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                        val vFile = localFs.findFileByPath(filePath)
+                        if (vFile == null) {
+                            bridge.sendMessage("error", "파일을 찾을 수 없습니다: $filePath")
+                            return@invokeLater
+                        }
+                        // 닫혀 있으면 다시 열기
+                        FileEditorManager.getInstance(project).openFile(vFile, false)
+                        val document = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(vFile)
+                        if (document == null) {
+                            bridge.sendMessage("error", "파일 내용을 읽을 수 없습니다.")
+                            return@invokeLater
+                        }
+                        val originalText = document.text
+                        // SEARCH/REPLACE 적용 → 실패 시 코드 블록 추출 → 최후엔 원문 그대로
+                        val rightFullText = EditorApplyService.applySearchReplace(originalText, textBody)
+                            ?: EditorApplyService.extractCodeBlock(textBody).takeIf { it.isNotBlank() }
+                            ?: textBody
+                        EditorDiffService.showDiff(project, vFile, rightFullText, "AI 코드 개선 제안 (${vFile.name})")
+                        return@invokeLater
+                    }
+
+                    // ── 기존 scope 기반 경로 ───────────────────────────────────────────
                     val original = payload["original"] ?: ""
                     val modified = payload["modified"] ?: ""
                     val scope    = payload["scope"] ?: "File"
-                    
+
                     if (original == modified && original.isNotBlank()) {
                         logger.warn("Router: /viewDiff 무시됨 → original과 modified가 완벽히 동일합니다.")
                         bridge.sendMessage("task_progress", "⚠️ 원본과 개선된 코드가 동일하여 Diff를 열 수 없습니다.")
                         return@invokeLater
                     }
-                    
+
                     val fileEditorManager = FileEditorManager.getInstance(project)
                     val targetFile = fileEditorManager.openFiles.firstOrNull { it.name == scope }
                         ?: fileEditorManager.selectedTextEditor?.virtualFile
-                        
+
                     if (targetFile == null) {
                         logger.warn("Router: /viewDiff 대상을 찾을 수 없음 (scope=$scope)")
                         bridge.sendMessage("error", "적용 대상 파일($scope)을 찾을 수 없어 Diff 뷰어를 열 수 없습니다.")
                         return@invokeLater
                     }
-                    
+
                     val document = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(targetFile)
                     if (document == null) {
                         bridge.sendMessage("error", "해당 파일의 내용을 읽을 수 없습니다.")
                         return@invokeLater
                     }
 
-                    // 선택 영역 단위의 Diff일 경우 전체 문서 내에서 해당 영역만 교체하여 Full Text를 생성합니다.
                     val fullOriginalText = document.text
                     val rightFullText = if (original.isNotBlank() && original != modified) {
-                        // 문서 전체에서 original을 modified로 치환 (첫 번째 일치 항목 안전 교체)
                         fullOriginalText.replaceFirst(original, modified)
                     } else {
                         modified
                     }
-                    
+
                     EditorDiffService.showDiff(project, targetFile, rightFullText, "AI 코드 개선 제안 ($scope)")
                 }
+
+                // [이전 코드 백업 - 선택 영역 SimpleDiff 2-way 비교, 드래그 케이스도 3-way Diff로 대체됨]
+                // "/viewDiffSimple" -> {
+                //     logger.info("Router: /viewDiffSimple 분기 → SimpleDiffRequest")
+                //     val originalCode = payload["originalCode"] ?: ""
+                //     // SEARCH/REPLACE 적용 시도 → 코드 블록 추출 → 원문 순으로 fallback
+                //     val rightText = EditorApplyService.applySearchReplace(originalCode, textBody)
+                //         ?: EditorApplyService.extractCodeBlock(textBody).takeIf { it.isNotBlank() }
+                //         ?: textBody
+                //     val factory = com.intellij.diff.DiffContentFactory.getInstance()
+                //     val request = com.intellij.diff.requests.SimpleDiffRequest(
+                //         "AI 코드 개선 제안 (선택 영역)",
+                //         factory.create(originalCode),
+                //         factory.create(rightText),
+                //         "원본 선택 코드",
+                //         "개선된 코드"
+                //     )
+                //     com.intellij.diff.DiffManager.getInstance().showDiff(project, request)
+                // }
 
                 // ── Undo: IDE 기본 Undo 실행 (단축키 Ctrl+Z와 동일) ──────────────
                 "/undo" -> {
@@ -322,14 +544,13 @@ class WebviewActionRouter(private val project: Project) {
                         val result = dialog.save(projectBase, "analysis_result.md")
                         if (result != null) {
                             try {
-                                result.getVirtualFile(true)?.let { vFile ->
-                                    com.intellij.openapi.vfs.VfsUtil.saveText(vFile, content)
-                                    logger.info("Router: Markdown 저장 완료 → ${vFile.path}")
-                                } ?: run {
-                                    val file = result.file
-                                    file.writeText(content)
-                                    logger.info("Router: Markdown 저장 완료 (fallback) → ${file.absolutePath}")
-                                }
+                                // 사용자가 선택한 외부 파일이므로 VFS 대신 java.io.File 로 직접 쓴다.
+                                // (VfsUtil.saveText 는 write-action 요구 → EDT 에서 예외 → 빈 파일 남음)
+                                val file = result.file
+                                file.parentFile?.mkdirs()
+                                file.writeText(content, Charsets.UTF_8)
+                                com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
+                                logger.info("Router: Markdown 저장 완료 → ${file.absolutePath} (${content.length}자)")
                             } catch (e: Exception) {
                                 logger.error("Router: Markdown 저장 실패", e)
                                 bridge.sendMessage("error", "파일 저장 중 오류가 발생했습니다: ${e.message}")
@@ -356,42 +577,35 @@ class WebviewActionRouter(private val project: Project) {
                         return@invokeLater
                     }
 
-                    // 소스 파일로부터 테스트 파일 경로 추론
-                    val testFilePath = resolveTestFilePath(basePath, sourceFile)
+                    val testFilePath = TestFileService.resolveTestFilePath(basePath, sourceFile, code)
 
-                    ApplicationManager.getApplication().invokeLater {
-                        val testFile = java.io.File(testFilePath)
+                    val testFile = java.io.File(testFilePath)
 
-                        // 이미 존재하면 확인 다이얼로그
-                        if (testFile.exists()) {
-                            val result = com.intellij.openapi.ui.Messages.showYesNoDialog(
-                                project,
-                                "테스트 파일이 이미 존재합니다:\n${testFile.name}\n\n덮어쓰시겠습니까?",
-                                "테스트 파일 생성",
-                                com.intellij.openapi.ui.Messages.getQuestionIcon()
-                            )
-                            if (result != com.intellij.openapi.ui.Messages.YES) return@invokeLater
+                    // 이미 존재하면 확인 다이얼로그
+                    if (testFile.exists()) {
+                        val result = com.intellij.openapi.ui.Messages.showYesNoDialog(
+                            project,
+                            "테스트 파일이 이미 존재합니다:\n${testFile.name}\n\n덮어쓰시겠습니까?",
+                            "테스트 파일 생성",
+                            com.intellij.openapi.ui.Messages.getQuestionIcon()
+                        )
+                        if (result != com.intellij.openapi.ui.Messages.YES) return@invokeLater
+                    }
+
+                    try {
+                        val vFile = TestFileService.saveTestFile(testFilePath, code)
+                        vFile?.let {
+                            com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+                                .openFile(it, true)
                         }
 
-                        try {
-                            testFile.parentFile?.mkdirs()
-                            testFile.writeText(code)
-
-                            // VFS refresh 후 에디터에서 열기
-                            com.intellij.openapi.vfs.LocalFileSystem.getInstance()
-                                .refreshAndFindFileByPath(testFilePath)?.let { vFile ->
-                                    com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
-                                        .openFile(vFile, true)
-                                }
-
-                            val relativePath = testFilePath.removePrefix("$basePath/")
-                            bridge.sendMessage("test_file_created",
-                                "테스트 파일이 생성되었습니다: $relativePath", messageId)
-                            logger.info("Router: 테스트 파일 생성 완료 → $testFilePath")
-                        } catch (e: Exception) {
-                            logger.error("Router: 테스트 파일 생성 실패", e)
-                            bridge.sendMessage("error", "테스트 파일 생성 중 오류: ${e.message}", messageId)
-                        }
+                        val relativePath = testFilePath.removePrefix("$basePath/")
+                        bridge.sendMessage("test_file_created",
+                            "테스트 파일이 생성되었습니다: $relativePath", messageId)
+                        logger.info("Router: 테스트 파일 생성 완료 → $testFilePath")
+                    } catch (e: Exception) {
+                        logger.error("Router: 테스트 파일 생성 실패", e)
+                        bridge.sendMessage("error", "테스트 파일 생성 중 오류: ${e.message}", messageId)
                     }
                 }
 
@@ -439,9 +653,93 @@ class WebviewActionRouter(private val project: Project) {
                     val baseUrl = payload["baseUrl"] ?: settings.baseUrl
                     val apiKey = payload["apiKey"] ?: settings.apiKey
                     logger.info("Router: /fetchModels 실행 (baseUrl=$baseUrl)")
-                    net.ib.ixpert.ops.wuwagent.service.WuwLlmService.fetchModels(null, baseUrl, apiKey) { models ->
-                        // 조회 성공 시 WebView로 다시 전달하거나 로그만 남김 (현재는 네이티브 팝업이 주 목적)
-                        logger.info("Router: Models fetched successfully: $models")
+                    
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        val models = net.ib.ixpert.ops.wuwagent.agent.SettingsAgent.fetchModelsSilent(baseUrl, apiKey)
+                        ApplicationManager.getApplication().invokeLater {
+                            if (models != null) {
+                                bridge.sendMessage("fetched_models", models.joinToString(","))
+                            } else {
+                                bridge.sendMessage("fetched_models_error", "모델 조회 실패")
+                            }
+                        }
+                    }
+                }
+
+                // ── Change Model: 즉시 모델명 변경 ──────────────
+                "/changeModel" -> {
+                    val targetModel = payload["model"]
+                    if (targetModel.isNullOrBlank()) {
+                        bridge.sendMessage("fetched_models_error", "변경할 모델명이 없습니다.")
+                        return@invokeLater
+                    }
+                    val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+                    settings.model = targetModel
+                    logger.info("Router: 모델 변경 성공 → $targetModel")
+
+                    com.intellij.openapi.project.ProjectManager.getInstance().openProjects.forEach { p ->
+                        net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(p).sendMessage("selected_model", targetModel)
+                    }
+                }
+
+                // ── Chat History: 대화 저장 ──────────────
+                "/saveChat" -> {
+                    val id = payload["id"] ?: return@invokeLater
+                    val title = payload["title"] ?: ""
+                    val messages = payload["messages"] ?: "[]"
+                    println("saveChat 수신: id=$id, title=$title")
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        net.ib.ixpert.ops.wuwagent.service.ChatHistoryService.saveChat(id, title, messages)
+                    }
+                }
+
+                // ── Chat History: 마지막 채팅 자동 복원 ──────────────
+                "/loadLastChat" -> {
+                    println("loadLastChat 수신됨")
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        val json = net.ib.ixpert.ops.wuwagent.service.ChatHistoryService.loadLastChat()
+                        println("loadLastChat 결과: ${if (json != null) "성공 (${json.length}bytes)" else "없음"}")
+                        if (json != null) {
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("chat_loaded", json)
+                            }
+                        }
+                    }
+                }
+
+                // ── Chat History: 대화 불러오기 ──────────────
+                "/loadChat" -> {
+                    val id = payload["id"] ?: return@invokeLater
+                    println("loadChat 수신: id=$id")
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        val json = net.ib.ixpert.ops.wuwagent.service.ChatHistoryService.loadChat(id)
+                        println("loadChat 파일 읽기 결과: ${if (json != null) "성공 (${json.length}bytes)" else "파일 없음"}")
+                        ApplicationManager.getApplication().invokeLater {
+                            if (json != null) {
+                                println("loadChat bridge 전송: chat_loaded")
+                                bridge.sendMessage("chat_loaded", json)
+                            } else {
+                                bridge.sendMessage("error", "채팅 기록을 불러올 수 없습니다.")
+                            }
+                        }
+                    }
+                }
+
+                // ── Chat History: 대화 목록 조회 ──────────────
+                "/listChats" -> {
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        val json = net.ib.ixpert.ops.wuwagent.service.ChatHistoryService.listChats()
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage("chat_list", json)
+                        }
+                    }
+                }
+
+                // ── Chat History: 대화 삭제 ──────────────
+                "/deleteChat" -> {
+                    val id = payload["id"] ?: return@invokeLater
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        net.ib.ixpert.ops.wuwagent.service.ChatHistoryService.deleteChat(id)
                     }
                 }
 

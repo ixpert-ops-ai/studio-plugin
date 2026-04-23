@@ -10,7 +10,7 @@ import com.intellij.openapi.util.Computable
  */
 object EditorContextService {
     /** 에디터 코드 추출 결과 — 코드 본문과 추출 범위(선택 영역/전체 파일) */
-    data class CodeExtractionResult(val code: String, val isSelection: Boolean)
+    data class CodeExtractionResult(val code: String, val isSelection: Boolean, val startLine: Int? = null, val endLine: Int? = null)
 
     /**
      * 에디터에서 선택된 텍스트를 추출하거나,
@@ -20,10 +20,6 @@ object EditorContextService {
     fun extractCode(editor: Editor, project: Project): String =
         extractCodeWithScope(editor, project).code
 
-    /**
-     * 코드와 함께 "선택 영역인지 여부"를 함께 반환합니다.
-     * Diff 기반 Apply를 위해 추가되었습니다.
-     */
     /**
      * 현재 에디터에서 열린 파일의 이름을 반환합니다.
      * 파일을 찾을 수 없는 경우 빈 문자열을 반환합니다.
@@ -41,10 +37,68 @@ object EditorContextService {
             val selectedText = selectionModel.selectedText
 
             if (!selectedText.isNullOrBlank()) {
-                CodeExtractionResult(selectedText, isSelection = true)
+                val startLine = editor.document.getLineNumber(selectionModel.selectionStart) + 1
+                val endLine = editor.document.getLineNumber(selectionModel.selectionEnd) + 1
+                CodeExtractionResult(selectedText, isSelection = true, startLine = startLine, endLine = endLine)
             } else {
-                CodeExtractionResult(editor.document.text, isSelection = false)
+                CodeExtractionResult(editor.document.text, isSelection = false, startLine = null, endLine = null)
             }
+        })
+    }
+
+    /**
+     * 파일의 언어 ID를 반환합니다 (예: "JAVA", "kotlin").
+     */
+    fun extractLanguageId(editor: Editor, project: Project): String {
+        return ApplicationManager.getApplication().runReadAction(Computable {
+            val psiFile = com.intellij.psi.PsiDocumentManager.getInstance(project)
+                .getPsiFile(editor.document)
+            psiFile?.language?.id ?: "Unknown"
+        })
+    }
+
+    /**
+     * PSI 파일 객체를 반환합니다.
+     */
+    fun extractPsiFile(editor: Editor, project: Project): com.intellij.psi.PsiFile? {
+        return ApplicationManager.getApplication().runReadAction(Computable {
+            com.intellij.psi.PsiDocumentManager.getInstance(project)
+                .getPsiFile(editor.document)
+        })
+    }
+
+    /**
+     * Document 객체를 반환합니다.
+     */
+    fun extractDocument(editor: Editor): com.intellij.openapi.editor.Document {
+        return editor.document
+    }
+
+    /**
+     * 선택 영역의 시작/끝 줄 번호를 반환합니다. (기존 메서드는 하위 호환성을 위해 유지)
+     */
+    fun extractLineRange(editor: Editor): Pair<Int, Int>? {
+        return ApplicationManager.getApplication().runReadAction(Computable {
+            val selectionModel = editor.selectionModel
+            if (selectionModel.hasSelection()) {
+                val startLine = editor.document.getLineNumber(selectionModel.selectionStart) + 1
+                val endLine = editor.document.getLineNumber(selectionModel.selectionEnd) + 1
+                Pair(startLine, endLine)
+            } else {
+                null
+            }
+        })
+    }
+
+    /**
+     * 커서 위치의 PsiElement를 반환합니다.
+     */
+    fun extractElementAtCaret(editor: Editor, project: Project): com.intellij.psi.PsiElement? {
+        return ApplicationManager.getApplication().runReadAction(Computable {
+            val psiFile = com.intellij.psi.PsiDocumentManager.getInstance(project)
+                .getPsiFile(editor.document) ?: return@Computable null
+            val offset = editor.caretModel.offset
+            psiFile.findElementAt(offset)
         })
     }
 }
