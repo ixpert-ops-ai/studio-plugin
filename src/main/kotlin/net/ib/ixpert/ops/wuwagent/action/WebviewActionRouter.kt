@@ -682,6 +682,67 @@ class WebviewActionRouter(private val project: Project) {
                     }
                 }
 
+                // ── Chat History: 대화 저장 ──────────────
+                "/saveChat" -> {
+                    val id = payload["id"] ?: return@invokeLater
+                    val title = payload["title"] ?: ""
+                    val messages = payload["messages"] ?: "[]"
+                    println("saveChat 수신: id=$id, title=$title")
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        net.ib.ixpert.ops.wuwagent.service.ChatHistoryService.saveChat(id, title, messages)
+                    }
+                }
+
+                // ── Chat History: 마지막 채팅 자동 복원 ──────────────
+                "/loadLastChat" -> {
+                    println("loadLastChat 수신됨")
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        val json = net.ib.ixpert.ops.wuwagent.service.ChatHistoryService.loadLastChat()
+                        println("loadLastChat 결과: ${if (json != null) "성공 (${json.length}bytes)" else "없음"}")
+                        if (json != null) {
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("chat_loaded", json)
+                            }
+                        }
+                    }
+                }
+
+                // ── Chat History: 대화 불러오기 ──────────────
+                "/loadChat" -> {
+                    val id = payload["id"] ?: return@invokeLater
+                    println("loadChat 수신: id=$id")
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        val json = net.ib.ixpert.ops.wuwagent.service.ChatHistoryService.loadChat(id)
+                        println("loadChat 파일 읽기 결과: ${if (json != null) "성공 (${json.length}bytes)" else "파일 없음"}")
+                        ApplicationManager.getApplication().invokeLater {
+                            if (json != null) {
+                                println("loadChat bridge 전송: chat_loaded")
+                                bridge.sendMessage("chat_loaded", json)
+                            } else {
+                                bridge.sendMessage("error", "채팅 기록을 불러올 수 없습니다.")
+                            }
+                        }
+                    }
+                }
+
+                // ── Chat History: 대화 목록 조회 ──────────────
+                "/listChats" -> {
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        val json = net.ib.ixpert.ops.wuwagent.service.ChatHistoryService.listChats()
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage("chat_list", json)
+                        }
+                    }
+                }
+
+                // ── Chat History: 대화 삭제 ──────────────
+                "/deleteChat" -> {
+                    val id = payload["id"] ?: return@invokeLater
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        net.ib.ixpert.ops.wuwagent.service.ChatHistoryService.deleteChat(id)
+                    }
+                }
+
                 else -> {
                     logger.warn("Router: 정의되지 않은 명령어 수신 → $command")
                     bridge.sendMessage("error", "알 수 없는 명령어: $command")

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Edit, Square, Terminal, Send, ArrowDown } from 'lucide-react';
+import { Settings, Plus, MessageSquare, Square, Terminal, Send, ArrowDown } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -287,6 +287,15 @@ function App() {
   const [filePopupSelectedIndex, setFilePopupSelectedIndex] = useState(0);
   const filePopupRef = useRef<HTMLDivElement>(null);
 
+  // 채팅 기록 관련 상태
+  const [chatId, setChatId] = useState<string>(() => `chat_${Date.now()}`);
+  const [chatTitle, setChatTitle] = useState<string>('New Chat');
+  const [showChatListPopup, setShowChatListPopup] = useState(false);
+  const [chatList, setChatList] = useState<Array<{id: string, title: string, date: string}>>([]);
+  const [isChatListLoading, setIsChatListLoading] = useState(false);
+  const chatListPopupRef = useRef<HTMLDivElement>(null);
+  const isLoadingChat = useRef(false);
+
   // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화 및 버튼 표시 여부 업데이트
   useEffect(() => {
     const el = chatListRef.current;
@@ -328,6 +337,26 @@ function App() {
     chatListRef.current?.scrollTo({ top: chatListRef.current.scrollHeight, behavior: 'smooth' });
   };
 
+  // 플러그인 시작 시 마지막 채팅 자동 복원
+  // sendToIde는 JCEF 브리지가 비동기로 주입하므로 준비될 때까지 폴링
+  useEffect(() => {
+    let attempts = 0;
+    const tryLoad = () => {
+      if (window.sendToIde) {
+        console.log('[loadLastChat] sendToIde 준비 완료, 커맨드 전송 (시도=' + attempts + ')');
+        window.sendToIde(JSON.stringify({ command: '/loadLastChat' }));
+      } else {
+        attempts++;
+        if (attempts < 30) {
+          setTimeout(tryLoad, 200);
+        } else {
+          console.log('[loadLastChat] sendToIde 30회 시도 후 포기');
+        }
+      }
+    };
+    setTimeout(tryLoad, 200);
+  }, []);
+
   // 외부 클릭 시 팝업 닫기
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -352,6 +381,18 @@ function App() {
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showFilePopup]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (chatListPopupRef.current && !chatListPopupRef.current.contains(event.target as Node)) {
+        setShowChatListPopup(false);
+      }
+    };
+    if (showChatListPopup) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showChatListPopup]);
 
   // 메시지 변경 시 하단 근처인 경우에만 자동 스크롤
   useEffect(() => {
@@ -391,6 +432,36 @@ function App() {
           setOpenTabs([]);
         }
         setIsLoadingTabs(false);
+        return;
+      }
+
+      if (data.subType === 'chat_list') {
+        try {
+          setChatList(JSON.parse(data.content));
+        } catch {
+          setChatList([]);
+        }
+        setIsChatListLoading(false);
+        return;
+      }
+
+      if (data.subType === 'chat_loaded') {
+        console.log('[chat_loaded] 수신 content 길이=' + data.content?.length);
+        try {
+          const chatData = JSON.parse(data.content);
+          const loadedMessages: Message[] = Array.isArray(chatData.messages)
+            ? chatData.messages
+            : JSON.parse(chatData.messages);
+          console.log('[chat_loaded] 파싱 성공 id=' + chatData.id + ' messages=' + loadedMessages.length + '개');
+          isLoadingChat.current = true;
+          setChatId(chatData.id);
+          setChatTitle(chatData.title || 'New Chat');
+          setMessages(loadedMessages);
+          setTimeout(() => { isLoadingChat.current = false; }, 100);
+        } catch (err) {
+          console.log('[chat_loaded] 파싱 실패:', err);
+        }
+        setShowChatListPopup(false);
         return;
       }
 
@@ -590,6 +661,53 @@ function App() {
     };
   }, []);
 
+  // 메시지 변경 시 자동 저장 (초기 인사 메시지 1개만 있는 경우 제외)
+  useEffect(() => {
+    if (isLoadingChat.current) return;
+    if (messages.length <= 1) return;
+    const firstUser = messages.find(m => m.role === 'user');
+    const firstAi   = messages.find(m => m.role === 'ai' && m.id !== '1' && m.content.trim());
+    const title = firstUser?.content.slice(0, 20)
+      ?? firstAi?.content.slice(0, 20)
+      ?? '새 채팅';
+    setChatTitle(title);
+    window.sendToIde?.(JSON.stringify({
+      command: '/saveChat',
+      id: chatId,
+      title,
+      messages: JSON.stringify(messages)
+    }));
+  }, [messages, chatId]);
+
+  const handleNewChat = () => {
+    const userMessages = messages.filter(m => m.role === 'user');
+    if (userMessages.length > 0) {
+      const title = userMessages[0].content.slice(0, 20);
+      window.sendToIde?.(JSON.stringify({
+        command: '/saveChat',
+        id: chatId,
+        title,
+        messages: JSON.stringify(messages)
+      }));
+    }
+    const newId = `chat_${Date.now()}`;
+    isLoadingChat.current = true;
+    setChatId(newId);
+    setChatTitle('New Chat');
+    setMessages([{ id: '1', role: 'ai', content: '무엇을 도와드릴까요?' }]);
+    setTimeout(() => { isLoadingChat.current = false; }, 100);
+  };
+
+  const handleOpenChatList = () => {
+    if (showChatListPopup) {
+      setShowChatListPopup(false);
+      return;
+    }
+    setShowChatListPopup(true);
+    setIsChatListLoading(true);
+    window.sendToIde?.(JSON.stringify({ command: '/listChats' }));
+  };
+
   const handleSend = () => {
     const text = inputText.trim();
     if (!text || !window.sendToIde) return;
@@ -783,17 +901,65 @@ function App() {
   };
 
   return (
-    <div id="root">
+    <div id="root" style={{ position: 'relative' }}>
       <header className="header flex justify-between items-center">
-        <span className="title">New Chat</span>
+        <span className="title">{chatTitle}</span>
         <div className="flex gap-2">
-          <button className="icon-btn"><Terminal size={14} /></button>
-          <button className="icon-btn"><Edit size={14} /></button>
+          <button className="icon-btn" onClick={handleNewChat} title="새 채팅">
+            <Plus size={14} />
+          </button>
+          <button className="icon-btn" onClick={handleOpenChatList} title="채팅 목록">
+            <MessageSquare size={14} />
+          </button>
           <button className="icon-btn" onClick={() => window.sendToIde?.(JSON.stringify({ command: '/openSettings' }))}>
             <Settings size={14} />
           </button>
         </div>
       </header>
+
+      {showChatListPopup && (
+        <div
+          className="command-popup"
+          ref={chatListPopupRef}
+          style={{ position: 'fixed', top: '44px', right: '8px', bottom: 'auto', left: 'auto', width: '280px', zIndex: 9999 }}
+        >
+          <div className="popup-section">
+            <div className="popup-section-title">채팅 기록</div>
+            {isChatListLoading ? (
+              <div className="popup-loading">로딩 중...</div>
+            ) : chatList.length === 0 ? (
+              <div className="popup-loading">저장된 채팅이 없습니다.</div>
+            ) : (
+              chatList.map(chat => (
+                <div key={chat.id} className="popup-item" style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '0' }}>
+                  <button
+                    style={{ flex: 1, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: '6px 8px', color: 'inherit' }}
+                    onClick={() => {
+                      console.log('[loadChat] 항목 클릭 id=' + chat.id);
+                      window.sendToIde?.(JSON.stringify({ command: '/loadChat', id: chat.id }));
+                    }}
+                  >
+                    <span className="popup-item-command" style={{ display: 'block' }}>{chat.title || '(제목 없음)'}</span>
+                    <span className="popup-item-desc">{chat.date?.slice(0, 10)}</span>
+                  </button>
+                  <button
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', color: '#888', fontSize: '16px', lineHeight: 1, flexShrink: 0 }}
+                    title="삭제"
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (!confirm('이 대화를 삭제하시겠습니까?')) return;
+                      window.sendToIde?.(JSON.stringify({ command: '/deleteChat', id: chat.id }));
+                      setChatList(prev => prev.filter(c => c.id !== chat.id));
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="chat-list" ref={chatListRef}>
         {messages.map(msg => <MessageItem key={msg.id} msg={msg} />)}
