@@ -192,6 +192,15 @@ class WebviewActionRouter(private val project: Project) {
                     val enhancedText = if (fileContext.isNotBlank()) "$textBody\n\n$fileContext" else textBody
                     val context = AgentContext(project, editor, enhancedText)
 
+                    // @ 첨부 파일이 있으면 첫 번째 파일 경로, 없으면 에디터 파일 경로 (Improve Diff 버튼용)
+                    val firstAttachedFilePath: String = run {
+                        val filesJson = payload["files"] ?: ""
+                        if (filesJson.isBlank()) ""
+                        else Regex(""""path":"([^"]+)"""").find(filesJson)
+                            ?.groupValues?.get(1)?.replace("\\\\", "\\") ?: ""
+                    }
+                    val improveFilePath = firstAttachedFilePath.ifBlank { editor.virtualFile?.path ?: "" }
+
                     // 🛎 즉시 시작 알림 (UI 스레드 큐로 보냄)
                     ApplicationManager.getApplication().invokeLater {
                         bridge.sendMessage("task_start", "✅ 의도를 분석하고 있습니다...", messageId)
@@ -199,17 +208,27 @@ class WebviewActionRouter(private val project: Project) {
 
                     // Step 시작 시 즉각 UI 피드백
                     val stepNotiIdx = intArrayOf(0)
-                    val onStepStart = { stepLabel: String ->
-                        logger.info("Router: Step 시작 알림 → $stepLabel")
+                    val onStepStart = { stepLabel: String, stepMsgId: String, isApplyable: Boolean ->
+                        logger.info("Router: Step 시작 알림 → $stepLabel (stepMsgId=$stepMsgId, isApplyable=$isApplyable)")
                         val notiId = "${messageId}_noti_${stepNotiIdx[0]}"
                         stepNotiIdx[0]++
                         ApplicationManager.getApplication().invokeLater {
                             bridge.sendMessage("step_noti", stepLabel, notiId, mapOf("status" to "started"))
-                            bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
+                            when {
+                                stepMsgId == messageId -> bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId)
+                                !isApplyable -> bridge.sendMessage(
+                                    "task_start", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId,
+                                    mapOf(
+                                        "filePath"     to improveFilePath,
+                                        "hasSelection" to "false"
+                                    )
+                                )
+                                else -> bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
+                            }
                         }
                     }
 
-                    // Step 완료 시 결과 전송
+                    // Step 완료 시 결과 전송 (stepMsgId: Step별 독립 말풍선 ID)
                     val stepNotiDoneIdx = intArrayOf(0)
                     val onStep = { stepLabel: String, result: TaskPipeline.StepResult, isApplyable: Boolean, stepMsgId: String ->
                         logger.info("Router: Task Step 완료 → $stepLabel (applyable=$isApplyable, success=${result.isSuccess}, scope=${result.applyScope})")
@@ -256,16 +275,11 @@ class WebviewActionRouter(private val project: Project) {
                                 }
                             }
                             else -> {
-                                // ── 텍스트 말풍선 (Step 1: Analyze / Explain) ───────────
-                                // 코드 블록 제거 후 설명 텍스트만 기존 말풍선에 누적
-                                val displayContent = result.llmResponse
-                                    .replace(Regex("```[\\w]*\\n?[\\s\\S]*?```"), "")
-                                    .trim()
                                 ApplicationManager.getApplication().invokeLater {
                                     bridge.sendMessage(
                                         subType = "task_step",
-                                        content = displayContent,
-                                        messageId = messageId,
+                                        content = result.llmResponse,
+                                        messageId = stepMsgId,
                                         meta = mapOf(
                                             "stepLabel" to stepLabel,
                                             "applyable" to "false",
@@ -399,43 +413,89 @@ class WebviewActionRouter(private val project: Project) {
 
                 // ── Diff: IDE 내장 Diff 창 띄우기 (블록 단위 적용 << 지원) ─────────────
                 "/viewDiff" -> {
+                    val filePath = payload["filePath"] ?: ""
+
+                    if (filePath.isNotBlank()) {
+                        // ── filePath 기반 경로: Improve Step2 Diff 버튼 ──────────────────
+                        // Step2 LLM 응답(SEARCH/REPLACE 또는 풀코드)을 원본 파일에 적용하여 Diff 표시
+                        logger.info("Router: /viewDiff (filePath 기반) → $filePath")
+                        val localFs = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                        val vFile = localFs.findFileByPath(filePath)
+                        if (vFile == null) {
+                            bridge.sendMessage("error", "파일을 찾을 수 없습니다: $filePath")
+                            return@invokeLater
+                        }
+                        // 닫혀 있으면 다시 열기
+                        FileEditorManager.getInstance(project).openFile(vFile, false)
+                        val document = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(vFile)
+                        if (document == null) {
+                            bridge.sendMessage("error", "파일 내용을 읽을 수 없습니다.")
+                            return@invokeLater
+                        }
+                        val originalText = document.text
+                        // SEARCH/REPLACE 적용 → 실패 시 코드 블록 추출 → 최후엔 원문 그대로
+                        val rightFullText = EditorApplyService.applySearchReplace(originalText, textBody)
+                            ?: EditorApplyService.extractCodeBlock(textBody).takeIf { it.isNotBlank() }
+                            ?: textBody
+                        EditorDiffService.showDiff(project, vFile, rightFullText, "AI 코드 개선 제안 (${vFile.name})")
+                        return@invokeLater
+                    }
+
+                    // ── 기존 scope 기반 경로 ───────────────────────────────────────────
                     val original = payload["original"] ?: ""
                     val modified = payload["modified"] ?: ""
                     val scope    = payload["scope"] ?: "File"
-                    
+
                     if (original == modified && original.isNotBlank()) {
                         logger.warn("Router: /viewDiff 무시됨 → original과 modified가 완벽히 동일합니다.")
                         bridge.sendMessage("task_progress", "⚠️ 원본과 개선된 코드가 동일하여 Diff를 열 수 없습니다.")
                         return@invokeLater
                     }
-                    
+
                     val fileEditorManager = FileEditorManager.getInstance(project)
                     val targetFile = fileEditorManager.openFiles.firstOrNull { it.name == scope }
                         ?: fileEditorManager.selectedTextEditor?.virtualFile
-                        
+
                     if (targetFile == null) {
                         logger.warn("Router: /viewDiff 대상을 찾을 수 없음 (scope=$scope)")
                         bridge.sendMessage("error", "적용 대상 파일($scope)을 찾을 수 없어 Diff 뷰어를 열 수 없습니다.")
                         return@invokeLater
                     }
-                    
+
                     val document = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(targetFile)
                     if (document == null) {
                         bridge.sendMessage("error", "해당 파일의 내용을 읽을 수 없습니다.")
                         return@invokeLater
                     }
 
-                    // 선택 영역 단위의 Diff일 경우 전체 문서 내에서 해당 영역만 교체하여 Full Text를 생성합니다.
                     val fullOriginalText = document.text
                     val rightFullText = if (original.isNotBlank() && original != modified) {
-                        // 문서 전체에서 original을 modified로 치환 (첫 번째 일치 항목 안전 교체)
                         fullOriginalText.replaceFirst(original, modified)
                     } else {
                         modified
                     }
-                    
+
                     EditorDiffService.showDiff(project, targetFile, rightFullText, "AI 코드 개선 제안 ($scope)")
                 }
+
+                // [이전 코드 백업 - 선택 영역 SimpleDiff 2-way 비교, 드래그 케이스도 3-way Diff로 대체됨]
+                // "/viewDiffSimple" -> {
+                //     logger.info("Router: /viewDiffSimple 분기 → SimpleDiffRequest")
+                //     val originalCode = payload["originalCode"] ?: ""
+                //     // SEARCH/REPLACE 적용 시도 → 코드 블록 추출 → 원문 순으로 fallback
+                //     val rightText = EditorApplyService.applySearchReplace(originalCode, textBody)
+                //         ?: EditorApplyService.extractCodeBlock(textBody).takeIf { it.isNotBlank() }
+                //         ?: textBody
+                //     val factory = com.intellij.diff.DiffContentFactory.getInstance()
+                //     val request = com.intellij.diff.requests.SimpleDiffRequest(
+                //         "AI 코드 개선 제안 (선택 영역)",
+                //         factory.create(originalCode),
+                //         factory.create(rightText),
+                //         "원본 선택 코드",
+                //         "개선된 코드"
+                //     )
+                //     com.intellij.diff.DiffManager.getInstance().showDiff(project, request)
+                // }
 
                 // ── Undo: IDE 기본 Undo 실행 (단축키 Ctrl+Z와 동일) ──────────────
                 "/undo" -> {
