@@ -1,10 +1,10 @@
-# WuwAgent Development Guide
+# iXpert AI Assistant Development Guide
 
 ---
 
 ## 0. 목적
 
-이 문서는 WuwAgent 프로젝트의 구조와 설계 원칙을 설명한다.
+이 문서는 iXpert AI Assistant 프로젝트의 구조와 설계 원칙을 설명한다.
 모든 개발자는 이 구조를 이해하고 이를 기반으로 기능을 구현해야 한다.
 
 ---

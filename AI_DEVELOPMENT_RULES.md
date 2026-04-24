@@ -1,10 +1,10 @@
-# AI Development Rules (WuwAgent)
+# AI Development Rules (iXpert AI Assistant)
 
 ---
 
 ## 0. 목적
 
-이 문서는 모든 AI가 WuwAgent 프로젝트에서 코드를 수정하거나 생성할 때 반드시 따라야 하는 기준이다.
+이 문서는 모든 AI가 iXpert AI Assistant 프로젝트에서 코드를 수정하거나 생성할 때 반드시 따라야 하는 기준이다.
 모든 작업은 이 규칙을 최우선으로 따른다.
 
 ---

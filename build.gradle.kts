@@ -82,10 +82,12 @@ tasks {
         token.set(System.getenv("PUBLISH_TOKEN"))
     }
 
-    // 빌드된 플러그인 압축파일(.zip)을 _release 폴더로 복사
+    // 빌드된 플러그인 압축파일(.zip)을 _release 폴더로 복사 (현재 프로젝트명 파일만)
     val copyToRelease by registering(Copy::class) {
         dependsOn("buildPlugin")
-        from(layout.buildDirectory.dir("distributions").get().asFile)
+        from(layout.buildDirectory.dir("distributions").get().asFile) {
+            include("${rootProject.name}-*.zip")
+        }
         into("${project.rootDir}/_release")
     }
 
