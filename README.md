@@ -1,4 +1,4 @@
-# WuwAgent
+# iXpert AI Assistant
 
 AI Agent 기반 IDE Plugin 프로젝트
 
@@ -6,7 +6,7 @@ AI Agent 기반 IDE Plugin 프로젝트
 
 ## 📌 Overview
 
-WuwAgent는 IntelliJ / Android Studio 환경에서
+iXpert AI Assistant는 IntelliJ / Android Studio 환경에서
 코드 설명, 리뷰, 개선 등을 지원하는 AI 기반 개발 도구이다.
 
 ---

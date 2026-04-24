@@ -1,10 +1,10 @@
-# WuwAgent Working Guide
+# iXpert AI Assistant Working Guide
 
 ---
 
 ## 0. 목적
 
-이 문서는 WuwAgent 팀원이 기능을 개발할 때 따라야 하는 실무 작업 가이드이다.
+이 문서는 iXpert AI Assistant 팀원이 기능을 개발할 때 따라야 하는 실무 작업 가이드이다.
 구조 설계는 `DEVELOPMENT_GUIDE.md`, AI 작업 규칙은 `AI_DEVELOPMENT_RULES.md`를 참고한다.
 
 ---

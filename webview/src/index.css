@@ -74,12 +74,14 @@ body {
 /* Chat List */
 .chat-list {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: scroll;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   scroll-behavior: smooth;
+  will-change: transform;
+  transform: translateZ(0);
 }
 
 .chat-list::-webkit-scrollbar { width: 6px; }
@@ -607,6 +609,50 @@ body {
   padding: 12px;
   overflow-x: auto;
   margin: 10px 0;
+}
+
+/* ── 에디터 스타일 코드블록 ── */
+.code-block {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 10px 0;
+  background: #1e1e1e;
+}
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 12px;
+  background: #2a2a2a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  min-height: 28px;
+}
+.code-block-lang {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #888;
+  text-transform: lowercase;
+}
+.code-block-copy {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: #aaa;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.code-block-copy:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.markdown-body .code-block .code-block-pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  padding: 12px;
 }
 
 .markdown-body pre code {
