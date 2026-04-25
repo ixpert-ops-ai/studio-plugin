@@ -20,8 +20,29 @@ class GenerateTestAgent : BaseAgent() {
         val editor = context.editor ?: run {
             onError("[상태 이상] 에디터 컨텍스트가 주어지지 않았습니다."); return
         }
-        val code = EditorContextService.extractCode(editor, context.project)
+        val scope = EditorContextService.extractCodeWithScope(editor, context.project)
+        val methodAtCaret = if (!scope.isSelection) {
+            EditorContextService.extractMethodAtCaret(editor, context.project)
+        } else null
+
+        // 전체 파일 텍스트에서 패키지·import 추출 (선택/메서드 모드 모두 전체 파일 기준)
+        val sourcePackage = extractSourcePackage(scope.code)
+        val sourceImports = extractSourceImports(scope.code)
+
+        // LLM에 전달할 코드: 메서드 모드이면 package + import 선언을 앞에 붙여 LLM이 정확한 패키지를 인식하게 함
+        val code = when {
+            scope.isSelection -> scope.code
+            methodAtCaret != null -> buildString {
+                if (sourcePackage != null) append("package $sourcePackage\n")
+                if (sourceImports.isNotBlank()) append("$sourceImports\n")
+                append("\n")
+                append(methodAtCaret.methodText)
+            }
+            else -> scope.code
+        }
         if (code.isBlank()) { onError("[알림] 분석할 코드를 도출하지 못했습니다."); return }
+
+        val targetMethodName = methodAtCaret?.methodName
 
         val fileName = EditorContextService.extractFileName(editor)
         val ext = fileName.substringAfterLast('.', "")
@@ -39,16 +60,33 @@ class GenerateTestAgent : BaseAgent() {
         }
 
         val basePath = context.project.basePath
-        val basePrompt = PromptManager.loadPrompt("generate_test_prompt.md")
-        val buildHint = basePath?.let { BuildContextService.detect(it).toPromptHint() }.orEmpty()
+        val buildContext = basePath?.let { BuildContextService.detect(it) }
+        val envBlock = buildEnvBlock(basePath, buildContext)
+        // ignoreableFields는 전체 파일 기준으로 추출 (메서드 모드에서 code가 잘려 있어도 정확히 추출)
+        val ignoreableFields = extractIgnoreableFields(scope.code)
+        val basePrompt = PromptManager.loadPromptWithVars(
+            "generate_test_prompt.md", mapOf(
+                "PROJECT_ENV" to envBlock,
+                "IGNOREABLE_FIELDS" to ignoreableFields.ifBlank { "(없음)" }
+            )
+        )
         val typeContext = basePath?.let { TypeContextService.buildTypeContext(it, code) }.orEmpty()
         val systemPrompt = buildString {
             append(basePrompt)
             append("\n\n[Source File: $fileName]\n[Source Language: $langHint]")
-            if (buildHint.isNotBlank()) append("\n").append(buildHint)
+            if (sourcePackage != null)
+                append("\n[Source Package: $sourcePackage — 생성되는 테스트 클래스의 package 선언을 반드시 이 값으로 작성하세요.]")
+            if (sourceImports.isNotBlank())
+                append("\n[Source Imports — 아래 import 구문을 테스트 코드에 그대로 사용하세요. 동일한 클래스명이 다른 패키지에 존재하더라도 반드시 아래 패키지를 사용해야 합니다.]\n$sourceImports")
+            if (targetMethodName != null)
+                append("\n[대상 범위: 메서드 단위 — `$targetMethodName` 메서드에 대한 단위 테스트만 작성하세요. 클래스의 다른 메서드는 무시합니다.]")
+            if (ignoreableFields.isNotBlank())
+                append("\n[테스트에서 무시할 필드 (@Value/@Autowired 설정값): $ignoreableFields]")
             if (typeContext.isNotBlank()) append(typeContext)
         }
-        logger.info("GenerateTestAgent: 빌드 컨텍스트 주입 → ${buildHint.replace("\n", " | ")}")
+        logger.info("GenerateTestAgent: 환경 컨텍스트 주입 → ${envBlock.replace("\n", " | ")}")
+        logger.info("GenerateTestAgent: 소스 패키지 → ${sourcePackage ?: "(감지 실패)"}")
+        logger.info("GenerateTestAgent: 무시 필드 목록 → $ignoreableFields")
         logger.info("GenerateTestAgent: 타입 컨텍스트 주입 (길이=${typeContext.length})")
 
         val wrappedOnSuccess: (String) -> Unit = { llmResponse ->
@@ -108,7 +146,8 @@ class GenerateTestAgent : BaseAgent() {
         var currentCode = testCode
         var attempt = 1
 
-        while (isCompileFailure(currentResult) && !TaskCancellationToken.isCancelled.get()) {
+        val maxRetries = 3
+        while (isCompileFailure(currentResult) && attempt <= maxRetries && !TaskCancellationToken.isCancelled.get()) {
             logger.info("GenerateTestAgent: 컴파일 실패 감지 → 재시도 $attempt 실행")
             ApplicationManager.getApplication().invokeLater {
                 bridge.sendMessage("test_execution_start", "🔁 컴파일 오류 감지 → 테스트를 자동 수정하고 있습니다... (시도 $attempt)", execMsgId)
@@ -262,6 +301,113 @@ class GenerateTestAgent : BaseAgent() {
         logger.info("GenerateTestAgent: 재시도 코드 추출 (길이=${retryCode.length})")
         return retryCode.ifBlank { null }
     }
+
+    /**
+     * 소스 코드에서 @Value / @Autowired(Properties 등 설정 타입) 필드명을 추출한다.
+     * 테스트 클래스에 복사하지 말아야 할 필드 목록으로 프롬프트에 주입된다.
+     */
+    private fun extractIgnoreableFields(sourceCode: String): String {
+        val valueFields = Regex(
+            """@Value\s*\([^)]+\)\s*(?:private|protected|public)?\s*\S+\s+(\w+)\s*;""",
+            RegexOption.MULTILINE
+        ).findAll(sourceCode).map { it.groupValues[1] }
+
+        // Properties/Environment 타입 필드도 무시 대상 (설정 주입 전용)
+        val configFields = Regex(
+            """@Autowired\s*(?:private|protected|public)?\s*(?:Properties|Environment)\s+(\w+)\s*;""",
+            RegexOption.MULTILINE
+        ).findAll(sourceCode).map { it.groupValues[1] }
+
+        return (valueFields + configFields)
+            .filter { it.isNotBlank() }
+            .distinct()
+            .joinToString(", ")
+    }
+
+    /** 프로젝트 환경을 동적으로 탐지해 프롬프트용 마크다운 테이블을 반환한다. 탐지 실패 시 기본값 사용. */
+    private fun buildEnvBlock(basePath: String?, buildContext: BuildContextService.BuildContext?): String {
+        val buildTool = buildContext?.buildTool ?: "Maven"
+        val javaVersion = basePath?.let { detectJavaVersion(it) } ?: "1.8"
+        val junitVersion = basePath?.let { detectDependencyVersion(it, "junit") } ?: "4.13.2"
+        val mockitoVersion = basePath?.let { detectDependencyVersion(it, "mockito-core") } ?: "2.28.2"
+        val buildCmd = when (buildTool) {
+            "Gradle" -> "Gradle (`./gradlew test`)"
+            "Maven"  -> "Maven (`mvn test`)"
+            else     -> "Maven (`mvn test`)"
+        }
+        val testDir = when (buildTool) {
+            "Gradle" -> "`src/test/kotlin/` 또는 `src/test/java/` (소스와 동일 패키지)"
+            else     -> "`src/test/java/` (소스와 동일 패키지)"
+        }
+
+        val sb = StringBuilder()
+        sb.appendLine("| 항목 | 버전 |")
+        sb.appendLine("|---|---|")
+        sb.appendLine("| Java | $javaVersion |")
+        if (buildContext?.springBootVersion != null) {
+            sb.appendLine("| Spring Boot | ${buildContext.springBootVersion} |")
+        }
+        sb.appendLine("| JUnit | $junitVersion |")
+        sb.appendLine("| Mockito | $mockitoVersion |")
+        sb.appendLine("| 빌드 | $buildCmd |")
+        sb.append("| 테스트 위치 | $testDir |")
+
+        if (buildContext?.springBootVersion != null) {
+            val major = buildContext.springBootVersion.substringBefore('.').toIntOrNull() ?: 0
+            val minor = buildContext.springBootVersion.substringAfter('.', "").substringBefore('.').toIntOrNull() ?: 0
+            val use34Plus = (major > 3) || (major == 3 && minor >= 4)
+            sb.appendLine()
+            if (use34Plus) {
+                sb.append("\n> ⚠️ Spring Boot 3.4+: `@MockitoBean` (`org.springframework.test.context.bean.override.mockito`) 사용 — `@MockBean` 제거됨")
+            } else {
+                sb.append("\n> Spring Boot < 3.4: `@MockBean` (`org.springframework.boot.test.mock.mockito`) 사용")
+            }
+        }
+
+        return sb.toString()
+    }
+
+    private fun detectJavaVersion(basePath: String): String? {
+        return try {
+            val pom = java.io.File("$basePath/pom.xml")
+            if (!pom.exists()) return null
+            val content = pom.readText()
+            Regex("<java\\.version>\\s*([^<\\s]+)\\s*</java\\.version>").find(content)?.groupValues?.get(1)
+                ?: Regex("<maven\\.compiler\\.source>\\s*([^<\\s]+)\\s*</maven\\.compiler\\.source>").find(content)?.groupValues?.get(1)
+        } catch (e: Exception) {
+            logger.warn("GenerateTestAgent: Java 버전 탐지 실패", e); null
+        }
+    }
+
+    private fun detectDependencyVersion(basePath: String, artifactId: String): String? {
+        return try {
+            val pom = java.io.File("$basePath/pom.xml")
+            if (!pom.exists()) return null
+            val content = pom.readText()
+            content.split("<dependency>").drop(1).firstNotNullOfOrNull { block ->
+                val end = block.indexOf("</dependency>").takeIf { it >= 0 } ?: return@firstNotNullOfOrNull null
+                val dep = block.substring(0, end)
+                if (!dep.contains("<artifactId>$artifactId</artifactId>")) return@firstNotNullOfOrNull null
+                Regex("<version>\\s*([^<\\s\$][^<]*)\\s*</version>").find(dep)?.groupValues?.get(1)
+                    ?.takeIf { !it.startsWith("\${") }
+            }
+        } catch (e: Exception) {
+            logger.warn("GenerateTestAgent: $artifactId 버전 탐지 실패", e); null
+        }
+    }
+
+    /** 소스 파일 전체 텍스트에서 package 선언을 추출 */
+    private fun extractSourcePackage(fullSourceCode: String): String? =
+        Regex("^\\s*package\\s+([\\w.]+)\\s*;?", RegexOption.MULTILINE)
+            .find(fullSourceCode)?.groupValues?.get(1)
+
+    /** 소스 파일 전체 텍스트에서 import 선언 목록을 원문 그대로 추출 */
+    private fun extractSourceImports(fullSourceCode: String): String =
+        Regex("^\\s*import\\s+[\\w.*]+\\s*;?", RegexOption.MULTILINE)
+            .findAll(fullSourceCode)
+            .map { it.value.trim() }
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
 
     /** LLM 응답에서 가장 긴 코드 블록을 추출 (리포트에 예시 코드 블록이 섞여 있어도 실제 테스트 코드 우선) */
     private fun extractCodeBlock(response: String): String {

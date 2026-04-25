@@ -14,20 +14,10 @@ object TypeContextService {
     private const val MAX_TYPES = 20       // 주입할 최대 타입 개수
     private const val MAX_LINES_PER_TYPE = 120  // 타입당 최대 라인 수
 
-    // 프로젝트 타입 아닐 가능성이 높은 패키지 prefix (라이브러리/표준)
-    private val SKIP_PREFIXES = listOf(
-        "java.", "javax.", "jakarta.", "kotlin.", "kotlinx.",
-        "org.springframework.", "org.junit.", "org.mockito.", "org.assertj.",
-        "org.slf4j.", "org.apache.", "org.hibernate.", "org.w3c.",
-        "com.fasterxml.", "com.google.", "com.intellij.",
-        "lombok.", "io.jsonwebtoken.", "ch.qos.", "net.bytebuddy."
-    )
-
     /** 소스 코드에서 프로젝트 타입 시그니처 블록을 생성. 결과가 없으면 빈 문자열. */
     fun buildTypeContext(basePath: String, sourceCode: String): String {
         val imports = extractImports(sourceCode)
         val projectFiles = imports
-            .filter { fqn -> SKIP_PREFIXES.none { fqn.startsWith(it) } }
             .mapNotNull { fqn -> findSourceFile(basePath, fqn)?.let { fqn to it } }
             .take(MAX_TYPES)
 
