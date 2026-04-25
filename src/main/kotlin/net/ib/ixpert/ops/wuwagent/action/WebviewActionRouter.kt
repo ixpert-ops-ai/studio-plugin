@@ -6,6 +6,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import net.ib.ixpert.ops.wuwagent.agent.AgentContext
 import net.ib.ixpert.ops.wuwagent.agent.ChatAgent
+import net.ib.ixpert.ops.wuwagent.agent.DocGenerateAgent
 import net.ib.ixpert.ops.wuwagent.agent.ExplainAgent
 import net.ib.ixpert.ops.wuwagent.agent.GenerateTestAgent
 import net.ib.ixpert.ops.wuwagent.agent.ImpactAgent
@@ -137,6 +138,67 @@ class WebviewActionRouter(private val project: Project) {
                             }
                         }
                     )
+                }
+
+                // ── 분석 문서 MD 생성 (디렉토리 선택 → 일괄 분석) ────────
+                "/doc" -> {
+                    logger.info("Router: /doc 분기 → 디렉토리 선택 다이얼로그")
+                    val messageId = "doc_${System.currentTimeMillis()}"
+
+                    // 네이티브 디렉토리 선택 다이얼로그
+                    val descriptor = com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+                        .createSingleFolderDescriptor()
+                    descriptor.title = "분석 대상 디렉토리 선택"
+                    descriptor.description = "하위 폴더의 모든 소스 파일을 분석하여 Markdown 문서를 생성합니다."
+
+                    val projectBase = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                        .findFileByPath(project.basePath ?: "")
+
+                    com.intellij.openapi.fileChooser.FileChooser.chooseFile(
+                        descriptor, project, projectBase
+                    ) { selectedDir ->
+                        // 소스 파일 수집
+                        val files = net.ib.ixpert.ops.wuwagent.service.MarkdownFileService
+                            .collectSourceFiles(selectedDir)
+
+                        if (files.isEmpty()) {
+                            bridge.sendMessage("error", "선택한 디렉토리에 분석 가능한 소스 파일이 없습니다.")
+                            return@chooseFile
+                        }
+
+                        // 시작 알림
+                        bridge.sendMessage("explain_start",
+                            "📄 ${files.size}개 파일의 분석 문서를 생성합니다...", messageId)
+
+                        // step_noti 인덱스
+                        var notiIdx = 0
+
+                        DocGenerateAgent().executeBatch(
+                            project = project,
+                            files = files,
+                            onStepProgress = { fileName, current, total, status ->
+                                val notiId = "${messageId}_noti_${notiIdx++}"
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage(
+                                        "step_noti",
+                                        "$current/$total $fileName",
+                                        notiId,
+                                        mapOf("status" to status)
+                                    )
+                                }
+                            },
+                            onComplete = { summary ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("explain", summary, messageId)
+                                }
+                            },
+                            onError = { errorMsg ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("error", errorMsg, messageId)
+                                }
+                            }
+                        )
+                    }
                 }
 
                 "/openTabs" -> {
@@ -371,6 +433,28 @@ class WebviewActionRouter(private val project: Project) {
                                 onError = { errorMsg ->
                                     ApplicationManager.getApplication().invokeLater {
                                         bridge.sendMessage("error", errorMsg, messageId)
+                                    }
+                                }
+                            )
+                        }
+
+                        TaskPipeline.DocGenerate -> {
+                            DocGenerateAgent().execute(context,
+                                onSuccess = { res ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("explain", res, messageId)
+                                    }
+                                },
+                                onChunk = { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
+                                },
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        if (errorMsg != "__cancelled__") {
+                                            bridge.sendMessage("error", errorMsg, messageId)
+                                        }
                                     }
                                 }
                             )

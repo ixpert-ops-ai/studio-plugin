@@ -69,6 +69,11 @@
                     class="net.ib.ixpert.ops.wuwagent.action.GenerateTestAction"
                     text="Generate Test (테스트 생성)"
                     description="선택한 코드의 단위 테스트를 AI가 생성합니다."/>
+
+            <action id="IxpertAiAssistant.DocGenerateAction"
+                    class="net.ib.ixpert.ops.wuwagent.action.DocGenerateAction"
+                    text="Generate Analysis Doc (분석 문서 생성)"
+                    description="현재 파일의 AI 분석 결과를 Markdown 문서로 저장합니다."/>
         </group>
     </actions>
 </idea-plugin>
