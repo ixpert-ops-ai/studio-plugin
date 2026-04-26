@@ -52,11 +52,14 @@ class DocGenerateAgent : BaseAgent() {
 
         logger.info("DocGenerateAgent: 단일 파일 분석 문서 생성 시작 → $fileName")
 
-        // ExplainAgent를 전체 파일 모드로 실행 (payloadText = "" → 전체 분석)
+        val command = context.command ?: "/doc"
+        val subDir = if (command == "/ragdoc") "rag_docs" else "docs"
+
         val explainContext = AgentContext(
             project = context.project,
             editor = editor,
-            payloadText = ""
+            payloadText = "",
+            command = command
         )
 
         ExplainAgent().execute(
@@ -64,11 +67,11 @@ class DocGenerateAgent : BaseAgent() {
             onSuccess = { analysisResult ->
                 try {
                     val savedPath = MarkdownFileService.saveAnalysisDoc(
-                        context.project, fileName, analysisResult
+                        context.project, fileName, analysisResult, subDir
                     )
                     logger.info("DocGenerateAgent: 분석 문서 저장 완료 → $savedPath")
 
-                    val vFile = MarkdownFileService.findSavedFile(context.project, fileName)
+                    val vFile = MarkdownFileService.findSavedFile(context.project, fileName, subDir)
                     if (vFile != null) {
                         ApplicationManager.getApplication().invokeLater {
                             FileEditorManager.getInstance(context.project).openFile(vFile, true)
@@ -104,6 +107,7 @@ class DocGenerateAgent : BaseAgent() {
     fun executeBatch(
         project: Project,
         files: List<VirtualFile>,
+        command: String = "/doc",
         onStepProgress: (fileName: String, current: Int, total: Int, status: String) -> Unit,
         onComplete: (summary: String) -> Unit,
         onError: (String) -> Unit
@@ -140,10 +144,12 @@ class DocGenerateAgent : BaseAgent() {
                     // step 시작 알림
                     onStepProgress(fileName, current, total, "started")
 
+                    val subDir = if (command == "/ragdoc") "rag_docs" else "docs"
+
                     try {
-                        val result = analyzeFileSync(project, file)
+                        val result = analyzeFileSync(project, file, command)
                         if (result != null) {
-                            val savedPath = MarkdownFileService.saveAnalysisDoc(project, fileName, result)
+                            val savedPath = MarkdownFileService.saveAnalysisDoc(project, fileName, result, subDir)
                             val relativePath = savedPath.removePrefix("${project.basePath}/")
                             successList.add(relativePath)
                             logger.info("DocGenerateAgent: [$current/$total] $fileName → 저장 완료")
@@ -193,7 +199,7 @@ class DocGenerateAgent : BaseAgent() {
      *
      * @return 분석 결과 Markdown 문자열, 실패 시 null
      */
-    private fun analyzeFileSync(project: Project, file: VirtualFile): String? {
+    private fun analyzeFileSync(project: Project, file: VirtualFile, command: String = "/doc"): String? {
         val code = MarkdownFileService.readFileContent(file)
         if (code.isBlank()) {
             logger.warn("DocGenerateAgent: 빈 파일 건너뜀 → ${file.name}")
@@ -244,7 +250,8 @@ class DocGenerateAgent : BaseAgent() {
                 isPartial = false,
                 startLine = null,
                 endLine = null,
-                partialCode = code
+                partialCode = code,
+                includeFaq = (command == "/ragdoc")
             ).toMutableMap()
             structureVars.apply {
                 this["ANALYSIS_MODE"] = "전체 파일"
@@ -262,6 +269,17 @@ class DocGenerateAgent : BaseAgent() {
                 "THYMELEAF_INFO" to "",
                 "PATTERN_GUIDE" to "",
                 "FUNCTION_GUIDE" to "",
+                "FAQ_SECTION" to if (command == "/ragdoc") {
+                    """
+                        ## 7. 자주 묻는 질문 (FAQ)
+                        - 이 코드에 대해 개발자가 실무에서 물을 법한 질문 3~5개를 생성하세요.
+                        - 각 질문에 대해 코드 사실에만 기반하여 2~4문장으로 답변하세요.
+                        - 질문은 "~하려면?", "~는 어떻게 동작하나?", "~의 역할은?", "~를 호출하기 전에 필요한 것은?" 패턴으로 작성하세요.
+                        - 아래 형식으로 작성하세요
+                        ### Q. 질문 내용?
+                        답변 내용 (2~4문장)
+                    """.trimIndent()
+                } else "",
                 "KEY_CODE" to code
             )
         }

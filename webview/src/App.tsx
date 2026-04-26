@@ -622,6 +622,9 @@ function App() {
     } else if (text === '/doc' || text.startsWith('/doc ')) {
       command = '/doc';
       payload = '';
+    } else if (text === '/ragdoc' || text.startsWith('/ragdoc ')) {
+      command = '/ragdoc';
+      payload = '';
     } else if (/개선|리팩토링|리팩|refactor|improve|최적화|optimize/i.test(text)) {
       command = '/task';
     } else if (/리뷰|review|검토|점검/i.test(text)) {
@@ -650,6 +653,7 @@ function App() {
     const cmds = [
       { cmd: '/explain', desc: '코드를 설명해줘' },
       { cmd: '/doc', desc: '디렉토리 분석 문서 생성' },
+      { cmd: '/ragdoc', desc: 'RAG 전용 분석 문서 생성 (FAQ 포함)' },
       { cmd: '/review', desc: '코드를 리뷰해줘' },
       { cmd: '/improve', desc: '코드를 개선해줘' },
       { cmd: '/test', desc: '테스트 코드를 생성해줘' },

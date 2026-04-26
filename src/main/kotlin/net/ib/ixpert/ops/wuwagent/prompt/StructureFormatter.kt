@@ -150,17 +150,15 @@ object StructureFormatter {
         return sb.toString()
     }
 
-    /**
-     * 모든 구조 정보를 프롬프트 변수 맵으로 변환합니다.
-     */
     fun toPromptVariables(
-        structure: ExtractedStructure,
-        language: String,
         fileName: String,
+        language: String,
+        structure: ExtractedStructure,
         isPartial: Boolean,
         startLine: Int? = null,
         endLine: Int? = null,
-        partialCode: String? = null
+        partialCode: String? = null,
+        includeFaq: Boolean = false
     ): Map<String, String> {
         val langNames = mapOf(
             "java" to "Java", "JAVA" to "Java",
@@ -168,7 +166,8 @@ object StructureFormatter {
             "javascript" to "JavaScript", "typescript" to "TypeScript",
             "html" to "HTML", "css" to "CSS",
             "python" to "Python", "sql" to "SQL",
-            "xml" to "XML", "json" to "JSON", "yaml" to "YAML"
+            "xml" to "XML", "json" to "JSON", "yaml" to "YAML",
+            "jsp" to "JSP", "JSP" to "JSP"
         )
         val langName = langNames[language] ?: language
 
@@ -225,6 +224,18 @@ $thymeleafNotice"""
 | <분류명> | `식별자(파라미터)` | 1문장으로 요약된 기능 |"""
         }
 
+        val faqSection = if (includeFaq) {
+            """
+            ## 7. 자주 묻는 질문 (FAQ)
+            - 이 코드에 대해 개발자가 실무에서 물을 법한 질문 3~5개를 생성하세요.
+            - 각 질문에 대해 코드 사실에만 기반하여 2~4문장으로 답변하세요.
+            - 질문은 "~하려면?", "~는 어떻게 동작하나?", "~의 역할은?", "~를 호출하기 전에 필요한 것은?" 패턴으로 작성하세요.
+            - 아래 형식으로 작성하세요
+            ### Q. 질문 내용?
+            답변 내용 (2~4문장)
+            """.trimIndent()
+        } else ""
+
         return mapOf(
             "LANGUAGE" to langName,
             "ANALYSIS_MODE" to analysisMode,
@@ -234,7 +245,8 @@ $thymeleafNotice"""
             "THYMELEAF_INFO" to formatThymeleafInfo(structure),
             "KEY_CODE" to formatKeyCode(structure, isPartial = isPartial, partialCode = partialCode),
             "PATTERN_GUIDE" to patternGuide,
-            "FUNCTION_GUIDE" to functionGuide
+            "FUNCTION_GUIDE" to functionGuide,
+            "FAQ_SECTION" to faqSection
         )
     }
 

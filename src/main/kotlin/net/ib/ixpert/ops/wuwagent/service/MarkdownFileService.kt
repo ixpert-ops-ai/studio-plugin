@@ -29,7 +29,7 @@ object MarkdownFileService {
     /** 탐색에서 제외할 디렉토리명 */
     private val EXCLUDED_DIRS = setOf(
         "build", "out", "target", "dist", ".gradle", ".idea",
-        "node_modules", ".git", "__pycache__", ".next", "docs"
+        "node_modules", ".git", "__pycache__", ".next", "docs", "rag_docs"
     )
 
     /**
@@ -105,14 +105,14 @@ object MarkdownFileService {
      * @param content        저장할 Markdown 내용
      * @return 저장된 파일의 절대 경로
      */
-    fun saveAnalysisDoc(project: Project, sourceFileName: String, content: String): String {
+    fun saveAnalysisDoc(project: Project, sourceFileName: String, content: String, subDir: String = DOCS_DIR): String {
         val basePath = project.basePath
             ?: throw IllegalStateException("프로젝트 경로를 찾을 수 없습니다.")
 
-        val docsDir = File(basePath, DOCS_DIR)
+        val docsDir = File(basePath, subDir)
         if (!docsDir.exists()) {
             docsDir.mkdirs()
-            logger.info("MarkdownFileService: docs 디렉토리 생성 → ${docsDir.absolutePath}")
+            logger.info("MarkdownFileService: $subDir 디렉토리 생성 → ${docsDir.absolutePath}")
         }
 
         val mdFileName = "${sourceFileName}.md"
@@ -129,9 +129,9 @@ object MarkdownFileService {
     /**
      * 저장된 MD 파일을 VirtualFile로 반환한다. (에디터에서 열기 위해 사용)
      */
-    fun findSavedFile(project: Project, sourceFileName: String): VirtualFile? {
+    fun findSavedFile(project: Project, sourceFileName: String, subDir: String = DOCS_DIR): VirtualFile? {
         val basePath = project.basePath ?: return null
-        val mdFile = File(basePath, "$DOCS_DIR/${sourceFileName}.md")
+        val mdFile = File(basePath, "$subDir/${sourceFileName}.md")
         return LocalFileSystem.getInstance().refreshAndFindFileByIoFile(mdFile)
     }
 }

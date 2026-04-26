@@ -21,7 +21,7 @@ class DocGenerateAction : AnAction() {
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
 
         val bridge = JcefBridge.getInstance(project)
-        val context = AgentContext(project, editor, "")
+        val context = AgentContext(project, editor, "", command = "/doc")
         val messageId = "msg_${System.currentTimeMillis()}"
 
         // 즉시 로딩 표시

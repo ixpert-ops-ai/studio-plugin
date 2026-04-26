@@ -116,7 +116,7 @@ class WebviewActionRouter(private val project: Project) {
                     // 🛎 즉시 자리 만들기 (로딩 표시 유도)
                     bridge.sendMessage("explain_start", "🔍 코드 구조를 분석하고 있습니다...", messageId)
 
-                    val context = AgentContext(project, editor, textBody)
+                    val context = AgentContext(project, editor, textBody, command = "/explain")
                     ExplainAgent().execute(
                         context, 
                         onSuccess = { res ->
@@ -201,6 +201,63 @@ class WebviewActionRouter(private val project: Project) {
                     }
                 }
 
+                // ── RAG 특화 분석 문서 생성 (FAQ 포함) ────────
+                "/ragdoc" -> {
+                    logger.info("Router: /ragdoc 분기 → 디렉토리 선택 다이얼로그")
+                    val messageId = "rag_${System.currentTimeMillis()}"
+
+                    val descriptor = com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+                        .createSingleFolderDescriptor()
+                    descriptor.title = "RAG 전용 분석 대상 디렉토리 선택"
+                    descriptor.description = "하위 폴더의 모든 소스 파일을 분석하여 FAQ가 포함된 RAG용 Markdown 문서를 생성합니다."
+
+                    val projectBase = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                        .findFileByPath(project.basePath ?: "")
+
+                    com.intellij.openapi.fileChooser.FileChooser.chooseFile(
+                        descriptor, project, projectBase
+                    ) { selectedDir ->
+                        val files = net.ib.ixpert.ops.wuwagent.service.MarkdownFileService
+                            .collectSourceFiles(selectedDir)
+
+                        if (files.isEmpty()) {
+                            bridge.sendMessage("error", "선택한 디렉토리에 분석 가능한 소스 파일이 없습니다.")
+                            return@chooseFile
+                        }
+
+                        bridge.sendMessage("explain_start",
+                            "📄 ${files.size}개 파일의 RAG 분석 문서를 생성합니다...", messageId)
+
+                        var notiIdx = 0
+                        DocGenerateAgent().executeBatch(
+                            project = project,
+                            files = files,
+                            command = "/ragdoc",
+                            onStepProgress = { fileName, current, total, status ->
+                                val notiId = "${messageId}_noti_${notiIdx++}"
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage(
+                                        "step_noti",
+                                        "$current/$total $fileName",
+                                        notiId,
+                                        mapOf("status" to status)
+                                    )
+                                }
+                            },
+                            onComplete = { summary ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("explain", summary, messageId)
+                                }
+                            },
+                            onError = { errorMsg ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("error", errorMsg, messageId)
+                                }
+                            }
+                        )
+                    }
+                }
+
                 "/openTabs" -> {
                     logger.info("Router: /openTabs 분기")
                     val openFiles = FileEditorManager.getInstance(project).openFiles
@@ -218,7 +275,7 @@ class WebviewActionRouter(private val project: Project) {
                     // 🛎 즉시 자리 만들기 (로딩 표시 유도)
                     bridge.sendMessage("chat_start", "💬 답변을 준비 중입니다...", messageId)
 
-                    val context = AgentContext(project, editor, textBody)
+                    val context = AgentContext(project, editor, textBody, command = "/chat")
                     ChatAgent().execute(
                         context, 
                         onSuccess = { res ->
@@ -252,7 +309,7 @@ class WebviewActionRouter(private val project: Project) {
                     val messageId = "task_${System.currentTimeMillis()}"
                     val fileContext = buildAttachedFileContext(payload["files"] ?: "")
                     val enhancedText = if (fileContext.isNotBlank()) "$textBody\n\n$fileContext" else textBody
-                    val context = AgentContext(project, editor, enhancedText)
+                    val context = AgentContext(project, editor, enhancedText, command = "/task")
 
                     // @ 첨부 파일이 있으면 첫 번째 파일 경로, 없으면 에디터 파일 경로 (Improve Diff 버튼용)
                     val firstAttachedFilePath: String = run {
