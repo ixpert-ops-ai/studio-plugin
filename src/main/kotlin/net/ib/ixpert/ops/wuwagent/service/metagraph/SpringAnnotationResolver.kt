@@ -71,7 +71,7 @@ class SpringAnnotationResolver {
         val fileType = resolveFileType(psiClass)
         val layer = LAYER_MAP[fileType] ?: ArchitectureLayer.COMMON
         val annotations = extractAnnotationNames(psiClass)
-        val injections = resolveDependencyInjections(psiClass)
+        val injections = resolveDependencyInjections(psiClass, fileType)
 
         val superClass = psiClass.superClass?.let { sup ->
             if (sup.qualifiedName != "java.lang.Object") sup.qualifiedName else null
@@ -97,10 +97,19 @@ class SpringAnnotationResolver {
     // ── 타입 판정 ──────────────────────────────────
 
     private fun resolveFileType(psiClass: PsiClass): SpringFileType {
-        // 1. FQN 기반 어노테이션 비교
+        // 1. 어노테이션 비교 (FQN 및 Simple Name 폴백)
         for (annotation in psiClass.annotations) {
-            val fqn = annotation.qualifiedName ?: continue
-            ANNOTATION_TYPE_MAP[fqn]?.let { return it }
+            val name = annotation.qualifiedName ?: annotation.nameReferenceElement?.referenceName ?: continue
+            
+            // FQN 직접 매칭
+            ANNOTATION_TYPE_MAP[name]?.let { return it }
+            
+            // Simple Name 매칭 (FQN이 패키지 없는 단순 이름으로 반환되는 경우 폴백)
+            val simpleMatch = ANNOTATION_TYPE_MAP.entries.firstOrNull { 
+                it.key.endsWith(".$name") 
+            }?.value
+            
+            if (simpleMatch != null) return simpleMatch
         }
 
         // 2. 클래스명 패턴 폴백
@@ -128,11 +137,35 @@ class SpringAnnotationResolver {
 
     private fun extractAnnotationNames(psiClass: PsiClass): List<String> {
         return psiClass.annotations.mapNotNull { ann ->
-            ann.qualifiedName?.substringAfterLast(".")
+            val name = ann.qualifiedName ?: ann.nameReferenceElement?.referenceName
+            name?.substringAfterLast(".")
         }
     }
 
     // ── DI 주입 분석 (3패턴) ──────────────────────
+
+    private fun isSpringManaged(fileType: SpringFileType): Boolean {
+        return fileType !in listOf(
+            SpringFileType.DTO, SpringFileType.VO,
+            SpringFileType.ENUM, SpringFileType.INTERFACE,
+            SpringFileType.ABSTRACT_CLASS, SpringFileType.UNKNOWN,
+            SpringFileType.ENTITY, SpringFileType.TEST
+        )
+    }
+
+    private fun isLikelySpringBeanType(typeFqn: String): Boolean {
+        val excludePrefixes = listOf(
+            "java.", "javax.", "jakarta.", "org.slf4j.",
+            "org.apache.", "com.fasterxml.", "org.springframework.web."
+        )
+        return excludePrefixes.none { typeFqn.startsWith(it) }
+    }
+
+    private fun matchesAnyAnnotation(annotation: PsiAnnotation, fqnSet: Set<String>): Boolean {
+        val name = annotation.qualifiedName ?: annotation.nameReferenceElement?.referenceName ?: return false
+        if (fqnSet.contains(name)) return true
+        return fqnSet.any { it.endsWith(".$name") }
+    }
 
     /**
      * DI 주입을 분석합니다.
@@ -140,13 +173,16 @@ class SpringAnnotationResolver {
      * 2. 명시적 @Autowired 생성자
      * 3. @Autowired / @Inject / @Resource 필드 주입
      */
-    private fun resolveDependencyInjections(psiClass: PsiClass): List<DependencyInjection> {
+    private fun resolveDependencyInjections(psiClass: PsiClass, fileType: SpringFileType): List<DependencyInjection> {
+        // Spring 관리 대상 빈이 아니면 DI 분석을 건너뜀 (Bug 3 방지)
+        if (!isSpringManaged(fileType)) return emptyList()
+
         val injections = mutableListOf<DependencyInjection>()
         val processedFields = mutableSetOf<String>()
 
         // 패턴 1: Lombok @RequiredArgsConstructor + final 필드
         val hasRequiredArgsConstructor = psiClass.annotations.any { ann ->
-            REQUIRED_ARGS_CONSTRUCTOR_FQNS.contains(ann.qualifiedName)
+            matchesAnyAnnotation(ann, REQUIRED_ARGS_CONSTRUCTOR_FQNS)
         }
 
         if (hasRequiredArgsConstructor) {
@@ -157,11 +193,14 @@ class SpringAnnotationResolver {
                     val fieldName = field.name
                     if (processedFields.add(fieldName)) {
                         val rawType = field.type.canonicalText
-                        injections.add(DependencyInjection(
-                            targetType = TypeResolver.unwrapGenericType(rawType),
-                            fieldName = fieldName,
-                            method = InjectionMethod.CONSTRUCTOR
-                        ))
+                        val targetType = TypeResolver.unwrapGenericType(rawType)
+                        if (isLikelySpringBeanType(targetType)) {
+                            injections.add(DependencyInjection(
+                                targetType = targetType,
+                                fieldName = fieldName,
+                                method = InjectionMethod.CONSTRUCTOR
+                            ))
+                        }
                     }
                 }
         }
@@ -169,7 +208,7 @@ class SpringAnnotationResolver {
         // 패턴 2: 명시적 @Autowired 생성자 주입
         psiClass.constructors
             .filter { constructor ->
-                constructor.annotations.any { AUTOWIRED_FQNS.contains(it.qualifiedName) }
+                constructor.annotations.any { matchesAnyAnnotation(it, AUTOWIRED_FQNS) }
                         || (psiClass.constructors.size == 1 && !hasRequiredArgsConstructor)
             }
             .forEach { constructor ->
@@ -177,11 +216,14 @@ class SpringAnnotationResolver {
                     val fieldName = param.name
                     if (processedFields.add(fieldName)) {
                         val rawType = param.type.canonicalText
-                        injections.add(DependencyInjection(
-                            targetType = TypeResolver.unwrapGenericType(rawType),
-                            fieldName = fieldName,
-                            method = InjectionMethod.CONSTRUCTOR
-                        ))
+                        val targetType = TypeResolver.unwrapGenericType(rawType)
+                        if (isLikelySpringBeanType(targetType)) {
+                            injections.add(DependencyInjection(
+                                targetType = targetType,
+                                fieldName = fieldName,
+                                method = InjectionMethod.CONSTRUCTOR
+                            ))
+                        }
                     }
                 }
             }
@@ -189,17 +231,20 @@ class SpringAnnotationResolver {
         // 패턴 3: 필드 주입 (@Autowired / @Inject / @Resource)
         psiClass.fields
             .filter { field ->
-                field.annotations.any { AUTOWIRED_FQNS.contains(it.qualifiedName) }
+                field.annotations.any { matchesAnyAnnotation(it, AUTOWIRED_FQNS) }
             }
             .forEach { field ->
                 val fieldName = field.name
                 if (processedFields.add(fieldName)) {
                     val rawType = field.type.canonicalText
-                    injections.add(DependencyInjection(
-                        targetType = TypeResolver.unwrapGenericType(rawType),
-                        fieldName = fieldName,
-                        method = InjectionMethod.FIELD
-                    ))
+                    val targetType = TypeResolver.unwrapGenericType(rawType)
+                    if (isLikelySpringBeanType(targetType)) {
+                        injections.add(DependencyInjection(
+                            targetType = targetType,
+                            fieldName = fieldName,
+                            method = InjectionMethod.FIELD
+                        ))
+                    }
                 }
             }
 
