@@ -368,6 +368,13 @@ sealed class TaskPipeline {
         )
     }
 
+    /** 분석 문서 생성 (DocGenerateAgent 직접 호출) */
+    object DocGenerate : TaskPipeline() {
+        override val steps = listOf(
+            AgentStep("1/1 분석 문서 생성", "explain_prompt.txt", isApplyable = false)
+        )
+    }
+
     /** 일반 대화 (폴백) */
     object Chat : TaskPipeline() {
         override val steps = listOf(

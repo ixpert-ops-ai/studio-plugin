@@ -780,6 +780,12 @@ function App() {
     } else if (text === '/test' || text.startsWith('/test ')) {
       command = '/task';
       payload = '테스트 코드를 생성해주세요.';
+    } else if (text === '/doc' || text.startsWith('/doc ')) {
+      command = '/doc';
+      payload = '';
+    } else if (text === '/ragdoc' || text.startsWith('/ragdoc ')) {
+      command = '/ragdoc';
+      payload = '';
     } else if (/개선|리팩토링|리팩|refactor|improve|최적화|optimize/i.test(text)) {
       command = '/task';
     } else if (/리뷰|review|검토|점검/i.test(text)) {
@@ -806,11 +812,14 @@ function App() {
     let idx = 0;
     fetchedModels.forEach(m => items.push({ type: 'model', cmd: m, index: idx++ }));
     const cmds = [
-      { cmd: '/explain', desc: '' },
-      { cmd: '/improve', desc: '' },
-      { cmd: '/test', desc: '' },
-      { cmd: '/analyze', desc: '' },
-      { cmd: '/query', desc: '' }
+      { cmd: '/explain', desc: '코드를 설명해줘' },
+      { cmd: '/doc', desc: '디렉토리 분석 문서 생성' },
+      { cmd: '/ragdoc', desc: 'RAG 전용 분석 문서 생성 (FAQ 포함)' },
+      { cmd: '/review', desc: '코드를 리뷰해줘' },
+      { cmd: '/improve', desc: '코드를 개선해줘' },
+      { cmd: '/test', desc: '테스트 코드를 생성해줘' },
+      { cmd: '/analyze', desc: '영향도를 분석해줘' },
+      { cmd: '/query', desc: '쿼리를 검증해줘' }
     ];
     cmds.forEach(c => items.push({ type: 'cmd', cmd: c.cmd, desc: c.desc, index: idx++ }));
     items.push({ type: 'settings', cmd: '/openSettings', label: '설정', index: idx++ });
