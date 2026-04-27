@@ -813,13 +813,12 @@ function App() {
     fetchedModels.forEach(m => items.push({ type: 'model', cmd: m, index: idx++ }));
     const cmds = [
       { cmd: '/explain', desc: '코드를 설명해줘' },
-      { cmd: '/doc', desc: '디렉토리 분석 문서 생성' },
-      { cmd: '/ragdoc', desc: 'RAG 전용 분석 문서 생성 (FAQ 포함)' },
-      { cmd: '/review', desc: '코드를 리뷰해줘' },
       { cmd: '/improve', desc: '코드를 개선해줘' },
       { cmd: '/test', desc: '테스트 코드를 생성해줘' },
       { cmd: '/analyze', desc: '영향도를 분석해줘' },
-      { cmd: '/query', desc: '쿼리를 검증해줘' }
+      { cmd: '/query', desc: '쿼리를 검증해줘' },
+      { cmd: '/doc', desc: '디렉토리 분석 문서 생성' },
+      { cmd: '/ragdoc', desc: 'RAG 전용 분석 문서 생성 (FAQ 포함)' }
     ];
     cmds.forEach(c => items.push({ type: 'cmd', cmd: c.cmd, desc: c.desc, index: idx++ }));
     items.push({ type: 'settings', cmd: '/openSettings', label: '설정', index: idx++ });
