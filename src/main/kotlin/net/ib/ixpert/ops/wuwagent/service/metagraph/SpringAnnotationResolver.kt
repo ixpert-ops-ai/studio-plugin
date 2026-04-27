@@ -97,20 +97,35 @@ class SpringAnnotationResolver {
     // ── 타입 판정 ──────────────────────────────────
 
     private fun resolveFileType(psiClass: PsiClass): SpringFileType {
+        var annotationType = SpringFileType.UNKNOWN
+        
         // 1. 어노테이션 비교 (FQN 및 Simple Name 폴백)
         for (annotation in psiClass.annotations) {
             val name = annotation.qualifiedName ?: annotation.nameReferenceElement?.referenceName ?: continue
             
             // FQN 직접 매칭
-            ANNOTATION_TYPE_MAP[name]?.let { return it }
+            var match = ANNOTATION_TYPE_MAP[name]
             
             // Simple Name 매칭 (FQN이 패키지 없는 단순 이름으로 반환되는 경우 폴백)
-            val simpleMatch = ANNOTATION_TYPE_MAP.entries.firstOrNull { 
-                it.key.endsWith(".$name") 
-            }?.value
+            if (match == null) {
+                match = ANNOTATION_TYPE_MAP.entries.firstOrNull { 
+                    it.key.endsWith(".$name") 
+                }?.value
+            }
             
-            if (simpleMatch != null) return simpleMatch
+            if (match != null) {
+                annotationType = match
+                break
+            }
         }
+
+        // @Component는 범용이므로, 클래스명 패턴이 더 구체적이면 그걸 우선 (예: AuthDto에 @Component가 붙은 경우)
+        if (annotationType == SpringFileType.COMPONENT) {
+            val nameType = inferFromClassName(psiClass)
+            if (nameType != SpringFileType.UNKNOWN) return nameType
+        }
+
+        if (annotationType != SpringFileType.UNKNOWN) return annotationType
 
         // 2. 클래스명 패턴 폴백
         return inferFromClassName(psiClass)
