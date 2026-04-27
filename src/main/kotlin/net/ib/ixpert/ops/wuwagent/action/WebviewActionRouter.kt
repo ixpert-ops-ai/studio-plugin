@@ -258,6 +258,46 @@ class WebviewActionRouter(private val project: Project) {
                     }
                 }
 
+                // ── 프로젝트 메타 그래프 생성 ────────────────
+                "/metagraph" -> {
+                    logger.info("Router: /metagraph 분기 → 프로젝트 메타 그래프 생성")
+                    val messageId = "metagraph_${System.currentTimeMillis()}"
+                    bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다...", messageId)
+
+                    val builder = net.ib.ixpert.ops.wuwagent.service.metagraph.ProjectGraphBuilder(project)
+                    builder.buildGraphAsync(
+                        onProgress = { statusMsg ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("step_noti", statusMsg, "${messageId}_progress_${System.currentTimeMillis()}")
+                            }
+                        },
+                        onComplete = { graph ->
+                            val stats = graph.statistics
+                            val summary = buildString {
+                                appendLine("# 📊 프로젝트 메타 그래프 생성 완료")
+                                appendLine()
+                                appendLine("## 분석 결과 요약")
+                                appendLine("| 항목 | 수량 |")
+                                appendLine("| :--- | ---: |")
+                                appendLine("| 전체 파일 | ${stats.totalFiles}개 |")
+                                appendLine("| Controller | ${stats.controllers}개 |")
+                                appendLine("| Service | ${stats.services}개 |")
+                                appendLine("| Repository | ${stats.repositories}개 |")
+                                appendLine("| Entity | ${stats.entities}개 |")
+                                appendLine("| Configuration | ${stats.configs}개 |")
+                                appendLine("| 기타 | ${stats.others}개 |")
+                                appendLine("| 관계 (Relationships) | ${stats.totalRelationships}개 |")
+                                appendLine()
+                                appendLine("📁 저장 위치: `.meta/project-graph.json`")
+                            }
+                            bridge.sendMessage("explain", summary, messageId)
+                        },
+                        onError = { errorMsg ->
+                            bridge.sendMessage("error", errorMsg, messageId)
+                        }
+                    )
+                }
+
                 "/openTabs" -> {
                     logger.info("Router: /openTabs 분기")
                     val openFiles = FileEditorManager.getInstance(project).openFiles
