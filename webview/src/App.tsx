@@ -786,6 +786,9 @@ function App() {
     } else if (text === '/ragdoc' || text.startsWith('/ragdoc ')) {
       command = '/ragdoc';
       payload = '';
+    } else if (text === '/metagraph' || text.startsWith('/metagraph ')) {
+      command = '/metagraph';
+      payload = '';
     } else if (/개선|리팩토링|리팩|refactor|improve|최적화|optimize/i.test(text)) {
       command = '/task';
     } else if (/리뷰|review|검토|점검/i.test(text)) {
