@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>net.ib.ixpert.ops.wuwagent</id>
     <name>iXpert AI Assistant</name>
-    <vendor email="admin@jodongik.cloud" url="http://jodongik.cloud">Jodongik Cloud</vendor>
+    <vendor email="admin@jodongik.cloud" url="http://jodongik.cloud">IB iXpert Ops</vendor>
     <description><![CDATA[
       iXpert AI Assistant is an on-premise AI Coding Assistant plugin powered by Ollama.
       Provides code explain, review, refactoring, PMD analysis, Impact Analysis, and Generate Test.
