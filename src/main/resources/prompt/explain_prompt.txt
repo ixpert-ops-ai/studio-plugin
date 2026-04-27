@@ -46,12 +46,12 @@
 ```yaml
 ---
 file: "{{FILE_NAME}}"
-package: "(패키지명 또는 네임스페이스)"
+package: "{{PACKAGE_NAME}}"
 language: "{{LANGUAGE}}"
-type: "(class / interface / enum / module / script 등)"
+type: "{{FILE_TYPE}}"
 pattern: "(식별 가능한 디자인 패턴, 없으면 생략)"
-dependencies: ["핵심 의존 타입1", "핵심 의존 타입2"]
-analyzed_date: "(분석 수행 날짜)"
+dependencies: ["{{LANGUAGE}}"]
+analyzed_date: "{{ANALYZED_DATE}}"
 ---
 ```
 

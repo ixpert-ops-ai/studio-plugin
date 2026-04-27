@@ -235,11 +235,14 @@ $thymeleafNotice"""
             답변 내용 (2~4문장)
             """.trimIndent()
         } else ""
-
         return mapOf(
             "LANGUAGE" to langName,
             "ANALYSIS_MODE" to analysisMode,
             "LOCATION_INFO" to locationInfo,
+            "FILE_NAME" to fileName,
+            "PACKAGE_NAME" to (structure.packageName ?: "(식별 불가)"),
+            "ANALYZED_DATE" to java.time.LocalDate.now().toString(),
+            "FILE_TYPE" to (structure.classes.firstOrNull()?.kind?.displayName ?: "script"),
             "EXTRACTION_METHOD" to structure.extractionMethod.displayName,
             "STRUCTURE_INFO" to formatStructureInfo(structure),
             "THYMELEAF_INFO" to formatThymeleafInfo(structure),
