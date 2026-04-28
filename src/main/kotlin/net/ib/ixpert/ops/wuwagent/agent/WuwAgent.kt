@@ -11,7 +11,8 @@ data class AgentContext(
     val editor: Editor? = null,
     val payloadText: String = "",
     val startLine: Int? = null,
-    val endLine: Int? = null
+    val endLine: Int? = null,
+    val command: String? = null
 )
 
 interface WuwAgent {

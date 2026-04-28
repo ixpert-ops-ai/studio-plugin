@@ -17,6 +17,7 @@ object IntentAnalyzer {
 
     // 키워드 → Pipeline 매핑 (순서 중요: 더 구체적인 것 먼저)
     private val keywordMap: List<Pair<List<String>, TaskPipeline>> = listOf(
+        listOf("문서 생성", "분석 문서", "doc 생성", "generate doc")                       to TaskPipeline.DocGenerate,
         listOf("개선", "리팩토링", "리팩", "refactor", "improve", "최적화", "optimize") to TaskPipeline.Improve,
         listOf("리뷰", "review", "검토", "코드 품질")                                   to TaskPipeline.Review,
         listOf("코드 설명", "이 코드 설명", "코드 분석해줘", "explain this code", "explain the code") to TaskPipeline.ExplainTask,

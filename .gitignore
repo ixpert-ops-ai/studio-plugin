@@ -19,3 +19,6 @@ _release/
 webview/node_modules/
 webview/dist/
 webview/build/
+node_modules
+.graphify/
+bin/

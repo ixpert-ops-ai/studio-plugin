@@ -78,14 +78,16 @@ class ExplainAgent : BaseAgent() {
         )
 
         // 3. 단일 프롬프트 템플릿용 변수 구성
+        val includeFaq = context.command == "/ragdoc"
         val promptVars = buildPromptVars(
             structure = structure,
-            languageId = languageId,
+            language = languageId,
             fileName = fileName,
             isPartial = isPartial,
             startLine = startLine,
             endLine = endLine,
-            partialCode = partialCode
+            partialCode = partialCode,
+            includeFaq = includeFaq
         )
 
         val systemPrompt = PromptManager.loadPromptWithVars("explain_prompt.txt", promptVars)
@@ -128,12 +130,13 @@ class ExplainAgent : BaseAgent() {
      */
     private fun buildPromptVars(
         structure: ExtractedStructure,
-        languageId: String,
+        language: String,
         fileName: String,
         isPartial: Boolean,
         startLine: Int?,
         endLine: Int?,
-        partialCode: String
+        partialCode: String,
+        includeFaq: Boolean = false
     ): Map<String, String> {
         val analysisMode = if (isPartial) "부분 선택" else "전체 파일"
         val locationInfo = buildLocationInfo(fileName, isPartial, startLine, endLine)
@@ -142,12 +145,13 @@ class ExplainAgent : BaseAgent() {
             // 구조 추출 성공: StructureFormatter 변수 + 공통 메타데이터 보강
             val structureVars = StructureFormatter.toPromptVariables(
                 structure = structure,
-                language = languageId,
+                language = language,
                 fileName = fileName,
                 isPartial = isPartial,
                 startLine = startLine,
                 endLine = endLine,
-                partialCode = partialCode
+                partialCode = partialCode,
+                includeFaq = includeFaq
             ).toMutableMap()
 
             // 공통 메타데이터 명시적 추가 (안전성 확보)
@@ -159,7 +163,7 @@ class ExplainAgent : BaseAgent() {
         } else {
             // 구조 추출 실패: 최소 컨텍스트로 폴백
             mapOf(
-                "LANGUAGE" to languageId,
+                "LANGUAGE" to language,
                 "ANALYSIS_MODE" to analysisMode,
                 "FILE_NAME" to fileName,
                 "LOCATION_INFO" to locationInfo,
@@ -168,6 +172,17 @@ class ExplainAgent : BaseAgent() {
                 "THYMELEAF_INFO" to "",
                 "PATTERN_GUIDE" to "",
                 "FUNCTION_GUIDE" to "",
+                "FAQ_SECTION" to if (includeFaq) {
+                    """
+                    ## 7. 자주 묻는 질문 (FAQ)
+                    - 이 코드에 대해 개발자가 실무에서 물을 법한 질문 3~5개를 생성하세요.
+                    - 각 질문에 대해 코드 사실에만 기반하여 2~4문장으로 답변하세요.
+                    - 질문은 "~하려면?", "~는 어떻게 동작하나?", "~의 역할은?", "~를 호출하기 전에 필요한 것은?" 패턴으로 작성하세요.
+                    - 아래 형식으로 작성하세요
+                    ### Q. 질문 내용?
+                    답변 내용 (2~4문장)
+                    """.trimIndent()
+                } else "",
                 "KEY_CODE" to partialCode
             )
         }
