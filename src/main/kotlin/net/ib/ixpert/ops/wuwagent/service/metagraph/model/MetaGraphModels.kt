@@ -36,7 +36,7 @@ data class FileNode(
     val entityRelations: List<EntityRelation> = emptyList(),
     val dependsOn: MutableList<String> = mutableListOf(),
     val dependedBy: MutableList<String> = mutableListOf(),
-    val changeRisk: ChangeRisk = ChangeRisk.LOW
+    val changeRisk: ChangeRisk = ChangeRisk.NOT_CALCULATED
 )
 
 /**
@@ -152,7 +152,7 @@ enum class RelationshipStrength {
 }
 
 enum class ChangeRisk {
-    LOW, MEDIUM, HIGH, CRITICAL
+    NOT_CALCULATED, LOW, MEDIUM, HIGH, CRITICAL
 }
 
 // ── TypeResolver 유틸 ─────────────────────────────

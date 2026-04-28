@@ -150,7 +150,14 @@ sealed class TaskPipeline {
             onChunk: ((String) -> Unit)? = null,
             previousStepResult: String? = null
         ): StepResult {
-            val systemPrompt = PromptManager.loadPrompt(promptFile)
+            var systemPrompt = PromptManager.loadPrompt(promptFile)
+
+            // [Phase 1b] 메타그래프 컨텍스트 자동 주입
+            val contextAssembler = context.project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ContextAssembler::class.java)
+            val graphContext = contextAssembler.assemble(context, context.payloadText)
+            if (graphContext.isNotBlank()) {
+                systemPrompt = "$graphContext\n\n$systemPrompt"
+            }
 
             var originalCode = ""
             var applyScope   = ""
