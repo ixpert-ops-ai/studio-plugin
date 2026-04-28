@@ -35,6 +35,13 @@ import java.time.Instant
  */
 class ProjectGraphBuilder(private val project: Project) {
 
+    companion object {
+        const val LOW_THRESHOLD = 0
+        const val MEDIUM_THRESHOLD = 1
+        const val HIGH_THRESHOLD = 2
+        const val CRITICAL_THRESHOLD = 3
+    }
+
     private val logger = Logger.getInstance(ProjectGraphBuilder::class.java)
     private val annotationResolver = SpringAnnotationResolver()
     private val dependencyResolver = DependencyResolver(project)
@@ -157,10 +164,10 @@ class ProjectGraphBuilder(private val project: Project) {
         val scoredNodes = resolvedNodes.mapValues { (_, node) ->
             val score = node.dependedBy.size
             val risk = when {
-                score == 0 -> ChangeRisk.LOW
-                score == 1 -> ChangeRisk.MEDIUM
-                score == 2 -> ChangeRisk.HIGH
-                else -> ChangeRisk.CRITICAL
+                score >= CRITICAL_THRESHOLD -> ChangeRisk.CRITICAL
+                score >= HIGH_THRESHOLD -> ChangeRisk.HIGH
+                score >= MEDIUM_THRESHOLD -> ChangeRisk.MEDIUM
+                else -> ChangeRisk.LOW
             }
             node.copy(riskScore = score, changeRisk = risk)
         }
