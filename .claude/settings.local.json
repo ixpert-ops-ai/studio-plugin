@@ -32,7 +32,9 @@
       "Bash(node -e \"require\\('typescript'\\); console.log\\('ts ok'\\)\")",
       "Bash(/usr/local/bin/npx tsc *)",
       "Bash(bash build.sh webview)",
-      "Bash(xargs cat *)"
+      "Bash(xargs cat *)",
+      "Bash(grep -v \"^$\")",
+      "Bash(git checkout *)"
     ]
   }
 }

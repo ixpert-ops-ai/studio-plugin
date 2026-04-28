@@ -990,7 +990,7 @@ function App() {
                     }}
                   >
                     <span className="popup-item-command" style={{ display: 'block' }}>{chat.title || '(제목 없음)'}</span>
-                    <span className="popup-item-desc">{chat.date?.slice(0, 10)}</span>
+                    <span className="popup-item-desc">{chat.date?.slice(0, 16).replace('T', ' ')}</span>
                   </button>
                   <button
                     style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', color: '#888', fontSize: '16px', lineHeight: 1, flexShrink: 0 }}

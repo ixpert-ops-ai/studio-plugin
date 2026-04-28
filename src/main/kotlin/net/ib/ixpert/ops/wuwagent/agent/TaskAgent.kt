@@ -35,7 +35,7 @@ class TaskAgent(
         TaskCancellationToken.reset()   // 이전 취소 상태 초기화
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(
-            context.project, "WuwAgent: Task 실행 중", true   // canBeCancelled=true
+            context.project, "iXpert AI Assistant: Task 실행 중", true   // canBeCancelled=true
         ) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
