@@ -1,0 +1,94 @@
+package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
+
+/**
+ * PSI에서 추출된 메서드 시그니처.
+ * annotations를 포함해야 LLM이 @Transactional, @Override 등 역할을 판단할 수 있음.
+ */
+data class MethodSignature(
+    val name: String,
+    val parameters: List<String>,      // 예: ["Long surveyId", "String format"]
+    val returnType: String,            // 예: "List<SurveyDto>"
+    val annotations: List<String>,     // 예: ["@Transactional", "@Override"]
+    val accessModifier: String = "public"  // public, private, protected, package-private
+)
+
+/**
+ * 시그니처 + 바디를 함께 담는 컨테이너.
+ * 키워드 매칭으로 연관성이 확인된 메서드만 바디가 포함됨.
+ */
+data class MethodBody(
+    val signature: MethodSignature,
+    val body: String,                  // 메서드 전체 텍스트 (어노테이션 + 시그니처 + 중괄호 내용)
+    val startLine: Int,                // 원본 파일 내 시작 줄 번호 (위치 힌트용)
+    val endLine: Int
+)
+
+/**
+ * PsiMethodExtractor의 최종 출력.
+ * 프롬프트 변환(toPromptText)과 파이프라인 로직을 분리하기 위해 구조화.
+ */
+data class ClassSkeleton(
+    val filePath: String,              // 프로젝트 루트 기준 상대 경로
+    val packageName: String,
+    val imports: List<String>,
+    val classAnnotations: List<String>,  // @Service, @RestController 등
+    val classDeclaration: String,      // 예: "public class SurveyServiceImpl implements SurveyService"
+    val fields: List<String>,          // 예: ["@Autowired private SurveyDao surveyDao"]
+    val allMethodSignatures: List<MethodSignature>,
+    val relevantMethodBodies: List<MethodBody>,
+    val isNewMethodRequired: Boolean   // 기존 메서드 수정이 아닌 신규 추가인 경우
+) {
+
+    /**
+     * LLM 프롬프트용 텍스트 변환.
+     * 프롬프트 포맷이 바뀌어도 추출 로직(PsiMethodExtractor)은 수정 불요.
+     */
+    fun toPromptText(): String = buildString {
+        appendLine("// 파일: $filePath")
+        appendLine("// 패키지: $packageName")
+        appendLine()
+
+        // import 요약 (너무 많으면 핵심만)
+        appendLine("/* === Import 목록 === */")
+        imports.forEach { appendLine(it) }
+        appendLine()
+
+        // 클래스 선언부
+        appendLine("/* === 클래스 선언 === */")
+        classAnnotations.forEach { appendLine(it) }
+        appendLine("$classDeclaration {")
+        appendLine()
+
+        // 필드 목록
+        appendLine("    /* === 멤버 변수 === */")
+        fields.forEach { appendLine("    $it") }
+        appendLine()
+
+        // 전체 메서드 시그니처 목록 (바디 생략)
+        appendLine("    /* === 메서드 시그니처 목록 (바디 생략) === */")
+        allMethodSignatures.forEach { sig ->
+            val annotations = if (sig.annotations.isNotEmpty()) {
+                sig.annotations.joinToString(" ") + " "
+            } else ""
+            appendLine("    ${annotations}${sig.accessModifier} ${sig.returnType} ${sig.name}(${sig.parameters.joinToString(", ")});")
+        }
+        appendLine()
+
+        // 연관 메서드 바디 (키워드 매칭된 것만)
+        if (relevantMethodBodies.isNotEmpty()) {
+            appendLine("    /* === 연관 메서드 상세 코드 (수정 대상 후보) === */")
+            relevantMethodBodies.forEach { method ->
+                appendLine("    // 📍 위치: 라인 ${method.startLine}~${method.endLine}")
+                appendLine(method.body.prependIndent("    "))
+                appendLine()
+            }
+        }
+
+        if (isNewMethodRequired) {
+            appendLine("    // 📍 신규 메서드 삽입 위치: 클래스 바디 하단")
+            appendLine("    // (새 메서드를 아래에 작성하세요)")
+        }
+
+        appendLine("}")
+    }
+}

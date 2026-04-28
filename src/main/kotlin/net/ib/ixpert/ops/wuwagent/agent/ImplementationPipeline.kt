@@ -29,105 +29,36 @@ class ImplementationPipeline(
         }
     }
 
+    private val psiMethodExtractor = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.PsiMethodExtractor(project)
+
     fun execute(
         analysisResult: RequirementAnalysisResult,
         onChunk: (String) -> Unit
     ) {
-        // 1. 파일 목록 계층 기반 정렬
         val sortedTargets = analysisResult.targetFiles.sortedBy { getLayerWeight(it.path) }
-        
-        // 전체 작업 계획 문자열 생성
-        val overallPlan = sortedTargets.joinToString("\n") { 
-            "- [${it.type}] ${it.path} : ${it.description}" 
-        }
         
         logger.info("ImplementationPipeline: 총 ${sortedTargets.size}개 파일 순차 처리 시작")
 
-        // 이전 파일들의 수정 내역(메서드 시그니처 등)을 누적할 컨텍스트 체인
         val contextChain = mutableListOf<String>()
 
-        // 2. 파일별 순차 처리 루프
         for ((index, target) in sortedTargets.withIndex()) {
             val progressHeader = "\n\n### 🔄 [${index + 1}/${sortedTargets.size}] `${target.path}` 처리 중...\n\n"
             onChunk(progressHeader)
 
-            // 파일 내용 읽기
-            var sourceCode = ""
-            if (target.type != "신규") {
-                val absolutePath = "${project.basePath}/${target.path}".replace("//", "/")
-                val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath)
-                if (virtualFile != null && virtualFile.exists()) {
-                    sourceCode = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
-                    
-                    // [대형 파일 스킵 방안 A] 파일이 200줄을 초과하면 자동 생성 스킵
-                    if (sourceCode.lines().size > 200) {
-                        logger.warn("대형 파일 스킵 (Line: ${sourceCode.lines().size}): ${target.path}")
-                        onChunk("> ⚠️ **이 파일은 내용이 너무 커서(200줄 초과) 자동 코드 생성을 건너뜁니다.**\n> 다음 가이드를 참고하여 직접 수동으로 수정해주세요: `${target.description}`\n\n")
-                        continue
-                    }
-                } else {
-                    logger.warn("VirtualFile을 찾을 수 없습니다: $absolutePath")
-                    onChunk("> ⚠️ **파일을 찾을 수 없어 건너뜁니다:** `${target.path}`\n\n")
-                    continue
-                }
+            // 파일 및 프롬프트 생성 로직
+            val isLargeFile = target.type != "신규" && psiMethodExtractor.isLargeFile(target.path)
+            
+            val systemPrompt = if (isLargeFile) buildLargeFileSystemPrompt() else buildSmallFileSystemPrompt()
+            val userPrompt = buildUserPromptForFile(target, contextChain, analysisResult.summary, sortedTargets)
+
+            // Fallback guide returned from buildUserPromptForFile means skipping
+            if (userPrompt.startsWith("> ⚠️")) {
+                onChunk(userPrompt)
+                continue
             }
-
-            // System Prompt 구성
-            val systemPrompt = """
-                당신은 Spring Boot 프로젝트를 구현하는 시니어 백엔드 개발자입니다.
-                주어진 요구사항과 작업 계획에 따라, 현재 타겟 파일의 코드를 작성/수정해야 합니다.
-                
-                ## 코드 작성 규칙
-                1. 기존 코드의 스타일과 아키텍처를 반드시 유지하세요.
-                2. 필요한 import 문을 모두 포함하여 컴파일 가능한 "전체 코드"를 반환하세요.
-                3. 생략(`...`) 없이 모든 메서드와 로직을 완전하게 작성하세요.
-                4. 이전 파일들에서 추가/변경된 메서드가 있다면, 그 시그니처를 참고하여 코드를 작성하세요.
-                
-                ## 출력 포맷
-                반드시 아래의 마크다운 형식을 지켜서 출력하세요. 코드 블록 앞에는 반드시 파일 경로를 주석으로 명시해야 합니다.
-                그 외의 부가 설명은 하지 마세요. 단, 응답의 맨 마지막 줄에만 `[MODIFIED_SIGNATURES]` 태그를 달고, 
-                이번 파일에서 새롭게 추가되거나 변경된 public 메서드의 시그니처를 한 줄씩 요약해서 적어주세요. (다음 파일의 컨텍스트로 사용됨)
-                
-                // 파일: (현재 파일 경로)
-                ```java
-                (전체 소스 코드)
-                ```
-                [MODIFIED_SIGNATURES]
-                + public List<SurveyDto> findAllForExport()
-            """.trimIndent()
-
-            // User Prompt 구성
-            val contextChainStr = if (contextChain.isEmpty()) "없음" else contextChain.joinToString("\n")
-            val sourceCodeSection = if (target.type == "신규") {
-                "이 파일은 신규 생성입니다. 요구사항에 맞는 전체 코드를 새로 작성하세요."
-            } else {
-                "```java\n$sourceCode\n```"
-            }
-
-            val userPrompt = """
-                ## 요구사항 요약
-                ${analysisResult.summary}
-                
-                ## 전체 작업 계획
-                $overallPlan
-                
-                ## 이전 단계까지의 수정 요약 (참고용 컨텍스트)
-                $contextChainStr
-                
-                ---
-                
-                ## 🎯 현재 작업 대상
-                - 경로: ${target.path}
-                - 유형: ${target.type}
-                - 작업 내용: ${target.description}
-                
-                ## 기존 소스 코드
-                $sourceCodeSection
-            """.trimIndent()
 
             logger.info("Processing target: ${target.path}")
             
-            // LLM 호출 및 스트리밍
             var fullResponse = ""
             try {
                 val response = client.callChatApiStream(systemPrompt, userPrompt) { chunk ->
@@ -135,7 +66,6 @@ class ImplementationPipeline(
                     fullResponse += chunk
                 }
 
-                // 응답 후처리: [MODIFIED_SIGNATURES] 파싱하여 컨텍스트 체인에 추가
                 val finalResponseText = response?.message?.content ?: fullResponse
                 if (finalResponseText.contains("[MODIFIED_SIGNATURES]")) {
                     val signatures = finalResponseText.substringAfter("[MODIFIED_SIGNATURES]").trim()
@@ -153,5 +83,153 @@ class ImplementationPipeline(
         }
         
         onChunk("\n\n✅ **모든 파일의 자동 코드 수정 제안이 완료되었습니다.**\n수정된 코드를 확인하시고 Apply 버튼을 눌러 적용해주세요.")
+    }
+
+    private fun buildUserPromptForFile(
+        targetFile: TargetFileSpec,
+        contextChain: List<String>,
+        requirementSummary: String,
+        allTargetFiles: List<TargetFileSpec>
+    ): String {
+        return if (targetFile.type.contains("신규")) {
+            buildNewFilePrompt(targetFile, contextChain, requirementSummary, allTargetFiles)
+        } else if (psiMethodExtractor.isLargeFile(targetFile.path)) {
+            buildLargeFilePrompt(targetFile, contextChain, requirementSummary, allTargetFiles)
+        } else {
+            buildSmallFilePrompt(targetFile, contextChain, requirementSummary, allTargetFiles)
+        }
+    }
+
+    private fun buildCommonUserPrompt(
+        targetFile: TargetFileSpec,
+        contextChain: List<String>,
+        requirementSummary: String,
+        allTargetFiles: List<TargetFileSpec>,
+        sourceCodeSection: String
+    ): String {
+        val overallPlan = allTargetFiles.joinToString("\n") { 
+            val marker = if (it.path == targetFile.path) "👉 " else "   "
+            "${marker}- [${it.type}] ${it.path} : ${it.description}" 
+        }
+        val contextChainStr = if (contextChain.isEmpty()) "없음" else contextChain.joinToString("\n")
+        
+        return """
+            ## 요구사항 요약
+            $requirementSummary
+            
+            ## 전체 작업 계획
+            $overallPlan
+            
+            ## 이전 단계까지의 수정 요약 (참고용 컨텍스트)
+            $contextChainStr
+            
+            ---
+            
+            ## 🎯 현재 작업 대상
+            - 경로: ${targetFile.path}
+            - 유형: ${targetFile.type}
+            - 작업 내용: ${targetFile.description}
+            
+            ## 파일 분석 / 소스 코드
+            $sourceCodeSection
+        """.trimIndent()
+    }
+
+    private fun buildNewFilePrompt(
+        targetFile: TargetFileSpec,
+        contextChain: List<String>,
+        requirementSummary: String,
+        allTargetFiles: List<TargetFileSpec>
+    ): String {
+        return buildCommonUserPrompt(
+            targetFile, contextChain, requirementSummary, allTargetFiles, 
+            "이 파일은 신규 생성입니다. 요구사항에 맞는 전체 코드를 새로 작성하세요."
+        )
+    }
+
+    private fun buildSmallFilePrompt(
+        targetFile: TargetFileSpec,
+        contextChain: List<String>,
+        requirementSummary: String,
+        allTargetFiles: List<TargetFileSpec>
+    ): String {
+        val absolutePath = "${project.basePath}/${targetFile.path}".replace("//", "/")
+        val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath)
+        
+        if (virtualFile == null || !virtualFile.exists()) {
+            logger.warn("VirtualFile을 찾을 수 없습니다: $absolutePath")
+            return "> ⚠️ **파일을 찾을 수 없어 건너뜁니다:** `${targetFile.path}`\n\n"
+        }
+        val sourceCode = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
+        return buildCommonUserPrompt(targetFile, contextChain, requirementSummary, allTargetFiles, "```java\n$sourceCode\n```")
+    }
+
+    private fun buildLargeFilePrompt(
+        targetFile: TargetFileSpec,
+        contextChain: List<String>,
+        requirementSummary: String,
+        allTargetFiles: List<TargetFileSpec>
+    ): String {
+        val skeleton = psiMethodExtractor.extract(
+            filePath = targetFile.path,
+            taskDescription = targetFile.description,
+            taskType = targetFile.type
+        )
+
+        if (skeleton == null) {
+            logger.warn("스켈레톤 추출 실패, 스킵: ${targetFile.path}")
+            return "> ⚠️ **파일 파싱 실패로 건너뜁니다:** `${targetFile.path}`\n\n"
+        }
+        
+        val sourceCodeSection = """
+            이 파일은 대형 파일이므로 클래스 구조와 연관 메서드 스니펫만 제공됩니다.
+            
+            ${skeleton.toPromptText()}
+        """.trimIndent()
+        
+        return buildCommonUserPrompt(targetFile, contextChain, requirementSummary, allTargetFiles, sourceCodeSection)
+    }
+
+    private fun buildSmallFileSystemPrompt(): String {
+        return """
+            당신은 Spring Boot 프로젝트를 구현하는 시니어 백엔드 개발자입니다.
+            주어진 요구사항과 작업 계획에 따라, 현재 타겟 파일의 코드를 작성/수정해야 합니다.
+            
+            ## 코드 작성 규칙
+            1. 기존 코드의 스타일과 아키텍처를 반드시 유지하세요.
+            2. 필요한 import 문을 모두 포함하여 컴파일 가능한 "전체 코드"를 반환하세요.
+            3. 생략(`...`) 없이 모든 메서드와 로직을 완전하게 작성하세요.
+            4. 이전 파일들에서 추가/변경된 메서드가 있다면, 그 시그니처를 참고하여 코드를 작성하세요.
+            
+            ## 출력 포맷
+            반드시 아래의 마크다운 형식을 지켜서 출력하세요. 코드 블록 앞에는 반드시 파일 경로를 주석으로 명시해야 합니다.
+            그 외의 부가 설명은 하지 마세요. 단, 응답의 맨 마지막 줄에만 `[MODIFIED_SIGNATURES]` 태그를 달고, 
+            이번 파일에서 새롭게 추가되거나 변경된 public 메서드의 시그니처를 한 줄씩 요약해서 적어주세요. (다음 파일의 컨텍스트로 사용됨)
+            
+            // 파일: (현재 파일 경로)
+            ```java
+            (전체 소스 코드)
+            ```
+            [MODIFIED_SIGNATURES]
+            + public List<SurveyDto> findAllForExport()
+        """.trimIndent()
+    }
+
+    private fun buildLargeFileSystemPrompt(): String {
+        return """
+            당신은 Spring Boot 시니어 개발자입니다.
+            
+            아래 규칙을 반드시 준수하세요:
+            1. 오직 수정하거나 새로 추가할 메서드의 완전한 코드만 반환하세요.
+            2. 변경되지 않는 기존 메서드는 절대 출력하지 마세요.
+            3. 각 메서드 블록 위에 위치 힌트를 반드시 포함하세요:
+               - 기존 메서드 수정: // 📍 대체 위치: {파일명} → {메서드명}() 메서드 교체
+               - 신규 메서드 추가: // 📍 삽입 위치: {파일명} → 클래스 바디 하단 (새 메서드)
+            4. 필요한 import문이 있으면 코드 블록 최상단에 별도로 나열하세요:
+               // 📍 추가 import
+               import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+            5. 기존 코드 스타일(어노테이션 사용 패턴, 네이밍 컨벤션)을 유지하세요.
+            6. 코드 블록 마지막에 [MODIFIED_SIGNATURES] 태그로 변경/추가된 메서드 시그니처를 나열하세요.
+        """.trimIndent()
     }
 }
