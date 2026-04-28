@@ -19,7 +19,7 @@ class ReviewAgent : BaseAgent() {
 
         callLlmStreamAsync(
             context.project, 
-            "WuwAgent: Reviewing Code",
+            "iXpert AI Assistant: Reviewing Code",
             PromptManager.loadPrompt("review_prompt.txt"), 
             code, 
             onSuccess, 

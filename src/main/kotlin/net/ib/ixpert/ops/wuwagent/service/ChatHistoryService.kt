@@ -9,12 +9,21 @@ object ChatHistoryService {
     private val logger = Logger.getInstance(ChatHistoryService::class.java)
 
     private val chatsDir: File
-        get() = File(System.getProperty("user.home"), ".ixpert/chats").also { it.mkdirs() }
+        get() {
+            val isWindows = System.getProperty("os.name").lowercase().contains("windows")
+            val path = if (isWindows) {
+                val appData = System.getenv("APPDATA")
+                    ?: (System.getProperty("user.home") + "\\AppData\\Roaming")
+                "$appData\\ixpert\\chats\\"
+            } else {
+                System.getProperty("user.home") + "/.ixpert/chats/"
+            }
+            return File(path).also { it.mkdirs() }
+        }
 
     fun saveChat(id: String, title: String, messagesJson: String) {
         try {
-            val chatsDir = File(System.getProperty("user.home") + "/.ixpert/chats/")
-            chatsDir.mkdirs()
+            val chatsDir = chatsDir
             val file = File(chatsDir, "$id.json")
             val date = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss").format(Date())
             val json = """{"id":"${id.esc()}","title":"${title.esc()}","date":"$date","messages":$messagesJson}"""
@@ -28,7 +37,7 @@ object ChatHistoryService {
 
     fun loadLastChat(): String? {
         return try {
-            val file = File(System.getProperty("user.home") + "/.ixpert/chats/")
+            val file = chatsDir
                 .listFiles { f -> f.extension == "json" }
                 ?.maxByOrNull { it.lastModified() }
                 ?: return null
@@ -42,7 +51,7 @@ object ChatHistoryService {
 
     fun loadChat(id: String): String? {
         return try {
-            val file = File(System.getProperty("user.home") + "/.ixpert/chats/", "$id.json")
+            val file = File(chatsDir, "$id.json")
             println("loadChat 시도: ${file.absolutePath} (exists=${file.exists()})")
             if (!file.exists()) return null
             val content = file.readText(Charsets.UTF_8)

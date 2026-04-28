@@ -56,7 +56,7 @@ class ImpactAgent : BaseAgent() {
         }
 
         // 2. 단일 ProgressManager 태스크 안에서 ImpactAnalyzer(동기) → LLM(스트리밍) 직렬 실행
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "WuwAgent: 영향도 분석 중...", true) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "iXpert AI Assistant: 영향도 분석 중...", true) {
             override fun run(indicator: ProgressIndicator) {
                 TaskCancellationToken.reset()
                 TaskCancellationToken.backgroundThread = Thread.currentThread()

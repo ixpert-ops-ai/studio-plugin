@@ -51,7 +51,9 @@ sealed class TaskPipeline {
         val isApplyable: Boolean = false,
         val isImproveStep: Boolean = false,
         /** 코드가 없을 때 LLM 호출 없이 반환할 안내 메시지. null이면 기존 폴백 동작 유지. */
-        val chatFallbackMessage: String? = null
+        val chatFallbackMessage: String? = null,
+        /** true이면 이전 단계 결과(원본·개선 코드·분석)를 프롬프트 변수로 주입해 안정성 평가 수행 */
+        val isStabilityStep: Boolean = false
     ) {
         private val logger = Logger.getInstance(AgentStep::class.java)
 
@@ -173,8 +175,51 @@ sealed class TaskPipeline {
             context: AgentContext,
             client: OllamaClient,
             onChunk: ((String) -> Unit)? = null,
-            previousStepResult: String? = null
+            previousStepResult: String? = null,
+            allPreviousResults: List<StepResult> = emptyList()
         ): StepResult {
+            // ─ 안정성 평가 Step (isStabilityStep=true) ─────────────────────────
+            if (isStabilityStep) {
+                val originalCode = if (context.editor != null)
+                    EditorContextService.extractCodeWithScope(context.editor, context.project).code
+                else ""
+
+                val improvedCode = allPreviousResults.getOrNull(1)
+                    ?.extractedCode?.takeIf { it.isNotBlank() }
+                    ?: allPreviousResults.getOrNull(1)?.rawLlmResponse
+                    ?: ""
+
+                val analysisResult = allPreviousResults.getOrNull(0)?.rawLlmResponse ?: ""
+
+                val language = context.editor?.virtualFile?.extension?.uppercase() ?: "Unknown"
+
+                val stabilitySystemPrompt = PromptManager.loadPromptWithVars(
+                    promptFile, mapOf(
+                        "LANGUAGE"        to language,
+                        "ORIGINAL_CODE"   to originalCode,
+                        "IMPROVED_CODE"   to improvedCode,
+                        "ANALYSIS_RESULT" to analysisResult
+                    )
+                )
+                val userMessage = "위 원본 코드와 개선된 코드를 비교하여 안정성을 평가하세요."
+
+                logger.info("AgentStep[${label}]: 안정성 평가 LLM 호출 시작")
+                val response = client.callChatApiStream(stabilitySystemPrompt, userMessage, onChunk)
+                val rawLlmResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
+                val llmResponse = rawLlmResponse.trimEnd()
+                val isError = llmResponse.startsWith("[오류]") || llmResponse.startsWith("[Error]")
+
+                return StepResult(
+                    originalCode  = null,
+                    modifiedCode  = null,
+                    applyScope    = "",
+                    llmResponse   = llmResponse,
+                    rawLlmResponse = rawLlmResponse,
+                    extractedCode = "",
+                    isSuccess     = !isError
+                )
+            }
+
             val systemPrompt = PromptManager.loadPrompt(promptFile)
 
             var originalCode = ""
@@ -378,19 +423,21 @@ sealed class TaskPipeline {
     // ──────────────────────────────────────────
 
     /**
-     * 분석 → 코드 개선
-     * - 1/2 개선 분석: 참고용 텍스트 (isApplyable = false)
-     * - 2/2 코드 개선: Diff 대상 (isApplyable = true, isImproveStep = true)
+     * 분석 → 코드 개선 → 안정성 평가
+     * - 1/3 개선 분석: 참고용 텍스트 (isApplyable = false)
+     * - 2/3 코드 개선: 개선 코드 출력 (isApplyable = false)
+     * - 3/3 안정성 평가: 원본/개선 코드 비교 후 위험도 평가 (isStabilityStep = true)
      */
     object Improve : TaskPipeline() {
         override val steps = listOf(
             AgentStep(
-                label               = "1/2 개선 분석",
+                label               = "1/3 개선 분석",
                 promptFile          = "improve_analysis_prompt.txt",
                 isApplyable         = false,
                 chatFallbackMessage = "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
             ),
-            AgentStep("2/2 코드 개선", "improve_prompt.txt", isApplyable = false)
+            AgentStep("2/3 코드 개선", "improve_prompt.txt", isApplyable = false),
+            AgentStep("3/3 안정성 평가", "stability_check_prompt.txt", isApplyable = false, isStabilityStep = true)
         )
     }
 

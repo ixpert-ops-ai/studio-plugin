@@ -56,7 +56,7 @@ class GenerateTestAgent : BaseAgent() {
             runPostGenerationPipeline(context, fileName, code, systemPrompt, llmResponse)
         }
 
-        callLlmStreamAsync(context.project, "WuwAgent: Generating Tests",
+        callLlmStreamAsync(context.project, "iXpert AI Assistant: Generating Tests",
             systemPrompt, code, wrappedOnSuccess, onChunk, onError)
     }
 

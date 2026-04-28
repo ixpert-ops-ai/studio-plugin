@@ -21,6 +21,6 @@ class ChatAgent : BaseAgent() {
 
         val systemPrompt = PromptManager.loadPrompt("chat_prompt.txt")
 
-        callLlmStreamAsync(context.project, "WuwAgent: Answering Chat", systemPrompt, userQuery, onSuccess, onChunk, onError)
+        callLlmStreamAsync(context.project, "iXpert AI Assistant: Answering Chat", systemPrompt, userQuery, onSuccess, onChunk, onError)
     }
 }

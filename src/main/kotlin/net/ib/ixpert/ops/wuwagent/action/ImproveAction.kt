@@ -67,8 +67,11 @@ class ImproveAction : AnAction() {
                         val scopeText = if (hasSelection) "선택 영역" else "전체 파일"
                         bridge.sendMessageChunk(messageId, "### 분석 대상: `$fileName` ($scopeText)\n\n")
                     }
+                } else if (!isApplyable && stepMsgId.endsWith("_s3")) {
+                    // Step 3: 안정성 평가 - 새 말풍선, 파일 메타 없음
+                    bridge.sendMessage("task_start", "$stepLabel LLM 응답 대기 중...", stepMsgId)
                 } else if (!isApplyable) {
-                    // Step 2+, 텍스트 스트리밍 step: 새 말풍선 생성 + Diff 버튼용 메타 전달
+                    // Step 2: 텍스트 스트리밍 step - 새 말풍선 생성 + Diff 버튼용 메타 전달
                     bridge.sendMessage("task_start", "$stepLabel LLM 응답 대기 중...", stepMsgId,
                         mapOf(
                             "filePath"     to (editor.virtualFile?.path ?: ""),
@@ -92,7 +95,8 @@ class ImproveAction : AnAction() {
             // bridge.sendMessage(subType = "task_step", content = result.llmResponse, messageId = stepMsgId, meta = meta)
 
             // 선택 케이스 Step2: 원본 풀코드에서 선택 범위를 개선 코드로 교체 → 3-way Diff용 modifiedFullCode 생성
-            val modifiedFullCode = if (hasSelection && stepMsgId != messageId && result.isSuccess && selectedText.isNotBlank()) {
+            // Step3(안정성 평가)는 코드가 없으므로 제외
+            val modifiedFullCode = if (hasSelection && stepMsgId != messageId && !stepMsgId.endsWith("_s3") && result.isSuccess && selectedText.isNotBlank()) {
                 val fullCode = ApplicationManager.getApplication().runReadAction(
                     com.intellij.openapi.util.Computable { editor.document.text }
                 )

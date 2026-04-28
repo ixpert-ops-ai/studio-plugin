@@ -81,7 +81,7 @@ class QueryValidationAgent : BaseAgent() {
 
         callLlmStreamAsync(
             context.project,
-            "WuwAgent: Validating Query",
+            "iXpert AI Assistant: Validating Query",
             PromptManager.loadPrompt("query_validation_prompt.txt"),
             userMessage,
             wrappedOnSuccess,
