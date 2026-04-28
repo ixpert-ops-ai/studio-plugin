@@ -88,13 +88,13 @@ class RequirementAnalysisPipeline(private val client: OllamaClient) {
         for (line in lines) {
             val trimmed = line.trim()
             
-            if (trimmed.startsWith("### 요구사항 요약")) {
+            if (trimmed.contains("요구사항 요약")) {
                 currentSection = "SUMMARY"
                 continue
-            } else if (trimmed.startsWith("### 수정 대상 파일")) {
+            } else if (trimmed.contains("수정 대상 파일")) {
                 currentSection = "TABLE"
                 continue
-            } else if (trimmed.startsWith("### 작업 시 주의사항")) {
+            } else if (trimmed.contains("작업 시 주의사항")) {
                 currentSection = "WARNINGS"
                 continue
             }
