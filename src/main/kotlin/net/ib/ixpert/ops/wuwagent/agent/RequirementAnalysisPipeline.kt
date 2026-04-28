@@ -66,6 +66,8 @@ class RequirementAnalysisPipeline(private val client: OllamaClient) {
             $summaryContext
         """.trimIndent()
 
+        logger.info("==== Phase 2a: LLM에 전달되는 Project Summary Context ====\n$summaryContext\n==================================================")
+
         val userMessage = "## 요구사항\n$requirement"
 
         val response = client.callChatApiStream(systemPrompt, userMessage, onChunk)
