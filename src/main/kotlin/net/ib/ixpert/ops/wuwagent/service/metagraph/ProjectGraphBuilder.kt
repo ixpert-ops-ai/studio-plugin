@@ -9,7 +9,7 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.roots.ModuleRootManager
+import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiClassOwner
@@ -198,32 +198,29 @@ class ProjectGraphBuilder(private val project: Project) {
     // ── Step 2: 멀티모듈 소스 루트 탐색 ──────────
 
     /**
-     * IntelliJ의 ModuleManager + ModuleRootManager를 활용하여
-     * 프로젝트의 모든 모듈에서 Java 및 Kotlin 소스 파일을 수집합니다.
+     * IntelliJ의 ProjectFileIndex를 활용하여
+     * 프로젝트의 Java 및 Kotlin 소스 파일을 수집합니다.
      * 테스트 소스셋, 빌드 결과물(build/generated)은 제외됩니다.
      */
     private fun collectJavaAndKotlinFiles(): List<PsiClassOwner> {
         val result = mutableListOf<PsiClassOwner>()
         val psiManager = PsiManager.getInstance(project)
+        val fileIndex = ProjectFileIndex.getInstance(project)
 
-        for (module in ModuleManager.getInstance(project).modules) {
-            val sourceRoots = ModuleRootManager.getInstance(module)
-                .getSourceRoots(JavaSourceRootType.SOURCE)
-
-            for (root in sourceRoots) {
-                VfsUtilCore.iterateChildrenRecursively(root, null) { vf ->
-                    if (!vf.isDirectory && (vf.extension == "java" || vf.extension == "kt")) {
-                        val psiFile = psiManager.findFile(vf) as? PsiClassOwner
-                        if (psiFile != null) {
-                            result.add(psiFile)
-                        }
+        fileIndex.iterateContent { vf ->
+            if (!vf.isDirectory && (vf.extension == "java" || vf.extension == "kt")) {
+                // 소스 디렉토리 내부에 있으면서 테스트 코드가 아닌 파일만 수집
+                if (fileIndex.isInSourceContent(vf) && !fileIndex.isInTestSourceContent(vf)) {
+                    val psiFile = psiManager.findFile(vf) as? PsiClassOwner
+                    if (psiFile != null) {
+                        result.add(psiFile)
                     }
-                    true
                 }
             }
+            true
         }
 
-        logger.info("Collected ${result.size} source files from ${ModuleManager.getInstance(project).modules.size} modules")
+        logger.info("Collected ${result.size} source files from project")
         return result
     }
 
