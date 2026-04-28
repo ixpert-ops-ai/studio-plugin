@@ -40,7 +40,9 @@ class OllamaClient {
             options = mapOf(
                 "temperature" to settings.temperature,
                 "num_ctx" to settings.contextWindow,
-                "num_predict" to 12000
+                "num_predict" to 12000,
+                "repeat_penalty" to 1.3,
+                "repeat_last_n" to 256
             )
         )
         val jsonPayload = gson.toJson(requestBody)

@@ -47,7 +47,11 @@ class ImplementationPipeline(
             onChunk(progressHeader)
 
             // 파일 및 프롬프트 생성 로직
-            val isLargeFile = target.type != "신규" && psiMethodExtractor.isLargeFile(target.path)
+            val isNewFile = target.type.contains("신규")
+            val isDtoOrEntity = target.path.lowercase().let { p ->
+                p.contains("dto") || p.contains("entity") || p.contains("vo") || p.contains("model")
+            }
+            val isLargeFile = !isNewFile && !isDtoOrEntity && psiMethodExtractor.isLargeFile(target.path)
             
             val systemPrompt = if (isLargeFile) buildLargeFileSystemPrompt() else buildSmallFileSystemPrompt()
             val userPrompt = buildUserPromptForFile(target, contextChain, analysisResult.summary, sortedTargets)
@@ -61,8 +65,35 @@ class ImplementationPipeline(
             logger.info("Processing target: ${target.path}")
             
             var fullResponse = ""
+            var lastChunks = ArrayDeque<String>(5)
+            var repeatCount = 0
+            val MAX_REPEAT = 3
+            val MAX_RESPONSE_LENGTH = 15_000
+
             try {
                 val response = client.callChatApiStream(systemPrompt, userPrompt) { chunk ->
+                    // 반복 감지
+                    if (lastChunks.size >= 5) {
+                        val recentPattern = lastChunks.joinToString("")
+                        if (recentPattern.length > 100 && fullResponse.contains(recentPattern, ignoreCase = true)) {
+                            repeatCount++
+                            if (repeatCount >= MAX_REPEAT) {
+                                logger.warn("반복 패턴 감지, 응답 조기 중단: ${target.path}")
+                                onChunk("\n\n> ⚠️ **반복 패턴이 감지되어 생성을 중단합니다.** 수동 확인이 필요합니다.\n\n")
+                                throw RepetitionDetectedException(target.path)
+                            }
+                        }
+                        lastChunks.removeFirst()
+                    }
+                    lastChunks.addLast(chunk)
+
+                    // 응답 길이 상한 초과 시 중단
+                    if (fullResponse.length > MAX_RESPONSE_LENGTH) {
+                        logger.warn("응답 길이 상한 초과 (${fullResponse.length}자), 조기 중단: ${target.path}")
+                        onChunk("\n\n> ⚠️ **응답이 비정상적으로 길어 생성을 중단합니다.** 수동 확인이 필요합니다.\n\n")
+                        throw ResponseTooLongException(target.path)
+                    }
+
                     onChunk(chunk)
                     fullResponse += chunk
                 }
@@ -94,6 +125,11 @@ class ImplementationPipeline(
                 } else {
                     logger.warn("[MODIFIED_SIGNATURES] 블록이 생성되지 않음: ${target.path}")
                 }
+            } catch (e: RepetitionDetectedException) {
+                continue
+            } catch (e: ResponseTooLongException) {
+                generatedSnippets[target.path] = fullResponse
+                continue
             } catch (e: Exception) {
                 logger.error("Error processing file ${target.path}", e)
                 onChunk("\n\n> ❌ **코드 생성 중 에러가 발생하여 이 파일을 건너뜁니다:** `${e.message}`\n\n")
@@ -130,9 +166,14 @@ class ImplementationPipeline(
         // 복사본(TargetFileSpec) 생성 (수정된 타입 반영)
         val correctedTarget = targetFile.copy(type = actualType)
 
+        // DTO/Entity/VO는 대형 파일이어도 FullFileStrategy 적용
+        val isDtoOrEntity = correctedTarget.path.lowercase().let { p ->
+            p.contains("dto") || p.contains("entity") || p.contains("vo") || p.contains("model")
+        }
+
         return if (correctedTarget.type.contains("신규")) {
             buildNewFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
-        } else if (psiMethodExtractor.isLargeFile(correctedTarget.path)) {
+        } else if (!isDtoOrEntity && psiMethodExtractor.isLargeFile(correctedTarget.path)) {
             buildLargeFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
         } else {
             buildSmallFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
@@ -275,4 +316,6 @@ class ImplementationPipeline(
             8. 코드 블록 마지막에 [MODIFIED_SIGNATURES] 태그로 변경/추가된 메서드 시그니처를 나열하세요.
         """.trimIndent()
     }
+    private class RepetitionDetectedException(val filePath: String) : RuntimeException()
+    private class ResponseTooLongException(val filePath: String) : RuntimeException()
 }
