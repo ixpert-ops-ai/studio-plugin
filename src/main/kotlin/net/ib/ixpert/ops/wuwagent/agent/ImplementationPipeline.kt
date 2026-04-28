@@ -58,6 +58,13 @@ class ImplementationPipeline(
                 val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath)
                 if (virtualFile != null && virtualFile.exists()) {
                     sourceCode = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
+                    
+                    // [대형 파일 스킵 방안 A] 파일이 200줄을 초과하면 자동 생성 스킵
+                    if (sourceCode.lines().size > 200) {
+                        logger.warn("대형 파일 스킵 (Line: ${sourceCode.lines().size}): ${target.path}")
+                        onChunk("> ⚠️ **이 파일은 내용이 너무 커서(200줄 초과) 자동 코드 생성을 건너뜁니다.**\n> 다음 가이드를 참고하여 직접 수동으로 수정해주세요: `${target.description}`\n\n")
+                        continue
+                    }
                 } else {
                     logger.warn("VirtualFile을 찾을 수 없습니다: $absolutePath")
                     onChunk("> ⚠️ **파일을 찾을 수 없어 건너뜁니다:** `${target.path}`\n\n")
