@@ -59,13 +59,9 @@ class ImplementationPipeline(
                 if (virtualFile != null && virtualFile.exists()) {
                     sourceCode = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
                 } else {
-                    val fallbackFile = File(absolutePath)
-                    if (fallbackFile.exists()) {
-                        sourceCode = fallbackFile.readText(Charsets.UTF_8)
-                    } else {
-                        logger.warn("파일을 찾을 수 없습니다: $absolutePath")
-                        sourceCode = "// [오류] 기존 파일의 소스 코드를 읽을 수 없습니다.\n"
-                    }
+                    logger.warn("VirtualFile을 찾을 수 없습니다: $absolutePath")
+                    onChunk("> ⚠️ **파일을 찾을 수 없어 건너뜁니다:** `${target.path}`\n\n")
+                    continue
                 }
             }
 
@@ -124,25 +120,28 @@ class ImplementationPipeline(
 
             logger.info("Processing target: ${target.path}")
             
-            // LLM 호출 및 스트리밍 (청크 단위 파싱 및 필터링 가능하지만, 여기서는 직접 브로드캐스트)
+            // LLM 호출 및 스트리밍
             var fullResponse = ""
-            val response = client.callChatApiStream(systemPrompt, userPrompt) { chunk ->
-                // 청크를 클라이언트(Webview)에 전송 (하지만 [MODIFIED_SIGNATURES] 부분은 사용자에게 불필요할 수 있으므로,
-                // 스트리밍 시 일단 다 보내고 나중에 필터링하거나, 스트리밍에서는 그대로 노출시킴.
-                // 여기서는 투명하게 다 보여주는 방식 선택)
-                onChunk(chunk)
-                fullResponse += chunk
-            }
-
-            // 응답 후처리: [MODIFIED_SIGNATURES] 파싱하여 컨텍스트 체인에 추가
-            val finalResponseText = response?.message?.content ?: fullResponse
-            if (finalResponseText.contains("[MODIFIED_SIGNATURES]")) {
-                val signatures = finalResponseText.substringAfter("[MODIFIED_SIGNATURES]").trim()
-                if (signatures.isNotBlank()) {
-                    contextChain.add("### `${target.path}` 변경사항\n$signatures")
+            try {
+                val response = client.callChatApiStream(systemPrompt, userPrompt) { chunk ->
+                    onChunk(chunk)
+                    fullResponse += chunk
                 }
-            } else {
-                logger.warn("[MODIFIED_SIGNATURES] 블록이 생성되지 않음: ${target.path}")
+
+                // 응답 후처리: [MODIFIED_SIGNATURES] 파싱하여 컨텍스트 체인에 추가
+                val finalResponseText = response?.message?.content ?: fullResponse
+                if (finalResponseText.contains("[MODIFIED_SIGNATURES]")) {
+                    val signatures = finalResponseText.substringAfter("[MODIFIED_SIGNATURES]").trim()
+                    if (signatures.isNotBlank()) {
+                        contextChain.add("### `${target.path}` 변경사항\n$signatures")
+                    }
+                } else {
+                    logger.warn("[MODIFIED_SIGNATURES] 블록이 생성되지 않음: ${target.path}")
+                }
+            } catch (e: Exception) {
+                logger.error("Error processing file ${target.path}", e)
+                onChunk("\n\n> ❌ **코드 생성 중 에러가 발생하여 이 파일을 건너뜁니다:** `${e.message}`\n\n")
+                continue
             }
         }
         
