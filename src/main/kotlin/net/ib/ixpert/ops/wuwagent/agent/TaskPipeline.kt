@@ -481,7 +481,7 @@ sealed class TaskPipeline {
     /** 테스트 코드 생성 (GenerateTestAgent 직접 호출) */
     object GenerateTest : TaskPipeline() {
         override val steps = listOf(
-            AgentStep("1/1 테스트 생성", "generate_test_prompt.txt", isApplyable = false)
+            AgentStep("1/1 테스트 생성", "generate_test_prompt.md", isApplyable = false)
         )
     }
 
