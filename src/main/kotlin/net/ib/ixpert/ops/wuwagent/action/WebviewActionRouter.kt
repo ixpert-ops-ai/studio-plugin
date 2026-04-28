@@ -161,12 +161,11 @@ class WebviewActionRouter(private val project: Project) {
                             }
                             
                             ApplicationManager.getApplication().invokeLater {
-                                val finalMessage = if (result.targetFiles.isNotEmpty()) {
-                                    result.rawResponse + "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
-                                } else {
-                                    result.rawResponse
+                                if (result.targetFiles.isNotEmpty()) {
+                                    val extraText = "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
+                                    bridge.sendMessageChunk(messageId, extraText)
                                 }
-                                bridge.sendMessage("analyze", finalMessage, messageId)
+                                bridge.sendMessage("chat", "", messageId) // 스트리밍 종료 신호
                             }
                         } catch (e: Exception) {
                             logger.error("RequirementAnalysisPipeline Error", e)
@@ -184,12 +183,14 @@ class WebviewActionRouter(private val project: Project) {
                     
                     val cachedResult = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline.lastResult
                     if (cachedResult == null || cachedResult.targetFiles.isEmpty()) {
+                        bridge.sendMessage("chat_start", "", messageId)
                         bridge.sendMessage("error", "분석된 타겟 파일이 없습니다. 먼저 `/analyze 요구사항`을 실행해주세요.", messageId)
                         return@invokeLater
                     }
                     
+                    bridge.sendMessage("chat_start", "코드 수정을 준비 중입니다...", messageId)
                     val fileListStr = cachedResult.targetFiles.joinToString("\n") { "- [${it.type}] `${it.path}`\n  > ${it.description}" }
-                    bridge.sendMessage("implement", "🚀 **Phase 2b 코드 수정 파이프라인 (스텁)**\n\n다음 파일들에 대해 구체적인 코드 생성 및 수정을 진행합니다 (추후 구현 예정):\n\n$fileListStr", messageId)
+                    bridge.sendMessage("chat", "🚀 **Phase 2b 코드 수정 파이프라인 (스텁)**\n\n다음 파일들에 대해 구체적인 코드 생성 및 수정을 진행합니다 (추후 구현 예정):\n\n$fileListStr", messageId)
                 }
 
                 // ── 분석 문서 MD 생성 (디렉토리 선택 → 일괄 분석) ────────
