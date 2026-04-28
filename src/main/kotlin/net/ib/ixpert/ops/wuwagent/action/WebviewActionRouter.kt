@@ -140,6 +140,58 @@ class WebviewActionRouter(private val project: Project) {
                     )
                 }
 
+                // ── 요구사항 기반 파일 추출 (Phase 2a) ────────
+                "/analyze" -> {
+                    logger.info("Router: /analyze 분기")
+                    val messageId = "analyze_${System.currentTimeMillis()}"
+                    bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프를 분석하여 요구사항 대상 파일을 추출하고 있습니다...", messageId)
+                    
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
+                            val projectGraph = graphLoader.loadGraph() ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
+                            
+                            val client = OllamaClient()
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(client)
+                            
+                            val result = pipeline.analyze(textBody, projectGraph) { chunk ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessageChunk(messageId, chunk)
+                                }
+                            }
+                            
+                            ApplicationManager.getApplication().invokeLater {
+                                val finalMessage = if (result.targetFiles.isNotEmpty()) {
+                                    result.rawResponse + "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
+                                } else {
+                                    result.rawResponse
+                                }
+                                bridge.sendMessage("analyze", finalMessage, messageId)
+                            }
+                        } catch (e: Exception) {
+                            logger.error("RequirementAnalysisPipeline Error", e)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", "요구사항 분석 중 오류가 발생했습니다: ${e.message}", messageId)
+                            }
+                        }
+                    }
+                }
+
+                // ── 자동 코드 작성 스텁 (Phase 2b) ────────
+                "/implement" -> {
+                    logger.info("Router: /implement 분기 (스텁)")
+                    val messageId = "implement_${System.currentTimeMillis()}"
+                    
+                    val cachedResult = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline.lastResult
+                    if (cachedResult == null || cachedResult.targetFiles.isEmpty()) {
+                        bridge.sendMessage("error", "분석된 타겟 파일이 없습니다. 먼저 `/analyze 요구사항`을 실행해주세요.", messageId)
+                        return@invokeLater
+                    }
+                    
+                    val fileListStr = cachedResult.targetFiles.joinToString("\n") { "- [${it.type}] `${it.path}`\n  > ${it.description}" }
+                    bridge.sendMessage("implement", "🚀 **Phase 2b 코드 수정 파이프라인 (스텁)**\n\n다음 파일들에 대해 구체적인 코드 생성 및 수정을 진행합니다 (추후 구현 예정):\n\n$fileListStr", messageId)
+                }
+
                 // ── 분석 문서 MD 생성 (디렉토리 선택 → 일괄 분석) ────────
                 "/doc" -> {
                     logger.info("Router: /doc 분기 → 디렉토리 선택 다이얼로그")

@@ -772,8 +772,11 @@ function App() {
       command = '/task';
       payload = '코드를 개선해주세요.';
     } else if (text === '/analyze' || text.startsWith('/analyze ')) {
-      command = '/task';
-      payload = '영향도를 분석해주세요.';
+      command = '/analyze';
+      payload = text.startsWith('/analyze ') ? text.slice(9).trim() : '요구사항 대상 파일을 추출해주세요.';
+    } else if (text === '/implement' || text.startsWith('/implement ')) {
+      command = '/implement';
+      payload = '';
     } else if (text === '/query' || text.startsWith('/query ')) {
       command = '/task';
       payload = '쿼리를 검증해주세요.';
@@ -806,7 +809,7 @@ function App() {
       { cmd: '/explain', desc: '코드를 설명해줘' },
       { cmd: '/improve', desc: '코드를 개선해줘' },
       { cmd: '/test', desc: '테스트 코드를 생성해줘' },
-      { cmd: '/analyze', desc: '영향도를 분석해줘' },
+      { cmd: '/analyze', desc: '요구사항 기반 수정 대상 파일 추출' },
       { cmd: '/query', desc: '쿼리를 검증해줘' },
       { cmd: '/doc', desc: '디렉토리 분석 문서 생성' },
       { cmd: '/ragdoc', desc: 'RAG 전용 분석 문서 생성 (FAQ 포함)' },

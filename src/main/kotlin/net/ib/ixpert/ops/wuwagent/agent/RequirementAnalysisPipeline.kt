@@ -24,6 +24,10 @@ data class RequirementAnalysisResult(
  */
 class RequirementAnalysisPipeline(private val client: OllamaClient) {
 
+    companion object {
+        var lastResult: RequirementAnalysisResult? = null
+    }
+
     private val logger = Logger.getInstance(RequirementAnalysisPipeline::class.java)
 
     fun analyze(requirement: String, projectGraph: ProjectGraph, onChunk: ((String) -> Unit)? = null): RequirementAnalysisResult {
@@ -67,10 +71,12 @@ class RequirementAnalysisPipeline(private val client: OllamaClient) {
         val response = client.callChatApiStream(systemPrompt, userMessage, onChunk)
         val rawResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
 
-        return parseResponse(rawResponse)
+        val result = parseResponse(rawResponse)
+        lastResult = result
+        return result
     }
 
-    private fun parseResponse(rawResponse: String): RequirementAnalysisResult {
+    fun parseResponse(rawResponse: String): RequirementAnalysisResult {
         val lines = rawResponse.lines()
         
         var summary = ""
