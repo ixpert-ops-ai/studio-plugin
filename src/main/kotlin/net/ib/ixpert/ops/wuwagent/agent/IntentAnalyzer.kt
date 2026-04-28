@@ -19,7 +19,7 @@ object IntentAnalyzer {
     private val keywordMap: List<Pair<List<String>, TaskPipeline>> = listOf(
         listOf("개선", "리팩토링", "리팩", "refactor", "improve", "최적화", "optimize") to TaskPipeline.Improve,
         listOf("리뷰", "review", "검토", "코드 품질")                                   to TaskPipeline.Review,
-        listOf("설명", "explain")                                                       to TaskPipeline.ExplainTask,
+        listOf("코드 설명", "이 코드 설명", "코드 분석해줘", "explain this code", "explain the code") to TaskPipeline.ExplainTask,
         listOf("영향 분석", "영향도", "impact analyze")                                 to TaskPipeline.Impact,
         listOf("쿼리 검증", "query validation", "sql 검증")                             to TaskPipeline.QueryValidation,
         listOf("테스트 생성", "test 생성", "generate test")                             to TaskPipeline.GenerateTest
