@@ -781,8 +781,8 @@ function App() {
       command = '/task';
       payload = '쿼리를 검증해주세요.';
     } else if (text === '/test' || text.startsWith('/test ')) {
-      command = '/task';
-      payload = '테스트 코드를 생성해주세요.';
+      command = '/test';
+      payload = text.startsWith('/test ') ? text.slice(6).trim() : '';
     } else if (text === '/doc' || text.startsWith('/doc ')) {
       command = '/doc';
       payload = '';
@@ -808,7 +808,7 @@ function App() {
     const cmds = [
       { cmd: '/explain', desc: '코드를 설명해줘' },
       { cmd: '/improve', desc: '코드를 개선해줘' },
-      { cmd: '/test', desc: '테스트 코드를 생성해줘' },
+      { cmd: '/test', desc: '단위 테스트 코드 자동 생성' },
       { cmd: '/analyze', desc: '요구사항 기반 수정 대상 파일 추출' },
       { cmd: '/implement', desc: '추출된 대상 파일 코드 자동 구현' },
       { cmd: '/query', desc: '쿼리를 검증해줘' },

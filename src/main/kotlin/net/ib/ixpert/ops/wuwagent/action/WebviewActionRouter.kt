@@ -201,13 +201,58 @@ class WebviewActionRouter(private val project: Project) {
                                 }
                             }
                             
+                            // [Phase 2c] 실행 완료 후 컨텍스트 캐시 저장 (파이프라인 내부에서 이미 저장하지만, 완료 메시지는 여기서 처리)
+                            val extraText = "\n\n💡 생성된 코드에 대한 **테스트 코드**를 자동으로 만들려면 `/test`를 입력하세요."
                             ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessageChunk(messageId, extraText)
                                 bridge.sendMessage("chat", "", messageId)
                             }
                         } catch (e: Exception) {
                             logger.error("ImplementationPipeline Error", e)
                             ApplicationManager.getApplication().invokeLater {
                                 bridge.sendMessage("error", "코드 생성 중 오류가 발생했습니다: ${e.message}", messageId)
+                            }
+                        }
+                    }
+                }
+
+                // ── 단위 테스트 코드 생성 (Phase 2c) ────────
+                "/test" -> {
+                    logger.info("Router: /test 분기")
+                    val messageId = "test_${System.currentTimeMillis()}"
+                    val trimmedQuery = textBody.removePrefix("/test").trim()
+
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            if (trimmedQuery.isBlank() && net.ib.ixpert.ops.wuwagent.agent.TestGenerationPipeline.lastImplementContext == null) {
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("chat_start", "", messageId)
+                                    bridge.sendMessage("error", "⚠️ 테스트를 생성할 컨텍스트가 없습니다.\n먼저 `/implement`를 실행하거나, `/test 클래스명`으로 특정 클래스를 지정하세요.", messageId)
+                                }
+                                return@executeOnPooledThread
+                            }
+
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("chat_start", "🧪 **단위 테스트 자동 생성**을 시작합니다...", messageId)
+                            }
+
+                            val client = OllamaClient()
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.TestGenerationPipeline(project, client)
+
+                            val target = if (trimmedQuery.isBlank()) null else trimmedQuery
+                            pipeline.execute(explicitTarget = target) { chunk ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessageChunk(messageId, chunk)
+                                }
+                            }
+
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("chat", "", messageId)
+                            }
+                        } catch (e: Exception) {
+                            logger.error("TestGenerationPipeline Error", e)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", "테스트 생성 중 오류가 발생했습니다: ${e.message}", messageId)
                             }
                         }
                     }
