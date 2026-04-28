@@ -40,6 +40,7 @@ class ImplementationPipeline(
         logger.info("ImplementationPipeline: 총 ${sortedTargets.size}개 파일 순차 처리 시작")
 
         val contextChain = mutableListOf<String>()
+        val generatedSnippets = mutableMapOf<String, String>()
 
         for ((index, target) in sortedTargets.withIndex()) {
             val progressHeader = "\n\n### 🔄 [${index + 1}/${sortedTargets.size}] `${target.path}` 처리 중...\n\n"
@@ -67,6 +68,8 @@ class ImplementationPipeline(
                 }
 
                 val finalResponseText = response?.message?.content ?: fullResponse
+                generatedSnippets[target.path] = finalResponseText // Phase 2c 단위 테스트 생성을 위해 응답 캐시 저장
+
                 if (finalResponseText.contains("[MODIFIED_SIGNATURES]")) {
                     val signaturesText = finalResponseText.substringAfter("[MODIFIED_SIGNATURES]").trim()
                     if (signaturesText.isNotBlank()) {
@@ -97,7 +100,12 @@ class ImplementationPipeline(
                 continue
             }
         }
-        
+        TestGenerationPipeline.lastImplementContext = TestGenerationPipeline.ImplementContext(
+            targetFiles = sortedTargets,
+            contextChain = contextChain.toList(),
+            generatedSnippets = generatedSnippets
+        )
+
         onChunk("\n\n✅ **모든 파일의 자동 코드 수정 제안이 완료되었습니다.**\n수정된 코드를 확인하시고 Apply 버튼을 눌러 적용해주세요.")
     }
 
