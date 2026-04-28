@@ -178,7 +178,7 @@ class WebviewActionRouter(private val project: Project) {
 
                 // ── 자동 코드 작성 스텁 (Phase 2b) ────────
                 "/implement" -> {
-                    logger.info("Router: /implement 분기 (스텁)")
+                    logger.info("Router: /implement 분기")
                     val messageId = "implement_${System.currentTimeMillis()}"
                     
                     val cachedResult = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline.lastResult
@@ -188,9 +188,29 @@ class WebviewActionRouter(private val project: Project) {
                         return@invokeLater
                     }
                     
-                    bridge.sendMessage("chat_start", "코드 수정을 준비 중입니다...", messageId)
-                    val fileListStr = cachedResult.targetFiles.joinToString("\n") { "- [${it.type}] `${it.path}`\n  > ${it.description}" }
-                    bridge.sendMessage("chat", "🚀 **Phase 2b 코드 수정 파이프라인 (스텁)**\n\n다음 파일들에 대해 구체적인 코드 생성 및 수정을 진행합니다 (추후 구현 예정):\n\n$fileListStr", messageId)
+                    bridge.sendMessage("chat_start", "🚀 **Phase 2b 코드 수정 파이프라인**\n타겟 파일 소스 코드를 분석하여 수정을 시작합니다...", messageId)
+                    
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            val client = OllamaClient()
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.ImplementationPipeline(client, project)
+                            
+                            pipeline.execute(cachedResult) { chunk ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessageChunk(messageId, chunk)
+                                }
+                            }
+                            
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("chat", "", messageId)
+                            }
+                        } catch (e: Exception) {
+                            logger.error("ImplementationPipeline Error", e)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", "코드 생성 중 오류가 발생했습니다: ${e.message}", messageId)
+                            }
+                        }
+                    }
                 }
 
                 // ── 분석 문서 MD 생성 (디렉토리 선택 → 일괄 분석) ────────
