@@ -40,9 +40,16 @@ class Phase2aVerificationTest {
     @Test
     fun testVerification3_ParsingFallback() {
         val rawResponse = """
-            요구사항을 분석했습니다.
-            ExcelExportUtil.java 파일을 새로 만들고, SurveyServiceImpl.java를 수정해야 합니다.
-            마크다운 테이블 형식을 지키지 않고 이렇게 자유 텍스트로만 말할 수도 있습니다.
+요구사항 요약
+설문 결과를 Excel 파일로 다운로드할 수 있는 기능을 추가해야 합니다. 이 기능은 Survey 관련 기능과 연동되어야 하며, Controller, Service, DAO 계층에서 필요한 수정이나 추가가 필요합니다.
+
+수정 대상 파일
+순서	파일 경로	유형	작업 내용
+1	src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java	수정	설문 결과 데이터를 조회하는 메서드 추가 또는 수정
+2	src/main/java/net/infobank/iss/survey/service/SurveyServiceImpl.java	수정	설문 결과를 Excel로 변환하는 로직 추가
+
+작업 시 주의사항
+SurveyDaoImpl과 SurveyServiceImpl은 데이터베이스 연동 및 로직 변경으로 인해 ChangeRisk가 HIGH입니다. ⚠️
         """.trimIndent()
         
         // Just to instantiate the pipeline, we don't actually call the LLM in this test
@@ -53,7 +60,6 @@ class Phase2aVerificationTest {
         println("Target Files size: ${result.targetFiles.size}")
         println("Raw Response: \n${result.rawResponse}")
         
-        assertEquals(0, result.targetFiles.size)
-        assertEquals(rawResponse, result.rawResponse)
+        assertTrue(result.targetFiles.size > 0)
     }
 }

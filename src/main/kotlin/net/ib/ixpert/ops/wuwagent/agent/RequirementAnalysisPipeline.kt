@@ -106,7 +106,7 @@ class RequirementAnalysisPipeline(private val client: OllamaClient) {
                     }
                 }
                 "TABLE" -> {
-                    // 테이블 파싱 (정규식 대신 split 사용)
+                    // 테이블 파싱 (다양한 포맷 허용)
                     if (trimmed.startsWith("|") && !trimmed.contains("|:---:|")) {
                         val parts = trimmed.split("|").map { it.trim() }
                         // 맨 앞과 맨 뒤의 파이프 때문에 인덱스 1부터 시작
@@ -115,9 +115,27 @@ class RequirementAnalysisPipeline(private val client: OllamaClient) {
                             val path = parts[2]
                             val type = parts[3]
                             val desc = parts[4]
-                            
-                            // 헤더 "순서" 등은 toIntOrNull 에서 필터링됨
                             targetFiles.add(TargetFileSpec(order, path, type, desc))
+                        }
+                    } else if (trimmed.contains("\t")) {
+                        // 탭 구분자 (웹뷰에서 복사한 텍스트 또는 탭 포맷)
+                        val parts = trimmed.split("\t").map { it.trim() }
+                        if (parts.size >= 4 && parts[0].toIntOrNull() != null) {
+                            targetFiles.add(TargetFileSpec(parts[0].toInt(), parts[1], parts[2], parts[3]))
+                        }
+                    } else if (!trimmed.startsWith("|") && trimmed.isNotBlank()) {
+                        // 공백이나 숫자 리스트 포맷 (예: "1 src/main/... 수정 내용")
+                        val firstToken = trimmed.substringBefore(" ").replace(".", "")
+                        if (firstToken.toIntOrNull() != null) {
+                            val order = firstToken.toInt()
+                            val remainder = trimmed.substringAfter(" ").trim()
+                            val path = remainder.substringBefore(" ").trim()
+                            val rest = remainder.substringAfter(" ").trim()
+                            val type = rest.substringBefore(" ").trim()
+                            val desc = rest.substringAfter(" ").trim()
+                            if (path.contains("/")) {
+                                targetFiles.add(TargetFileSpec(order, path, type, desc))
+                            }
                         }
                     }
                 }
