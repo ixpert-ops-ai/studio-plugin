@@ -12,7 +12,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.psi.PsiClass
-import com.intellij.psi.PsiJavaFile
+import com.intellij.psi.PsiClassOwner
 import com.intellij.psi.PsiManager
 import com.intellij.psi.PsiModifier
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.*
@@ -109,27 +109,27 @@ class ProjectGraphBuilder(private val project: Project) {
     ): ProjectGraph {
         val startTime = System.currentTimeMillis()
 
-        // Step 2: 멀티모듈 소스 루트 탐색 → PsiJavaFile 목록 수집
+        // Step 2: 멀티모듈 소스 루트 탐색 → PsiClassOwner 목록 수집
         indicator?.text = "프로젝트 파일 탐색 중..."
         onProgress?.invoke("프로젝트 파일을 탐색하고 있습니다...")
 
-        val javaFiles = ReadAction.compute<List<PsiJavaFile>, Throwable> {
-            collectJavaFiles()
+        val sourceFiles = ReadAction.compute<List<PsiClassOwner>, Throwable> {
+            collectJavaAndKotlinFiles()
         }
 
-        if (javaFiles.isEmpty()) {
-            onProgress?.invoke("분석 대상 Java 파일이 없습니다.")
+        if (sourceFiles.isEmpty()) {
+            onProgress?.invoke("분석 대상 소스 파일(Java/Kotlin)이 없습니다.")
             return emptyGraph()
         }
 
-        val totalFiles = javaFiles.size
-        onProgress?.invoke("총 ${totalFiles}개의 Java 파일 발견. 분석을 시작합니다...")
+        val totalFiles = sourceFiles.size
+        onProgress?.invoke("총 ${totalFiles}개의 소스 파일 발견. 분석을 시작합니다...")
 
         // Step 3: 파일별 ReadAction으로 PsiClass 분석 → FileNode 생성
         val nodes = mutableMapOf<String, FileNode>()
         val projectBasePath = project.basePath ?: ""
 
-        javaFiles.forEachIndexed { index, psiFile ->
+        sourceFiles.forEachIndexed { index, psiFile ->
             indicator?.checkCanceled()
             indicator?.fraction = index.toDouble() / totalFiles
             indicator?.text = "분석 중: ${psiFile.name} (${index + 1}/$totalFiles)"
@@ -199,11 +199,11 @@ class ProjectGraphBuilder(private val project: Project) {
 
     /**
      * IntelliJ의 ModuleManager + ModuleRootManager를 활용하여
-     * 프로젝트의 모든 모듈에서 Java 소스 파일을 정확하게 수집합니다.
+     * 프로젝트의 모든 모듈에서 Java 및 Kotlin 소스 파일을 수집합니다.
      * 테스트 소스셋, 빌드 결과물(build/generated)은 제외됩니다.
      */
-    private fun collectJavaFiles(): List<PsiJavaFile> {
-        val result = mutableListOf<PsiJavaFile>()
+    private fun collectJavaAndKotlinFiles(): List<PsiClassOwner> {
+        val result = mutableListOf<PsiClassOwner>()
         val psiManager = PsiManager.getInstance(project)
 
         for (module in ModuleManager.getInstance(project).modules) {
@@ -212,8 +212,8 @@ class ProjectGraphBuilder(private val project: Project) {
 
             for (root in sourceRoots) {
                 VfsUtilCore.iterateChildrenRecursively(root, null) { vf ->
-                    if (!vf.isDirectory && vf.extension == "java") {
-                        val psiFile = psiManager.findFile(vf) as? PsiJavaFile
+                    if (!vf.isDirectory && (vf.extension == "java" || vf.extension == "kt")) {
+                        val psiFile = psiManager.findFile(vf) as? PsiClassOwner
                         if (psiFile != null) {
                             result.add(psiFile)
                         }
@@ -223,17 +223,17 @@ class ProjectGraphBuilder(private val project: Project) {
             }
         }
 
-        logger.info("Collected ${result.size} Java files from ${ModuleManager.getInstance(project).modules.size} modules")
+        logger.info("Collected ${result.size} source files from ${ModuleManager.getInstance(project).modules.size} modules")
         return result
     }
 
     // ── Step 3: 파일별 분석 ──────────────────────
 
     /**
-     * 단일 PsiJavaFile에서 public 클래스를 기준으로 FileNode를 생성합니다.
+     * 단일 PsiClassOwner(Java 또는 Kotlin 파일)에서 public 클래스를 기준으로 FileNode를 생성합니다.
      * 한 파일에 여러 클래스가 있는 경우, public 클래스를 우선합니다.
      */
-    private fun analyzeFile(psiFile: PsiJavaFile, projectBasePath: String): List<Pair<String, FileNode>> {
+    private fun analyzeFile(psiFile: PsiClassOwner, projectBasePath: String): List<Pair<String, FileNode>> {
         val relativePath = psiFile.virtualFile?.path
             ?.removePrefix(projectBasePath)
             ?.removePrefix("/")

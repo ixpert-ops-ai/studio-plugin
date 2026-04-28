@@ -380,13 +380,14 @@ class WebviewActionRouter(private val project: Project) {
                 "/metagraph" -> {
                     logger.info("Router: /metagraph 분기 → 프로젝트 메타 그래프 생성")
                     val messageId = "metagraph_${System.currentTimeMillis()}"
+                    val progressId = "${messageId}_progress"
                     bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다...", messageId)
 
                     val builder = net.ib.ixpert.ops.wuwagent.service.metagraph.ProjectGraphBuilder(project)
                     builder.buildGraphAsync(
                         onProgress = { statusMsg ->
                             ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("step_noti", statusMsg, "${messageId}_progress_${System.currentTimeMillis()}")
+                                bridge.sendMessage("step_noti", statusMsg, progressId)
                             }
                         },
                         onComplete = { graph ->
@@ -408,10 +409,16 @@ class WebviewActionRouter(private val project: Project) {
                                 appendLine()
                                 appendLine("📁 저장 위치: `.meta/project-graph.json`")
                             }
-                            bridge.sendMessage("explain", summary, messageId)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("step_noti", "완료되었습니다.", progressId, mapOf("status" to "completed"))
+                                bridge.sendMessage("explain", summary, messageId)
+                            }
                         },
                         onError = { errorMsg ->
-                            bridge.sendMessage("error", errorMsg, messageId)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("step_noti", "오류 발생: $errorMsg", progressId, mapOf("status" to "failed"))
+                                bridge.sendMessage("error", errorMsg, messageId)
+                            }
                         }
                     )
                 }
