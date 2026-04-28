@@ -202,7 +202,7 @@ class WebviewActionRouter(private val project: Project) {
                             }
                             
                             // [Phase 2c] 실행 완료 후 컨텍스트 캐시 저장 (파이프라인 내부에서 이미 저장하지만, 완료 메시지는 여기서 처리)
-                            val extraText = "\n\n💡 생성된 코드에 대한 **테스트 코드**를 자동으로 만들려면 `/test`를 입력하세요."
+                            val extraText = "\n\n💡 수정된 파일들의 테스트 코드를 일괄 생성하려면 `/test-all`을 입력하세요."
                             ApplicationManager.getApplication().invokeLater {
                                 bridge.sendMessageChunk(messageId, extraText)
                                 bridge.sendMessage("chat", "", messageId)
@@ -216,18 +216,18 @@ class WebviewActionRouter(private val project: Project) {
                     }
                 }
 
-                // ── 단위 테스트 코드 생성 (Phase 2c) ────────
-                "/test" -> {
-                    logger.info("Router: /test 분기")
+                // ── 단위 테스트 코드 일괄 생성 (Phase 2c) ────────
+                "/test-all" -> {
+                    logger.info("Router: /test-all 분기")
                     val messageId = "test_${System.currentTimeMillis()}"
-                    val trimmedQuery = textBody.removePrefix("/test").trim()
+                    val trimmedQuery = textBody.removePrefix("/test-all").trim()
 
                     ApplicationManager.getApplication().executeOnPooledThread {
                         try {
                             if (trimmedQuery.isBlank() && net.ib.ixpert.ops.wuwagent.agent.TestGenerationPipeline.lastImplementContext == null) {
                                 ApplicationManager.getApplication().invokeLater {
                                     bridge.sendMessage("chat_start", "", messageId)
-                                    bridge.sendMessage("error", "⚠️ 테스트를 생성할 컨텍스트가 없습니다.\n먼저 `/implement`를 실행하거나, `/test 클래스명`으로 특정 클래스를 지정하세요.", messageId)
+                                    bridge.sendMessage("error", "⚠️ 테스트를 생성할 컨텍스트가 없습니다.\n먼저 `/implement`를 실행하거나, `/test-all 클래스명`으로 특정 클래스를 지정하세요.", messageId)
                                 }
                                 return@executeOnPooledThread
                             }
