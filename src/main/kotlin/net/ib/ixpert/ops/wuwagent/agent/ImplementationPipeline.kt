@@ -68,9 +68,25 @@ class ImplementationPipeline(
 
                 val finalResponseText = response?.message?.content ?: fullResponse
                 if (finalResponseText.contains("[MODIFIED_SIGNATURES]")) {
-                    val signatures = finalResponseText.substringAfter("[MODIFIED_SIGNATURES]").trim()
-                    if (signatures.isNotBlank()) {
-                        contextChain.add("### `${target.path}` 변경사항\n$signatures")
+                    val signaturesText = finalResponseText.substringAfter("[MODIFIED_SIGNATURES]").trim()
+                    if (signaturesText.isNotBlank()) {
+                        // [수정 2] 응답 코드 블록 내에 해당 시그니처의 메서드명이 존재하는지 검증
+                        val responseBody = finalResponseText.substringBefore("[MODIFIED_SIGNATURES]")
+                        val validSignatures = signaturesText.lines().filter { line ->
+                            val methodNameMatch = Regex("""\b([a-zA-Z_]\w*)\s*\(""").find(line)
+                            if (methodNameMatch != null) {
+                                val methodName = methodNameMatch.groupValues[1]
+                                responseBody.contains(methodName)
+                            } else {
+                                true // 정규식에 안 잡히는 특이한 형식은 일단 허용
+                            }
+                        }.joinToString("\n")
+
+                        if (validSignatures.isNotBlank()) {
+                            contextChain.add("### `${target.path}` 변경사항\n$validSignatures")
+                        } else {
+                            logger.warn("유효한 시그니처를 찾지 못함 (응답 코드에 없음): $signaturesText")
+                        }
                     }
                 } else {
                     logger.warn("[MODIFIED_SIGNATURES] 블록이 생성되지 않음: ${target.path}")
@@ -91,12 +107,27 @@ class ImplementationPipeline(
         requirementSummary: String,
         allTargetFiles: List<TargetFileSpec>
     ): String {
-        return if (targetFile.type.contains("신규")) {
-            buildNewFilePrompt(targetFile, contextChain, requirementSummary, allTargetFiles)
-        } else if (psiMethodExtractor.isLargeFile(targetFile.path)) {
-            buildLargeFilePrompt(targetFile, contextChain, requirementSummary, allTargetFiles)
+        var actualType = targetFile.type
+        
+        // [수정 1] "신규" 판별 검증 로직: 실제 파일이 존재하면 "수정"으로 교정
+        if (actualType.contains("신규")) {
+            val absolutePath = "${project.basePath}/${targetFile.path}".replace("//", "/")
+            val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath)
+            if (virtualFile != null && virtualFile.exists()) {
+                logger.warn("기존 파일을 신규로 잘못 분류함. '수정'으로 자동 교정: ${targetFile.path}")
+                actualType = "수정"
+            }
+        }
+
+        // 복사본(TargetFileSpec) 생성 (수정된 타입 반영)
+        val correctedTarget = targetFile.copy(type = actualType)
+
+        return if (correctedTarget.type.contains("신규")) {
+            buildNewFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
+        } else if (psiMethodExtractor.isLargeFile(correctedTarget.path)) {
+            buildLargeFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
         } else {
-            buildSmallFilePrompt(targetFile, contextChain, requirementSummary, allTargetFiles)
+            buildSmallFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
         }
     }
 
@@ -200,6 +231,7 @@ class ImplementationPipeline(
             2. 필요한 import 문을 모두 포함하여 컴파일 가능한 "전체 코드"를 반환하세요.
             3. 생략(`...`) 없이 모든 메서드와 로직을 완전하게 작성하세요.
             4. 이전 파일들에서 추가/변경된 메서드가 있다면, 그 시그니처를 참고하여 코드를 작성하세요.
+               (특히, 이전 파일 수정 요약에 기재된 메서드 시그니처(메서드명, 파라미터 타입, 반환 타입)를 정확히 사용하세요. 임의로 메서드명을 변경하지 마세요.)
             
             ## 출력 포맷
             반드시 아래의 마크다운 형식을 지켜서 출력하세요. 코드 블록 앞에는 반드시 파일 경로를 주석으로 명시해야 합니다.
@@ -225,11 +257,14 @@ class ImplementationPipeline(
             3. 각 메서드 블록 위에 위치 힌트를 반드시 포함하세요:
                - 기존 메서드 수정: // 📍 대체 위치: {파일명} → {메서드명}() 메서드 교체
                - 신규 메서드 추가: // 📍 삽입 위치: {파일명} → 클래스 바디 하단 (새 메서드)
-            4. 필요한 import문이 있으면 코드 블록 최상단에 별도로 나열하세요:
+            4. 기존 메서드를 교체할 때, 변경하지 않는 로직 부분도 생략하지 말고 전체를 작성하세요. 
+               `// ... 기존 코드 ...` 같은 생략 표현을 절대 사용하지 마세요.
+            5. 필요한 import문이 있으면 코드 블록 최상단에 별도로 나열하세요:
                // 📍 추가 import
                import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-            5. 기존 코드 스타일(어노테이션 사용 패턴, 네이밍 컨벤션)을 유지하세요.
-            6. 코드 블록 마지막에 [MODIFIED_SIGNATURES] 태그로 변경/추가된 메서드 시그니처를 나열하세요.
+            6. 기존 코드 스타일(어노테이션 사용 패턴, 네이밍 컨벤션)을 유지하세요.
+            7. 이전 파일 수정 요약에 기재된 메서드 시그니처(메서드명, 파라미터 타입, 반환 타입)를 정확히 사용하세요. 임의로 메서드명을 변경하지 마세요.
+            8. 코드 블록 마지막에 [MODIFIED_SIGNATURES] 태그로 변경/추가된 메서드 시그니처를 나열하세요.
         """.trimIndent()
     }
 }
