@@ -9,8 +9,11 @@ import net.ib.ixpert.ops.wuwagent.service.TestFileService
 import net.ib.ixpert.ops.wuwagent.service.TypeContextService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
-/** JUnit 테스트 코드를 자동 생성하고, 파일 저장 → 테스트 실행 → 결과 리포트 반영까지 수행하는 Agent */
-class GenerateTestAgent : BaseAgent() {
+/** JUnit 테스트 코드를 자동 생성하고, 파일 저장 → 테스트 실행 → 결과 리포트 반영까지 수행하는 Agent.
+ *
+ *  @param targetMessageId LLM 응답이 흘러간 webview 메시지 ID. 지정하면 "4. 단위 테스트 실행 결과"
+ *                         섹션을 같은 메시지에 합쳐 전송한다. null이면 별도 메시지 버블로 전송(폴백). */
+class GenerateTestAgent(private val targetMessageId: String? = null) : BaseAgent() {
     override fun execute(
         context: AgentContext,
         onSuccess: (String) -> Unit,
@@ -123,22 +126,29 @@ class GenerateTestAgent : BaseAgent() {
         val buildTool = TestExecutionService.detectBuildTool(basePath)
         logger.info("GenerateTestAgent: 빌드 도구 감지 = $buildTool")
 
-        val execMsgId = "testexec_${System.currentTimeMillis()}"
+        // attachMode=true: LLM 응답(섹션 1~3)에 섹션 4를 이어 붙여 같은 버블에 전송
+        // attachMode=false: 별도 메시지 버블로 전송 (폴백 — targetMessageId가 없을 때)
+        val attachMode = targetMessageId != null
+        val finalMsgId = targetMessageId ?: "testexec_${System.currentTimeMillis()}"
 
         if (buildTool == TestExecutionService.BuildTool.UNKNOWN) {
             val testFilePath = TestFileService.resolveTestFilePath(basePath, fileName, testCode)
             TestFileService.saveTestFile(testFilePath, testCode)
             logger.info("GenerateTestAgent: 테스트 파일 저장 (빌드 도구 없음) → $testFilePath")
-            val skipMarkdown = "## ⚡ 테스트 실행 결과\n\n빌드 도구(Gradle/Maven)를 감지하지 못해 자동 실행을 건너뛰었습니다."
+            val skipMarkdown = "## 4. 단위 테스트 실행 결과\n\n빌드 도구(Gradle/Maven)를 감지하지 못해 자동 실행을 건너뛰었습니다."
+            val payload = if (attachMode) "$llmResponse\n\n$skipMarkdown" else skipMarkdown
             ApplicationManager.getApplication().invokeLater {
-                bridge.sendMessage("test_execution_start", "⚙️ 테스트 실행 준비 중...", execMsgId)
-                bridge.sendMessage("testExecutionResult", skipMarkdown, execMsgId)
+                if (!attachMode) bridge.sendMessage("test_execution_start", "⚙️ 테스트 실행 준비 중...", finalMsgId)
+                bridge.sendMessage("testExecutionResult", payload, finalMsgId)
             }
             return
         }
 
-        ApplicationManager.getApplication().invokeLater {
-            bridge.sendMessage("test_execution_start", "⚙️ 테스트를 실행하고 있습니다...", execMsgId)
+        // attachMode이면 별도의 진행 중 버블을 만들지 않는다 (UI상 잠시 대기 후 섹션 4가 같은 버블에 채워짐)
+        if (!attachMode) {
+            ApplicationManager.getApplication().invokeLater {
+                bridge.sendMessage("test_execution_start", "⚙️ 테스트를 실행하고 있습니다...", finalMsgId)
+            }
         }
 
         val testClassName = fileName.substringBeforeLast('.') + "Test"
@@ -149,8 +159,10 @@ class GenerateTestAgent : BaseAgent() {
         val maxRetries = 3
         while (isCompileFailure(currentResult) && attempt <= maxRetries && !TaskCancellationToken.isCancelled.get()) {
             logger.info("GenerateTestAgent: 컴파일 실패 감지 → 재시도 $attempt 실행")
-            ApplicationManager.getApplication().invokeLater {
-                bridge.sendMessage("test_execution_start", "🔁 컴파일 오류 감지 → 테스트를 자동 수정하고 있습니다... (시도 $attempt)", execMsgId)
+            if (!attachMode) {
+                ApplicationManager.getApplication().invokeLater {
+                    bridge.sendMessage("test_execution_start", "🔁 컴파일 오류 감지 → 테스트를 자동 수정하고 있습니다... (시도 $attempt)", finalMsgId)
+                }
             }
             val retryCode = retryGenerate(systemPrompt, sourceCode, currentCode, currentResult.errorMessage.orEmpty())
             if (retryCode.isNullOrBlank()) {
@@ -166,7 +178,7 @@ class GenerateTestAgent : BaseAgent() {
         if (TaskCancellationToken.isCancelled.get()) {
             logger.info("GenerateTestAgent: 사용자 취소 — 파이프라인 중단 (시도 $attempt 후)")
             ApplicationManager.getApplication().invokeLater {
-                bridge.sendMessage("task_cancelled", "⛔ 테스트 생성이 취소되었습니다.", execMsgId)
+                bridge.sendMessage("task_cancelled", "⛔ 테스트 생성이 취소되었습니다.", finalMsgId)
             }
             return
         }
@@ -178,26 +190,84 @@ class GenerateTestAgent : BaseAgent() {
             logger.warn("GenerateTestAgent: 테스트 실행 오류 메시지 →\n${finalResult.errorMessage}")
         }
 
-        val reportMarkdown = formatResultAsMarkdown(finalResult, testClassName)
+        val testCaseInfoMap = parseTestCaseInfo(currentCode)
+        val reportMarkdown = formatResultAsMarkdown(finalResult, testClassName, testCaseInfoMap)
+        val payload = if (attachMode) "$llmResponse\n\n$reportMarkdown" else reportMarkdown
         ApplicationManager.getApplication().invokeLater {
-            bridge.sendMessage("testExecutionResult", reportMarkdown, execMsgId)
+            bridge.sendMessage("testExecutionResult", payload, finalMsgId)
         }
     }
 
-    /** TestResult 를 Markdown 리포트로 변환 (요약표 + 실패 상세 + 실행 오류) */
-    private fun formatResultAsMarkdown(r: TestExecutionService.TestResult, testClassName: String): String {
+    /** 테스트 메서드명 → (소스 메서드명, 테스트 케이스 설명) 매핑.
+     *  테스트 코드에서 `@Test` 메서드와 그 위의 `// <케이스 설명>` 주석을 파싱한다. */
+    private data class TestCaseInfo(val sourceMethod: String, val description: String?)
+
+    private fun parseTestCaseInfo(testCode: String): Map<String, TestCaseInfo> {
+        val result = mutableMapOf<String, TestCaseInfo>()
+        val lines = testCode.lines()
+        // public [static] [<T>] void <name>(  ← 라인 시작
+        val methodPattern = Regex("""^\s*public\s+(?:static\s+)?(?:<[^>]+>\s+)?void\s+(\w+)\s*\(""")
+        for (i in lines.indices) {
+            val match = methodPattern.find(lines[i]) ?: continue
+            val testMethodName = match.groupValues[1]
+            // 메서드명 컨벤션: `메서드_조건_기댓값` → 첫 `_` 앞 토큰이 소스 메서드명
+            val sourceMethod = testMethodName.substringBefore('_', testMethodName)
+            // 위쪽으로 올라가며 가장 가까운 `//` 주석 줄을 찾는다 (어노테이션/빈줄은 건너뜀)
+            var description: String? = null
+            var j = i - 1
+            while (j >= 0) {
+                val trimmed = lines[j].trim()
+                if (trimmed.isEmpty() || trimmed.startsWith("@")) { j--; continue }
+                if (trimmed.startsWith("//")) {
+                    description = trimmed.removePrefix("//").trim().ifBlank { null }
+                }
+                break
+            }
+            result[testMethodName] = TestCaseInfo(sourceMethod, description)
+        }
+        return result
+    }
+
+    /** TestResult 를 Markdown 리포트로 변환 (대상 클래스/대상 메서드 → 케이스별 결과 → 전체 통계 → 실패 상세) */
+    private fun formatResultAsMarkdown(
+        r: TestExecutionService.TestResult,
+        testClassName: String,
+        caseInfo: Map<String, TestCaseInfo> = emptyMap()
+    ): String {
         val sb = StringBuilder()
         val durationSec = String.format("%.2f", r.durationMs / 1000.0)
-        val status = when {
-            r.total == 0 && !r.errorMessage.isNullOrBlank() -> "⚠️ 실행 불가"
-            r.failed == 0 && r.errors == 0 && r.total > 0   -> "✅ 전체 통과"
-            else                                             -> "❌ 일부 실패"
+
+        // 소스 클래스명 = "FooTest" → "Foo"
+        val sourceClassName = testClassName.removeSuffix("Test")
+        // 대상 메서드 = 테스트 메서드명에서 추출한 소스 메서드명들의 distinct 목록
+        val sourceMethods = caseInfo.values.map { it.sourceMethod }.distinct().filter { it.isNotBlank() }
+        val sourceMethodsLabel = if (sourceMethods.isEmpty()) "—" else sourceMethods.joinToString(", ") { "`$it`" }
+
+        sb.appendLine("## 4. 단위 테스트 실행 결과")
+        sb.appendLine()
+        sb.appendLine("**대상 클래스:** `$sourceClassName`  ")
+        sb.appendLine("**대상 메서드:** $sourceMethodsLabel")
+        sb.appendLine()
+
+        if (r.cases.isNotEmpty()) {
+            sb.appendLine("### 테스트 케이스별 결과")
+            sb.appendLine()
+            sb.appendLine("| 메서드 | 테스트 케이스 | 결과 |")
+            sb.appendLine("|---|---|---|")
+            r.cases.forEach { c ->
+                val mark = when (c.status) {
+                    TestExecutionService.CaseStatus.PASSED  -> "✅ 통과"
+                    TestExecutionService.CaseStatus.FAILED  -> "❌ 실패"
+                    TestExecutionService.CaseStatus.ERROR   -> "⚠️ 오류"
+                    TestExecutionService.CaseStatus.SKIPPED -> "⏭ 건너뜀"
+                }
+                val description = caseInfo[c.name]?.description ?: "—"
+                sb.appendLine("| `${c.name}` | $description | $mark |")
+            }
+            sb.appendLine()
         }
 
-        sb.appendLine("## ⚡ 테스트 실행 결과")
-        sb.appendLine()
-        sb.appendLine("**대상 클래스:** `$testClassName`  ")
-        sb.appendLine("**상태:** $status")
+        sb.appendLine("### 전체 통계")
         sb.appendLine()
         sb.appendLine("| 전체 | 통과 | 실패 | 오류 | 소요 시간 |")
         sb.appendLine("|---|---|---|---|---|")
@@ -235,8 +305,12 @@ class GenerateTestAgent : BaseAgent() {
     ): TestExecutionService.TestResult {
         val testFilePath = TestFileService.resolveTestFilePath(basePath, fileName, testCode)
         TestFileService.saveTestFile(testFilePath, testCode)
-        logger.info("GenerateTestAgent: [시도 $attempt] 테스트 파일 저장 → $testFilePath")
-        return TestExecutionService.runTests(basePath, testClassName, buildTool)
+        // testCode의 package 선언을 추출해 FQCN을 구성한다. 동일 simple-name이 다른 패키지에
+        // 존재할 때 Maven Surefire가 모두 실행해 결과가 섞이는 것을 방지한다.
+        val testPackage = extractSourcePackage(testCode)
+        val qualifiedName = if (testPackage != null) "$testPackage.$testClassName" else testClassName
+        logger.info("GenerateTestAgent: [시도 $attempt] 테스트 파일 저장 → $testFilePath (FQCN=$qualifiedName)")
+        return TestExecutionService.runTests(basePath, qualifiedName, buildTool)
     }
 
     /** 컴파일 에러 여부 판정: XML 결과 없음 + errorMessage에 컴파일 오류 키워드 포함 */

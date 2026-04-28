@@ -13,6 +13,10 @@ object TestExecutionService {
 
     data class FailureDetail(val testName: String, val message: String)
 
+    enum class CaseStatus { PASSED, FAILED, ERROR, SKIPPED }
+
+    data class TestCaseResult(val name: String, val status: CaseStatus)
+
     data class TestResult(
         val total: Int,
         val passed: Int,
@@ -20,7 +24,8 @@ object TestExecutionService {
         val errors: Int,
         val durationMs: Long,
         val failures: List<FailureDetail>,
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val cases: List<TestCaseResult> = emptyList()
     ) {
         fun toJson(): String {
             val failuresJson = failures.joinToString(",") { f ->
@@ -43,11 +48,20 @@ object TestExecutionService {
         else                                        -> BuildTool.UNKNOWN
     }
 
+    /**
+     * @param testClassName FQCN(`com.app.FooTest`) 또는 simple name(`FooTest`).
+     *                      가능한 경우 FQCN을 권장 — simple name으로는 동명 클래스가 여러 패키지에 있을 때
+     *                      Maven Surefire가 모두 실행하여 결과가 섞일 수 있다.
+     */
     fun runTests(projectBasePath: String, testClassName: String, buildTool: BuildTool): TestResult {
+        // 이전 실행의 누적 XML이 다른 클래스 결과로 오인되는 것을 방지하기 위해
+        // 빌드 명령 실행 전에 reports 디렉토리의 모든 .xml 파일을 비운다.
+        cleanReportXmls(projectBasePath, buildTool)
+
+        // JUnit 4 단독 환경이므로 와일드카드 없이 정확한 클래스명만 매칭한다.
         val command = when (buildTool) {
-            BuildTool.GRADLE  -> listOf("./gradlew", "test", "--tests", "$testClassName*", "--rerun-tasks")
-            // surefire 2.22.2 의 -Dtest=<Class> 는 JUnit5 @Nested 발견 실패 케이스가 있으므로 와일드카드 사용
-            BuildTool.MAVEN   -> listOf("mvn", "test", "-Dtest=$testClassName*", "-q")
+            BuildTool.GRADLE  -> listOf("./gradlew", "test", "--tests", testClassName, "--rerun-tasks")
+            BuildTool.MAVEN   -> listOf("mvn", "test", "-Dtest=$testClassName", "-q")
             BuildTool.UNKNOWN -> return TestResult(0, 0, 0, 0, 0, emptyList(), "빌드 도구를 감지할 수 없습니다.")
         }
 
@@ -87,7 +101,7 @@ object TestExecutionService {
             val fullOutput = output.toString()
             logger.info("TestExecutionService: 완료 (exit=$exitCode, ${durationMs}ms, outputLen=${fullOutput.length})")
 
-            val result = parseJUnitXml(projectBasePath, buildTool, durationMs)
+            val result = parseJUnitXml(projectBasePath, buildTool, durationMs, testClassName)
             // exitCode가 0이 아니고 XML도 비어있다면 컴파일 오류 등 → 출력 테일을 포함하여 반환
             if (exitCode != 0 && result.total == 0 && result.errorMessage != null) {
                 val allLines = fullOutput.lines().filter { it.isNotBlank() }
@@ -120,40 +134,91 @@ object TestExecutionService {
         }
     }
 
-    private fun parseJUnitXml(projectBasePath: String, buildTool: BuildTool, durationMs: Long): TestResult {
-        val xmlDir = when (buildTool) {
-            BuildTool.GRADLE  -> File("$projectBasePath/build/test-results/test")
-            BuildTool.MAVEN   -> File("$projectBasePath/target/surefire-reports")
-            BuildTool.UNKNOWN -> return TestResult(0, 0, 0, 0, durationMs, emptyList(), "빌드 도구 미감지")
-        }
+    private fun reportsDir(projectBasePath: String, buildTool: BuildTool): File? = when (buildTool) {
+        BuildTool.GRADLE  -> File("$projectBasePath/build/test-results/test")
+        BuildTool.MAVEN   -> File("$projectBasePath/target/surefire-reports")
+        BuildTool.UNKNOWN -> null
+    }
 
-        val xmlFiles = xmlDir.listFiles { f -> f.extension == "xml" }
-        if (xmlFiles.isNullOrEmpty()) {
+    /** 빌드 명령 실행 전에 reports 디렉토리의 누적 XML을 모두 제거한다. */
+    private fun cleanReportXmls(projectBasePath: String, buildTool: BuildTool) {
+        val xmlDir = reportsDir(projectBasePath, buildTool) ?: return
+        if (!xmlDir.exists()) return
+        val files = xmlDir.listFiles { f -> f.extension == "xml" } ?: return
+        var deleted = 0
+        files.forEach { if (it.delete()) deleted++ }
+        logger.info("TestExecutionService: 사전 XML 정리 (deleted=$deleted/${files.size}, dir=${xmlDir.path})")
+    }
+
+    private fun parseJUnitXml(
+        projectBasePath: String,
+        buildTool: BuildTool,
+        durationMs: Long,
+        testClassName: String
+    ): TestResult {
+        val xmlDir = reportsDir(projectBasePath, buildTool)
+            ?: return TestResult(0, 0, 0, 0, durationMs, emptyList(), "빌드 도구 미감지")
+
+        val allXmlFiles = xmlDir.listFiles { f -> f.extension == "xml" }
+        if (allXmlFiles.isNullOrEmpty()) {
             return TestResult(0, 0, 0, 0, durationMs, emptyList(),
                 "테스트 결과 XML 파일을 찾을 수 없습니다: ${xmlDir.path}")
         }
 
-        var total = 0; var failed = 0; var errors = 0
+        // surefire/Gradle 모두 `TEST-<FQCN>.xml` 또는 `<FQCN>.xml` 형태로 작성한다.
+        // testClassName이 FQCN(`.` 포함)이면 정확히 매칭하고, simple name이면 suffix 매칭한다.
+        val isFqcn = '.' in testClassName
+        val xmlFiles = allXmlFiles.filter { f ->
+            val base = f.nameWithoutExtension
+            if (isFqcn) {
+                base == testClassName || base == "TEST-$testClassName"
+            } else {
+                base == testClassName ||
+                    base.endsWith(".$testClassName") ||  // package 포함: TEST-com.example.FooTest
+                    base.endsWith("-$testClassName")     // package 없음: TEST-FooTest
+            }
+        }
+        if (xmlFiles.isEmpty()) {
+            logger.warn("TestExecutionService: 대상 클래스 XML 미발견 (testClassName=$testClassName, dir=${xmlDir.path}, total=${allXmlFiles.size}, names=${allXmlFiles.joinToString { it.name }})")
+            return TestResult(0, 0, 0, 0, durationMs, emptyList(),
+                "대상 테스트 클래스 `$testClassName` 의 결과 XML을 찾을 수 없습니다.")
+        }
+        logger.info("TestExecutionService: XML 필터링 (testClassName=$testClassName, matched=${xmlFiles.size}/${allXmlFiles.size}, kept=${xmlFiles.joinToString { it.name }})")
+
+        var total = 0; var failed = 0; var errors = 0; var skipped = 0
         val failures = mutableListOf<FailureDetail>()
+        val cases = mutableListOf<TestCaseResult>()
         val factory = DocumentBuilderFactory.newInstance()
 
         for (xmlFile in xmlFiles) {
             try {
                 val doc = factory.newDocumentBuilder().parse(xmlFile)
                 val suite = doc.documentElement
-                total  += suite.getAttribute("tests").toIntOrNull()    ?: 0
-                failed += suite.getAttribute("failures").toIntOrNull() ?: 0
-                errors += suite.getAttribute("errors").toIntOrNull()   ?: 0
+                total   += suite.getAttribute("tests").toIntOrNull()    ?: 0
+                failed  += suite.getAttribute("failures").toIntOrNull() ?: 0
+                errors  += suite.getAttribute("errors").toIntOrNull()   ?: 0
+                skipped += suite.getAttribute("skipped").toIntOrNull()  ?: 0
 
                 val testCases = suite.getElementsByTagName("testcase")
                 for (i in 0 until testCases.length) {
                     val tc = testCases.item(i) as Element
                     val name = tc.getAttribute("name")
-                    val failNode = tc.getElementsByTagName("failure").item(0)
-                        ?: tc.getElementsByTagName("error").item(0)
-                    if (failNode != null) {
-                        val msg = (failNode as Element).getAttribute("message")
-                            .ifBlank { failNode.textContent.take(300) }
+                    val failureNode = tc.getElementsByTagName("failure").item(0)
+                    val errorNode   = tc.getElementsByTagName("error").item(0)
+                    val skippedNode = tc.getElementsByTagName("skipped").item(0)
+
+                    val status = when {
+                        failureNode != null -> CaseStatus.FAILED
+                        errorNode   != null -> CaseStatus.ERROR
+                        skippedNode != null -> CaseStatus.SKIPPED
+                        else                -> CaseStatus.PASSED
+                    }
+                    cases.add(TestCaseResult(name, status))
+
+                    val failOrErr = failureNode ?: errorNode
+                    if (failOrErr != null) {
+                        val msg = (failOrErr as Element).getAttribute("message")
+                            .ifBlank { failOrErr.textContent.take(300) }
                         failures.add(FailureDetail(name, msg))
                     }
                 }
@@ -162,6 +227,7 @@ object TestExecutionService {
             }
         }
 
-        return TestResult(total, total - failed - errors, failed, errors, durationMs, failures)
+        val passed = total - failed - errors - skipped
+        return TestResult(total, passed, failed, errors, durationMs, failures, null, cases)
     }
 }

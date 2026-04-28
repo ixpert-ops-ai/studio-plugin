@@ -172,21 +172,9 @@ const MessageItem = ({ msg }: { msg: Message }) => {
     navigator.clipboard.writeText(codeOnly || msg.content).catch(() => {});
   };
 
-  const handleCreateFile = () => {
-    if (window.sendToIde) {
-      const codeOnly = extractCodeBlocks(msg.content);
-      window.sendToIde(JSON.stringify({
-        command: '/createTestFile',
-        code: codeOnly || msg.content,
-        sourceFile: msg.sourceFile || '',
-        id: msg.id
-      }));
-    }
-  };
-
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
-    <div className={`msg-ai ${isError ? 'error' : isTestResult ? 'test-result' : 'analysis'}`}>
+    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`}>
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
         {msg.content && (
@@ -225,9 +213,6 @@ const MessageItem = ({ msg }: { msg: Message }) => {
         <div className="msg-text-actions test-actions">
           <button className="btn-text-action btn-copy-code" onClick={handleCopyCode} title="테스트 코드만 클립보드에 복사">
             📋 Copy Code
-          </button>
-          <button className="btn-text-action btn-create-file" onClick={handleCreateFile} title="테스트 파일을 프로젝트에 생성">
-            📁 Create File
           </button>
           <button className="btn-text-action" onClick={handleSave} title="전체 결과를 Markdown 파일로 저장">
             💾 Save .md
