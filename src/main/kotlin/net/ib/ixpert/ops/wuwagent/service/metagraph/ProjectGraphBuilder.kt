@@ -158,8 +158,8 @@ class ProjectGraphBuilder(private val project: Project) {
             val score = node.dependedBy.size
             val risk = when {
                 score == 0 -> ChangeRisk.LOW
-                score in 1..2 -> ChangeRisk.MEDIUM
-                score in 3..7 -> ChangeRisk.HIGH
+                score == 1 -> ChangeRisk.MEDIUM
+                score == 2 -> ChangeRisk.HIGH
                 else -> ChangeRisk.CRITICAL
             }
             node.copy(riskScore = score, changeRisk = risk)

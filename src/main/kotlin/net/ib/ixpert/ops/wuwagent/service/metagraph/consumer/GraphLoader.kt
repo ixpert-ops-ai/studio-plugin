@@ -58,10 +58,26 @@ class GraphLoader(private val project: Project) {
                 val jsonContent = metaFile.readText(Charsets.UTF_8)
                 val parsedGraph = gson.fromJson(jsonContent, ProjectGraph::class.java)
                 
-                cachedGraph = parsedGraph
+                // Phase 1a JSON 하위 호환성: Gson이 누락된 컬렉션 필드를 null로 만들 수 있으므로 기본값 복구
+                val safeFiles = parsedGraph.files.mapValues { (_, node) ->
+                    node.copy(
+                        apiEndpoints = node.apiEndpoints ?: emptyList(),
+                        beanDefinitions = node.beanDefinitions ?: emptyList(),
+                        entityRelations = node.entityRelations ?: emptyList(),
+                        dependsOn = node.dependsOn ?: mutableListOf(),
+                        dependedBy = node.dependedBy ?: mutableListOf(),
+                        injections = node.injections ?: emptyList(),
+                        implementedInterfaces = node.implementedInterfaces ?: emptyList(),
+                        annotations = node.annotations ?: emptyList()
+                    )
+                }
+                
+                val safeGraph = parsedGraph.copy(files = safeFiles)
+                
+                cachedGraph = safeGraph
                 lastModifiedTime = currentModifiedTime
                 
-                return parsedGraph
+                return safeGraph
             }
 
 
