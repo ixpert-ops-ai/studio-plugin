@@ -3,6 +3,7 @@ package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.TypeResolver
+import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ChangeRisk
 
 /**
  * 추출된 서브그래프를 LLM이 이해하기 쉬운 마크다운 텍스트로 변환합니다.
@@ -32,7 +33,7 @@ object SubGraphFormatter {
         // 2. 분석 대상 (Targets)
         sb.append("### 분석 대상\n")
         for (target in subGraph.targets) {
-            sb.append("- ${formatNode(target, graph, implMap)}\n")
+            sb.append("- ${formatNode(target, graph, implMap, isTarget = true)}\n")
             // 대상의 직접 주입 정보 간략 표시
             val injections = target.injections.map { TypeResolver.unwrapGenericType(TypeResolver.toSimpleName(it.targetType)) }.distinct()
             if (injections.isNotEmpty()) {
@@ -64,7 +65,12 @@ object SubGraphFormatter {
                     " -> ${names.joinToString(", ")} 주입"
                 } else ""
                 
-                sb.append("- ${formatNode(node, graph, implMap)}$detail\n")
+                // 1차 영향도 노드 중 ChangeRisk가 HIGH 이상이면 경고 태그 추가
+                val riskTag = if (depth == 1 && (node.changeRisk == ChangeRisk.HIGH || node.changeRisk == ChangeRisk.CRITICAL)) {
+                    " ⚠️ HIGH RISK"
+                } else ""
+                
+                sb.append("- ${formatNode(node, graph, implMap)}$detail$riskTag\n")
             }
             sb.append("\n")
         }
@@ -97,7 +103,7 @@ object SubGraphFormatter {
      * 인터페이스-구현체 병합 표기를 처리하여 노드 문자열을 생성합니다.
      * 예: UserService (impl: UserServiceImpl) (SERVICE / BUSINESS)
      */
-    private fun formatNode(node: FileNode, graph: ProjectGraph, implMap: Map<String, List<FileNode>>): String {
+    private fun formatNode(node: FileNode, graph: ProjectGraph, implMap: Map<String, List<FileNode>>, isTarget: Boolean = false): String {
         var displayName = node.className
         
         if (node.isInterface) {
@@ -120,6 +126,24 @@ object SubGraphFormatter {
             }
         }
 
-        return "$displayName (${node.fileType.name} / ${node.layer.name})"
+        var result = "$displayName (${node.fileType.name} / ${node.layer.name})"
+        
+        // 타겟 노드일 경우 보강 정보 노출
+        if (isTarget) {
+            if (node.apiEndpoints.isNotEmpty()) {
+                val endpointList = node.apiEndpoints.joinToString(", ") { "[${it.httpMethod}] ${it.path}" }
+                result += " ✨ Endpoints: $endpointList"
+            }
+            if (node.beanDefinitions.isNotEmpty()) {
+                val beanList = node.beanDefinitions.joinToString(", ") { "${it.beanName}: ${it.returnType}" }
+                result += " 📦 Beans: $beanList"
+            }
+            if (node.entityRelations.isNotEmpty()) {
+                val relationList = node.entityRelations.joinToString(", ") { "${it.type} -> ${it.targetEntity}" }
+                result += " 🔗 Relations: $relationList"
+            }
+        }
+        
+        return result
     }
 }

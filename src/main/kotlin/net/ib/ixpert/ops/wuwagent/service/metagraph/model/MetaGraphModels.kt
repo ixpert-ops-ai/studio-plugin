@@ -30,13 +30,14 @@ data class FileNode(
     val superClass: String? = null,
     val implementedInterfaces: List<String> = emptyList(),
     val injections: List<DependencyInjection> = emptyList(),
-    // Phase 1b에서 채움
-    val endpoints: List<ApiEndpoint> = emptyList(),
+    // Phase 1c 보강 분석기용 데이터
+    val apiEndpoints: List<ApiEndpoint> = emptyList(),
     val beanDefinitions: List<BeanDefinition> = emptyList(),
     val entityRelations: List<EntityRelation> = emptyList(),
     val dependsOn: MutableList<String> = mutableListOf(),
     val dependedBy: MutableList<String> = mutableListOf(),
-    val changeRisk: ChangeRisk = ChangeRisk.NOT_CALCULATED
+    val changeRisk: ChangeRisk = ChangeRisk.NOT_CALCULATED,
+    val riskScore: Int = 0
 )
 
 /**

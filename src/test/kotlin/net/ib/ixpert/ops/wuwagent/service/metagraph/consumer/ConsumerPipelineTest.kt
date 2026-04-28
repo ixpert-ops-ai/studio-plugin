@@ -34,6 +34,7 @@ class ConsumerPipelineTest {
             isAbstract = false,
             dependsOn = mutableListOf("src/UserDaoImpl.java"),
             dependedBy = mutableListOf("src/IpsController.java"),
+            changeRisk = ChangeRisk.HIGH, // for testing HIGH RISK tag
             injections = listOf(
                 DependencyInjection("com.test.UserDao", "userDao", InjectionMethod.FIELD, "com.test.UserDaoImpl")
             )
@@ -84,6 +85,7 @@ class ConsumerPipelineTest {
             layer = ArchitectureLayer.PRESENTATION,
             isInterface = false,
             isAbstract = false,
+            apiEndpoints = listOf(ApiEndpoint("GET", "/api/survey", "getSurvey", "SurveyDto")),
             dependsOn = mutableListOf("src/UserServiceImpl.java", "src/SurveyServiceImpl.java") // 합류
         )
 
@@ -273,7 +275,20 @@ class ConsumerPipelineTest {
         // 상향 노드에 "UserDao 주입" 문구가 포함되었는지 확인
         assertTrue(markdown.contains("UserServiceImpl (SERVICE / BUSINESS) -> UserDao 주입"))
     }
-
+    @Test
+    fun testSubGraphFormatter_Phase1cFeatures() {
+        val graph = createAdvancedGraph()
+        
+        // 1. Target with Endpoints and 1st degree dependency with HIGH RISK
+        val subGraph = SubGraphExtractor.extract(graph, listOf("IpsController", "UserDaoImpl"))
+        val markdown = SubGraphFormatter.format(graph, subGraph)
+        
+        // Endpoints should be visible for IpsController
+        assertTrue(markdown.contains("✨ Endpoints: [GET] /api/survey"))
+        
+        // HIGH RISK should be visible for UserServiceImpl (which is HIGH risk and 1st degree of UserDaoImpl)
+        assertTrue(markdown.contains("UserServiceImpl (SERVICE / BUSINESS) -> UserDao 주입 ⚠️ HIGH RISK"))
+    }
 
     @Test
     fun testTargetExtractorStrategy2() {

@@ -39,6 +39,9 @@ class ProjectGraphBuilder(private val project: Project) {
     private val annotationResolver = SpringAnnotationResolver()
     private val dependencyResolver = DependencyResolver(project)
     private val exporter = MetaGraphExporter()
+    private val endpointAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.SpringEndpointAnalyzer()
+    private val beanAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.SpringBeanAnalyzer()
+    private val entityAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.JpaEntityAnalyzer()
 
     /**
      * 비동기로 프로젝트 그래프를 생성합니다.
@@ -150,18 +153,30 @@ class ProjectGraphBuilder(private val project: Project) {
             dependencyResolver.buildRelationships(resolvedNodes)
         }
 
+        // Phase 1c: ChangeRisk 계산
+        val scoredNodes = resolvedNodes.mapValues { (_, node) ->
+            val score = node.dependedBy.size
+            val risk = when {
+                score == 0 -> ChangeRisk.LOW
+                score in 1..2 -> ChangeRisk.MEDIUM
+                score in 3..7 -> ChangeRisk.HIGH
+                else -> ChangeRisk.CRITICAL
+            }
+            node.copy(riskScore = score, changeRisk = risk)
+        }
+
         // Step 8: GraphStatistics 계산
-        val statistics = calculateStatistics(resolvedNodes, relationships)
+        val statistics = calculateStatistics(scoredNodes, relationships)
 
         // Step 9: 그래프 조립
         indicator?.fraction = 1.0
         val elapsed = System.currentTimeMillis() - startTime
-        onProgress?.invoke("메타 그래프 생성 완료 (${resolvedNodes.size}개 파일, ${relationships.size}개 관계, ${elapsed}ms)")
+        onProgress?.invoke("메타 그래프 생성 완료 (${scoredNodes.size}개 파일, ${relationships.size}개 관계, ${elapsed}ms)")
 
         val graph = ProjectGraph(
             generatedAt = Instant.now().toString(),
             projectRoot = projectBasePath,
-            files = resolvedNodes,
+            files = scoredNodes,
             relationships = relationships,
             statistics = statistics
         )
@@ -224,7 +239,20 @@ class ProjectGraphBuilder(private val project: Project) {
         val primaryClass = classes.firstOrNull { it.hasModifierProperty(PsiModifier.PUBLIC) }
             ?: classes.first()
 
-        val node = annotationResolver.resolve(primaryClass, relativePath)
+        var node = annotationResolver.resolve(primaryClass, relativePath)
+        
+        // Phase 1c: 보강 분석기 연동
+        if (node.fileType == SpringFileType.REST_CONTROLLER || node.fileType == SpringFileType.CONTROLLER) {
+            val endpoints = endpointAnalyzer.analyze(primaryClass)
+            node = node.copy(apiEndpoints = endpoints)
+        } else if (node.fileType == SpringFileType.CONFIG) {
+            val beans = beanAnalyzer.analyze(primaryClass)
+            node = node.copy(beanDefinitions = beans)
+        } else if (node.fileType == SpringFileType.ENTITY) {
+            val relations = entityAnalyzer.analyze(primaryClass)
+            node = node.copy(entityRelations = relations)
+        }
+        
         return listOf(relativePath to node)
     }
 

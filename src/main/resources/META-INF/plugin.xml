@@ -75,5 +75,18 @@
                     text="Generate Analysis Doc (분석 문서 생성)"
                     description="현재 파일의 AI 분석 결과를 Markdown 문서로 저장합니다."/>
         </group>
+
+        <!-- Project View 컨텍스트 메뉴 그룹 -->
+        <group id="IxpertAiAssistant.ProjectViewGroup"
+               text="iXpert AI Assistant"
+               description="iXpert AI Assistant actions"
+               popup="true">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+
+            <action id="IxpertAiAssistant.MetaGraphAction"
+                    class="net.ib.ixpert.ops.wuwagent.action.MetaGraphAction"
+                    text="Generate Project MetaGraph"
+                    description="전체 프로젝트를 분석하여 메타그래프(project-graph.json)를 갱신합니다."/>
+        </group>
     </actions>
 </idea-plugin>
