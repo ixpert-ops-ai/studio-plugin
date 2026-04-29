@@ -188,6 +188,6 @@ class PsiMethodExtractorTest : LightJavaCodeInsightFixtureTestCase() {
         assertTrue("시그니처 포함", text.contains("findAll"))
         assertTrue("연관 메서드 바디 포함", text.contains("return userDao.findAll()"))
         assertTrue("위치 힌트 포함", text.contains("📍 위치: 라인 25~28"))
-        assertTrue("신규 메서드 삽입 안내 포함", text.contains("📍 신규 메서드 삽입 위치"))
+        assertTrue("신규 메서드 삽입 안내 포함", text.contains("=== 새 메서드를 여기에 추가하세요 ==="))
     }
 }
