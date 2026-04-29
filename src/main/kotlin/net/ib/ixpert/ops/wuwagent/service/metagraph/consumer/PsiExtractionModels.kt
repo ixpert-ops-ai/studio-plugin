@@ -47,38 +47,53 @@ data class ClassSkeleton(
      */
     fun toPromptText(): String = buildString {
         appendLine("// 파일: $filePath")
-        appendLine("// 패키지: $packageName")
+        appendLine("package $packageName;")
         appendLine()
 
-        // import 요약 (너무 많으면 핵심만)
-        appendLine("/* === Import 목록 === */")
-        imports.forEach { appendLine(it) }
-        appendLine()
+        // import 목록
+        if (imports.isNotEmpty()) {
+            imports.forEach { appendLine(it) }
+            appendLine()
+        }
 
-        // 클래스 선언부
-        appendLine("/* === 클래스 선언 === */")
+        // 클래스 어노테이션 + 선언
         classAnnotations.forEach { appendLine(it) }
         appendLine("$classDeclaration {")
         appendLine()
 
-        // 필드 목록
-        appendLine("    /* === 멤버 변수 === */")
-        fields.forEach { appendLine("    $it") }
-        appendLine()
+        // 필드
+        if (fields.isNotEmpty()) {
+            appendLine("    // === 필드 ===")
+            fields.forEach { appendLine("    $it") }
+            appendLine()
+        }
 
-        // 전체 메서드 시그니처 목록 (바디 생략)
-        appendLine("    /* === 메서드 시그니처 목록 (바디 생략) === */")
-        allMethodSignatures.forEach { sig ->
+        // 관련 메서드의 이름 목록 (비교용)
+        val relevantMethodNames = relevantMethodBodies.map { it.signature.name }.toSet()
+
+        // 메서드 시그니처 목록 (관련 메서드와 비관련 메서드 분리)
+        appendLine("    // === 메서드 시그니처 목록 ===")
+        appendLine("    // (아래는 이 클래스에 존재하는 메서드 시그니처입니다)")
+        appendLine("    // (⚠️ 이 시그니처들을 보고 메서드 전체를 재작성하지 마세요)")
+        
+        // 관련 메서드 시그니처만 개별 표시
+        allMethodSignatures.filter { it.name in relevantMethodNames }.forEach { sig ->
             val annotations = if (sig.annotations.isNotEmpty()) {
                 sig.annotations.joinToString(" ") + " "
             } else ""
-            appendLine("    ${annotations}${sig.accessModifier} ${sig.returnType} ${sig.name}(${sig.parameters.joinToString(", ")});")
+            appendLine("    // → ${annotations}${sig.accessModifier} ${sig.returnType} ${sig.name}(${sig.parameters.joinToString(", ")})  [관련 메서드 - 본문 아래 참조]")
+        }
+
+        // 비관련 메서드는 개수만 표시
+        val unrelatedCount = allMethodSignatures.count { it.name !in relevantMethodNames }
+        if (unrelatedCount > 0) {
+            appendLine("    // → ... 외 ${unrelatedCount}개 기존 메서드 (변경 불필요, 시그니처 생략)")
         }
         appendLine()
 
         // 연관 메서드 바디 (키워드 매칭된 것만)
         if (relevantMethodBodies.isNotEmpty()) {
-            appendLine("    /* === 연관 메서드 상세 코드 (수정 대상 후보) === */")
+            appendLine("    // === 관련 메서드 본문 ===")
             relevantMethodBodies.forEach { method ->
                 appendLine("    // 📍 위치: 라인 ${method.startLine}~${method.endLine}")
                 if (method.lineCount > 50) { // PsiMethodExtractor.METHOD_BODY_LINE_LIMIT와 동기화
@@ -91,9 +106,8 @@ data class ClassSkeleton(
             }
         }
 
-        if (isNewMethodRequired) {
-            appendLine("    // 📍 신규 메서드 삽입 위치: 클래스 바디 하단")
-            appendLine("    // (새 메서드를 아래에 작성하세요)")
+        if (isNewMethodRequired || relevantMethodBodies.isEmpty()) {
+            appendLine("    // === 새 메서드를 여기에 추가하세요 ===")
         }
 
         appendLine("}")
