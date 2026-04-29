@@ -443,6 +443,9 @@ class ImplementationPipeline(
         targetFile: TargetFileSpec,
         allTargetFiles: List<TargetFileSpec>
     ): String {
+        logger.warn("=== filterInterfaceHallucination 호출됨: ${targetFile.path} ===")
+        logger.warn("=== 응답 길이: ${responseText.length}자 ===")
+
         val absolutePath = "${project.basePath}/${targetFile.path}".replace("//", "/")
         val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath) ?: return responseText
         val originalSource = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
@@ -493,6 +496,7 @@ class ImplementationPipeline(
         hallucinatedMethods.forEach { methodName ->
             // 메서드 선언 줄 제거 (세미콜론으로 끝나는 인터페이스 메서드)
             // 앞에 붙은 Javadoc 주석과 함께 제거 시도
+            logger.warn("인터페이스 환각 메서드 제거 시도: $methodName in ${targetFile.path}")
             val pattern = Regex("""(?:/\*\*[\s\S]*?\*/\s*\n)?\s*.*\b$methodName\s*\([^)]*\)\s*(?:throws\s+[^;]+)?\s*;[^\n]*\n?""")
             filteredResponse = filteredResponse.replace(pattern, "")
             logger.info("환각 메서드 제거 완료: $methodName")
