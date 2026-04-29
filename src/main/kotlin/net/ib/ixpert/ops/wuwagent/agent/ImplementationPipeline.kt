@@ -288,6 +288,14 @@ class ImplementationPipeline(
         }
         val contextChainStr = if (contextChain.isEmpty()) "없음" else contextChain.joinToString("\n")
         
+        // DAO 계층 여부 판별 (지침 6번에 활용)
+        val isDaoLayer = targetFile.path.lowercase().let { p ->
+            p.contains("dao") || p.contains("repository")
+        }
+        val daoWarning = if (isDaoLayer) {
+            "\n6. **이 파일은 DAO/Repository 계층입니다.** 인증(JWT/Session) 검증 로직을 절대 넣지 마세요. 인증은 Controller 또는 Filter에서 처리합니다."
+        } else ""
+
         return """
             ## 🎯 현재 작업 대상 (가장 중요)
             - **파일 경로**: `${targetFile.path}`
@@ -297,7 +305,10 @@ class ImplementationPipeline(
             ## 💡 필수 구현 지침
             1. 위 **수정/추가 내용**에 명시된 모든 로직을 반드시 구현해야 합니다.
             2. 특히 메서드명이나 필드명이 명시되어 있다면 토씨 하나 틀리지 않고 정확히 사용하세요.
-            3. 요구사항에 '우회(bypass)', '예외', '허용' 등의 조건이 있다면, 해당 조건이 로직에 올바르게 반영되었는지 확인하세요. (반대로 구현하지 않도록 주의)
+            3. '우회(bypass)', '허용' 등의 조건이 있으면 해당 조건일 때 **통과(skip/continue/chain.doFilter)**시키는 로직을 작성하세요. 차단(block)이 아닙니다.
+            4. 위 '수정/추가 내용'에 **언급되지 않은** 메서드를 새로 만들지 마세요.
+            5. 위 '수정/추가 내용'에 **언급되지 않은** 필드나 변수를 추가하지 마세요.$daoWarning
+            7. 이전 단계에서 생성된 메서드를 호출할 때, [이전 컨텍스트]의 시그니처와 파라미터 수/타입이 일치하도록 작성하세요.
             
             ---
             
@@ -388,7 +399,10 @@ class ImplementationPipeline(
                반복적으로 선언하는 것은 금지입니다. 오직 요구사항에 명시된 필드만 추가하세요.
             6. 변수 선언은 요구사항에서 요청한 것만 최소한으로 작성하세요.
                비슷한 이름의 변수를 번호를 붙여 반복 생성하지 마세요.
-            7. 요구사항에 '우회', '허용' 등의 조건이 있다면 로직의 방향이 정반대로 구현되지 않도록 논리 구조를 철저히 검토하세요.
+            7. 요구사항에 '우회(bypass)', '허용', '예외' 등의 조건이 있다면 로직 방향을 철저히 검토하세요.
+               - 예시: "Bearer JWT가 있으면 필터 바이패스" -> 올바른 구현: `if (token != null && token.startsWith("Bearer ")) { chain.doFilter(req, res); return; }`
+               - 잘못된 구현 (절대 금지): 토큰이 없을 때 401 반환하고 토큰 있을 때 검증 후 진행.
+            8. DAO/Repository 파일에는 인증(JWT/Session) 검증 로직을 넣지 마세요.
         """.trimIndent()
 
         val interfaceRule = if (isInterface) """
@@ -442,7 +456,10 @@ class ImplementationPipeline(
                기존 코드에 없는 필드를 반복적으로 선언하는 것은 금지입니다. 오직 요구사항에 명시된 필드만 추가하세요.
             10. 변수 선언은 요구사항에서 요청한 것만 최소한으로 작성하세요.
                 비슷한 이름의 변수를 번호를 붙여 반복 생성하지 마세요.
-            11. 요구사항에 '우회', '허용' 등의 조건이 있다면 로직의 방향이 정반대로 구현되지 않도록 논리 구조를 철저히 검토하세요.
+            11. 요구사항에 '우회(bypass)', '허용' 등의 조건이 있다면 로직 방향을 철저히 검토하세요.
+                '바이패스' = 해당 조건이면 처리를 건너뛰고 다음 단계로 진행(chain.doFilter 등).
+                절대로 '바이패스' 조건에서 차단(block/reject/return error)하지 마세요.
+            12. DAO/Repository 파일에는 인증(JWT/Session) 검증 로직을 넣지 마세요.
         """.trimIndent()
 
         val interfaceRule = if (isInterface) """
