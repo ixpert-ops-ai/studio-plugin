@@ -40,8 +40,8 @@ class OllamaClient {
             options = mapOf(
                 "temperature" to settings.temperature,
                 "num_ctx" to settings.contextWindow,
-                "num_predict" to 12000,
-                "repeat_penalty" to 1.3,
+                "num_predict" to 4096,
+                "repeat_penalty" to 1.5,
                 "repeat_last_n" to 256
             )
         )

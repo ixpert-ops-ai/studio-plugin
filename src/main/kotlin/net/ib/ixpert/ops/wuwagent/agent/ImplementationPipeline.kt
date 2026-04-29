@@ -65,37 +65,39 @@ class ImplementationPipeline(
             logger.info("Processing target: ${target.path}")
             
             var fullResponse = ""
-            var lastChunks = ArrayDeque<String>(5)
-            var repeatCount = 0
-            val MAX_REPEAT = 3
-            val MAX_RESPONSE_LENGTH = 15_000
+            var consecutiveRepeatCount = 0
+            val MAX_RESPONSE_CHARS = 15_000
 
             try {
                 val response = client.callChatApiStream(systemPrompt, userPrompt) { chunk ->
-                    // 반복 감지
-                    if (lastChunks.size >= 5) {
-                        val recentPattern = lastChunks.joinToString("")
-                        if (recentPattern.length > 100 && fullResponse.contains(recentPattern, ignoreCase = true)) {
-                            repeatCount++
-                            if (repeatCount >= MAX_REPEAT) {
-                                logger.warn("반복 패턴 감지, 응답 조기 중단: ${target.path}")
-                                onChunk("\n\n> ⚠️ **반복 패턴이 감지되어 생성을 중단합니다.** 수동 확인이 필요합니다.\n\n")
-                                throw RepetitionDetectedException(target.path)
-                            }
-                        }
-                        lastChunks.removeFirst()
-                    }
-                    lastChunks.addLast(chunk)
+                    fullResponse += chunk
 
-                    // 응답 길이 상한 초과 시 중단
-                    if (fullResponse.length > MAX_RESPONSE_LENGTH) {
-                        logger.warn("응답 길이 상한 초과 (${fullResponse.length}자), 조기 중단: ${target.path}")
-                        onChunk("\n\n> ⚠️ **응답이 비정상적으로 길어 생성을 중단합니다.** 수동 확인이 필요합니다.\n\n")
+                    // === 가드 1: 응답 길이 상한 ===
+                    if (fullResponse.length > MAX_RESPONSE_CHARS) {
+                        logger.warn("응답 길이 상한 초과 (${fullResponse.length}자): ${target.path}")
                         throw ResponseTooLongException(target.path)
                     }
 
+                    // === 가드 2: 반복 패턴 감지 ===
+                    val lines = fullResponse.lines()
+                    if (lines.size > 10) {
+                        val recentLines = lines.takeLast(10)
+                        val uniquePatterns = recentLines.map { line ->
+                            line.trim().replace(Regex("\\d+"), "")
+                        }.filter { it.isNotEmpty() }.toSet()
+
+                        if (uniquePatterns.size <= 2 && recentLines.all { it.trim().isNotEmpty() }) {
+                            consecutiveRepeatCount++
+                            if (consecutiveRepeatCount >= 3) {
+                                logger.warn("반복 패턴 감지 (고유 패턴 ${uniquePatterns.size}개): ${target.path}")
+                                throw RepetitionDetectedException(target.path)
+                            }
+                        } else {
+                            consecutiveRepeatCount = 0
+                        }
+                    }
+
                     onChunk(chunk)
-                    fullResponse += chunk
                 }
 
                 val finalResponseText = response?.message?.content ?: fullResponse
@@ -126,8 +128,10 @@ class ImplementationPipeline(
                     logger.warn("[MODIFIED_SIGNATURES] 블록이 생성되지 않음: ${target.path}")
                 }
             } catch (e: RepetitionDetectedException) {
+                onChunk("\n\n> ⚠️ **반복 패턴이 감지되어 생성을 중단했습니다.** `${target.path}`는 수동 수정이 필요합니다.\n\n")
                 continue
             } catch (e: ResponseTooLongException) {
+                onChunk("\n\n> ⚠️ **응답이 비정상적으로 길어 생성을 중단했습니다.** `${target.path}`는 수동 수정이 필요합니다.\n\n")
                 generatedSnippets[target.path] = fullResponse
                 continue
             } catch (e: Exception) {
@@ -281,12 +285,17 @@ class ImplementationPipeline(
             3. 생략(`...`) 없이 모든 메서드와 로직을 완전하게 작성하세요.
             4. 이전 파일들에서 추가/변경된 메서드가 있다면, 그 시그니처를 참고하여 코드를 작성하세요.
                (특히, 이전 파일 수정 요약에 기재된 메서드 시그니처(메서드명, 파라미터 타입, 반환 타입)를 정확히 사용하세요. 임의로 메서드명을 변경하지 마세요.)
-            
+            5. **절대로 존재하지 않는 변수나 필드를 임의로 생성하지 마세요.**
+               기존 코드에 없는 필드(예: userAuthGroupLevel1, alimtalk_image_link_custom 등)를 
+               반복적으로 선언하는 것은 금지입니다. 오직 요구사항에 명시된 필드만 추가하세요.
+            6. 변수 선언은 요구사항에서 요청한 것만 최소한으로 작성하세요.
+               비슷한 이름의 변수를 번호를 붙여 반복 생성하지 마세요.
+
             ## 출력 포맷
             반드시 아래의 마크다운 형식을 지켜서 출력하세요. 코드 블록 앞에는 반드시 파일 경로를 주석으로 명시해야 합니다.
             그 외의 부가 설명은 하지 마세요. 단, 응답의 맨 마지막 줄에만 `[MODIFIED_SIGNATURES]` 태그를 달고, 
             이번 파일에서 새롭게 추가되거나 변경된 public 메서드의 시그니처를 한 줄씩 요약해서 적어주세요. (다음 파일의 컨텍스트로 사용됨)
-            
+
             // 파일: (현재 파일 경로)
             ```java
             (전체 소스 코드)
@@ -308,12 +317,15 @@ class ImplementationPipeline(
                - 신규 메서드 추가: // 📍 삽입 위치: {파일명} → 클래스 바디 하단 (새 메서드)
             4. 기존 메서드를 교체할 때, 변경하지 않는 로직 부분도 생략하지 말고 전체를 작성하세요. 
                `// ... 기존 코드 ...` 같은 생략 표현을 절대 사용하지 마세요.
-            5. 필요한 import문이 있으면 코드 블록 최상단에 별도로 나열하세요:
-               // 📍 추가 import
-               import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+            5. 필요한 import문이 있으면 코드 블록 최상단에 별도로 나열하세요.
             6. 기존 코드 스타일(어노테이션 사용 패턴, 네이밍 컨벤션)을 유지하세요.
             7. 이전 파일 수정 요약에 기재된 메서드 시그니처(메서드명, 파라미터 타입, 반환 타입)를 정확히 사용하세요. 임의로 메서드명을 변경하지 마세요.
             8. 코드 블록 마지막에 [MODIFIED_SIGNATURES] 태그로 변경/추가된 메서드 시그니처를 나열하세요.
+            9. **절대로 존재하지 않는 변수나 필드를 임의로 생성하지 마세요.**
+               기존 코드에 없는 필드(예: userAuthGroupLevel1, alimtalk_image_link_custom 등)를 
+               반복적으로 선언하는 것은 금지입니다. 오직 요구사항에 명시된 필드만 추가하세요.
+            10. 변수 선언은 요구사항에서 요청한 것만 최소한으로 작성하세요.
+                비슷한 이름의 변수를 번호를 붙여 반복 생성하지 마세요.
         """.trimIndent()
     }
     private class RepetitionDetectedException(val filePath: String) : RuntimeException()
