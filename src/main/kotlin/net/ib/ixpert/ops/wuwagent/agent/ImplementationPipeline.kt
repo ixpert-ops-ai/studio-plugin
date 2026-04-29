@@ -304,7 +304,23 @@ class ImplementationPipeline(
                 appendLine("${num++}. ⚠️ **이 파일은 DAO/Repository 계층입니다.** 인증(JWT/Session) 검증 로직을 절대 넣지 마세요. 인증은 Controller 또는 Filter에서 처리합니다.")
             }
             appendLine("${num++}. 이전 단계에서 생성된 메서드를 호출할 때, [이전 컨텍스트]의 시그니처와 파라미터 수/타입이 일치하도록 작성하세요.")
+            appendLine("${num++}. **static/instance 호출 일치**: [이전 컨텍스트]에 'static' 키워드가 있다면 ClassName.methodName()으로 호출하고, 없으면 객체를 주입받아 호출하세요.")
         }
+
+        val bypassTemplate = if (targetFile.description.lowercase().let { it.contains("bypass") || it.contains("우회") || it.contains("허용") }) {
+            """
+                
+                ⚠️ **바이패스 구현 필수 패턴**:
+                요구사항에 '바이패스'나 '우회'가 있다면 아래 패턴을 그대로 사용하세요.
+                ```java
+                if (조건) { 
+                    chain.doFilter(request, response); // 다음 필터로 진행
+                    return; // 현재 로직 중단
+                }
+                ```
+                조건 불일치 시 에러를 반환하거나 인증을 강제하는 로직을 추가하지 마세요.
+            """.trimIndent()
+        } else ""
 
         return """
             ## 🎯 현재 작업 대상 (가장 중요)
@@ -313,6 +329,7 @@ class ImplementationPipeline(
             - **수정/추가 내용**: `${targetFile.description}`
             
             **주의**: 오직 위 파일 하나에 대해서만 코드를 생성하세요. 계획에 없는 다른 파일(Security Filter 등)을 임의로 생성하지 마세요.
+            $bypassTemplate
             
             $guidelines
             
@@ -470,6 +487,8 @@ class ImplementationPipeline(
             12. DAO/Repository 파일에는 인증(JWT/Session) 검증 로직을 넣지 마세요.
             13. **오직 현재 타겟 파일 하나만 생성하세요.** 계획에 없는 추가 파일을 임의로 생성하지 마세요.
             14. 유틸리티 클래스 호출 시 static/instance 성격을 구분하세요. `@Component` 인스턴스 메서드를 static으로 호출하지 마세요.
+            15. **신규 메서드 생성 제한**: 요구사항에 명시되지 않은 메서드를 임의로 대량 생성하지 마세요. (최대 5개 제한)
+            16. **생략 금지**: 기존 메서드를 교체할 때 `// ... 기존 코드 ...` 같은 생략 표현을 절대 사용하지 마세요.
         """.trimIndent()
 
         val interfaceRule = if (isInterface) """
