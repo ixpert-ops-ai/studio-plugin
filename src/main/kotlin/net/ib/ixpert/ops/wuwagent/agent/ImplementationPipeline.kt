@@ -42,6 +42,11 @@ class ImplementationPipeline(
         val contextChain = mutableListOf<String>()
         val generatedSnippets = mutableMapOf<String, String>()
 
+        // 전략별 파일 추적
+        val fullFileResults = mutableListOf<String>()
+        val snippetFileResults = mutableListOf<String>()
+        val skippedFileResults = mutableListOf<String>()
+
         for ((index, target) in sortedTargets.withIndex()) {
             val progressHeader = "\n\n### 🔄 [${index + 1}/${sortedTargets.size}] `${target.path}` 처리 중...\n\n"
             onChunk(progressHeader)
@@ -59,6 +64,7 @@ class ImplementationPipeline(
             // Fallback guide returned from buildUserPromptForFile means skipping
             if (userPrompt.startsWith("> ⚠️")) {
                 onChunk(userPrompt)
+                skippedFileResults.add(target.path)
                 continue
             }
 
@@ -115,11 +121,18 @@ class ImplementationPipeline(
                     if (abortReason == "LENGTH") {
                         generatedSnippets[target.path] = fullResponse
                     }
+                    skippedFileResults.add(target.path)
                     continue
                 }
 
                 val finalResponseText = response?.message?.content ?: fullResponse
                 generatedSnippets[target.path] = finalResponseText // Phase 2c 단위 테스트 생성을 위해 응답 캐시 저장
+
+                if (isLargeFile) {
+                    snippetFileResults.add(target.path)
+                } else {
+                    fullFileResults.add(target.path)
+                }
 
                 if (finalResponseText.contains("[MODIFIED_SIGNATURES]")) {
                     val signaturesText = finalResponseText.substringAfter("[MODIFIED_SIGNATURES]").trim()
@@ -147,7 +160,8 @@ class ImplementationPipeline(
                 }
             } catch (e: Exception) {
                 logger.error("Error processing file ${target.path}", e)
-                onChunk("\n\n> ❌ **코드 생성 중 에러가 발생하여 이 파일을 건너뜜:** `${e.message}`\n\n")
+                onChunk("\n\n> ❌ **코드 생성 중 에러가 발생하여 이 파일을 건너뜁니다:** `${e.message}`\n\n")
+                skippedFileResults.add(target.path)
                 continue
             }
         }
@@ -157,7 +171,40 @@ class ImplementationPipeline(
             generatedSnippets = generatedSnippets
         )
 
-        onChunk("\n\n✅ **모든 파일의 자동 코드 수정 제안이 완료되었습니다.**\n수정된 코드를 확인하시고 Apply 버튼을 눌러 적용해주세요.")
+        onChunk(buildCompletionMessage(fullFileResults, snippetFileResults, skippedFileResults))
+    }
+
+    private fun buildCompletionMessage(
+        fullFiles: List<String>,
+        snippetFiles: List<String>,
+        skippedFiles: List<String>
+    ): String {
+        val sb = StringBuilder("\n\n---\n\n## ✅ 코드 생성 완료\n\n")
+
+        if (fullFiles.isNotEmpty()) {
+            sb.append("### 📄 전체 코드 생성 완료 (Apply 적용 가능)\n")
+            sb.append("다음 파일들은 전체 코드가 생성되었습니다. 코드를 확인 후 Apply 버튼으로 적용할 수 있습니다.\n")
+            fullFiles.forEach { sb.append("- `$it`\n") }
+            sb.append("\n")
+        }
+
+        if (snippetFiles.isNotEmpty()) {
+            sb.append("### 📝 스니펫 생성 완료 (수동 적용 필요)\n")
+            sb.append("다음 파일들은 대형 파일이므로 변경/추가할 메서드 스니펫만 생성되었습니다.\n")
+            sb.append("`// 📍` 위치 힌트를 참고하여 해당 위치에 직접 삽입하거나 교체해주세요.\n")
+            snippetFiles.forEach { sb.append("- `$it`\n") }
+            sb.append("\n")
+        }
+
+        if (skippedFiles.isNotEmpty()) {
+            sb.append("### ⚠️ 건너뛴 파일\n")
+            sb.append("다음 파일들은 반복 감지, 파싱 실패 또는 오류로 처리되지 않았습니다. 수동 확인이 필요합니다.\n")
+            skippedFiles.forEach { sb.append("- `$it`\n") }
+            sb.append("\n")
+        }
+
+        sb.append("💡 생성된 코드에 대한 테스트를 자동으로 만들려면 `/test-all`을 입력하세요.")
+        return sb.toString()
     }
 
     private fun buildUserPromptForFile(
