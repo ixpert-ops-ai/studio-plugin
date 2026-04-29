@@ -76,6 +76,7 @@ class ImplementationPipeline(
                 continue
             }
 
+            logger.info("파일 판별: ${target.path} → isInterface=$isInterface, isLargeFile=$isLargeFile, isDtoOrEntity=$isDtoOrEntity")
             logger.info("Processing target: ${target.path}")
             
             var fullResponse = ""
@@ -154,11 +155,11 @@ class ImplementationPipeline(
                     fullFileResults.add(target.path)
                 }
 
-                if (finalResponseText.contains("[MODIFIED_SIGNATURES]")) {
-                    val signaturesText = finalResponseText.substringAfter("[MODIFIED_SIGNATURES]").trim()
+                if (processedResponse.contains("[MODIFIED_SIGNATURES]")) {
+                    val signaturesText = processedResponse.substringAfter("[MODIFIED_SIGNATURES]").trim()
                     if (signaturesText.isNotBlank()) {
                         // [수정 2] 응답 코드 블록 내에 해당 시그니처의 메서드명이 존재하는지 검증
-                        val responseBody = finalResponseText.substringBefore("[MODIFIED_SIGNATURES]")
+                        val responseBody = processedResponse.substringBefore("[MODIFIED_SIGNATURES]")
                         val validSignatures = signaturesText.lines().filter { line ->
                             val methodNameMatch = Regex("""\b([a-zA-Z_]\w*)\s*\(""").find(line)
                             if (methodNameMatch != null) {
