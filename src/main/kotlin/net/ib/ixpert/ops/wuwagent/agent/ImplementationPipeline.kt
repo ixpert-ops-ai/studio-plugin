@@ -66,16 +66,20 @@ class ImplementationPipeline(
             
             var fullResponse = ""
             var consecutiveRepeatCount = 0
+            var abortReason: String? = null // null=정상, "REPEAT", "LENGTH"
             val MAX_RESPONSE_CHARS = 15_000
 
             try {
                 val response = client.callChatApiStream(systemPrompt, userPrompt) { chunk ->
+                    if (abortReason != null) return@callChatApiStream
+
                     fullResponse += chunk
 
                     // === 가드 1: 응답 길이 상한 ===
                     if (fullResponse.length > MAX_RESPONSE_CHARS) {
                         logger.warn("응답 길이 상한 초과 (${fullResponse.length}자): ${target.path}")
-                        throw ResponseTooLongException(target.path)
+                        abortReason = "LENGTH"
+                        return@callChatApiStream
                     }
 
                     // === 가드 2: 반복 패턴 감지 ===
@@ -90,7 +94,8 @@ class ImplementationPipeline(
                             consecutiveRepeatCount++
                             if (consecutiveRepeatCount >= 3) {
                                 logger.warn("반복 패턴 감지 (고유 패턴 ${uniquePatterns.size}개): ${target.path}")
-                                throw RepetitionDetectedException(target.path)
+                                abortReason = "REPEAT"
+                                return@callChatApiStream
                             }
                         } else {
                             consecutiveRepeatCount = 0
@@ -98,6 +103,19 @@ class ImplementationPipeline(
                     }
 
                     onChunk(chunk)
+                }
+
+                if (abortReason != null) {
+                    val msg = when (abortReason) {
+                        "REPEAT" -> "\n\n> ⚠️ **반복 패턴이 감지되어 생성을 중단했습니다.** `${target.path}`는 수동 수정이 필요합니다.\n\n"
+                        "LENGTH" -> "\n\n> ⚠️ **응답이 비정상적으로 길어 생성을 중단했습니다.** `${target.path}`는 수동 수정이 필요합니다.\n\n"
+                        else -> ""
+                    }
+                    onChunk(msg)
+                    if (abortReason == "LENGTH") {
+                        generatedSnippets[target.path] = fullResponse
+                    }
+                    continue
                 }
 
                 val finalResponseText = response?.message?.content ?: fullResponse
@@ -127,16 +145,9 @@ class ImplementationPipeline(
                 } else {
                     logger.warn("[MODIFIED_SIGNATURES] 블록이 생성되지 않음: ${target.path}")
                 }
-            } catch (e: RepetitionDetectedException) {
-                onChunk("\n\n> ⚠️ **반복 패턴이 감지되어 생성을 중단했습니다.** `${target.path}`는 수동 수정이 필요합니다.\n\n")
-                continue
-            } catch (e: ResponseTooLongException) {
-                onChunk("\n\n> ⚠️ **응답이 비정상적으로 길어 생성을 중단했습니다.** `${target.path}`는 수동 수정이 필요합니다.\n\n")
-                generatedSnippets[target.path] = fullResponse
-                continue
             } catch (e: Exception) {
                 logger.error("Error processing file ${target.path}", e)
-                onChunk("\n\n> ❌ **코드 생성 중 에러가 발생하여 이 파일을 건너뜁니다:** `${e.message}`\n\n")
+                onChunk("\n\n> ❌ **코드 생성 중 에러가 발생하여 이 파일을 건너뜜:** `${e.message}`\n\n")
                 continue
             }
         }
@@ -328,6 +339,5 @@ class ImplementationPipeline(
                 비슷한 이름의 변수를 번호를 붙여 반복 생성하지 마세요.
         """.trimIndent()
     }
-    private class RepetitionDetectedException(val filePath: String) : RuntimeException()
-    private class ResponseTooLongException(val filePath: String) : RuntimeException()
+    // 가이드 및 프롬프트 생성 유틸들
 }
