@@ -140,7 +140,7 @@ class ImplementationPipeline(
 
                 // 인터페이스 파일인 경우 환각 메서드 필터링
                 val processedResponse = if (isInterface) {
-                    val filtered = filterInterfaceHallucination(finalResponseText, target, sortedTargets)
+                    val filtered = runReadAction { filterInterfaceHallucination(finalResponseText, target, sortedTargets) }
                     if (filtered != finalResponseText) {
                         logger.info("인터페이스 환각 필터링 적용: ${target.path}")
                         // 필터링된 결과를 사용자에게 다시 표시 (원본 스트리밍 응답이 이미 출력되었으므로 추가 안내)

@@ -1,5 +1,6 @@
 package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
 
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -56,13 +57,15 @@ class PsiMethodExtractor(private val project: Project) {
             project.basePath + "/" + filePath.replace("//", "/")
         ) ?: return false
 
-        val content = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
-        val lineCount = content.lines().size
-        val estimatedTokens = content.length / 3  // 한국어/FQN 포함 보수적 추정
+        val isLarge = runReadAction {
+            val content = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
+            val lineCount = content.lines().size
+            val estimatedTokens = content.length / 3  // 한국어/FQN 포함 보수적 추정
+            lineCount > LINE_THRESHOLD || estimatedTokens > TOKEN_THRESHOLD
+        }
 
-        val isLarge = lineCount > LINE_THRESHOLD || estimatedTokens > TOKEN_THRESHOLD
         if (isLarge) {
-            logger.info("대형 파일 감지: $filePath (${lineCount}줄, ~${estimatedTokens}토큰)")
+            logger.info("대형 파일 감지: $filePath")
         }
         return isLarge
     }
@@ -114,10 +117,10 @@ class PsiMethodExtractor(private val project: Project) {
     // PSI 파일 조회
     // ──────────────────────────────────────────────
 
-    private fun findPsiFile(relativePath: String): PsiFile? {
+    private fun findPsiFile(relativePath: String): PsiFile? = runReadAction {
         val absolutePath = project.basePath + "/" + relativePath.replace("//", "/")
-        val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath) ?: return null
-        return PsiManager.getInstance(project).findFile(virtualFile)
+        val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath) ?: return@runReadAction null
+        PsiManager.getInstance(project).findFile(virtualFile)
     }
 
     // ──────────────────────────────────────────────
