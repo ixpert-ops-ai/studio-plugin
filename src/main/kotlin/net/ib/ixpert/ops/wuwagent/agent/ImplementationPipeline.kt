@@ -1,5 +1,6 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -65,7 +66,7 @@ class ImplementationPipeline(
                     p.endsWith("mapper.java")
                 )
             }
-            val isLargeFile = !isNewFile && !isDtoOrEntity && psiMethodExtractor.isLargeFile(target.path)
+            val isLargeFile = !isNewFile && !isDtoOrEntity && runReadAction { psiMethodExtractor.isLargeFile(target.path) }
             
             val systemPrompt = if (isLargeFile) buildLargeFileSystemPrompt(isInterface) else buildSmallFileSystemPrompt(isInterface)
             val userPrompt = buildUserPromptForFile(target, contextChain, analysisResult.summary, sortedTargets)
@@ -268,7 +269,7 @@ class ImplementationPipeline(
 
         return if (correctedTarget.type.contains("신규")) {
             buildNewFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
-        } else if (!isDtoOrEntity && psiMethodExtractor.isLargeFile(correctedTarget.path)) {
+        } else if (!isDtoOrEntity && runReadAction { psiMethodExtractor.isLargeFile(correctedTarget.path) }) {
             buildLargeFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
         } else {
             buildSmallFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
@@ -386,11 +387,13 @@ class ImplementationPipeline(
         requirementSummary: String,
         allTargetFiles: List<TargetFileSpec>
     ): String {
-        val skeleton = psiMethodExtractor.extract(
-            filePath = targetFile.path,
-            taskDescription = targetFile.description,
-            taskType = targetFile.type
-        )
+        val skeleton = runReadAction {
+            psiMethodExtractor.extract(
+                filePath = targetFile.path,
+                taskDescription = targetFile.description,
+                taskType = targetFile.type
+            )
+        }
 
         if (skeleton == null) {
             logger.warn("스켈레톤 추출 실패, 스킵: ${targetFile.path}")
