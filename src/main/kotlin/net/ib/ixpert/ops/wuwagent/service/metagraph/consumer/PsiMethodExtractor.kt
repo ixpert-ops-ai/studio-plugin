@@ -258,20 +258,22 @@ class PsiMethodExtractor(private val project: Project) {
 
         return psiClass.methods
             .mapNotNull { method ->
-                val score = calculateMatchScore(method.name, keywords)
-                if (score >= KEYWORD_MATCH_THRESHOLD) {
-                    logger.debug("연관 메서드 발견: ${method.name} (score: ${"%.2f".format(score)})")
+                    val score = calculateMatchScore(method.name, keywords)
+                    logger.info("메서드 매칭 점수: ${method.name} = $score (임계값: $KEYWORD_MATCH_THRESHOLD)")
+                    if (score >= KEYWORD_MATCH_THRESHOLD) {
+                        logger.info("연관 메서드 발견: ${method.name} (score: ${"%.2f".format(score)})")
 
-                    val startLine = document?.getLineNumber(method.textRange.startOffset)?.plus(1) ?: -1
-                    val endLine = document?.getLineNumber(method.textRange.endOffset)?.plus(1) ?: -1
-                    val fullBody = method.text
-                    val lineCount = endLine - startLine + 1
+                        val startLine = document?.getLineNumber(method.textRange.startOffset)?.plus(1) ?: -1
+                        val endLine = document?.getLineNumber(method.textRange.endOffset)?.plus(1) ?: -1
+                        val fullBody = method.text
+                        val lineCount = endLine - startLine + 1
 
-                    val bodyToUse = if (lineCount > METHOD_BODY_LINE_LIMIT) {
-                        buildTruncatedBody(method)
-                    } else {
-                        fullBody
-                    }
+                        val bodyToUse = if (lineCount > METHOD_BODY_LINE_LIMIT) {
+                            logger.info("메서드 본문 축약 적용: ${method.name} (${lineCount}줄)")
+                            buildTruncatedBody(method)
+                        } else {
+                            fullBody
+                        }
 
                     MethodBody(
                         signature = extractSignature(method),
