@@ -288,13 +288,23 @@ class ImplementationPipeline(
         }
         val contextChainStr = if (contextChain.isEmpty()) "없음" else contextChain.joinToString("\n")
         
-        // DAO 계층 여부 판별 (지침 6번에 활용)
         val isDaoLayer = targetFile.path.lowercase().let { p ->
             p.contains("dao") || p.contains("repository")
         }
-        val daoWarning = if (isDaoLayer) {
-            "\n6. **이 파일은 DAO/Repository 계층입니다.** 인증(JWT/Session) 검증 로직을 절대 넣지 마세요. 인증은 Controller 또는 Filter에서 처리합니다."
-        } else ""
+
+        val guidelines = buildString {
+            var num = 1
+            appendLine("## 💡 필수 구현 지침")
+            appendLine("${num++}. 위 **수정/추가 내용**에 명시된 모든 로직을 반드시 구현해야 합니다.")
+            appendLine("${num++}. 특히 메서드명이나 필드명이 명시되어 있다면 토씨 하나 틀리지 않고 정확히 사용하세요.")
+            appendLine("${num++}. '우회(bypass)', '허용' 등의 조건이 있으면 해당 조건일 때 **통과(skip/continue/chain.doFilter)**시키는 로직을 작성하세요. 차단(block)이 아닙니다.")
+            appendLine("${num++}. 위 '수정/추가 내용'에 **언급되지 않은** 메서드를 새로 만들지 마세요.")
+            appendLine("${num++}. 위 '수정/추가 내용'에 **언급되지 않은** 필드나 변수를 추가하지 마세요.")
+            if (isDaoLayer) {
+                appendLine("${num++}. ⚠️ **이 파일은 DAO/Repository 계층입니다.** 인증(JWT/Session) 검증 로직을 절대 넣지 마세요. 인증은 Controller 또는 Filter에서 처리합니다.")
+            }
+            appendLine("${num++}. 이전 단계에서 생성된 메서드를 호출할 때, [이전 컨텍스트]의 시그니처와 파라미터 수/타입이 일치하도록 작성하세요.")
+        }
 
         return """
             ## 🎯 현재 작업 대상 (가장 중요)
@@ -302,13 +312,7 @@ class ImplementationPipeline(
             - **작업 유형**: `${targetFile.type}`
             - **수정/추가 내용**: `${targetFile.description}`
             
-            ## 💡 필수 구현 지침
-            1. 위 **수정/추가 내용**에 명시된 모든 로직을 반드시 구현해야 합니다.
-            2. 특히 메서드명이나 필드명이 명시되어 있다면 토씨 하나 틀리지 않고 정확히 사용하세요.
-            3. '우회(bypass)', '허용' 등의 조건이 있으면 해당 조건일 때 **통과(skip/continue/chain.doFilter)**시키는 로직을 작성하세요. 차단(block)이 아닙니다.
-            4. 위 '수정/추가 내용'에 **언급되지 않은** 메서드를 새로 만들지 마세요.
-            5. 위 '수정/추가 내용'에 **언급되지 않은** 필드나 변수를 추가하지 마세요.$daoWarning
-            7. 이전 단계에서 생성된 메서드를 호출할 때, [이전 컨텍스트]의 시그니처와 파라미터 수/타입이 일치하도록 작성하세요.
+            $guidelines
             
             ---
             
