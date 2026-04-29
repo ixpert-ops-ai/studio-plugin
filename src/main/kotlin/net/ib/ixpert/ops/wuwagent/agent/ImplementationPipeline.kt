@@ -442,49 +442,62 @@ class ImplementationPipeline(
         targetFile: TargetFileSpec,
         allTargetFiles: List<TargetFileSpec>
     ): String {
-        // 원본 소스 읽기
         val absolutePath = "${project.basePath}/${targetFile.path}".replace("//", "/")
         val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath) ?: return responseText
         val originalSource = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
 
-        // 원본 메서드명 추출
-        val originalMethods = Regex("""(?:public\s+|protected\s+|)\S+\s+(\w+)\s*\(""")
-            .findAll(originalSource)
+        // 원본에서 메서드명 추출 (간단한 패턴: 반환타입 메서드명( )
+        val methodNamePattern = Regex("""\b(\w+)\s*\([^)]*\)\s*(?:throws\s+[^;{]+)?\s*[;{]""")
+        val originalMethods = methodNamePattern.findAll(originalSource)
             .map { it.groupValues[1] }
+            .filter { it !in listOf("if", "for", "while", "switch", "catch", "synchronized") }
             .toSet()
 
-        // 응답에서 메서드 선언 추출 (인터페이스는 세미콜론으로 끝남)
-        val responseMethodPattern = Regex("""^\s*(?:public\s+|protected\s+|default\s+|)\S+\s+(\w+)\s*\(.*\)\s*(?:throws\s+\S+)?\s*;""", RegexOption.MULTILINE)
-        val responseMethods = responseMethodPattern.findAll(responseText)
-            .map { it.groupValues[1] to it.value }
-            .toList()
+        logger.info("원본 메서드명: $originalMethods (${targetFile.path})")
+
+        // 응답에서 코드 블록 내용 추출
+        val codeBlockPattern = Regex("""```java\s*\n([\s\S]*?)```""")
+        val codeBlock = codeBlockPattern.find(responseText)?.groupValues?.get(1) ?: responseText
+
+        // 응답 코드에서 메서드명 추출
+        val responseMethods = methodNamePattern.findAll(codeBlock)
+            .map { it.groupValues[1] }
+            .filter { it !in listOf("if", "for", "while", "switch", "catch", "synchronized") }
+            .toSet()
+
+        logger.info("응답 메서드명: $responseMethods (${targetFile.path})")
 
         // 새로 추가된 메서드 식별
-        val newMethods = responseMethods.filter { (name, _) -> name !in originalMethods }
-
+        val newMethods = responseMethods - originalMethods
         if (newMethods.isEmpty()) return responseText
+
+        logger.info("신규 메서드 감지: $newMethods (${targetFile.path})")
 
         // 구현체 파일들의 description에서 키워드 추출
         val implDescriptions = allTargetFiles
             .filter { it.path.lowercase().contains("impl") }
-            .joinToString(" ") { it.description }
+            .joinToString(" ") { it.description + " " + it.path }
             .lowercase()
 
-        // 구현체 description에 언급되지 않은 메서드 = 환각
-        var filteredResponse = responseText
-        newMethods.forEach { (name, fullDeclaration) ->
-            if (!implDescriptions.contains(name.lowercase())) {
-                logger.warn("인터페이스 환각 메서드 제거: $name in ${targetFile.path}")
-                filteredResponse = filteredResponse.replace(fullDeclaration, "")
-                // 관련 Javadoc 주석도 제거 시도
-                val javadocPattern = Regex("""/\*\*[\s\S]*?\*/\s*\n\s*${Regex.escape(fullDeclaration)}""")
-                filteredResponse = filteredResponse.replace(javadocPattern, "")
-            }
+        val hallucinatedMethods = newMethods.filter { methodName ->
+            !implDescriptions.contains(methodName.lowercase())
         }
 
-        // 연속된 빈 줄 정리
-        filteredResponse = filteredResponse.replace(Regex("\n{3,}"), "\n\n")
+        if (hallucinatedMethods.isEmpty()) return responseText
 
+        logger.warn("인터페이스 환각 메서드 감지: $hallucinatedMethods (${targetFile.path})")
+
+        // 환각 메서드 포함 줄과 관련 Javadoc 제거
+        var filteredResponse = responseText
+        hallucinatedMethods.forEach { methodName ->
+            // 메서드 선언 줄 제거 (세미콜론으로 끝나는 인터페이스 메서드)
+            // 앞에 붙은 Javadoc 주석과 함께 제거 시도
+            val pattern = Regex("""(?:/\*\*[\s\S]*?\*/\s*\n)?\s*.*\b$methodName\s*\([^)]*\)\s*(?:throws\s+[^;]+)?\s*;[^\n]*\n?""")
+            filteredResponse = filteredResponse.replace(pattern, "")
+            logger.info("환각 메서드 제거 완료: $methodName")
+        }
+
+        filteredResponse = filteredResponse.replace(Regex("\n{3,}"), "\n\n")
         return filteredResponse
     }
     // 가이드 및 프롬프트 생성 유틸들
