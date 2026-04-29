@@ -56,9 +56,17 @@ class ImplementationPipeline(
             val isDtoOrEntity = target.path.lowercase().let { p ->
                 p.contains("dto") || p.contains("entity") || p.contains("vo") || p.contains("model")
             }
+            val isInterface = target.path.lowercase().let { p ->
+                !p.contains("impl") && (
+                    p.endsWith("dao.java") ||
+                    p.endsWith("service.java") ||
+                    p.endsWith("repository.java") ||
+                    p.endsWith("mapper.java")
+                )
+            }
             val isLargeFile = !isNewFile && !isDtoOrEntity && psiMethodExtractor.isLargeFile(target.path)
             
-            val systemPrompt = if (isLargeFile) buildLargeFileSystemPrompt() else buildSmallFileSystemPrompt()
+            val systemPrompt = if (isLargeFile) buildLargeFileSystemPrompt(isInterface) else buildSmallFileSystemPrompt(isInterface)
             val userPrompt = buildUserPromptForFile(target, contextChain, analysisResult.summary, sortedTargets)
 
             // Fallback guide returned from buildUserPromptForFile means skipping
@@ -332,8 +340,8 @@ class ImplementationPipeline(
         return buildCommonUserPrompt(targetFile, contextChain, requirementSummary, allTargetFiles, sourceCodeSection)
     }
 
-    private fun buildSmallFileSystemPrompt(): String {
-        return """
+    private fun buildSmallFileSystemPrompt(isInterface: Boolean = false): String {
+        val basePrompt = """
             당신은 Spring Boot 프로젝트를 구현하는 시니어 백엔드 개발자입니다.
             주어진 요구사항과 작업 계획에 따라, 현재 타겟 파일의 코드를 작성/수정해야 합니다.
             
@@ -348,6 +356,20 @@ class ImplementationPipeline(
                반복적으로 선언하는 것은 금지입니다. 오직 요구사항에 명시된 필드만 추가하세요.
             6. 변수 선언은 요구사항에서 요청한 것만 최소한으로 작성하세요.
                비슷한 이름의 변수를 번호를 붙여 반복 생성하지 마세요.
+        """.trimIndent()
+
+        val interfaceRule = if (isInterface) """
+            
+            ## 인터페이스 파일 추가 규칙
+            7. 이 파일은 인터페이스입니다. 다음을 반드시 준수하세요:
+               - 기존에 선언된 메서드 시그니처를 절대 변경하지 마세요.
+               - 새 메서드를 추가할 경우, 해당 메서드의 구현체가 이번 작업 계획에 포함되어 있는지 확인하세요.
+               - 존재하지 않는 예외 클래스나 타입을 throws 절에 사용하지 마세요.
+               - 메서드 추가는 최소한으로 하고, 기존 메서드의 시그니처를 활용하는 것을 우선하세요.
+               - 구현체에서 이미 예외 처리를 하고 있다면 인터페이스에 새 메서드를 추가할 필요가 없습니다.
+        """.trimIndent() else ""
+
+        val outputFormat = """
 
             ## 출력 포맷
             반드시 아래의 마크다운 형식을 지켜서 출력하세요. 코드 블록 앞에는 반드시 파일 경로를 주석으로 명시해야 합니다.
@@ -361,10 +383,12 @@ class ImplementationPipeline(
             [MODIFIED_SIGNATURES]
             + public List<SurveyDto> findAllForExport()
         """.trimIndent()
+
+        return basePrompt + interfaceRule + outputFormat
     }
 
-    private fun buildLargeFileSystemPrompt(): String {
-        return """
+    private fun buildLargeFileSystemPrompt(isInterface: Boolean = false): String {
+        val basePrompt = """
             당신은 Spring Boot 시니어 개발자입니다.
             
             아래 규칙을 반드시 준수하세요:
@@ -385,6 +409,15 @@ class ImplementationPipeline(
             10. 변수 선언은 요구사항에서 요청한 것만 최소한으로 작성하세요.
                 비슷한 이름의 변수를 번호를 붙여 반복 생성하지 마세요.
         """.trimIndent()
+
+        val interfaceRule = if (isInterface) """
+            11. 이 파일은 인터페이스입니다. 다음을 반드시 준수하세요:
+                - 기존에 선언된 메서드 시그니처를 절대 변경하지 마세요.
+                - 새 메서드를 추가할 경우, 해당 메서드의 구현체가 이번 작업 계획에 포함되어 있는지 확인하세요.
+                - 존재하지 않는 예외 클래스나 타입을 throws 절에 사용하지 마세요.
+        """.trimIndent() else ""
+
+        return basePrompt + "\n" + interfaceRule
     }
     // 가이드 및 프롬프트 생성 유틸들
 }

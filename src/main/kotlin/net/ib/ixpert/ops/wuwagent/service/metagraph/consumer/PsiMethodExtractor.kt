@@ -38,6 +38,9 @@ class PsiMethodExtractor(private val project: Project) {
 
         /** 의미 없는 짧은 토큰 최소 길이 */
         const val MIN_KEYWORD_LENGTH = 2
+
+        /** 메서드 본문 줄 수 제한: 이 값을 초과하면 본문을 축약함 */
+        const val METHOD_BODY_LINE_LIMIT = 50
     }
 
     // ──────────────────────────────────────────────
@@ -261,10 +264,18 @@ class PsiMethodExtractor(private val project: Project) {
 
                     val startLine = document?.getLineNumber(method.textRange.startOffset)?.plus(1) ?: -1
                     val endLine = document?.getLineNumber(method.textRange.endOffset)?.plus(1) ?: -1
+                    val fullBody = method.text
+                    val lineCount = endLine - startLine + 1
+
+                    val bodyToUse = if (lineCount > METHOD_BODY_LINE_LIMIT) {
+                        buildTruncatedBody(method)
+                    } else {
+                        fullBody
+                    }
 
                     MethodBody(
                         signature = extractSignature(method),
-                        body = method.text,  // 어노테이션 + 시그니처 + 중괄호 내부 전체
+                        body = bodyToUse,
                         startLine = startLine,
                         endLine = endLine
                     )
@@ -272,5 +283,25 @@ class PsiMethodExtractor(private val project: Project) {
                     null
                 }
             }
+    }
+
+    /**
+     * 대형 메서드의 축약 본문을 생성합니다.
+     * 첫 5줄과 마지막 5줄만 포함하고, 중간은 요약 주석으로 대체합니다.
+     */
+    private fun buildTruncatedBody(method: PsiMethod): String {
+        val fullBody = method.text ?: return ""
+        val lines = fullBody.lines()
+        if (lines.size <= METHOD_BODY_LINE_LIMIT) return fullBody
+
+        val header = lines.take(5).joinToString("\n")
+        val footer = lines.takeLast(5).joinToString("\n")
+        val omittedCount = lines.size - 10
+
+        return """
+            $header
+            // ... (${omittedCount}줄 생략 - 기존 비즈니스 로직, 수정 불필요) ...
+            $footer
+        """.trimIndent()
     }
 }

@@ -21,7 +21,9 @@ data class MethodBody(
     val body: String,                  // 메서드 전체 텍스트 (어노테이션 + 시그니처 + 중괄호 내용)
     val startLine: Int,                // 원본 파일 내 시작 줄 번호 (위치 힌트용)
     val endLine: Int
-)
+) {
+    val lineCount: Int get() = endLine - startLine + 1
+}
 
 /**
  * PsiMethodExtractor의 최종 출력.
@@ -79,6 +81,11 @@ data class ClassSkeleton(
             appendLine("    /* === 연관 메서드 상세 코드 (수정 대상 후보) === */")
             relevantMethodBodies.forEach { method ->
                 appendLine("    // 📍 위치: 라인 ${method.startLine}~${method.endLine}")
+                if (method.lineCount > 50) { // PsiMethodExtractor.METHOD_BODY_LINE_LIMIT와 동기화
+                    appendLine("    // ⚠️ 아래 메서드는 ${method.lineCount}줄로 매우 큽니다.")
+                    appendLine("    // 이 메서드의 기존 변수 선언을 모방하거나 확장하지 마세요.")
+                    appendLine("    // 오직 요구사항에 명시된 변경만 수행하세요.")
+                }
                 appendLine(method.body.prependIndent("    "))
                 appendLine()
             }
