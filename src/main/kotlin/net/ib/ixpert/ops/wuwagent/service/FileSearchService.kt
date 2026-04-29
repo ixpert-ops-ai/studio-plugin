@@ -29,16 +29,18 @@ object FileSearchService {
 
         return DumbService.getInstance(project).runReadActionInSmartMode<List<VirtualFile>> {
             val projectScope = GlobalSearchScope.projectScope(project)
+            val result = mutableListOf<VirtualFile>()
 
             FilenameIndex.getAllFilenames(project)
-                .asSequence()
                 .filter { it.contains(normalizedKeyword, ignoreCase = true) }
-                .flatMap { fileName ->
-                    FilenameIndex.getVirtualFilesByName(project, fileName, projectScope).asSequence()
+                .forEach { fileName ->
+                    FilenameIndex.processFilesByName(fileName, false, projectScope) { file ->
+                        if (!file.isDirectory) result.add(file)
+                        true
+                    }
                 }
-                .filterNot { it.isDirectory }
-                .distinctBy { it.path }
-                .toList()
+
+            result.distinctBy { it.path }
         }
     }
 

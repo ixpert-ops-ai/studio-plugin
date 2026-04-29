@@ -9,6 +9,7 @@ import com.intellij.util.io.HttpRequests
  * 설정 화면 및 관리 작업을 전담하는 에이전트입니다.
  * LLM 추론이 아닌 서버 관리용 API 호출(예: 모델 목록 조회)을 담당합니다.
  */
+@Suppress("UnstableApiUsage")
 object SettingsAgent {
     private val logger = Logger.getInstance(SettingsAgent::class.java)
 

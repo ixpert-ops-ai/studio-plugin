@@ -14,6 +14,7 @@ import javax.swing.SwingUtilities
  * Ollama 서버 통신 및 결과 알림을 총괄하는 서비스입니다.
  * 모든 서버 호출은 비동기로 수행되며, 결과는 IntelliJ 네이티브 메시지 박스로 표시됩니다.
  */
+@Suppress("UnstableApiUsage")
 object WuwLlmService {
     private val logger = Logger.getInstance(WuwLlmService::class.java)
 
