@@ -312,6 +312,8 @@ class ImplementationPipeline(
             - **작업 유형**: `${targetFile.type}`
             - **수정/추가 내용**: `${targetFile.description}`
             
+            **주의**: 오직 위 파일 하나에 대해서만 코드를 생성하세요. 계획에 없는 다른 파일(Security Filter 등)을 임의로 생성하지 마세요.
+            
             $guidelines
             
             ---
@@ -407,6 +409,8 @@ class ImplementationPipeline(
                - 예시: "Bearer JWT가 있으면 필터 바이패스" -> 올바른 구현: `if (token != null && token.startsWith("Bearer ")) { chain.doFilter(req, res); return; }`
                - 잘못된 구현 (절대 금지): 토큰이 없을 때 401 반환하고 토큰 있을 때 검증 후 진행.
             8. DAO/Repository 파일에는 인증(JWT/Session) 검증 로직을 넣지 마세요.
+            9. **오직 현재 타겟 파일 하나만 생성하세요.** 요구사항에 없는 새로운 파일(Filter, EntryPoint 등)을 임의로 만들지 마세요.
+            10. 유틸리티 클래스(JwtUtil 등) 호출 시, 이전 단계에서 정의된 static/instance 패턴을 정확히 따르세요. `@Component`로 정의된 경우 static 호출을 하지 마세요.
         """.trimIndent()
 
         val interfaceRule = if (isInterface) """
@@ -464,6 +468,8 @@ class ImplementationPipeline(
                 '바이패스' = 해당 조건이면 처리를 건너뛰고 다음 단계로 진행(chain.doFilter 등).
                 절대로 '바이패스' 조건에서 차단(block/reject/return error)하지 마세요.
             12. DAO/Repository 파일에는 인증(JWT/Session) 검증 로직을 넣지 마세요.
+            13. **오직 현재 타겟 파일 하나만 생성하세요.** 계획에 없는 추가 파일을 임의로 생성하지 마세요.
+            14. 유틸리티 클래스 호출 시 static/instance 성격을 구분하세요. `@Component` 인스턴스 메서드를 static으로 호출하지 마세요.
         """.trimIndent()
 
         val interfaceRule = if (isInterface) """

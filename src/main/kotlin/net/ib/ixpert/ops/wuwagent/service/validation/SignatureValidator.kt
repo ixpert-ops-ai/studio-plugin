@@ -15,14 +15,28 @@ object SignatureValidator {
     )
 
     /**
+     * 파싱된 시그니처 정보를 담는 클래스
+     */
+    data class ParsedSignature(
+        val className: String,  // 파일 경로에서 추출한 클래스명
+        val methodName: String,
+        val paramCount: Int,
+        val rawSignature: String
+    )
+
+    /**
      * contextChain에서 시그니처들을 추출합니다.
      * contextChain 항목 형식: "### `파일경로` 변경사항\n시그니처1\n시그니처2"
      * (ImplementationPipeline에서 [MODIFIED_SIGNATURES] 태그는 이미 제거된 상태)
      */
-    fun extractSignaturesFromContext(contextChain: List<String>): Map<String, List<String>> {
-        val signatureMap = mutableMapOf<String, MutableList<String>>()
+    fun extractSignaturesFromContext(contextChain: List<String>): Map<String, List<ParsedSignature>> {
+        val signatureMap = mutableMapOf<String, MutableList<ParsedSignature>>()
         
         contextChain.forEach context@ { context ->
+            // 헤더에서 클래스명 추출: "### `.../ClassName.java` 변경사항"
+            val classNameMatch = Regex("""###\s*`[^`]*?(\w+)\.java`""").find(context)
+            val className = classNameMatch?.groupValues?.get(1) ?: "Unknown"
+
             val lines = context.lines()
             lines.forEach lines@ { line ->
                 val cleanLine = line.trim()
@@ -39,8 +53,13 @@ object SignatureValidator {
                 if (methodNameMatch != null) {
                     val methodName = methodNameMatch.groupValues[1]
                     if (methodName !in EXCLUDED_KEYWORDS) {
-                        signatureMap.getOrPut(methodName) { mutableListOf() }.add(cleanLine)
-                        logger.info("시그니처 추출: $methodName -> $cleanLine")
+                        val paramsMatch = Regex("""\(([^)]*)\)""").find(cleanLine)
+                        val paramsStr = paramsMatch?.groupValues?.get(1) ?: ""
+                        val paramCount = countTopLevelArgs(paramsStr)
+
+                        val parsed = ParsedSignature(className, methodName, paramCount, cleanLine)
+                        signatureMap.getOrPut(methodName) { mutableListOf() }.add(parsed)
+                        logger.info("시그니처 추출: [$className] $methodName (params: $paramCount) -> $cleanLine")
                     }
                 }
             }
@@ -54,20 +73,24 @@ object SignatureValidator {
      * 응답 텍스트 내의 메서드 호출이 추출된 시그니처와 일치하는지 검증합니다.
      * 메서드 정의부는 제외하고 호출부만 검사하며, 중괄호를 고려하여 파라미터 수를 카운트합니다.
      */
-    fun validateConsistency(responseText: String, signatureMap: Map<String, List<String>>): List<String> {
+    fun validateConsistency(responseText: String, signatureMap: Map<String, List<ParsedSignature>>): List<String> {
         val warnings = mutableListOf<String>()
         
         if (signatureMap.isEmpty()) {
-            logger.info("시그니처 맵이 비어있어 일관성 검증을 건너뜁니다.")
+            logger.info("시그니처 맵이 비어있어 일관성 검증을 건너뜜.")
             return warnings
         }
         
         val responseLines = responseText.lines()
         
         signatureMap.forEach methods@ { (methodName, signatures) ->
-            val callPattern = Regex("""\b$methodName\s*\(([^)]*)\)""")
+            // methodName(...) 패턴 매칭
+            val callPattern = Regex("""\b(\w+)?\.?$methodName\s*\(([^)]*)\)""")
             
             callPattern.findAll(responseText).forEach calls@ { match ->
+                val callerObject = match.groupValues[1] // "filterChain", "AuthVal" 등 객체/클래스명
+                val argsStr = match.groupValues[2]
+                
                 // 매칭된 위치의 전체 줄을 찾기
                 val matchStart = match.range.first
                 val lineIndex = responseText.substring(0, matchStart).count { it == '\n' }
@@ -87,20 +110,30 @@ object SignatureValidator {
                     return@calls
                 }
                 
-                val argsStr = match.groupValues[1]
                 val argCount = countTopLevelArgs(argsStr)
                 
                 signatures.forEach { sig ->
-                    val paramsMatch = Regex("""\(([^)]*)\)""").find(sig)
-                    if (paramsMatch != null) {
-                        val paramsStr = paramsMatch.groupValues[1]
-                        val expectedCount = countTopLevelArgs(paramsStr)
-                        
-                        if (argCount != expectedCount) {
-                            val warning = "시그니처 불일치: `$methodName()` — " +
-                                "호출부 ${argCount}개 인자, 정의부 ${expectedCount}개 파라미터\n" +
+                    // 클래스명이 일치하거나 (객체명 매칭은 불완전하므로) 
+                    // 최소한 객체/클래스명이 호출부에 있을 때만 정밀 검증 시도하거나, 
+                    // 아니면 모든 동일 명칭 메서드에 대해 파라미터 수가 하나라도 맞으면 통과시키는 식으로 허위 경고 방지
+                    
+                    // 정교한 검증: 호출된 객체명이 시그니처의 클래스명과 유사한지 확인
+                    val isLikelyMatch = if (callerObject.isBlank()) {
+                        true // 로컬 호출은 일단 타겟으로 간주
+                    } else {
+                        // "authVal.validateToken"에서 "authVal"과 "AuthVal" 클래스명 비교
+                        callerObject.equals(sig.className, ignoreCase = true) ||
+                        sig.className.contains(callerObject, ignoreCase = true)
+                    }
+
+                    if (isLikelyMatch && argCount != sig.paramCount) {
+                        // 만약 다른 시그니처 중 이 파라미터 수와 맞는 것이 하나라도 있다면 경고하지 않음 (오버로딩 가능성)
+                        val hasAnyMatchingSig = signatures.any { it.paramCount == argCount }
+                        if (!hasAnyMatchingSig) {
+                            val warning = "시그니처 불일치: `${sig.className}.$methodName()` — " +
+                                "호출부 ${argCount}개 인자 ↔ 정의부 ${sig.paramCount}개 파라미터\n" +
                                 "  호출 코드: `${trimmedLine.take(120)}`\n" +
-                                "  정의 시그니처: `$sig`"
+                                "  정의 시그니처: `${sig.rawSignature}`"
                             warnings.add(warning)
                             logger.warn(warning)
                         }
@@ -113,7 +146,6 @@ object SignatureValidator {
     
     /**
      * 해당 줄이 메서드 정의부인지 판별합니다.
-     * 접근제어자, 반환타입, 또는 abstract/default 키워드가 메서드명 앞에 있으면 정의부로 간주합니다.
      */
     private fun isMethodDefinition(line: String, methodName: String): Boolean {
         val definitionPattern = Regex(
@@ -130,9 +162,6 @@ object SignatureValidator {
     
     /**
      * 중첩 괄호/제네릭을 고려하여 최상위 레벨의 인자(파라미터) 수를 카운트합니다.
-     * 예: "a, foo(b, c), d" → 3
-     * 예: "Map<String, Object> claims, String key" → 2
-     * 예: "" → 0
      */
     private fun countTopLevelArgs(argsStr: String): Int {
         val trimmed = argsStr.trim()
