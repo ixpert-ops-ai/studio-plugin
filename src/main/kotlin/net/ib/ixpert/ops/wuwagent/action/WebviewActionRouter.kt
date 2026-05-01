@@ -641,7 +641,7 @@ class WebviewActionRouter(private val project: Project) {
 
                         TaskPipeline.GenerateTest -> {
                             val sourceFile = editor.virtualFile?.name ?: ""
-                            GenerateTestAgent().execute(context,
+                            GenerateTestAgent(messageId).execute(context,
                                 onSuccess = { _ ->
                                     ApplicationManager.getApplication().invokeLater {
                                         bridge.sendMessage("test", "", messageId, mapOf("sourceFile" to sourceFile))

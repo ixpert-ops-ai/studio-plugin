@@ -28,6 +28,6 @@ class ChatAgent : BaseAgent() {
             systemPrompt = "$graphContext\n\n$systemPrompt"
         }
 
-        callLlmStreamAsync(context.project, "WuwAgent: Answering Chat", systemPrompt, userQuery, onSuccess, onChunk, onError)
+        callLlmStreamAsync(context.project, "iXpert AI Assistant: Answering Chat", systemPrompt, userQuery, onSuccess, onChunk, onError)
     }
 }

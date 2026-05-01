@@ -25,7 +25,7 @@ class GenerateTestAction : AnAction() {
                 meta = mapOf("sourceFile" to sourceFile))
         }
 
-        GenerateTestAgent().execute(
+        GenerateTestAgent(messageId).execute(
             context,
             onSuccess = { resultText ->
                 ApplicationManager.getApplication().invokeLater {

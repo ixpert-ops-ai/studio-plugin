@@ -49,9 +49,36 @@ sealed class TaskPipeline {
         val label: String,
         val promptFile: String,
         val isApplyable: Boolean = false,
-        val isImproveStep: Boolean = false
+        val isImproveStep: Boolean = false,
+        /** 코드가 없을 때 LLM 호출 없이 반환할 안내 메시지. null이면 기존 폴백 동작 유지. */
+        val chatFallbackMessage: String? = null,
+        /** true이면 이전 단계 결과(원본·개선 코드·분석)를 프롬프트 변수로 주입해 안정성 평가 수행 */
+        val isStabilityStep: Boolean = false
     ) {
         private val logger = Logger.getInstance(AgentStep::class.java)
+
+        // ─────────────────────────────────────────────────────────
+        //  @ 파일 첨부 헬퍼
+        // ─────────────────────────────────────────────────────────
+        private data class AttachedFile(val fileName: String, val content: String)
+
+        /**
+         * payload 내 [첨부 파일] 섹션에서 첫 번째 파일의 이름·내용을 추출합니다.
+         * buildAttachedFileContext 포맷:
+         *   [첨부 파일]
+         *   // 파일: {name}
+         *   ```
+         *   {content}
+         *   ```
+         */
+        private fun extractFirstAttachedFile(payload: String): AttachedFile? {
+            if (!payload.contains("[첨부 파일]")) return null
+            val regex = Regex("""// 파일: ([^\n]+)\n```[^\n]*\n([\s\S]*?)\n```""")
+            val match = regex.find(payload) ?: return null
+            val fileName = match.groupValues[1].trim()
+            val content  = match.groupValues[2].trim()
+            return if (fileName.isNotBlank() && content.isNotBlank()) AttachedFile(fileName, content) else null
+        }
 
         /**
          * SEARCH 블록 앞뒤 빈 줄 정규화 (들여쓰기는 유지, 상하단 공백 줄만 제거).
@@ -148,8 +175,51 @@ sealed class TaskPipeline {
             context: AgentContext,
             client: OllamaClient,
             onChunk: ((String) -> Unit)? = null,
-            previousStepResult: String? = null
+            previousStepResult: String? = null,
+            allPreviousResults: List<StepResult> = emptyList()
         ): StepResult {
+            // ─ 안정성 평가 Step (isStabilityStep=true) ─────────────────────────
+            if (isStabilityStep) {
+                val originalCode = if (context.editor != null)
+                    EditorContextService.extractCodeWithScope(context.editor, context.project).code
+                else ""
+
+                val improvedCode = allPreviousResults.getOrNull(1)
+                    ?.extractedCode?.takeIf { it.isNotBlank() }
+                    ?: allPreviousResults.getOrNull(1)?.rawLlmResponse
+                    ?: ""
+
+                val analysisResult = allPreviousResults.getOrNull(0)?.rawLlmResponse ?: ""
+
+                val language = context.editor?.virtualFile?.extension?.uppercase() ?: "Unknown"
+
+                val stabilitySystemPrompt = PromptManager.loadPromptWithVars(
+                    promptFile, mapOf(
+                        "LANGUAGE"        to language,
+                        "ORIGINAL_CODE"   to originalCode,
+                        "IMPROVED_CODE"   to improvedCode,
+                        "ANALYSIS_RESULT" to analysisResult
+                    )
+                )
+                val userMessage = "위 원본 코드와 개선된 코드를 비교하여 안정성을 평가하세요."
+
+                logger.info("AgentStep[${label}]: 안정성 평가 LLM 호출 시작")
+                val response = client.callChatApiStream(stabilitySystemPrompt, userMessage, onChunk)
+                val rawLlmResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
+                val llmResponse = rawLlmResponse.trimEnd()
+                val isError = llmResponse.startsWith("[오류]") || llmResponse.startsWith("[Error]")
+
+                return StepResult(
+                    originalCode  = null,
+                    modifiedCode  = null,
+                    applyScope    = "",
+                    llmResponse   = llmResponse,
+                    rawLlmResponse = rawLlmResponse,
+                    extractedCode = "",
+                    isSuccess     = !isError
+                )
+            }
+
             var systemPrompt = PromptManager.loadPrompt(promptFile)
 
             // [Phase 1b] 메타그래프 컨텍스트 자동 주입
@@ -170,80 +240,115 @@ sealed class TaskPipeline {
                 "\n\n[이전 단계 분석 결과]\n$prevAnalysis"
             else ""
 
-            // ① 파일명 패턴 추출 (대문자로 시작하는 단어 또는 확장자 포함 단어)
-            // (예: "MainActivity", "utils.kt", "ApiService.java")
-            val filePattern = Regex("\\b([A-Z][a-zA-Z0-9]*|\\w+\\.(kt|java|xml|gradle))\\b")
-            val potentialFileName = filePattern.find(payload)?.value
+            // ─ 1순위: @ 파일 첨부 ([첨부 파일] 섹션 감지) ─────────────────────────
+            val attachedFile = extractFirstAttachedFile(payload)
+            val userRequest  = if (attachedFile != null)
+                payload.substringBefore("[첨부 파일]").trim().ifBlank { "코드를 분석해줘" }
+            else
+                payload
 
-            if (potentialFileName != null) {
-                // [CASE A] 파일명이 명시된 경우 → "파일 검색" 우선, 에디터 폴백 금지
-                val matchedFile = FileSearchService.searchFiles(context.project, potentialFileName).firstOrNull()
-
-                if (matchedFile != null) {
-                    val fileContent = FileSearchService.readFileContent(matchedFile)
-                    logger.info("AgentStep[${label}]: 명시적 파일 검색 히트 → ${matchedFile.name}")
-                    originalCode = fileContent
-                    applyScope   = matchedFile.name
-                    userMessage  = if (isImproveStep) {
-                        buildString {
-                            appendLine("다음 코드를 수정하라.")
-                            appendLine()
-                            appendLine("[원본 코드]")
-                            appendLine("---CODE START---")
-                            appendLine(originalCode)
-                            appendLine("---CODE END---")
-                            appendLine()
-                            append("IMPORTANT:\n코드 외 텍스트를 출력하면 실패로 간주한다.")
-                        }
-                    } else {
-                        "사용자 요청: $payload$prevContext\n\n// 파일: ${matchedFile.name}\n```\n$fileContent\n```"
+            if (attachedFile != null) {
+                originalCode = attachedFile.content
+                applyScope   = attachedFile.fileName
+                logger.info("AgentStep[${label}]: @ 파일 첨부 감지 → ${attachedFile.fileName}")
+                userMessage = if (isImproveStep) {
+                    buildString {
+                        appendLine("다음 코드를 수정하라.")
+                        appendLine()
+                        appendLine("[원본 코드]")
+                        appendLine("---CODE START---")
+                        appendLine(originalCode)
+                        appendLine("---CODE END---")
+                        appendLine()
+                        append("IMPORTANT:\n코드 외 텍스트를 출력하면 실패로 간주한다.")
                     }
                 } else {
-                    // ❌ 파일을 찾지 못한 경우 에디터 폴백 없이 에러 반환
-                    logger.warn("AgentStep[${label}]: 명시적 파일($potentialFileName)을 찾을 수 없음")
+                    "사용자 요청: $userRequest$prevContext\n\n// 파일: ${attachedFile.fileName}\n```\n${attachedFile.content}\n```"
+                }
+
+            } else if (context.editor != null) {
+                // ─ 2순위(선택) / 3순위(전체): 에디터 기반 ────────────────────────
+                val extraction = EditorContextService.extractCodeWithScope(context.editor, context.project)
+                if (extraction.code.isNotBlank()) {
+                    originalCode = extraction.code
+                    applyScope   = if (extraction.isSelection) "선택 영역" else "전체 파일"
+                }
+                userMessage = if (isImproveStep && originalCode.isNotBlank()) {
+                    buildString {
+                        appendLine("다음 코드를 수정하라.")
+                        appendLine()
+                        appendLine("[원본 코드]")
+                        appendLine("---CODE START---")
+                        appendLine(originalCode)
+                        appendLine("---CODE END---")
+                        appendLine()
+                        append("IMPORTANT:\n코드 외 텍스트를 출력하면 실패로 간주한다.")
+                    }
+                } else {
+                    when {
+                        originalCode.isNotBlank() && payload.isNotBlank() ->
+                            "사용자 요청: $payload$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
+                        originalCode.isNotBlank() && prevContext.isNotBlank() ->
+                            "$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
+                        originalCode.isNotBlank() -> originalCode
+                        else -> payload
+                    }
+                }
+
+            } else {
+                // ─ 4순위: 에디터도 없음 ───────────────────────────────────────────
+                if (chatFallbackMessage != null) {
                     return StepResult(
-                        originalCode = null,
-                        modifiedCode = null,
-                        applyScope = "",
-                        llmResponse = "[오류] 프로젝트에서 '$potentialFileName' 파일을 찾을 수 없습니다. 정확한 파일명을 입력해 주세요.",
+                        originalCode  = null,
+                        modifiedCode  = null,
+                        applyScope    = "",
+                        llmResponse   = chatFallbackMessage,
                         extractedCode = "",
-                        isSuccess = false
+                        isSuccess     = false
                     )
                 }
-            } else {
-                // [CASE B] 파일명이 없는 일반 질문 → "에디터" 우선
-                if (context.editor != null) {
-                    val extraction = EditorContextService.extractCodeWithScope(context.editor, context.project)
-                    if (extraction.code.isNotBlank()) {
-                        originalCode = extraction.code
-                        applyScope   = if (extraction.isSelection) "선택 영역" else "전체 파일"
-                    }
-                    userMessage = if (isImproveStep && originalCode.isNotBlank()) {
-                        buildString {
-                            appendLine("다음 코드를 수정하라.")
-                            appendLine()
-                            appendLine("[원본 코드]")
-                            appendLine("---CODE START---")
-                            appendLine(originalCode)
-                            appendLine("---CODE END---")
-                            appendLine()
-                            append("IMPORTANT:\n코드 외 텍스트를 출력하면 실패로 간주한다.")
+                // chatFallbackMessage 미설정 시 기존 폴백: 파일명 패턴 검색 → 전체 텍스트 검색
+                val filePattern = Regex(
+                    "\\b([A-Z][a-zA-Z0-9]*|\\w+\\.(kt|java|xml|gradle|ts|tsx|js|jsx|py|sql|json|yaml|yml|html|css|sh|md))\\b"
+                )
+                val potentialFileName = filePattern.find(payload)?.value
+
+                if (potentialFileName != null) {
+                    val matchedFile = FileSearchService.searchFiles(context.project, potentialFileName).firstOrNull()
+                    if (matchedFile != null) {
+                        val fileContent = FileSearchService.readFileContent(matchedFile)
+                        logger.info("AgentStep[${label}]: 파일 검색 히트 → ${matchedFile.name}")
+                        originalCode = fileContent
+                        applyScope   = matchedFile.name
+                        userMessage  = if (isImproveStep) {
+                            buildString {
+                                appendLine("다음 코드를 수정하라.")
+                                appendLine()
+                                appendLine("[원본 코드]")
+                                appendLine("---CODE START---")
+                                appendLine(originalCode)
+                                appendLine("---CODE END---")
+                                appendLine()
+                                append("IMPORTANT:\n코드 외 텍스트를 출력하면 실패로 간주한다.")
+                            }
+                        } else {
+                            "사용자 요청: $payload$prevContext\n\n// 파일: ${matchedFile.name}\n```\n$fileContent\n```"
                         }
                     } else {
-                        when {
-                            originalCode.isNotBlank() && payload.isNotBlank() ->
-                                "사용자 요청: $payload$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
-                            originalCode.isNotBlank() && prevContext.isNotBlank() ->
-                                "$prevContext\n\n원본 코드:\n```\n$originalCode\n```"
-                            originalCode.isNotBlank() -> originalCode
-                            else -> payload
-                        }
+                        logger.warn("AgentStep[${label}]: 파일($potentialFileName)을 찾을 수 없음")
+                        return StepResult(
+                            originalCode  = null,
+                            modifiedCode  = null,
+                            applyScope    = "",
+                            llmResponse   = "[오류] 프로젝트에서 '$potentialFileName' 파일을 찾을 수 없습니다. 정확한 파일명을 입력해 주세요.",
+                            extractedCode = "",
+                            isSuccess     = false
+                        )
                     }
                 } else {
-                    // 에디터도 없으면 마지막 수단으로 전체 검색 (기존 로직 유지)
-                    val firstFile = if (payload.isNotBlank()) {
+                    val firstFile = if (payload.isNotBlank())
                         FileSearchService.searchFiles(context.project, payload).firstOrNull()
-                    } else null
+                    else null
 
                     if (firstFile != null) {
                         val fileContent = FileSearchService.readFileContent(firstFile)
@@ -325,21 +430,33 @@ sealed class TaskPipeline {
     // ──────────────────────────────────────────
 
     /**
-     * 분석 → 코드 개선
-     * - 1/2 개선 분석: 참고용 텍스트 (isApplyable = false)
-     * - 2/2 코드 개선: Diff 대상 (isApplyable = true, isImproveStep = true)
+     * 분석 → 코드 개선 → 안정성 평가
+     * - 1/3 개선 분석: 참고용 텍스트 (isApplyable = false)
+     * - 2/3 코드 개선: 개선 코드 출력 (isApplyable = false)
+     * - 3/3 안정성 평가: 원본/개선 코드 비교 후 위험도 평가 (isStabilityStep = true)
      */
     object Improve : TaskPipeline() {
         override val steps = listOf(
-            AgentStep("1/2 개선 분석", "improve_analysis_prompt.txt", isApplyable = false),
-            AgentStep("2/2 코드 개선", "improve_prompt.txt",          isApplyable = false)
+            AgentStep(
+                label               = "1/3 개선 분석",
+                promptFile          = "improve_analysis_prompt.txt",
+                isApplyable         = false,
+                chatFallbackMessage = "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
+            ),
+            AgentStep("2/3 코드 개선", "improve_prompt.txt", isApplyable = false),
+            AgentStep("3/3 안정성 평가", "stability_check_prompt.txt", isApplyable = false, isStabilityStep = true)
         )
     }
 
     /** 코드 리뷰 → 개선 제안 */
     object Review : TaskPipeline() {
         override val steps = listOf(
-            AgentStep("1/2 코드 리뷰", "review_prompt.txt",         isApplyable = false),
+            AgentStep(
+                label              = "1/2 코드 리뷰",
+                promptFile         = "review_prompt.txt",
+                isApplyable        = false,
+                chatFallbackMessage = "리뷰할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
+            ),
             AgentStep("2/2 개선 제안", "review_improve_prompt.txt", isApplyable = true, isImproveStep = true)
         )
     }
@@ -371,7 +488,7 @@ sealed class TaskPipeline {
     /** 테스트 코드 생성 (GenerateTestAgent 직접 호출) */
     object GenerateTest : TaskPipeline() {
         override val steps = listOf(
-            AgentStep("1/1 테스트 생성", "generate_test_prompt.txt", isApplyable = false)
+            AgentStep("1/1 테스트 생성", "generate_test_prompt.md", isApplyable = false)
         )
     }
 

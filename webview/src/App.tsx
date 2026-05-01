@@ -214,21 +214,9 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
     navigator.clipboard.writeText(codeOnly || msg.content).catch(() => {});
   };
 
-  const handleCreateFile = () => {
-    if (window.sendToIde) {
-      const codeOnly = extractCodeBlocks(msg.content);
-      window.sendToIde(JSON.stringify({
-        command: '/createTestFile',
-        code: codeOnly || msg.content,
-        sourceFile: msg.sourceFile || '',
-        id: msg.id
-      }));
-    }
-  };
-
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
-    <div className={`msg-ai ${isError ? 'error' : isTestResult ? 'test-result' : 'analysis'}`}>
+    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`}>
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
         {msg.content && (
@@ -268,9 +256,6 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
         <div className="msg-text-actions test-actions">
           <button className="btn-text-action btn-copy-code" onClick={handleCopyCode} title="테스트 코드만 클립보드에 복사">
             📋 Copy Code
-          </button>
-          <button className="btn-text-action btn-create-file" onClick={handleCreateFile} title="테스트 파일을 프로젝트에 생성">
-            📁 Create File
           </button>
           <button className="btn-text-action" onClick={handleSave} title="전체 결과를 Markdown 파일로 저장">
             💾 Save .md
@@ -990,7 +975,7 @@ function App() {
                     }}
                   >
                     <span className="popup-item-command" style={{ display: 'block' }}>{chat.title || '(제목 없음)'}</span>
-                    <span className="popup-item-desc">{chat.date?.slice(0, 10)}</span>
+                    <span className="popup-item-desc">{chat.date?.slice(0, 16).replace('T', ' ')}</span>
                   </button>
                   <button
                     style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', color: '#888', fontSize: '16px', lineHeight: 1, flexShrink: 0 }}

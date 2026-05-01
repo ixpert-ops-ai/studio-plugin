@@ -101,4 +101,39 @@ object EditorContextService {
             psiFile.findElementAt(offset)
         })
     }
+
+    /** 커서가 위치한 메서드(Java PsiMethod / Kotlin KtNamedFunction)의 텍스트와 이름 */
+    data class MethodExtractionResult(val methodText: String, val methodName: String)
+
+    /**
+     * 커서 위치에서 PSI 트리를 상위로 탐색해 메서드를 찾습니다.
+     * Java(PsiMethod)와 Kotlin(KtNamedFunction) 모두 지원합니다.
+     * 커서가 메서드 바깥이면 null을 반환합니다.
+     */
+    fun extractMethodAtCaret(editor: Editor, project: Project): MethodExtractionResult? {
+        // Class.forName은 순수 Java API — Kotlin stdlib 의존 없음
+        val ktFunctionClass: Class<*>? = try {
+            Class.forName("org.jetbrains.kotlin.psi.KtNamedFunction")
+        } catch (e: ClassNotFoundException) { null }
+
+        return ApplicationManager.getApplication().runReadAction(Computable {
+            val psiFile = com.intellij.psi.PsiDocumentManager.getInstance(project)
+                .getPsiFile(editor.document) ?: return@Computable null
+            val offset = editor.caretModel.offset
+            var element: com.intellij.psi.PsiElement? = psiFile.findElementAt(offset)
+
+            while (element != null) {
+                if (element is com.intellij.psi.PsiMethod) {
+                    return@Computable MethodExtractionResult(element.text, element.name)
+                }
+                // KtNamedFunction: Class.isInstance()은 순수 Java 호출
+                if (ktFunctionClass != null && ktFunctionClass.isInstance(element)) {
+                    val name = (element as? com.intellij.psi.PsiNamedElement)?.name ?: "unknown"
+                    return@Computable MethodExtractionResult(element.text, name)
+                }
+                element = element.parent
+            }
+            null
+        })
+    }
 }

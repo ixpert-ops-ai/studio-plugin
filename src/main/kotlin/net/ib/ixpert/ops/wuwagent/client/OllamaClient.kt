@@ -9,6 +9,7 @@ import net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse
 import net.ib.ixpert.ops.wuwagent.model.OllamaMessage
 import java.io.IOException
 
+@Suppress("UnstableApiUsage")
 class OllamaClient {
     private val logger = Logger.getInstance(OllamaClient::class.java)
     private val gson = Gson()

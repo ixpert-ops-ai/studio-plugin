@@ -5,6 +5,7 @@
 # Gradle
 .gradle/
 build/
+.intellijPlatform/
 gradle-app.setting
 !gradle-wrapper.jar
 
