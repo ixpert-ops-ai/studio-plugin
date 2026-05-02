@@ -3,6 +3,7 @@ package net.ib.ixpert.ops.wuwagent.agent
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import net.ib.ixpert.ops.wuwagent.client.OllamaClient
+import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.*
 
 /**
@@ -314,76 +315,50 @@ class TestGenerationPipeline(
 
     /**
      * 테스트 전용 System Prompt.
-     * ChangeRisk에 따라 테스트 강도를 차등 적용.
+     * develop 브랜치의 generate_test_prompt.md 정책을 따릅니다.
      */
     internal fun buildSystemPrompt(target: TestTarget): String {
-        val riskInstruction = when (target.changeRisk) {
-            "HIGH", "CRITICAL" -> """
-                ⚠️ 이 클래스는 ChangeRisk가 ${target.changeRisk}인 고위험 클래스입니다.
-                반드시 다음을 포함하세요:
-                - Happy path 테스트 (정상 동작)
-                - Edge case 테스트 (null 입력, 빈 리스트, 빈 문자열)
-                - 예외 발생 테스트 (잘못된 파라미터, DB 오류 시뮬레이션)
-                - 경계값 테스트 (0건, 1건, 대량 데이터)
-            """.trimIndent()
-            else -> """
-                이 클래스는 일반적인 위험 수준입니다.
-                Happy path 테스트를 중심으로 작성하되, 명백한 Edge case가 있다면 추가하세요.
-            """.trimIndent()
-        }
+        val basePrompt = PromptManager.loadPromptWithVars(
+            "generate_test_prompt.md", mapOf(
+                "IGNOREABLE_FIELDS" to "(없음)" // 추후 필요 시 추출 로직 추가
+            )
+        )
 
-        val existingTestInstruction = if (target.testFileInfo.exists) {
-            """
-                기존 테스트 클래스(${target.testFileInfo.testClassName})가 이미 존재합니다.
-                기존 테스트 메서드와 중복되지 않도록, 새로 추가/수정된 메서드에 대한 
-                테스트 메서드만 작성하세요.
-                @BeforeEach setUp 메서드는 기존 것을 재사용한다고 가정하고,
-                필요한 추가 Mock 설정만 별도로 명시하세요.
-            """.trimIndent()
-        } else {
-            """
-                테스트 클래스가 존재하지 않으므로 새로 생성합니다.
-                완전한 테스트 클래스 구조를 작성하세요:
-                - package 선언
-                - 필요한 import문 전체
-                - 클래스 선언 (@ExtendWith(MockitoExtension.class))
-                - @Mock 필드 (대상 클래스의 의존성)
-                - @InjectMocks 필드 (테스트 대상 클래스)
-                - @BeforeEach setUp() 메서드
-                - 테스트 메서드들
-            """.trimIndent()
-        }
+        // 소스 코드에서 패키지 및 import 추출
+        val sourcePackage = extractSourcePackage(target.productionContext)
+        val sourceImports = extractSourceImports(target.productionContext)
+        val fileName = target.targetFile.path.substringAfterLast('/')
 
-        return """
-            당신은 Spring Boot 프로젝트의 시니어 테스트 엔지니어입니다.
-            주어진 프로덕션 코드를 분석하여 단위 테스트 코드를 작성합니다.
-            
-            ## 테스트 프레임워크
-            - JUnit 5 (org.junit.jupiter)
-            - Mockito (org.mockito)
-            - AssertJ (org.assertj.core.api.Assertions)
-            - 필요 시: @WebMvcTest (Controller 테스트), @SpringBootTest (통합 테스트)
-            
-            ## 코드 작성 규칙
-            1. **Given-When-Then** 패턴을 반드시 사용하세요. 각 섹션을 주석으로 구분합니다:
-               // given
-               // when  
-               // then
-            2. 테스트 메서드명은 한국어로 작성하세요: @Test void 설문결과_Excel_다운로드_성공()
-            3. @Mock 대상은 프로덕션 클래스가 주입받는 의존성(필드)을 기반으로 정확히 설정하세요.
-            4. verify()로 핵심 메서드 호출 여부를 검증하세요.
-            5. 각 테스트 메서드 위에 // 📍 대상 메서드: {메서드명} 주석을 포함하세요.
-            
-            ## 출력 형식
-            - 코드 블록 최상단에 // 📍 대상 테스트 클래스: ${target.testFileInfo.testClassName} 주석을 포함하세요.
-            - 마크다운 java 코드 블록으로 감싸세요.
-            - 코드 블록 이후에 [TEST_SUMMARY] 태그로 생성된 테스트 메서드 목록을 나열하세요.
-            
-            $existingTestInstruction
-            
-            $riskInstruction
-        """.trimIndent()
+        return buildString {
+            append(basePrompt)
+            append("\n\n[Source File: $fileName]\n[Source Language: Java]")
+            if (sourcePackage != null) {
+                append("\n[Source Package: $sourcePackage — 생성되는 테스트 클래스의 package 선언을 반드시 이 값으로 작성하세요.]")
+            }
+            if (sourceImports.isNotBlank()) {
+                append("\n[Source Imports — 아래 import 구문을 테스트 코드에 그대로 사용하세요.]\n$sourceImports")
+            }
+
+            // 고위험군 특이 사항 주입 (develop 정책 보완)
+            if (target.changeRisk == "HIGH" || target.changeRisk == "CRITICAL") {
+                append("\n\n⚠️ 이 클래스는 고위험군(${target.changeRisk})입니다. 경계값 및 예외 케이스를 반드시 포함하세요.")
+            }
+
+            if (target.testFileInfo.exists) {
+                append("\n\n기존 테스트 클래스(${target.testFileInfo.testClassName})가 존재하므로, 추가된 시그니처에 대한 테스트만 작성하세요.")
+            }
+        }
     }
+
+    private fun extractSourcePackage(code: String): String? =
+        Regex("""^\s*package\s+([\w.]+)\s*;?""", RegexOption.MULTILINE)
+            .find(code)?.groupValues?.get(1)
+
+    private fun extractSourceImports(code: String): String =
+        Regex("""^\s*import\s+[\w.*]+\s*;?""", RegexOption.MULTILINE)
+            .findAll(code)
+            .map { it.value.trim() }
+            .joinToString("\n")
 
     /**
      * 테스트 User Prompt.

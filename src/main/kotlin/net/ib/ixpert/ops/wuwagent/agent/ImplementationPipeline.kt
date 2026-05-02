@@ -18,6 +18,12 @@ class ImplementationPipeline(
 ) {
     private val logger = Logger.getInstance(ImplementationPipeline::class.java)
 
+    enum class EditStrategy {
+        WHOLE,
+        ACTION_BASED,
+        DTO_ONLY
+    }
+
     /**
      * 파일 경로를 기반으로 계층 가중치를 계산합니다. (Phase 2a의 계층 역순 정렬 보완)
      */
@@ -86,6 +92,9 @@ class ImplementationPipeline(
             var abortReason: String? = null // null=정상, "REPEAT", "LENGTH"
             val MAX_RESPONSE_CHARS = 15_000
 
+            // [수정] 4-backtick UI wrapping 시작
+            onChunk("````text\n")
+
             try {
                 val response = client.callChatApiStream(systemPrompt, userPrompt) { chunk ->
                     if (abortReason != null) return@callChatApiStream
@@ -99,28 +108,23 @@ class ImplementationPipeline(
                         return@callChatApiStream
                     }
 
-                    // === 가드 2: 반복 패턴 감지 ===
-                    val lines = fullResponse.lines()
-                    if (lines.size > 10) {
-                        val recentLines = lines.takeLast(10)
-                        val uniquePatterns = recentLines.map { line ->
-                            line.trim().replace(Regex("\\d+"), "")
-                        }.filter { it.isNotEmpty() }.toSet()
-
-                        if (uniquePatterns.size <= 2 && recentLines.all { it.trim().isNotEmpty() }) {
-                            consecutiveRepeatCount++
-                            if (consecutiveRepeatCount >= 3) {
-                                logger.warn("반복 패턴 감지 (고유 패턴 ${uniquePatterns.size}개): ${target.path}")
-                                abortReason = "REPEAT"
-                                return@callChatApiStream
-                            }
-                        } else {
-                            consecutiveRepeatCount = 0
+                    // === 가드 2: 무한 루프(동일 패턴 반복) 감지 ===
+                    if (fullResponse.length > 500) {
+                        val last500 = fullResponse.takeLast(500)
+                        val first100 = last500.take(100)
+                        if (last500.split(first100).size > 3) {
+                            logger.warn("무한 루프 감지 (패턴 반복): ${target.path}")
+                            abortReason = "REPEAT"
+                            return@callChatApiStream
                         }
                     }
 
+                    // UI로 실시간 전송 (태그 제거 없이 필터링)
                     onChunk(chunk)
                 }
+
+                // [수정] 4-backtick UI wrapping 종료
+                onChunk("\n````\n")
 
                 if (abortReason != null) {
                     val msg = when (abortReason) {
@@ -293,8 +297,19 @@ class ImplementationPipeline(
             p.contains("dao") || p.contains("repository")
         }
 
+        val layerRole = when {
+            targetFile.path.contains("Controller") -> "REST API 요청을 처리하고 결과를 반환하는 Controller 계층입니다."
+            targetFile.path.contains("Service") -> "비즈니스 로직을 수행하고 DAO를 호출하는 Service 계층입니다. DB 직접 접근(SQL)을 하지 않습니다."
+            targetFile.path.contains("Dao") || targetFile.path.contains("Repository") -> "DB에 직접 접근하여 SQL을 실행하는 DAO 계층입니다. 비즈니스 로직이나 인증 검증을 하지 않습니다."
+            else -> "프로젝트의 구성 요소입니다."
+        }
+
         val guidelines = buildString {
             var num = 1
+            appendLine("## 🚨 CRITICAL LAYER CONSTRAINT")
+            appendLine("- **현재 역할**: $layerRole")
+            appendLine("- **위반 금지**: 해당 계층의 역할을 벗어나는 코드를 작성하지 마세요 (예: Service에서 MyBatis/SQL 직접 사용 금지).")
+            appendLine("")
             appendLine("## 💡 필수 구현 지침")
             appendLine("${num++}. 위 **수정/추가 내용**에 명시된 모든 로직을 반드시 구현해야 합니다.")
             appendLine("${num++}. 특히 메서드명이나 필드명이 명시되어 있다면 토씨 하나 틀리지 않고 정확히 사용하세요.")
