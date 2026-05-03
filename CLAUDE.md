@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-WuwAgent ("iXpert AI Assistant") is an IntelliJ/Android Studio plugin that adds AI coding features (Explain, Review, Improve, Impact Analysis, Query Validation, Generate Test) backed by an on-prem Ollama server. The Kotlin plugin embeds a React webview (JCEF) as its main UI.
+WuwAgent ("iXpert AI Assistant") is an IntelliJ/Android Studio plugin that adds AI coding features (Explain, Review, Improve, Impact Analysis, Query Validation, Generate Analysis Doc) backed by an on-prem Ollama server. The Kotlin plugin embeds a React webview (JCEF) as its main UI.
 
 Companion docs in repo root: `DEVELOPMENT_GUIDE.md` (architecture rules), `WORKING_GUIDE.md` (per-feature ownership + dev environment), `AI_DEVELOPMENT_RULES.md` (rules AI tooling must follow).
 
@@ -19,22 +19,22 @@ Companion docs in repo root: `DEVELOPMENT_GUIDE.md` (architecture rules), `WORKI
 The Gradle build wires the webview into `processResources`, so any plugin task rebuilds the webview as needed:
 `installWebviewDependencies` → `buildWebview` (Vite) → `copyWebviewToResources` → `processResources`. Node 20.11.1 is auto-downloaded by the `node` plugin (don't install Node manually). Webview-only dev server: `cd webview && npm run dev`.
 
-There is **no test task wired in** — there are no JUnit tests in this repo, and the "Generate Test" feature *generates* test code into the user's project; it does not test this plugin. Don't claim a test command exists.
+There is **no test task wired in** — there are no JUnit tests in this repo. Don't claim a test command exists.
 
 ## Architecture: Action → Agent → Service → LLM → UI
 
 This layering is strictly enforced (see `AI_DEVELOPMENT_RULES.md`). Putting logic in the wrong layer is the most common rule violation here.
 
-- **`action/`** — IntelliJ `AnAction` entry points (right-click menu items declared in `META-INF/plugin.xml`) plus `WebviewActionRouter` which dispatches JSQuery commands from the React webview (`/explain`, `/chat`, `/task`, `/apply`, `/viewDiff`, `/undo`, `/cancel`, `/createTestFile`, `/saveMarkdown`, `/testConnection`, `/fetchModels`, `/changeModel`, `/openTabs`, `/openSettings`, `/alert`). **No business logic in this layer.**
+- **`action/`** — IntelliJ `AnAction` entry points (`ExplainAction`, `ReviewAction`, `ImpactAnalysisAction`, `QueryValidationAction`, `ImproveAction`, `DocGenerateAction` — right-click menu items declared in `META-INF/plugin.xml`) plus `WebviewActionRouter` which dispatches JSQuery commands from the React webview (`/explain`, `/chat`, `/task`, `/doc`, `/ragdoc`, `/apply`, `/viewDiff`, `/undo`, `/cancel`, `/saveMarkdown`, `/testConnection`, `/fetchModels`, `/changeModel`, `/openTabs`, `/openSettings`, `/alert`, `/saveChat`, `/loadChat`, `/loadLastChat`, `/listChats`, `/deleteChat`). **No business logic in this layer.**
 - **`agent/`** — Holds all LLM-calling logic. Inherits from `BaseAgent` / implements `WuwAgent`. **LLM (Ollama) calls live only here.**
-- **`service/`** — "Tools": `EditorContextService`, `EditorApplyService`, `EditorDiffService`, `FileSearchService`, `TestFileService`, `BuildContextService`, `TypeContextService`, `WuwLlmService`, plus `service/analysis/` extractors. **Services must not call the LLM.**
+- **`service/`** — "Tools": `EditorContextService`, `EditorApplyService`, `EditorDiffService`, `FileSearchService`, `BuildContextService`, `TypeContextService`, `MarkdownFileService`, `ChatHistoryService`, `WuwLlmService`, plus `service/analysis/` extractors. **Services must not call the LLM.**
 - **`prompt/`** — `PromptManager.loadPrompt(fileName)` reads from `src/main/resources/prompt/`. Prompts are never hardcoded; new features add a new prompt file there.
 - **`ui/`** — `WuwToolWindowFactory` mounts the JCEF browser; `ui/bridge/JcefBridge` is the IDE→JS message channel (`sendMessage`, `sendMessageChunk`); `JcefMessageHandler` is the JS→IDE side feeding `WebviewActionRouter`.
 - **`client/OllamaClient`** — HTTP client for Ollama (streaming + blocking). All settings (baseUrl, model, temperature, timeoutSeconds, contextWindow) come from `setting/SettingsState` (persisted IntelliJ application service).
 
 ### TaskAgent + TaskPipeline (the orchestration core)
 
-`agent/TaskPipeline.kt` defines named pipelines (`Improve`, `Review`, `Impact`, `ExplainTask`, `QueryValidation`, `GenerateTest`, `Chat`) as ordered lists of `AgentStep(label, promptFile, isApplyable, isImproveStep)`. `TaskAgent` runs them inside a single `Task.Backgroundable`:
+`agent/TaskPipeline.kt` defines named pipelines (`Improve`, `Review`, `Impact`, `ExplainTask`, `QueryValidation`, `DocGenerate`, `Chat`) as ordered lists of `AgentStep(label, promptFile, isApplyable, isImproveStep)`. `TaskAgent` runs them inside a single `Task.Backgroundable`:
 
 1. `IntentAnalyzer.analyze()` first does keyword matching, then falls back to an LLM classifier (`intent_prompt.txt`), then to `Chat`.
 2. Each step calls `AgentStep.executeSync()`, which:
@@ -63,4 +63,4 @@ React + Vite + TypeScript under `webview/`. `vite.config.ts` uses `vite-plugin-s
 
 ## Plugin compatibility
 
-Targets IntelliJ Platform 2024.3.5 (IC) with `sinceBuild=232`, `untilBuild=299.*` (covers Android Studio builds through the long horizon). JVM 17, Kotlin 1.9.24.
+Targets IntelliJ Platform 2024.3.5 (IC). `build.gradle.kts` patches `sinceBuild=243`; no `untilBuild` is set (plugin runs on all later builds). JVM 17. Kotlin Gradle plugin 2.1.20, IntelliJ Platform Gradle plugin 2.11.0.

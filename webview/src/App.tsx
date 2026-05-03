@@ -35,7 +35,6 @@ interface Message {
   extractedCode?: string;
   applyScope?: string;
   applied?: boolean;
-  sourceFile?: string;
   filePath?: string;
   hasSelection?: boolean;
   selectedText?: string;
@@ -69,14 +68,6 @@ const StepNotiItem = React.memo(({ msg }: { msg: Message }) => {
     </div>
   );
 });
-
-// ─────────────────────────────────────────────
-//  유틸: 마크다운에서 코드 블록만 추출
-// ─────────────────────────────────────────────
-function extractCodeBlocks(markdown: string): string {
-  const blocks = [...markdown.matchAll(/```[\w]*\n([\s\S]*?)```/g)];
-  return blocks.map(m => m[1].trim()).join('\n\n');
-}
 
 // ─────────────────────────────────────────────
 //  컴포넌트: MermaidChart (플로우차트 렌더링)
@@ -206,14 +197,6 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
     }));
   };
 
-  // ── 테스트 결과 여부 판별 ────────────────────────────────────────
-  const isTestResult = msg.subType === 'test' || msg.subType === 'test_start' || msg.subType === 'task_chunk' && !!msg.sourceFile;
-
-  const handleCopyCode = () => {
-    const codeOnly = extractCodeBlocks(msg.content);
-    navigator.clipboard.writeText(codeOnly || msg.content).catch(() => {});
-  };
-
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
     <div className={`msg-ai ${isError ? 'error' : 'analysis'}`}>
@@ -251,20 +234,8 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
         {isError && <div className="error-badge" style={{ marginTop: '12px' }}>ERROR</div>}
       </div>
 
-      {/* 테스트 결과 전용 버튼 */}
-      {!isError && !msg.isLoading && msg.content && isTestResult && (
-        <div className="msg-text-actions test-actions">
-          <button className="btn-text-action btn-copy-code" onClick={handleCopyCode} title="테스트 코드만 클립보드에 복사">
-            📋 Copy Code
-          </button>
-          <button className="btn-text-action" onClick={handleSave} title="전체 결과를 Markdown 파일로 저장">
-            💾 Save .md
-          </button>
-        </div>
-      )}
-
       {/* 일반 결과 버튼 (Copy / Save / Diff 보기, 초기 인사말 제외) */}
-      {!isError && !msg.isLoading && msg.content && !isTestResult && msg.id !== '1' && (
+      {!isError && !msg.isLoading && msg.content && msg.id !== '1' && (
         <div className="msg-text-actions">
           <button className="btn-text-action" onClick={handleCopy} title="클립보드에 복사">
             Copy
@@ -604,23 +575,6 @@ function App() {
                 isLoading = false;
                 isStreaming = false;
                 break;
-              case 'test':
-                // 스트리밍으로 이미 청크가 쌓였으면 기존 content 유지
-                // (onSuccess의 done=true 응답은 content가 비어있을 수 있음)
-                newContent = existing.isStreaming ? existing.content : (data.content || existing.content);
-                isLoading = false;
-                isStreaming = false;
-                break;
-              case 'test_file_created':
-                // 파일 생성 완료 알림 — 기존 메시지 유지하고 상태만 갱신
-                break;
-              case 'testExecutionResult':
-                // 테스트 실행 최종 결과(Markdown) — 로딩 버블을 리포트로 교체
-                newContent = data.content;
-                isLoading = false;
-                isStreaming = false;
-                currentStatus = undefined;
-                break;
             }
 
             updated[index] = {
@@ -631,7 +585,6 @@ function App() {
               isError:         isError,
               isStreaming:     isStreaming,
               subType:         data.subType,
-              sourceFile:      data.sourceFile || existing.sourceFile,
               isSuccess:       data.isSuccess !== 'false' ? true : existing.isSuccess,
               modifiedFullCode: modifiedFullCode,
             };
@@ -667,7 +620,6 @@ function App() {
             subType: data.subType,
             isLoading: true,
             currentStatus: data.content,  // 로딩 문구는 UI 상태로만 관리
-            sourceFile: data.sourceFile,  // test_start 시 소스파일명 저장
             filePath: data.filePath,      // Improve Step2 시작 시 원본 파일 경로 저장 (Diff 버튼용)
             hasSelection: data.hasSelection === 'true',
             selectedText: data.selectedText
@@ -762,9 +714,6 @@ function App() {
     } else if (text === '/query' || text.startsWith('/query ')) {
       command = '/task';
       payload = '쿼리를 검증해주세요.';
-    } else if (text === '/test' || text.startsWith('/test ')) {
-      command = '/task';
-      payload = '테스트 코드를 생성해주세요.';
     } else if (text === '/doc' || text.startsWith('/doc ')) {
       command = '/doc';
       payload = '';
@@ -780,8 +729,6 @@ function App() {
     } else if (/영향 분석|영향도|impact|analyze|분석/i.test(text)) {
       command = '/task';
     } else if (/쿼리|query|sql|검증/i.test(text)) {
-      command = '/task';
-    } else if (/테스트|test|생성/i.test(text)) {
       command = '/task';
     }
     window.sendToIde(JSON.stringify({
@@ -799,7 +746,6 @@ function App() {
     const cmds = [
       { cmd: '/explain', desc: '코드를 설명해줘' },
       { cmd: '/improve', desc: '코드를 개선해줘' },
-      { cmd: '/test', desc: '테스트 코드를 생성해줘' },
       { cmd: '/analyze', desc: '영향도를 분석해줘' },
       { cmd: '/query', desc: '쿼리를 검증해줘' },
       { cmd: '/doc', desc: '디렉토리 분석 문서 생성' },
