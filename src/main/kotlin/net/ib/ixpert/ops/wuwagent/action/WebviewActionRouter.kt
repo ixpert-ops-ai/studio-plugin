@@ -296,15 +296,22 @@ class WebviewActionRouter(private val project: Project) {
                         ApplicationManager.getApplication().invokeLater {
                             bridge.sendMessage("step_noti", stepLabel, notiId, mapOf("status" to "started"))
                             when {
-                                stepMsgId == messageId -> bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId)
-                                !isApplyable -> bridge.sendMessage(
-                                    "task_start", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId,
-                                    mapOf(
-                                        "filePath"     to improveFilePath,
-                                        "hasSelection" to "false"
+                                stepMsgId == messageId ->
+                                    bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId)
+                                !isApplyable && !stepMsgId.endsWith("_s3") ->
+                                    // Step2: Diff 버튼용 filePath 포함
+                                    bridge.sendMessage(
+                                        "task_start", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId,
+                                        mapOf(
+                                            "filePath"     to improveFilePath,
+                                            "hasSelection" to "false"
+                                        )
                                     )
-                                )
-                                else -> bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
+                                !isApplyable ->
+                                    // Step3(안정성 평가) 등: filePath 없이 새 말풍선만 생성
+                                    bridge.sendMessage("task_start", "⚙️ $stepLabel LLM 응답 대기 중...", stepMsgId)
+                                else ->
+                                    bridge.sendMessage("task_progress", "⚙️ $stepLabel LLM 응답 대기 중...", messageId)
                             }
                         }
                     }
