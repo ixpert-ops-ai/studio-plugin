@@ -1020,11 +1020,14 @@ function App() {
             >
               <ChevronDown size={14} />
             </button>
-            {showScrollButton && (
-              <button className="scroll-nav-btn" onClick={scrollToBottom} title="맨 아래로">
-                <ArrowDown size={14} />
-              </button>
-            )}
+            <button 
+              className="scroll-nav-btn" 
+              onClick={() => showScrollButton && scrollToBottom()} 
+              disabled={!showScrollButton}
+              title="맨 아래로"
+            >
+              <ArrowDown size={14} />
+            </button>
           </div>
         )}
         <div className="input-toolbar">
