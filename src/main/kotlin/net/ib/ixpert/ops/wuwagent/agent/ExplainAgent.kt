@@ -90,7 +90,15 @@ class ExplainAgent : BaseAgent() {
             includeFaq = includeFaq
         )
 
-        val systemPrompt = PromptManager.loadPromptWithVars("explain_prompt.txt", promptVars)
+        var systemPrompt = PromptManager.loadPromptWithVars("explain_prompt.txt", promptVars)
+        
+        // [Phase 1b] 메타그래프 컨텍스트 자동 주입
+        val contextAssembler = context.project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ContextAssembler::class.java)
+        val graphContext = contextAssembler.assemble(context, context.payloadText)
+        if (graphContext.isNotBlank()) {
+            systemPrompt = "$graphContext\n\n$systemPrompt"
+        }
+        
         val userPrompt = """
             제공된 정보와 코드를 바탕으로 시스템 메시지의 4가지 섹션 형식에 맞춰 분석해 주세요.
             [중요] 코드 개선 제안이나 추측성 분석은 절대 하지 마세요.
