@@ -79,8 +79,12 @@ class TaskAgent(
                         { chunk -> bridge.sendMessageChunk(stepMsgId, chunk) }
                     } else null
 
+                    val toolNotiHandler: (String) -> Unit = { notiText ->
+                        bridge.sendMessage("tool_noti", notiText, stepMsgId)
+                    }
+
                     try {
-                        val result = step.executeSync(context, client, stepChunkHandler, previousStepResult, allCompletedResults.toList())
+                        val result = step.executeSync(context, client, stepChunkHandler, previousStepResult, allCompletedResults.toList(), toolNotiHandler)
 
                         // executeSync 완료 후에도 취소 여부 재확인
                         if (TaskCancellationToken.isCancelled.get()) {

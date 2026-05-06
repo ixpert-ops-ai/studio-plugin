@@ -227,10 +227,12 @@ sealed class TaskPipeline {
             client: OllamaClient,
             onChunk: ((String) -> Unit)? = null,
             previousStepResult: String? = null,
-            allPreviousResults: List<StepResult> = emptyList()
+            allPreviousResults: List<StepResult> = emptyList(),
+            onToolNoti: ((String) -> Unit)? = null
         ): StepResult {
             // ─ 안정성 평가 Step (isStabilityStep=true) ─────────────────────────
             if (isStabilityStep) {
+                onToolNoti?.invoke("컨텍스트 확인 중: 에디터 파일")
                 val originalCode = if (context.editor != null)
                     EditorContextService.extractCodeWithScope(context.editor, context.project).code
                 else ""
@@ -243,6 +245,8 @@ sealed class TaskPipeline {
                 val analysisResult = allPreviousResults.getOrNull(0)?.rawLlmResponse ?: ""
 
                 val language = context.editor?.virtualFile?.extension?.uppercase() ?: "Unknown"
+                val stabilityModel = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state.model
+                onToolNoti?.invoke("LLM 호출 중... ($stabilityModel)")
 
                 val stabilitySystemPrompt = PromptManager.loadPromptWithVars(
                     promptFile, mapOf(
@@ -296,6 +300,9 @@ sealed class TaskPipeline {
                 originalCode = attachedFile.content
                 applyScope   = attachedFile.fileName
                 logger.info("AgentStep[${label}]: @ 파일 첨부 감지 → ${attachedFile.fileName}")
+                onToolNoti?.invoke("컨텍스트 확인 중: @ 파일 (${attachedFile.fileName})")
+                onToolNoti?.invoke("파일 읽기 중... (${attachedFile.fileName})")
+                onToolNoti?.invoke("코드 ${originalCode.lines().size}줄 확인")
                 userMessage = if (isImproveStep) {
                     buildString {
                         appendLine("다음 코드를 수정하라.")
@@ -317,10 +324,14 @@ sealed class TaskPipeline {
 
             } else if (context.editor != null) {
                 // ─ 2순위(선택) / 3순위(전체): 에디터 기반 ────────────────────────
+                val editorFileName = context.editor.virtualFile?.name ?: "파일"
+                onToolNoti?.invoke("파일 읽기 중... ($editorFileName)")
                 val extraction = EditorContextService.extractCodeWithScope(context.editor, context.project)
                 if (extraction.code.isNotBlank()) {
                     originalCode = extraction.code
                     applyScope   = if (extraction.isSelection) "선택 영역" else "전체 파일"
+                    onToolNoti?.invoke("컨텍스트 확인 중: ${if (extraction.isSelection) "드래그 선택" else "에디터 파일"}")
+                    onToolNoti?.invoke("코드 ${originalCode.lines().size}줄 확인")
                 }
                 userMessage = if (isImproveStep && originalCode.isNotBlank()) {
                     buildString {
@@ -367,12 +378,15 @@ sealed class TaskPipeline {
                 val potentialFileName = filePattern.find(payload)?.value
 
                 if (potentialFileName != null) {
+                    onToolNoti?.invoke("파일 검색 중... ($potentialFileName)")
                     val matchedFile = FileSearchService.searchFiles(context.project, potentialFileName).firstOrNull()
                     if (matchedFile != null) {
                         val fileContent = FileSearchService.readFileContent(matchedFile)
                         logger.info("AgentStep[${label}]: 파일 검색 히트 → ${matchedFile.name}")
                         originalCode = fileContent
                         applyScope   = matchedFile.name
+                        onToolNoti?.invoke("파일 읽기 중... (${matchedFile.name})")
+                        onToolNoti?.invoke("코드 ${originalCode.lines().size}줄 확인")
                         userMessage  = if (isImproveStep) {
                             buildString {
                                 appendLine("다음 코드를 수정하라.")
@@ -402,6 +416,7 @@ sealed class TaskPipeline {
                         )
                     }
                 } else {
+                    if (payload.isNotBlank()) onToolNoti?.invoke("파일 검색 중... ($payload)")
                     val firstFile = if (payload.isNotBlank())
                         FileSearchService.searchFiles(context.project, payload).firstOrNull()
                     else null
@@ -409,6 +424,8 @@ sealed class TaskPipeline {
                     if (firstFile != null) {
                         val fileContent = FileSearchService.readFileContent(firstFile)
                         logger.info("AgentStep[${label}]: 일반 검색 히트 → ${firstFile.name}")
+                        onToolNoti?.invoke("파일 읽기 중... (${firstFile.name})")
+                        onToolNoti?.invoke("코드 ${fileContent.lines().size}줄 확인")
                         userMessage = "사용자 요청: $payload$prevContext\n\n// 파일: ${firstFile.name}\n```\n$fileContent\n```"
                     } else {
                         userMessage = payload + prevContext
@@ -429,11 +446,14 @@ sealed class TaskPipeline {
 
             // usesPromptVars=true이면 코드 추출 결과로 플레이스홀더 치환
             val systemPrompt = if (usesPromptVars && originalCode.isNotBlank()) {
+                onToolNoti?.invoke("코드 구조 추출 중...")
                 PromptManager.loadPromptWithVars(promptFile, buildPromptVars(context, originalCode, applyScope))
             } else {
                 promptTemplate
             }
 
+            val modelName = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state.model
+            onToolNoti?.invoke("LLM 호출 중... ($modelName)")
             logger.warn("AgentStep[${label}] INPUT: originalCode 길이=${originalCode.length}, userMessage 길이=${userMessage.length}, prevContext 포함=${prevContext.isNotBlank()}, promptVars=${usesPromptVars}")
             logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=${applyScope.ifBlank { "file-search" }}, stream=${onChunk != null})")
 

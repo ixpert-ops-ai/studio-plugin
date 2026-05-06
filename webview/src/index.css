@@ -210,6 +210,14 @@ body {
   font-size: 13px;
 }
 
+.tool-noti-text {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  opacity: 0.8;
+}
+
 .error-text {
   color: #ff8a80 !important;
 }

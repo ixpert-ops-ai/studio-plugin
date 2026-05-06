@@ -44,6 +44,7 @@ interface Message {
   isStreaming?: boolean;
   currentStatus?: string;
   stepNotiStatus?: 'started' | 'completed' | 'failed';
+  toolNotiText?: string;
 }
 
 // ─────────────────────────────────────────────
@@ -202,6 +203,9 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
     <div className={`msg-ai ${isError ? 'error' : 'analysis'}`} data-message-role="ai">
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
+        {msg.toolNotiText && (
+          <div className="tool-noti-text">{msg.toolNotiText}</div>
+        )}
         {msg.content && (
           <div className="markdown-body" style={{ maxWidth: '100%', overflowX: 'hidden' }}>
             <Markdown 
@@ -521,6 +525,15 @@ function App() {
 
       const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
 
+      if (data.subType === 'tool_noti') {
+        if (messageId) {
+          setMessages(prev => prev.map(m =>
+            m.id === messageId ? { ...m, toolNotiText: data.content } : m
+          ));
+        }
+        return;
+      }
+
       if (data.subType === 'step_noti') {
         if (messageId) {
           setMessages(prev => {
@@ -614,6 +627,7 @@ function App() {
                 isError = data.subType === 'error';
                 newContent += (newContent ? '\n\n' : '') + data.content;
                 break;
+
               case 'chat_chunk':
                 // /chat, /explain 전용 스트리밍
                 newContent += data.content;
@@ -632,6 +646,7 @@ function App() {
                 break;
             }
 
+            const isCompletionEvent = ['task_step', 'task_success', 'error', 'task_cancelled'].includes(data.subType);
             updated[index] = {
               ...existing,
               content:         newContent,
@@ -642,6 +657,7 @@ function App() {
               subType:         data.subType,
               isSuccess:       data.isSuccess !== 'false' ? true : existing.isSuccess,
               modifiedFullCode: modifiedFullCode,
+              toolNotiText:    isCompletionEvent ? undefined : existing.toolNotiText,
             };
             return updated;
           }
