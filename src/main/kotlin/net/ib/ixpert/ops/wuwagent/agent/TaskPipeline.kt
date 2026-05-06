@@ -485,17 +485,17 @@ sealed class TaskPipeline {
         )
     }
 
-    /** 테스트 코드 생성 (GenerateTestAgent 직접 호출) */
-    object GenerateTest : TaskPipeline() {
-        override val steps = listOf(
-            AgentStep("1/1 테스트 생성", "generate_test_prompt.md", isApplyable = false)
-        )
-    }
-
     /** 분석 문서 생성 (DocGenerateAgent 직접 호출) */
     object DocGenerate : TaskPipeline() {
         override val steps = listOf(
             AgentStep("1/1 분석 문서 생성", "explain_prompt.txt", isApplyable = false)
+        )
+    }
+
+    /** 단위 테스트 리포트 (UnitTestReportAgent 직접 호출) */
+    object UnitTestReport : TaskPipeline() {
+        override val steps = listOf(
+            AgentStep("1/1 단위 테스트 리포트", "unit-test-report-prompt.md", isApplyable = false)
         )
     }
 
