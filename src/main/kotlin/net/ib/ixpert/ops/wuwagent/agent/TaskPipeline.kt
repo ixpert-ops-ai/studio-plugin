@@ -73,9 +73,21 @@ sealed class TaskPipeline {
             originalCode: String,
             applyScope: String
         ): Map<String, String> {
-            val language         = context.editor?.virtualFile?.extension?.lowercase() ?: "unknown"
-            val fileName         = context.editor?.virtualFile?.name ?: applyScope
-            val filePath         = context.editor?.virtualFile?.path ?: ""
+            // applyScope이 "선택 영역" / "전체 파일"이 아니면 @ 첨부 파일 케이스
+            // → language·fileName은 첨부 파일명 기준으로 추출, filePath는 알 수 없으므로 빈 값
+            val isAttachedFile = applyScope != "선택 영역" && applyScope != "전체 파일"
+
+            val language = if (isAttachedFile) {
+                applyScope.substringAfterLast('.', "").lowercase()
+                    .ifBlank { context.editor?.virtualFile?.extension?.lowercase() ?: "unknown" }
+            } else {
+                context.editor?.virtualFile?.extension?.lowercase() ?: "unknown"
+            }
+            val fileName = if (isAttachedFile) applyScope
+                           else context.editor?.virtualFile?.name ?: ""
+            val filePath = if (isAttachedFile) ""
+                           else context.editor?.virtualFile?.path ?: ""
+
             val analysisMode     = if (applyScope == "선택 영역") "선택 범위" else "전체 파일"
             val extractionMethod = if (applyScope == "선택 영역") "드래그/커서 선택" else "파일 전체 추출"
             val locationInfo     = buildString {
