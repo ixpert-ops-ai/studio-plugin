@@ -814,12 +814,9 @@ function App() {
       { cmd: '/explain', desc: '코드를 설명해줘' },
       { cmd: '/improve', desc: '코드를 개선해줘' },
       { cmd: '/test', desc: '테스트 코드를 생성해줘' },
-      { cmd: '/test-all', desc: '단위 테스트 코드 일괄 자동 생성' },
       { cmd: '/analyze', desc: '요구사항 기반 수정 대상 파일 추출' },
-      { cmd: '/implement', desc: '추출된 대상 파일 코드 자동 구현' },
       { cmd: '/query', desc: '쿼리를 검증해줘' },
       { cmd: '/doc', desc: '디렉토리 분석 문서 생성' },
-      { cmd: '/ragdoc', desc: 'RAG 전용 분석 문서 생성 (FAQ 포함)' },
       { cmd: '/metagraph', desc: '프로젝트 메타 그래프 생성' }
     ];
     cmds.forEach(c => items.push({ type: 'cmd', cmd: c.cmd, desc: c.desc, index: idx++ }));
