@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Plus, MessageSquare, Square, Terminal, Send, ArrowDown } from 'lucide-react';
+import { Settings, Plus, MessageSquare, Square, Terminal, Send, ArrowDown, ChevronUp, ChevronDown } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -199,7 +199,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
 
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
-    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`}>
+    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`} data-message-role="ai">
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
         {msg.content && (
@@ -267,6 +267,9 @@ function App() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적 (자동 스크롤용)
   const [showScrollButton, setShowScrollButton] = useState(false); // 스크롤 하단 이동 버튼 노출 여부
+  const [hasScrollArea, setHasScrollArea] = useState(false); // 전체 스크롤 영역 존재 여부
+  const [canScrollPrev, setCanScrollPrev] = useState(false); // 이전 AI 메시지로 이동 가능 여부
+  const [canScrollNext, setCanScrollNext] = useState(false); // 다음 AI 메시지로 이동 가능 여부
   const isComposing = useRef(false); // 한글 IME composition 상태 추적 (JCEF 자모 분리 방지)
   const atTriggerPos = useRef<number>(-1); // @ 타이핑으로 팝업 열린 경우 @ 위치
 
@@ -310,7 +313,28 @@ function App() {
       const hasScroll = el.scrollHeight > el.clientHeight;
       const notAtBottom = el.scrollTop + el.clientHeight < el.scrollHeight - 10;
       
+      setHasScrollArea(hasScroll);
       setShowScrollButton(hasScroll && notAtBottom);
+
+      // AI 답변 탐색 버튼 활성화 여부 계산
+      if (hasScroll) {
+        const aiMessages = el.querySelectorAll('[data-message-role="ai"]');
+        const scrollTop = el.scrollTop;
+        let foundPrev = false;
+        let foundNext = false;
+        
+        aiMessages.forEach(msgNode => {
+          const top = (msgNode as HTMLElement).offsetTop;
+          if (top < scrollTop - 10) foundPrev = true;
+          else if (top > scrollTop + 10) foundNext = true;
+        });
+        
+        setCanScrollPrev(foundPrev);
+        setCanScrollNext(foundNext);
+      } else {
+        setCanScrollPrev(false);
+        setCanScrollNext(false);
+      }
     };
 
     el.addEventListener('scroll', handleScroll, { passive: true });
@@ -334,6 +358,37 @@ function App() {
 
   const scrollToBottom = () => {
     chatListRef.current?.scrollTo({ top: chatListRef.current.scrollHeight, behavior: 'smooth' });
+  };
+
+  const scrollToNearestAi = (direction: 'up' | 'down') => {
+    const el = chatListRef.current;
+    if (!el) return;
+    const aiMessages = el.querySelectorAll('[data-message-role="ai"]');
+    const scrollTop = el.scrollTop;
+    
+    let targetMsg: HTMLElement | null = null;
+    
+    if (direction === 'up') {
+      for (let i = aiMessages.length - 1; i >= 0; i--) {
+        const msgNode = aiMessages[i] as HTMLElement;
+        if (msgNode.offsetTop < scrollTop - 10) {
+          targetMsg = msgNode;
+          break;
+        }
+      }
+    } else {
+      for (let i = 0; i < aiMessages.length; i++) {
+        const msgNode = aiMessages[i] as HTMLElement;
+        if (msgNode.offsetTop > scrollTop + 10) {
+          targetMsg = msgNode;
+          break;
+        }
+      }
+    }
+
+    if (targetMsg) {
+      targetMsg.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   // 플러그인 시작 시 마지막 채팅 자동 복원
@@ -963,10 +1018,33 @@ function App() {
       </div>
 
       <div className="chat-input-area">
-        {showScrollButton && (
-          <button className="scroll-bottom-btn" onClick={scrollToBottom}>
-            <ArrowDown size={14} />
-          </button>
+        {hasScrollArea && (
+          <div className="scroll-nav-group">
+            <button 
+              className="scroll-nav-btn"
+              onClick={() => canScrollPrev && scrollToNearestAi('up')}
+              disabled={!canScrollPrev}
+              title="이전 AI 답변"
+            >
+              <ChevronUp size={14} />
+            </button>
+            <button 
+              className="scroll-nav-btn"
+              onClick={() => canScrollNext && scrollToNearestAi('down')}
+              disabled={!canScrollNext}
+              title="다음 AI 답변"
+            >
+              <ChevronDown size={14} />
+            </button>
+            <button 
+              className="scroll-nav-btn" 
+              onClick={() => showScrollButton && scrollToBottom()} 
+              disabled={!showScrollButton}
+              title="맨 아래로"
+            >
+              <ArrowDown size={14} />
+            </button>
+          </div>
         )}
         <div className="input-toolbar">
           <button className="toolbar-btn" onClick={handleFileButtonClick}>@ 파일</button>
