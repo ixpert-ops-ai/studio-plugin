@@ -14,7 +14,7 @@ import com.intellij.openapi.application.ApplicationManager
 class SettingsState : PersistentStateComponent<SettingsState.State> {
 
     data class State(
-        var baseUrl: String = "http://ollama.jodongik.cloud",
+        var baseUrl: String = "http://ollama.ixpertops.cloud",
         var apiKey: String = "ollama",
         var model: String = "qwen3-coder:30b",
         var temperature: Float = 0.1f,
