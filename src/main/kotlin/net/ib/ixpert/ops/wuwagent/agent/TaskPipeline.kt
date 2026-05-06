@@ -444,6 +444,17 @@ sealed class TaskPipeline {
                 )
             }
 
+            // Improve Step1 전용: 분석 대상 확정 noti (파일명·범위 확정 후 전송)
+            if (label == "1/3 개선 분석" && originalCode.isNotBlank()) {
+                val scopeDisplay = if (applyScope == "선택 영역") "선택 범위" else "전체 파일"
+                val fileDisplayName = when {
+                    applyScope == "선택 영역" || applyScope == "전체 파일" ->
+                        context.editor?.virtualFile?.name ?: ""
+                    else -> applyScope  // @ 파일 첨부: applyScope = 파일명
+                }
+                onToolNoti?.invoke("분석 대상 확정: $fileDisplayName ($scopeDisplay)")
+            }
+
             // usesPromptVars=true이면 코드 추출 결과로 플레이스홀더 치환
             val systemPrompt = if (usesPromptVars && originalCode.isNotBlank()) {
                 onToolNoti?.invoke("코드 구조 추출 중...")
