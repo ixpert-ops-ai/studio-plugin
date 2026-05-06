@@ -35,7 +35,7 @@ class TaskAgent(
         TaskCancellationToken.reset()   // 이전 취소 상태 초기화
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(
-            context.project, "WuwAgent: Task 실행 중", true   // canBeCancelled=true
+            context.project, "iXpert AI Assistant: Task 실행 중", true   // canBeCancelled=true
         ) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
@@ -54,6 +54,7 @@ class TaskAgent(
 
                 // ── Step 1~N: Pipeline 순차 실행 ──────────────
                 var previousStepResult: String? = null   // 이전 단계 LLM 응답 — 다음 단계 문맥으로 전달
+                val allCompletedResults = mutableListOf<TaskPipeline.StepResult>()
 
                 for ((idx, step) in pipeline.steps.withIndex()) {
                     // 취소 체크 (Step 시작 전)
@@ -79,7 +80,7 @@ class TaskAgent(
                     } else null
 
                     try {
-                        val result = step.executeSync(context, client, stepChunkHandler, previousStepResult)
+                        val result = step.executeSync(context, client, stepChunkHandler, previousStepResult, allCompletedResults.toList())
 
                         // executeSync 완료 후에도 취소 여부 재확인
                         if (TaskCancellationToken.isCancelled.get()) {
@@ -91,6 +92,7 @@ class TaskAgent(
                         logger.info("TaskAgent: [${idx + 1}/${pipeline.steps.size}] ${step.label} 완료 (success=${result.isSuccess})")
                         // 다음 단계 문맥 전달을 위해 원문 응답 보관 ([IMPROVE_TARGETS] 블록 포함)
                         previousStepResult = result.rawLlmResponse
+                        allCompletedResults.add(result)
                         onStep(step.label, result, step.isApplyable, stepMsgId)
 
                         // ❌ 에러 발생 시 파이프라인 즉시 중단

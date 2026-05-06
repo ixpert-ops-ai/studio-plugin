@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Settings, Plus, MessageSquare, Square, Terminal, Send, ArrowDown } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -35,7 +35,6 @@ interface Message {
   extractedCode?: string;
   applyScope?: string;
   applied?: boolean;
-  sourceFile?: string;
   filePath?: string;
   hasSelection?: boolean;
   selectedText?: string;
@@ -50,7 +49,7 @@ interface Message {
 // ─────────────────────────────────────────────
 //  컴포넌트: StepNotiItem (스텝 진행 알림 카드)
 // ─────────────────────────────────────────────
-const StepNotiItem = ({ msg }: { msg: Message }) => {
+const StepNotiItem = React.memo(({ msg }: { msg: Message }) => {
   const isStarted   = msg.stepNotiStatus === 'started';
   const isCompleted = msg.stepNotiStatus === 'completed';
   const isFailed    = msg.stepNotiStatus === 'failed';
@@ -68,54 +67,88 @@ const StepNotiItem = ({ msg }: { msg: Message }) => {
       </span>
     </div>
   );
-};
-
-// ─────────────────────────────────────────────
-//  유틸: 마크다운에서 코드 블록만 추출
-// ─────────────────────────────────────────────
-function extractCodeBlocks(markdown: string): string {
-  const blocks = [...markdown.matchAll(/```[\w]*\n([\s\S]*?)```/g)];
-  return blocks.map(m => m[1].trim()).join('\n\n');
-}
+});
 
 // ─────────────────────────────────────────────
 //  컴포넌트: MermaidChart (플로우차트 렌더링)
 // ─────────────────────────────────────────────
-const MermaidChart = ({ chart }: { chart: string }) => {
+const MermaidChart = React.memo(({ chart }: { chart: string }) => {
   const [svg, setSvg] = useState<string>('');
-  // 고유 id 보장 (동시 렌더링 충돌 회피)
   const [id] = useState(() => `mermaid-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hasRendered = useRef(false);
 
   useEffect(() => {
+    if (!chart || hasRendered.current) return;
+    const container = containerRef.current;
+    if (!container) return;
     let mounted = true;
-    if (chart) {
-      mermaid.render(id, chart)
-        .then((result) => {
-          if (mounted) setSvg(result.svg);
-        })
-        .catch((err) => {
-          console.error("Mermaid parsing error:", err);
-          if (mounted) setSvg(`<pre class="error-text" style="font-size:11px">Mermaid Error: ${err?.message || 'Syntax Error'}</pre>`);
-        });
-    }
-    return () => { mounted = false; };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !hasRendered.current) {
+          hasRendered.current = true;
+          observer.disconnect();
+          mermaid.render(id, chart)
+            .then((result) => { if (mounted) setSvg(result.svg); })
+            .catch((err) => {
+              console.error("Mermaid parsing error:", err);
+              if (mounted) setSvg(`<pre class="error-text" style="font-size:11px">Mermaid Error: ${err?.message || 'Syntax Error'}</pre>`);
+            });
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(container);
+    return () => { mounted = false; observer.disconnect(); };
   }, [chart, id]);
 
-  if (!svg) {
-    return (
-      <div className="mermaid-loading inline-loading-area" style={{ margin: '16px 0', padding: '12px' }}>
-        <div className="typing-dots"><span></span><span></span><span></span></div>
-        <span className="status-text">차트 렌더링 중...</span>
+  return (
+    <div ref={containerRef}>
+      {!svg ? (
+        <div className="mermaid-loading inline-loading-area" style={{ margin: '16px 0', padding: '12px' }}>
+          <div className="typing-dots"><span></span><span></span><span></span></div>
+          <span className="status-text">차트 렌더링 중...</span>
+        </div>
+      ) : (
+        <div className="mermaid-chart flex justify-center" dangerouslySetInnerHTML={{ __html: svg }} />
+      )}
+    </div>
+  );
+});
+
+// ─────────────────────────────────────────────
+//  컴포넌트: CodeBlock (에디터 스타일 코드블록)
+// ─────────────────────────────────────────────
+const CodeBlock = ({ children }: { children: React.ReactNode }) => {
+  const [copied, setCopied] = useState(false);
+
+  const codeEl = Array.isArray(children) ? children[0] : children;
+  const lang = /language-(\w+)/.exec((codeEl as any)?.props?.className || '')?.[1] ?? '';
+  const codeText = String((codeEl as any)?.props?.children ?? '').replace(/\n$/, '');
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(codeText).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div className="code-block">
+      <div className="code-block-header">
+        {lang && <span className="code-block-lang">{lang}</span>}
+        <button className="code-block-copy" onClick={handleCopy}>
+          {copied ? '✓ 복사됨' : 'Copy'}
+        </button>
       </div>
-    );
-  }
-  return <div className="mermaid-chart flex justify-center" dangerouslySetInnerHTML={{ __html: svg }} />;
+      <pre className="code-block-pre">{children}</pre>
+    </div>
+  );
 };
 
 // ─────────────────────────────────────────────
 //  컴포넌트: MessageItem (역할별 분기)
 // ─────────────────────────────────────────────
-const MessageItem = ({ msg }: { msg: Message }) => {
+const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   // 0. Step 알림 카드
   if (msg.subType === 'step_noti') {
     return <StepNotiItem msg={msg} />;
@@ -164,29 +197,9 @@ const MessageItem = ({ msg }: { msg: Message }) => {
     }));
   };
 
-  // ── 테스트 결과 여부 판별 ────────────────────────────────────────
-  const isTestResult = msg.subType === 'test' || msg.subType === 'test_start' || msg.subType === 'task_chunk' && !!msg.sourceFile;
-
-  const handleCopyCode = () => {
-    const codeOnly = extractCodeBlocks(msg.content);
-    navigator.clipboard.writeText(codeOnly || msg.content).catch(() => {});
-  };
-
-  const handleCreateFile = () => {
-    if (window.sendToIde) {
-      const codeOnly = extractCodeBlocks(msg.content);
-      window.sendToIde(JSON.stringify({
-        command: '/createTestFile',
-        code: codeOnly || msg.content,
-        sourceFile: msg.sourceFile || '',
-        id: msg.id
-      }));
-    }
-  };
-
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
-    <div className={`msg-ai ${isError ? 'error' : isTestResult ? 'test-result' : 'analysis'}`}>
+    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`}>
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
         {msg.content && (
@@ -195,6 +208,7 @@ const MessageItem = ({ msg }: { msg: Message }) => {
               remarkPlugins={[remarkGfm]} 
               rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
               components={{
+                pre: (props: any) => <CodeBlock>{props.children}</CodeBlock>,
                 code(props: any) {
                   const { children, className, node, ...rest } = props;
                   const match = /language-(\w+)/.exec(className || '');
@@ -220,23 +234,8 @@ const MessageItem = ({ msg }: { msg: Message }) => {
         {isError && <div className="error-badge" style={{ marginTop: '12px' }}>ERROR</div>}
       </div>
 
-      {/* 테스트 결과 전용 버튼 */}
-      {!isError && !msg.isLoading && msg.content && isTestResult && (
-        <div className="msg-text-actions test-actions">
-          <button className="btn-text-action btn-copy-code" onClick={handleCopyCode} title="테스트 코드만 클립보드에 복사">
-            📋 Copy Code
-          </button>
-          <button className="btn-text-action btn-create-file" onClick={handleCreateFile} title="테스트 파일을 프로젝트에 생성">
-            📁 Create File
-          </button>
-          <button className="btn-text-action" onClick={handleSave} title="전체 결과를 Markdown 파일로 저장">
-            💾 Save .md
-          </button>
-        </div>
-      )}
-
       {/* 일반 결과 버튼 (Copy / Save / Diff 보기, 초기 인사말 제외) */}
-      {!isError && !msg.isLoading && msg.content && !isTestResult && msg.id !== '1' && (
+      {!isError && !msg.isLoading && msg.content && msg.id !== '1' && (
         <div className="msg-text-actions">
           <button className="btn-text-action" onClick={handleCopy} title="클립보드에 복사">
             Copy
@@ -253,7 +252,7 @@ const MessageItem = ({ msg }: { msg: Message }) => {
       )}
     </div>
   );
-};
+});
 
 // ─────────────────────────────────────────────
 //  메인 App
@@ -576,23 +575,6 @@ function App() {
                 isLoading = false;
                 isStreaming = false;
                 break;
-              case 'test':
-                // 스트리밍으로 이미 청크가 쌓였으면 기존 content 유지
-                // (onSuccess의 done=true 응답은 content가 비어있을 수 있음)
-                newContent = existing.isStreaming ? existing.content : (data.content || existing.content);
-                isLoading = false;
-                isStreaming = false;
-                break;
-              case 'test_file_created':
-                // 파일 생성 완료 알림 — 기존 메시지 유지하고 상태만 갱신
-                break;
-              case 'testExecutionResult':
-                // 테스트 실행 최종 결과(Markdown) — 로딩 버블을 리포트로 교체
-                newContent = data.content;
-                isLoading = false;
-                isStreaming = false;
-                currentStatus = undefined;
-                break;
             }
 
             updated[index] = {
@@ -603,7 +585,6 @@ function App() {
               isError:         isError,
               isStreaming:     isStreaming,
               subType:         data.subType,
-              sourceFile:      data.sourceFile || existing.sourceFile,
               isSuccess:       data.isSuccess !== 'false' ? true : existing.isSuccess,
               modifiedFullCode: modifiedFullCode,
             };
@@ -639,7 +620,6 @@ function App() {
             subType: data.subType,
             isLoading: true,
             currentStatus: data.content,  // 로딩 문구는 UI 상태로만 관리
-            sourceFile: data.sourceFile,  // test_start 시 소스파일명 저장
             filePath: data.filePath,      // Improve Step2 시작 시 원본 파일 경로 저장 (Diff 버튼용)
             hasSelection: data.hasSelection === 'true',
             selectedText: data.selectedText
@@ -734,9 +714,12 @@ function App() {
     } else if (text === '/query' || text.startsWith('/query ')) {
       command = '/task';
       payload = '쿼리를 검증해주세요.';
-    } else if (text === '/test' || text.startsWith('/test ')) {
-      command = '/task';
-      payload = '테스트 코드를 생성해주세요.';
+    } else if (text === '/doc' || text.startsWith('/doc ')) {
+      command = '/doc';
+      payload = '';
+    } else if (text === '/ragdoc' || text.startsWith('/ragdoc ')) {
+      command = '/ragdoc';
+      payload = '';
     } else if (/개선|리팩토링|리팩|refactor|improve|최적화|optimize/i.test(text)) {
       command = '/task';
     } else if (/리뷰|review|검토|점검/i.test(text)) {
@@ -746,8 +729,6 @@ function App() {
     } else if (/영향 분석|영향도|impact|analyze|분석/i.test(text)) {
       command = '/task';
     } else if (/쿼리|query|sql|검증/i.test(text)) {
-      command = '/task';
-    } else if (/테스트|test|생성/i.test(text)) {
       command = '/task';
     }
     window.sendToIde(JSON.stringify({
@@ -764,11 +745,11 @@ function App() {
     fetchedModels.forEach(m => items.push({ type: 'model', cmd: m, index: idx++ }));
     const cmds = [
       { cmd: '/explain', desc: '코드를 설명해줘' },
-      { cmd: '/review', desc: '코드를 리뷰해줘' },
       { cmd: '/improve', desc: '코드를 개선해줘' },
-      { cmd: '/test', desc: '테스트 코드를 생성해줘' },
       { cmd: '/analyze', desc: '영향도를 분석해줘' },
-      { cmd: '/query', desc: '쿼리를 검증해줘' }
+      { cmd: '/query', desc: '쿼리를 검증해줘' },
+      { cmd: '/doc', desc: '디렉토리 분석 문서 생성' },
+      { cmd: '/ragdoc', desc: 'RAG 전용 분석 문서 생성 (FAQ 포함)' }
     ];
     cmds.forEach(c => items.push({ type: 'cmd', cmd: c.cmd, desc: c.desc, index: idx++ }));
     items.push({ type: 'settings', cmd: '/openSettings', label: '설정', index: idx++ });
@@ -940,7 +921,7 @@ function App() {
                     }}
                   >
                     <span className="popup-item-command" style={{ display: 'block' }}>{chat.title || '(제목 없음)'}</span>
-                    <span className="popup-item-desc">{chat.date?.slice(0, 10)}</span>
+                    <span className="popup-item-desc">{chat.date?.slice(0, 16).replace('T', ' ')}</span>
                   </button>
                   <button
                     style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', color: '#888', fontSize: '16px', lineHeight: 1, flexShrink: 0 }}
@@ -1032,6 +1013,19 @@ function App() {
                 )}
               </div>
               <div className="popup-section">
+                <div className="popup-section-title">명령어</div>
+                {popupItems.filter(item => item.type === 'cmd').map(item => (
+                  <button
+                    key={item.cmd}
+                    className={`popup-item ${popupSelectedIndex === item.index ? 'selected' : ''}`}
+                    onClick={() => applyPopupSelection(item)}
+                    onMouseEnter={() => setPopupSelectedIndex(item.index)}
+                  >
+                    <span className="popup-item-command">{item.cmd}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="popup-section">
                 <div className="popup-section-title">기타</div>
                 {popupItems.filter(item => item.type === 'settings').map(item => (
                   <button
@@ -1044,21 +1038,6 @@ function App() {
                   </button>
                 ))}
               </div>
-              {/* 명령어 섹션 숨김 처리 (기능 유지, UI에서만 미노출) */}
-              {false && <div className="popup-section">
-                <div className="popup-section-title">명령어</div>
-                {popupItems.filter(item => item.type === 'cmd').map(item => (
-                  <button
-                    key={item.cmd}
-                    className={`popup-item ${popupSelectedIndex === item.index ? 'selected' : ''}`}
-                    onClick={() => applyPopupSelection(item)}
-                    onMouseEnter={() => setPopupSelectedIndex(item.index)}
-                  >
-                    <span className="popup-item-command">{item.cmd}</span>
-                    <span className="popup-item-desc">{item.desc}</span>
-                  </button>
-                ))}
-              </div>}
             </div>
           )}
           <textarea

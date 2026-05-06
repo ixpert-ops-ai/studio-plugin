@@ -64,7 +64,7 @@ object EditorApplyService {
                     val userResponse = com.intellij.openapi.ui.Messages.showYesNoDialog(
                         project,
                         "현재 코드가 변경되었습니다. 전체 내용을 덮어쓰시겠습니까?",
-                        "WhatUWant 원본 불일치 경고",
+                        "iXpert AI Assistant 원본 불일치 경고",
                         com.intellij.openapi.ui.Messages.getWarningIcon()
                     )
                     
@@ -76,7 +76,7 @@ object EditorApplyService {
                 }
             }
 
-            WriteCommandAction.runWriteCommandAction(project, "WuwAgent: Apply Code", null, {
+            WriteCommandAction.runWriteCommandAction(project, "iXpert AI Assistant: Apply Code", null, {
                 val document = targetEditor!!.document
                 val selectionModel = targetEditor!!.selectionModel
 

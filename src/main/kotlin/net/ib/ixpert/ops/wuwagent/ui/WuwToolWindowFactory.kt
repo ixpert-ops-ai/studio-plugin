@@ -82,7 +82,7 @@ class WuwToolWindowFactory : ToolWindowFactory {
         } catch (e: Exception) {
             logger.error("WuwToolWindow: UI 로딩 실패", e)
             panel.add(
-                JLabel("Failed to load WuwAgent UI: ${e.message}", SwingConstants.CENTER),
+                JLabel("Failed to load iXpert AI Assistant UI: ${e.message}", SwingConstants.CENTER),
                 BorderLayout.CENTER
             )
         }

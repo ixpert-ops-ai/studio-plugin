@@ -32,10 +32,25 @@ class QueryValidationAgent : BaseAgent() {
             onError("[상태 이상] 에디터 컨텍스트가 주어지지 않았습니다.")
             return
         }
-        val code = EditorContextService.extractCode(editor, context.project)
+        val codeResult = EditorContextService.extractCodeWithScope(editor, context.project)
+        val code = codeResult.code
         if (code.isBlank()) {
             onError("[알림] 분석할 코드를 도출하지 못했습니다.")
             return
+        }
+
+        // 분석 대상 헤더 빌드
+        val header = if (!codeResult.isSelection) {
+            "## 📋 분석 대상: 전체 파일"
+        } else {
+            val myBatisId = extractMyBatisId(code)
+            if (myBatisId != null) {
+                "## 📋 분석 대상 Query Id: `$myBatisId`"
+            } else {
+                val lineInfo = if (codeResult.startLine != null && codeResult.endLine != null)
+                    " (Line ${codeResult.startLine} ~ ${codeResult.endLine})" else ""
+                "## 📋 분석 대상: 선택된 쿼리$lineInfo"
+            }
         }
 
         // AtomicReference 사용: null = 취소됨, "" = 건너뛰기, 나머지 = 입력된 스키마
@@ -64,6 +79,12 @@ class QueryValidationAgent : BaseAgent() {
 
         // OllamaClient 스트리밍 완료 시 done 청크의 message.content가 빈 문자열로 반환되는 문제 대응.
         val accumulated = StringBuilder()
+
+        // 분석 대상 헤더를 첫 청크로 발행
+        val headerChunk = "$header\n\n"
+        accumulated.append(headerChunk)
+        onChunk?.invoke(headerChunk)
+
         val wrappedOnChunk: ((String) -> Unit)? = onChunk?.let { forwardChunk ->
             { chunk: String ->
                 accumulated.append(chunk)
@@ -71,17 +92,17 @@ class QueryValidationAgent : BaseAgent() {
             }
         }
         val wrappedOnSuccess: (String) -> Unit = { resultText ->
-            val finalContent = if (resultText.isBlank() && accumulated.isNotEmpty()) {
-                accumulated.toString()
-            } else {
-                resultText
+            val finalContent = when {
+                resultText.isBlank() && accumulated.isNotEmpty() -> accumulated.toString()
+                resultText.isNotBlank() -> "$headerChunk$resultText"
+                else -> resultText
             }
             onSuccess(finalContent)
         }
 
         callLlmStreamAsync(
             context.project,
-            "WuwAgent: Validating Query",
+            "iXpert AI Assistant: Validating Query",
             PromptManager.loadPrompt("query_validation_prompt.txt"),
             userMessage,
             wrappedOnSuccess,
@@ -136,4 +157,17 @@ private class SchemaInputDialog(project: Project) : DialogWrapper(project) {
 
     fun isSkipped(): Boolean = skipped
     fun getSchema(): String = textArea.text.trim()
+}
+
+/**
+ * MyBatis XML 태그에서 id 속성값을 추출합니다.
+ * 예) <select id="getUserById" ...> → "getUserById"
+ * 해당하는 태그가 없으면 null을 반환합니다.
+ */
+private fun extractMyBatisId(code: String): String? {
+    val regex = Regex(
+        """<(?:select|insert|update|delete|statement)\s[^>]*?\bid\s*=\s*["']([^"']+)["']""",
+        RegexOption.IGNORE_CASE
+    )
+    return regex.find(code)?.groupValues?.get(1)
 }

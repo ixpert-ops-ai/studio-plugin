@@ -5,6 +5,7 @@ package net.ib.ixpert.ops.wuwagent.service.analysis.model
  * 어떤 추출 방식을 사용하든 이 형태로 변환된 뒤 프롬프트 빌더에 전달됩니다.
  */
 data class ExtractedStructure(
+    val packageName: String? = null,
     val symbols: List<SymbolInfo> = emptyList(),
     val imports: List<String> = emptyList(),
     val classes: List<ClassInfo> = emptyList(),

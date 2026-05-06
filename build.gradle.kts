@@ -1,7 +1,7 @@
 plugins {
     id("java")
-    id("org.jetbrains.kotlin.jvm") version "1.9.24"
-    id("org.jetbrains.intellij") version "1.17.4"
+    id("org.jetbrains.kotlin.jvm") version "2.1.20"
+    id("org.jetbrains.intellij.platform") version "2.11.0"
     id("com.github.node-gradle.node") version "7.0.2" // 웹앱 빌드 자동화용
 }
 
@@ -10,12 +10,18 @@ version = "1.0.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
 }
 
-intellij {
-    version.set("2023.2.5")
-    type.set("IC") // IntelliJ IDEA Community Edition (Base for Android Studio)
-    plugins.set(listOf("com.intellij.java", "org.jetbrains.kotlin"))
+dependencies {
+    intellijPlatform {
+        intellijIdeaCommunity("2024.3.5")
+        bundledPlugins("com.intellij.java", "org.jetbrains.kotlin")
+        pluginVerifier()
+        zipSigner()
+    }
 }
 
 // Node.js 자동 다운로드 및 설정
@@ -39,8 +45,7 @@ tasks {
     }
 
     patchPluginXml {
-        sinceBuild.set("232")
-        untilBuild.set("299.*") // 2023.2 ~ 장기 호환 (IDE 261.x / Android Studio 최신 빌드 포함)
+        sinceBuild.set("243")
     }
 
     // 웹앱 의존성 설치
@@ -82,10 +87,12 @@ tasks {
         token.set(System.getenv("PUBLISH_TOKEN"))
     }
 
-    // 빌드된 플러그인 압축파일(.zip)을 _release 폴더로 복사
+    // 빌드된 플러그인 압축파일(.zip)을 _release 폴더로 복사 (현재 프로젝트명 파일만)
     val copyToRelease by registering(Copy::class) {
         dependsOn("buildPlugin")
-        from(layout.buildDirectory.dir("distributions").get().asFile)
+        from(layout.buildDirectory.dir("distributions").get().asFile) {
+            include("${rootProject.name}-*.zip")
+        }
         into("${project.rootDir}/_release")
     }
 

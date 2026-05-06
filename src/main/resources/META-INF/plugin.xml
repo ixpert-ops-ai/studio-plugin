@@ -4,7 +4,7 @@
     <vendor email="admin@jodongik.cloud" url="http://jodongik.cloud">IB iXpert Ops</vendor>
     <description><![CDATA[
       iXpert AI Assistant is an on-premise AI Coding Assistant plugin powered by Ollama.
-      Provides code explain, review, refactoring, PMD analysis, Impact Analysis, and Generate Test.
+      Provides code explain, review, refactoring, PMD analysis, and Impact Analysis.
     ]]></description>
 
     <!-- Product and plugin compatibility requirements.
@@ -65,10 +65,15 @@
                     text="Improve This Code (코드 개선)"
                     description="선택한 코드를 AI가 개선합니다."/>
 
-            <action id="IxpertAiAssistant.GenerateTestAction"
-                    class="net.ib.ixpert.ops.wuwagent.action.GenerateTestAction"
-                    text="Generate Test (테스트 생성)"
-                    description="선택한 코드의 단위 테스트를 AI가 생성합니다."/>
+            <action id="IxpertAiAssistant.DocGenerateAction"
+                    class="net.ib.ixpert.ops.wuwagent.action.DocGenerateAction"
+                    text="Generate Analysis Doc (분석 문서 생성)"
+                    description="현재 파일의 AI 분석 결과를 Markdown 문서로 저장합니다."/>
+
+            <action id="IxpertAiAssistant.UnitTestReportAction"
+                    class="net.ib.ixpert.ops.wuwagent.action.UnitTestReportAction"
+                    text="Generate Unit Test Report (단위 테스트 리포트)"
+                    description="선택한 코드의 단위 테스트 리포트를 AI가 생성합니다."/>
         </group>
     </actions>
 </idea-plugin>

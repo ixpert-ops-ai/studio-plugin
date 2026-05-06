@@ -6,18 +6,18 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import net.ib.ixpert.ops.wuwagent.agent.AgentContext
 import net.ib.ixpert.ops.wuwagent.agent.ChatAgent
+import net.ib.ixpert.ops.wuwagent.agent.DocGenerateAgent
 import net.ib.ixpert.ops.wuwagent.agent.ExplainAgent
-import net.ib.ixpert.ops.wuwagent.agent.GenerateTestAgent
 import net.ib.ixpert.ops.wuwagent.agent.ImpactAgent
 import net.ib.ixpert.ops.wuwagent.agent.IntentAnalyzer
 import net.ib.ixpert.ops.wuwagent.agent.QueryValidationAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.agent.TaskPipeline
+import net.ib.ixpert.ops.wuwagent.agent.UnitTestReportAgent
 import net.ib.ixpert.ops.wuwagent.client.OllamaClient
 import net.ib.ixpert.ops.wuwagent.service.EditorApplyService
 import net.ib.ixpert.ops.wuwagent.service.EditorDiffService
-import net.ib.ixpert.ops.wuwagent.service.TestFileService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
 /**
@@ -33,43 +33,6 @@ import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
  */
 class WebviewActionRouter(private val project: Project) {
     private val logger = Logger.getInstance(WebviewActionRouter::class.java)
-
-    /**
-     * 소스 파일 경로로부터 테스트 파일 경로를 추론합니다.
-     * - src/main/kotlin/... → src/test/kotlin/...Test.kt
-     * - src/main/java/...   → src/test/java/...Test.java
-     * - *.tsx / *.ts / *.js → *.test.tsx / *.test.ts / *.test.js
-     */
-    private fun resolveTestFilePath(basePath: String, sourceFileName: String): String {
-        val ext = sourceFileName.substringAfterLast('.', "")
-        val nameWithoutExt = sourceFileName.substringBeforeLast('.')
-
-        // JS/TS 계열: 같은 디렉터리에 .test.ext 패턴
-        if (ext in listOf("ts", "tsx", "js", "jsx")) {
-            return "$basePath/src/__tests__/${nameWithoutExt}.test.$ext"
-        }
-
-        // JVM 계열: src/main → src/test 치환 + Test 접미사
-        // 현재 에디터에서 열린 파일의 프로젝트 내 상대 경로를 찾아야 하지만,
-        // sourceFileName만 있으므로 관례적 경로를 사용
-        val testSuffix = when (ext) {
-            "kt", "kts" -> "Test.kt"
-            "java"      -> "Test.java"
-            "py"        -> "_test.py"
-            "go"        -> "_test.go"
-            else        -> "Test.$ext"
-        }
-
-        val testDir = when (ext) {
-            "kt", "kts" -> "$basePath/src/test/kotlin"
-            "java"      -> "$basePath/src/test/java"
-            "py"        -> "$basePath/tests"
-            "go"        -> "$basePath"
-            else        -> "$basePath/src/test"
-        }
-
-        return "$testDir/${nameWithoutExt}$testSuffix"
-    }
 
     private fun buildAttachedFileContext(filesJson: String): String {
         if (filesJson.isBlank()) return ""
@@ -115,7 +78,7 @@ class WebviewActionRouter(private val project: Project) {
                     // 🛎 즉시 자리 만들기 (로딩 표시 유도)
                     bridge.sendMessage("explain_start", "🔍 코드 구조를 분석하고 있습니다...", messageId)
 
-                    val context = AgentContext(project, editor, textBody)
+                    val context = AgentContext(project, editor, textBody, command = "/explain")
                     ExplainAgent().execute(
                         context, 
                         onSuccess = { res ->
@@ -139,6 +102,124 @@ class WebviewActionRouter(private val project: Project) {
                     )
                 }
 
+                // ── 분석 문서 MD 생성 (디렉토리 선택 → 일괄 분석) ────────
+                "/doc" -> {
+                    logger.info("Router: /doc 분기 → 디렉토리 선택 다이얼로그")
+                    val messageId = "doc_${System.currentTimeMillis()}"
+
+                    // 네이티브 디렉토리 선택 다이얼로그
+                    val descriptor = com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+                        .createSingleFolderDescriptor()
+                    descriptor.title = "분석 대상 디렉토리 선택"
+                    descriptor.description = "하위 폴더의 모든 소스 파일을 분석하여 Markdown 문서를 생성합니다."
+
+                    val projectBase = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                        .findFileByPath(project.basePath ?: "")
+
+                    com.intellij.openapi.fileChooser.FileChooser.chooseFile(
+                        descriptor, project, projectBase
+                    ) { selectedDir ->
+                        // 소스 파일 수집
+                        val files = net.ib.ixpert.ops.wuwagent.service.MarkdownFileService
+                            .collectSourceFiles(selectedDir)
+
+                        if (files.isEmpty()) {
+                            bridge.sendMessage("error", "선택한 디렉토리에 분석 가능한 소스 파일이 없습니다.")
+                            return@chooseFile
+                        }
+
+                        // 시작 알림
+                        bridge.sendMessage("explain_start",
+                            "📄 ${files.size}개 파일의 분석 문서를 생성합니다...", messageId)
+
+                        // step_noti 인덱스
+                        var notiIdx = 0
+
+                        DocGenerateAgent().executeBatch(
+                            project = project,
+                            files = files,
+                            onStepProgress = { fileName, current, total, status ->
+                                val notiId = "${messageId}_noti_${notiIdx++}"
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage(
+                                        "step_noti",
+                                        "$current/$total $fileName",
+                                        notiId,
+                                        mapOf("status" to status)
+                                    )
+                                }
+                            },
+                            onComplete = { summary ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("explain", summary, messageId)
+                                }
+                            },
+                            onError = { errorMsg ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("error", errorMsg, messageId)
+                                }
+                            }
+                        )
+                    }
+                }
+
+                // ── RAG 특화 분석 문서 생성 (FAQ 포함) ────────
+                "/ragdoc" -> {
+                    logger.info("Router: /ragdoc 분기 → 디렉토리 선택 다이얼로그")
+                    val messageId = "rag_${System.currentTimeMillis()}"
+
+                    val descriptor = com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+                        .createSingleFolderDescriptor()
+                    descriptor.title = "RAG 전용 분석 대상 디렉토리 선택"
+                    descriptor.description = "하위 폴더의 모든 소스 파일을 분석하여 FAQ가 포함된 RAG용 Markdown 문서를 생성합니다."
+
+                    val projectBase = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                        .findFileByPath(project.basePath ?: "")
+
+                    com.intellij.openapi.fileChooser.FileChooser.chooseFile(
+                        descriptor, project, projectBase
+                    ) { selectedDir ->
+                        val files = net.ib.ixpert.ops.wuwagent.service.MarkdownFileService
+                            .collectSourceFiles(selectedDir)
+
+                        if (files.isEmpty()) {
+                            bridge.sendMessage("error", "선택한 디렉토리에 분석 가능한 소스 파일이 없습니다.")
+                            return@chooseFile
+                        }
+
+                        bridge.sendMessage("explain_start",
+                            "📄 ${files.size}개 파일의 RAG 분석 문서를 생성합니다...", messageId)
+
+                        var notiIdx = 0
+                        DocGenerateAgent().executeBatch(
+                            project = project,
+                            files = files,
+                            command = "/ragdoc",
+                            onStepProgress = { fileName, current, total, status ->
+                                val notiId = "${messageId}_noti_${notiIdx++}"
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage(
+                                        "step_noti",
+                                        "$current/$total $fileName",
+                                        notiId,
+                                        mapOf("status" to status)
+                                    )
+                                }
+                            },
+                            onComplete = { summary ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("explain", summary, messageId)
+                                }
+                            },
+                            onError = { errorMsg ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("error", errorMsg, messageId)
+                                }
+                            }
+                        )
+                    }
+                }
+
                 "/openTabs" -> {
                     logger.info("Router: /openTabs 분기")
                     val openFiles = FileEditorManager.getInstance(project).openFiles
@@ -156,7 +237,7 @@ class WebviewActionRouter(private val project: Project) {
                     // 🛎 즉시 자리 만들기 (로딩 표시 유도)
                     bridge.sendMessage("chat_start", "💬 답변을 준비 중입니다...", messageId)
 
-                    val context = AgentContext(project, editor, textBody)
+                    val context = AgentContext(project, editor, textBody, command = "/chat")
                     ChatAgent().execute(
                         context, 
                         onSuccess = { res ->
@@ -190,7 +271,7 @@ class WebviewActionRouter(private val project: Project) {
                     val messageId = "task_${System.currentTimeMillis()}"
                     val fileContext = buildAttachedFileContext(payload["files"] ?: "")
                     val enhancedText = if (fileContext.isNotBlank()) "$textBody\n\n$fileContext" else textBody
-                    val context = AgentContext(project, editor, enhancedText)
+                    val context = AgentContext(project, editor, enhancedText, command = "/task")
 
                     // @ 첨부 파일이 있으면 첫 번째 파일 경로, 없으면 에디터 파일 경로 (Improve Diff 버튼용)
                     val firstAttachedFilePath: String = run {
@@ -355,12 +436,11 @@ class WebviewActionRouter(private val project: Project) {
                             )
                         }
 
-                        TaskPipeline.GenerateTest -> {
-                            val sourceFile = editor.virtualFile?.name ?: ""
-                            GenerateTestAgent().execute(context,
-                                onSuccess = { _ ->
+                        TaskPipeline.UnitTestReport -> {
+                            UnitTestReportAgent().execute(context,
+                                onSuccess = { res ->
                                     ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("test", "", messageId, mapOf("sourceFile" to sourceFile))
+                                        bridge.sendMessage("explain", res, messageId)
                                     }
                                 },
                                 onChunk = { chunk ->
@@ -370,7 +450,31 @@ class WebviewActionRouter(private val project: Project) {
                                 },
                                 onError = { errorMsg ->
                                     ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("error", errorMsg, messageId)
+                                        if (errorMsg != "__cancelled__") {
+                                            bridge.sendMessage("error", errorMsg, messageId)
+                                        }
+                                    }
+                                }
+                            )
+                        }
+
+                        TaskPipeline.DocGenerate -> {
+                            DocGenerateAgent().execute(context,
+                                onSuccess = { res ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("explain", res, messageId)
+                                    }
+                                },
+                                onChunk = { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
+                                },
+                                onError = { errorMsg ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        if (errorMsg != "__cancelled__") {
+                                            bridge.sendMessage("error", errorMsg, messageId)
+                                        }
                                     }
                                 }
                             )
@@ -556,56 +660,6 @@ class WebviewActionRouter(private val project: Project) {
                                 bridge.sendMessage("error", "파일 저장 중 오류가 발생했습니다: ${e.message}")
                             }
                         }
-                    }
-                }
-
-                // ── CreateTestFile: 테스트 코드를 파일로 생성 ──────────────
-                "/createTestFile" -> {
-                    logger.info("Router: /createTestFile 분기")
-                    val code = payload["code"] ?: ""
-                    val sourceFile = payload["sourceFile"] ?: ""
-                    val messageId = payload["id"] ?: ""
-
-                    if (code.isBlank()) {
-                        bridge.sendMessage("error", "생성할 테스트 코드가 없습니다.", messageId)
-                        return@invokeLater
-                    }
-
-                    val basePath = project.basePath
-                    if (basePath == null) {
-                        bridge.sendMessage("error", "프로젝트 경로를 찾을 수 없습니다.", messageId)
-                        return@invokeLater
-                    }
-
-                    val testFilePath = TestFileService.resolveTestFilePath(basePath, sourceFile, code)
-
-                    val testFile = java.io.File(testFilePath)
-
-                    // 이미 존재하면 확인 다이얼로그
-                    if (testFile.exists()) {
-                        val result = com.intellij.openapi.ui.Messages.showYesNoDialog(
-                            project,
-                            "테스트 파일이 이미 존재합니다:\n${testFile.name}\n\n덮어쓰시겠습니까?",
-                            "테스트 파일 생성",
-                            com.intellij.openapi.ui.Messages.getQuestionIcon()
-                        )
-                        if (result != com.intellij.openapi.ui.Messages.YES) return@invokeLater
-                    }
-
-                    try {
-                        val vFile = TestFileService.saveTestFile(testFilePath, code)
-                        vFile?.let {
-                            com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
-                                .openFile(it, true)
-                        }
-
-                        val relativePath = testFilePath.removePrefix("$basePath/")
-                        bridge.sendMessage("test_file_created",
-                            "테스트 파일이 생성되었습니다: $relativePath", messageId)
-                        logger.info("Router: 테스트 파일 생성 완료 → $testFilePath")
-                    } catch (e: Exception) {
-                        logger.error("Router: 테스트 파일 생성 실패", e)
-                        bridge.sendMessage("error", "테스트 파일 생성 중 오류: ${e.message}", messageId)
                     }
                 }
 

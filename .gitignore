@@ -5,6 +5,7 @@
 # Gradle
 .gradle/
 build/
+.intellijPlatform/
 gradle-app.setting
 !gradle-wrapper.jar
 
@@ -19,3 +20,6 @@ _release/
 webview/node_modules/
 webview/dist/
 webview/build/
+node_modules
+.graphify/
+bin/

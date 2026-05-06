@@ -51,10 +51,26 @@ class CodeAnalysisPipeline {
         log.info(
             "구조 추출 완료: method=${enriched.extractionMethod.displayName}, " +
             "symbols=${enriched.symbols.size}, classes=${enriched.classes.size}, " +
+            "packageName=${enriched.packageName}, " +
             "hasThymeleaf=${enriched.thymeleafStructure != null}"
         )
 
-        return enriched
+        // 4단계: 패키지 정보 주입
+        return enriched.copy(packageName = getPackageName(input.psiFile))
+    }
+
+    private fun getPackageName(psiFile: PsiFile?): String? {
+        if (psiFile == null) return null
+        return try {
+            if (psiFile is com.intellij.psi.PsiClassOwner) {
+                psiFile.packageName.takeIf { it.isNotBlank() }
+            } else {
+                // 비 JVM 언어의 경우 폴더 구조를 패키지처럼 활용 (추후 확장 가능)
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun filterStructureByRange(
