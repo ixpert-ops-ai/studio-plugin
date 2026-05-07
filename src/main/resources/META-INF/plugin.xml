@@ -25,7 +25,13 @@
                            key="WhatUWantNotification" />
                            
         <applicationService serviceImplementation="net.ib.ixpert.ops.wuwagent.setting.SettingsState"/>
-        
+        <applicationService serviceImplementation="net.ib.ixpert.ops.wuwagent.service.DebugManager"/>
+
+        <toolWindow id="LLM Debug"
+                    anchor="bottom"
+                    secondary="true"
+                    factoryClass="net.ib.ixpert.ops.wuwagent.ui.LlmDebugToolWindowFactory"/>
+
         <applicationConfigurable instance="net.ib.ixpert.ops.wuwagent.setting.WuwSettingsConfigurable"
                                  id="net.ib.ixpert.ops.wuwagent.setting.WuwSettingsConfigurable"
                                  displayName="iXpert AI Assistant"

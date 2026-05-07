@@ -5,7 +5,8 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.application.ApplicationManager
-import net.ib.ixpert.ops.wuwagent.client.OllamaClient
+import net.ib.ixpert.ops.wuwagent.client.LLMClient
+import net.ib.ixpert.ops.wuwagent.service.WuwLlmService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
 /**
@@ -24,7 +25,7 @@ class TaskAgent(
 ) : WuwAgent {
 
     private val logger = Logger.getInstance(TaskAgent::class.java)
-    private val client = OllamaClient()
+    private val client: LLMClient = WuwLlmService.getClient()
 
     override fun execute(
         context: AgentContext, 
@@ -79,8 +80,18 @@ class TaskAgent(
                         { chunk -> bridge.sendMessageChunk(stepMsgId, chunk) }
                     } else null
 
+                    val toolNotiHandler: (String) -> Unit = { notiText ->
+                        bridge.sendMessage("tool_noti", notiText, stepMsgId)
+                    }
+
+                    // Improve Step2/3 시작 시 고정 noti (동적 정보 불필요)
+                    when (step.label) {
+                        "2/3 코드 개선"    -> bridge.sendMessage("tool_noti", "개선 코드 생성 중...", stepMsgId)
+                        "3/3 안정성 평가"  -> bridge.sendMessage("tool_noti", "안정성 검사 중...", stepMsgId)
+                    }
+
                     try {
-                        val result = step.executeSync(context, client, stepChunkHandler, previousStepResult, allCompletedResults.toList())
+                        val result = step.executeSync(context, client, stepChunkHandler, previousStepResult, allCompletedResults.toList(), toolNotiHandler)
 
                         // executeSync 완료 후에도 취소 여부 재확인
                         if (TaskCancellationToken.isCancelled.get()) {

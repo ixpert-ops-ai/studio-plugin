@@ -15,8 +15,8 @@ import net.ib.ixpert.ops.wuwagent.agent.TaskAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.agent.TaskPipeline
 import net.ib.ixpert.ops.wuwagent.agent.UnitTestReportAgent
-import net.ib.ixpert.ops.wuwagent.client.OllamaClient
 import net.ib.ixpert.ops.wuwagent.service.EditorApplyService
+import net.ib.ixpert.ops.wuwagent.service.WuwLlmService
 import net.ib.ixpert.ops.wuwagent.service.EditorDiffService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
@@ -113,7 +113,7 @@ class WebviewActionRouter(private val project: Project) {
                             val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
                             val projectGraph = graphLoader.loadGraph() ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
                             
-                            val client = OllamaClient()
+                            val client = WuwLlmService.getClient()
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(client)
                             
                             val result = pipeline.analyze(textBody, projectGraph) { chunk ->
@@ -154,7 +154,7 @@ class WebviewActionRouter(private val project: Project) {
                     
                     ApplicationManager.getApplication().executeOnPooledThread {
                         try {
-                            val client = OllamaClient()
+                            val client = WuwLlmService.getClient()
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.ImplementationPipeline(client, project)
                             
                             pipeline.execute(cachedResult) { chunk ->
@@ -198,7 +198,7 @@ class WebviewActionRouter(private val project: Project) {
                                 bridge.sendMessage("chat_start", "🧪 **단위 테스트 자동 생성**을 시작합니다...", messageId)
                             }
 
-                            val client = OllamaClient()
+                            val client = WuwLlmService.getClient()
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.TestGenerationPipeline(project, client)
 
                             val target = if (trimmedQuery.isBlank()) null else trimmedQuery
@@ -545,7 +545,7 @@ class WebviewActionRouter(private val project: Project) {
                     }
 
                     // IntentAnalyzer 키워드 매핑 (LLM 호출 없이 즉시 반환)
-                    val client = OllamaClient()
+                    val client = WuwLlmService.getClient()
                     when (IntentAnalyzer.analyze(enhancedText, client)) {
 
                         TaskPipeline.ExplainTask -> {

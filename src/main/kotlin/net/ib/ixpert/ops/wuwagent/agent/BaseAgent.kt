@@ -5,14 +5,15 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
-import net.ib.ixpert.ops.wuwagent.client.OllamaClient
+import net.ib.ixpert.ops.wuwagent.client.LLMClient
+import net.ib.ixpert.ops.wuwagent.service.WuwLlmService
 
 /**
  * 하위 에이전트들의 쓰레드 분리 및 반복되는 Client 네트워크 로직을 모아주는 추상 클래스
  */
 abstract class BaseAgent : WuwAgent {
     protected val logger: Logger = Logger.getInstance(this::class.java)
-    protected val ollamaClient = OllamaClient()
+    protected val ollamaClient: LLMClient = WuwLlmService.getClient()
 
     override abstract fun execute(
         context: AgentContext,
@@ -55,7 +56,7 @@ abstract class BaseAgent : WuwAgent {
                 logger.info("BaseAgent: 프롬프트 전달 완료. messageId=$messageId, Stream=${onChunk != null}")
 
                 // 1. Client HTTP 스트리밍/블로킹 호출
-                val response = ollamaClient.callChatApiStream(systemPrompt, userMessage, onChunk)
+                val response = ollamaClient.chat(systemPrompt, userMessage, onChunk)
                 logger.info("BaseAgent: LLM 응답 수신 완료 여부 = ${response?.message != null}")
 
                 // 2. 취소 여부 확인 — onError("__cancelled__") 로 Router에 전달

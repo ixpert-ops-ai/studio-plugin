@@ -4,7 +4,7 @@ import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
-import net.ib.ixpert.ops.wuwagent.client.OllamaClient
+import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.service.validation.SignatureValidator
 import java.io.File
 
@@ -13,7 +13,7 @@ import java.io.File
  * 순차적으로 LLM에 전달하여 코드 수정을 수행하는 파이프라인.
  */
 class ImplementationPipeline(
-    private val client: OllamaClient,
+    private val client: LLMClient,
     private val project: Project
 ) {
     private val logger = Logger.getInstance(ImplementationPipeline::class.java)
@@ -96,8 +96,8 @@ class ImplementationPipeline(
             onChunk("````text\n")
 
             try {
-                val response = client.callChatApiStream(systemPrompt, userPrompt) { chunk ->
-                    if (abortReason != null) return@callChatApiStream
+                val response = client.chat(systemPrompt, userPrompt) { chunk ->
+                    if (abortReason != null) return@chat
 
                     fullResponse += chunk
 
@@ -105,7 +105,7 @@ class ImplementationPipeline(
                     if (fullResponse.length > MAX_RESPONSE_CHARS) {
                         logger.warn("응답 길이 상한 초과 (${fullResponse.length}자): ${target.path}")
                         abortReason = "LENGTH"
-                        return@callChatApiStream
+                        return@chat
                     }
 
                     // === 가드 2: 무한 루프(동일 패턴 반복) 감지 ===
@@ -115,7 +115,7 @@ class ImplementationPipeline(
                         if (last500.split(first100).size > 3) {
                             logger.warn("무한 루프 감지 (패턴 반복): ${target.path}")
                             abortReason = "REPEAT"
-                            return@callChatApiStream
+                            return@chat
                         }
                     }
 

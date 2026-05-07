@@ -5,15 +5,14 @@ import com.google.gson.JsonParser
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.util.io.HttpRequests
 import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
-import net.ib.ixpert.ops.wuwagent.model.OllamaChatRequest
 import net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse
 import net.ib.ixpert.ops.wuwagent.model.OllamaMessage
 import net.ib.ixpert.ops.wuwagent.service.DebugManager
 import java.io.IOException
 
 @Suppress("UnstableApiUsage")
-class OllamaClient : LLMClient {
-    private val logger = Logger.getInstance(OllamaClient::class.java)
+class OpenAIClient : LLMClient {
+    private val logger = Logger.getInstance(OpenAIClient::class.java)
     private val gson = Gson()
 
     override fun chat(
@@ -22,33 +21,28 @@ class OllamaClient : LLMClient {
         onChunk: ((String) -> Unit)?
     ): OllamaChatResponse? {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
-        val serverUrl = "${settings.baseUrl.trimEnd('/')}/api/chat"
+        val serverUrl = "${settings.baseUrl.trimEnd('/')}/v1/chat/completions"
 
-        val messages = listOf(
-            OllamaMessage(role = "system", content = systemPrompt),
-            OllamaMessage(role = "user", content = userCode)
+        val messagesList = listOf(
+            mapOf("role" to "system", "content" to systemPrompt),
+            mapOf("role" to "user", "content" to userCode)
         )
-        val requestBody = OllamaChatRequest(
-            model = settings.model,
-            messages = messages,
-            stream = (onChunk != null),
-            options = mapOf(
-                "temperature" to settings.temperature,
-                "num_ctx" to settings.contextWindow,
-                "num_predict" to 4096,
-                "repeat_penalty" to 1.5,
-                "repeat_last_n" to 256
-            )
+        val requestBody = mapOf(
+            "model" to settings.model,
+            "messages" to messagesList,
+            "stream" to (onChunk != null),
+            "temperature" to settings.temperature,
+            "max_tokens" to 4096
         )
         val jsonPayload = gson.toJson(requestBody)
         val isStreaming = onChunk != null
 
-        logger.info("Ollama API Call (Stream=$isStreaming): url=$serverUrl, model=${settings.model}")
+        logger.info("OpenAI API Call (Stream=$isStreaming): url=$serverUrl, model=${settings.model}")
 
         val startMs = System.currentTimeMillis()
         val debugEntry = if (settings.enableLlmDebug) {
             try {
-                DebugManager.getInstance().newEntry(settings.model, serverUrl, jsonPayload, messages.size, isStreaming)
+                DebugManager.getInstance().newEntry(settings.model, serverUrl, jsonPayload, messagesList.size, isStreaming)
             } catch (_: Exception) { null }
         } else null
 
@@ -70,35 +64,36 @@ class OllamaClient : LLMClient {
                         TaskCancellationToken.activeInputStream = inputStream
                         val reader = inputStream.bufferedReader()
                         var fullContent = ""
-                        var lastResponse: OllamaChatResponse? = null
 
                         try {
                             var line = reader.readLine()
                             while (line != null) {
                                 if (TaskCancellationToken.isCancelled.get()) {
-                                    logger.info("OllamaClient: 취소 감지 → 스트림 중단")
+                                    logger.info("OpenAIClient: 취소 감지 → 스트림 중단")
                                     break
                                 }
-                                if (line.isNotBlank()) {
+                                if (line.startsWith("data: ")) {
+                                    val data = line.removePrefix("data: ").trim()
+                                    if (data == "[DONE]") break
                                     try {
-                                        val chunkResponse = gson.fromJson(line, OllamaChatResponse::class.java)
-                                        val content = chunkResponse.message?.content ?: ""
+                                        val json = JsonParser.parseString(data).asJsonObject
+                                        val delta = json.getAsJsonArray("choices")
+                                            ?.get(0)?.asJsonObject
+                                            ?.getAsJsonObject("delta")
+                                        val content = delta?.get("content")?.asString ?: ""
                                         if (content.isNotEmpty()) {
                                             fullContent += content
                                             onChunk(content)
                                         }
-                                        if (chunkResponse.done == true) {
-                                            lastResponse = chunkResponse
-                                        }
                                     } catch (e: Exception) {
-                                        logger.warn("Failed to parse chunk: $line", e)
+                                        logger.warn("Failed to parse SSE chunk: $line", e)
                                     }
                                 }
                                 line = reader.readLine()
                             }
                         } catch (e: IOException) {
                             if (TaskCancellationToken.isCancelled.get()) {
-                                logger.info("OllamaClient: 스트림 취소로 인한 IOException (정상) — ${e.message}")
+                                logger.info("OpenAIClient: 스트림 취소로 인한 IOException (정상) — ${e.message}")
                             } else {
                                 throw e
                             }
@@ -112,8 +107,8 @@ class OllamaClient : LLMClient {
                         } catch (_: Exception) {}
 
                         OllamaChatResponse(
-                            model = lastResponse?.model,
-                            createdAt = lastResponse?.createdAt,
+                            model = settings.model,
+                            createdAt = null,
                             message = OllamaMessage("assistant", fullContent),
                             done = true
                         )
@@ -122,15 +117,25 @@ class OllamaClient : LLMClient {
                         TaskCancellationToken.activeHttpConnection = httpConn
                         try {
                             val responseString = request.readString()
-                            logger.info("Ollama API Raw Response (len=${responseString.length})")
+                            logger.info("OpenAI API Raw Response (len=${responseString.length})")
                             try {
                                 debugEntry?.responseText = responseString
                                 debugEntry?.responseLength = responseString.length
                             } catch (_: Exception) {}
-                            gson.fromJson(responseString, OllamaChatResponse::class.java)
+                            val json = JsonParser.parseString(responseString).asJsonObject
+                            val content = json.getAsJsonArray("choices")
+                                ?.get(0)?.asJsonObject
+                                ?.getAsJsonObject("message")
+                                ?.get("content")?.asString ?: ""
+                            OllamaChatResponse(
+                                model = settings.model,
+                                createdAt = null,
+                                message = OllamaMessage("assistant", content),
+                                done = true
+                            )
                         } catch (e: IOException) {
                             if (TaskCancellationToken.isCancelled.get()) {
-                                logger.info("OllamaClient: 비스트리밍 취소로 인한 IOException (정상) — ${e.message}")
+                                logger.info("OpenAIClient: 비스트리밍 취소로 인한 IOException (정상) — ${e.message}")
                                 OllamaChatResponse(null, null, OllamaMessage("assistant", "__cancelled__"), true)
                             } else {
                                 throw e
@@ -151,11 +156,11 @@ class OllamaClient : LLMClient {
         } catch (e: IOException) {
             val errorMsg = when {
                 e.message?.contains("timeout", ignoreCase = true) == true ->
-                    "[Error] Ollama 서버 응답 타임아웃 ($serverUrl). 설정에서 Timeout 시간을 늘려보세요."
+                    "[Error] OpenAI 서버 응답 타임아웃 ($serverUrl). 설정에서 Timeout 시간을 늘려보세요."
                 e.message?.contains("refused", ignoreCase = true) == true ->
-                    "[Error] Ollama 서버 연결 거부 ($serverUrl). 서버가 실행 중인지 확인하세요."
+                    "[Error] OpenAI 서버 연결 거부 ($serverUrl). 서버가 실행 중인지 확인하세요."
                 else ->
-                    "[Error] Ollama 서버 통신 실패: ${e.message} ($serverUrl)"
+                    "[Error] OpenAI 서버 통신 실패: ${e.message} ($serverUrl)"
             }
             logger.error(errorMsg, e)
             try {
@@ -187,18 +192,18 @@ class OllamaClient : LLMClient {
         if (cleanUrl.isBlank()) return null
 
         return try {
-            val url = "$cleanUrl/api/tags"
+            val url = "$cleanUrl/v1/models"
             val response = HttpRequests.request(url).tuner {
                 if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
                 it.connectTimeout = 5000
                 it.readTimeout = 5000
             }.readString()
 
-            val jsonObject = JsonParser.parseString(response).asJsonObject
-            val modelsArray = jsonObject.getAsJsonArray("models")
-            modelsArray?.mapNotNull { it.asJsonObject.get("name")?.asString }
+            val json = JsonParser.parseString(response).asJsonObject
+            val data = json.getAsJsonArray("data")
+            data?.mapNotNull { it.asJsonObject.get("id")?.asString }
         } catch (e: Exception) {
-            logger.warn("OllamaClient: fetchModels failed", e)
+            logger.warn("OpenAIClient: fetchModels failed", e)
             null
         }
     }

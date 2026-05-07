@@ -291,7 +291,7 @@ class DocGenerateAgent : BaseAgent() {
         """.trimIndent()
 
         // LLM 동기 호출 (스트리밍 없이 블로킹)
-        val response = ollamaClient.callChatApi(systemPrompt, userPrompt)
+        val response = ollamaClient.chat(systemPrompt, userPrompt)
         val resultText = response?.message?.content
 
         if (resultText.isNullOrBlank() || resultText.startsWith("[Error]")) {

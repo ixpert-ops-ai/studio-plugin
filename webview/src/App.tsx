@@ -44,6 +44,7 @@ interface Message {
   isStreaming?: boolean;
   currentStatus?: string;
   stepNotiStatus?: 'started' | 'completed' | 'failed';
+  toolNotiText?: string;
 }
 
 // ─────────────────────────────────────────────
@@ -119,12 +120,17 @@ const MermaidChart = React.memo(({ chart }: { chart: string }) => {
 // ─────────────────────────────────────────────
 //  컴포넌트: CodeBlock (에디터 스타일 코드블록)
 // ─────────────────────────────────────────────
-const CodeBlock = ({ children }: { children: React.ReactNode }) => {
+const CodeBlock = ({ children, isCollapsible = false }: { children: React.ReactNode, isCollapsible?: boolean }) => {
   const [copied, setCopied] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const codeEl = Array.isArray(children) ? children[0] : children;
   const lang = /language-(\w+)/.exec((codeEl as any)?.props?.className || '')?.[1] ?? '';
   const codeText = String((codeEl as any)?.props?.children ?? '').replace(/\n$/, '');
+
+  const lineCount = codeText.split('\n').length;
+  // 코드가 20줄 이상일 때만 접기 적용
+  const shouldCollapse = isCollapsible && lineCount >= 20;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(codeText).catch(() => {});
@@ -140,7 +146,19 @@ const CodeBlock = ({ children }: { children: React.ReactNode }) => {
           {copied ? '✓ 복사됨' : 'Copy'}
         </button>
       </div>
-      <pre className="code-block-pre">{children}</pre>
+      {/* 실제 코드는 수정하지 않고 CSS(max-height, overflow)로 표시 영역만 제한합니다. */}
+      <div className={`code-block-content ${shouldCollapse && !isExpanded ? 'collapsed' : ''}`}>
+        <pre className="code-block-pre">{children}</pre>
+        {shouldCollapse && !isExpanded && <div className="code-block-fade" />}
+      </div>
+      {shouldCollapse && (
+        <button 
+          className="btn-text-action btn-code-toggle" 
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          {isExpanded ? '접기 ▲' : '펼치기 ▼'}
+        </button>
+      )}
     </div>
   );
 };
@@ -202,13 +220,16 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
     <div className={`msg-ai ${isError ? 'error' : 'analysis'}`} data-message-role="ai">
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
+        {msg.toolNotiText && (
+          <div className="tool-noti-text">{msg.toolNotiText}</div>
+        )}
         {msg.content && (
           <div className="markdown-body" style={{ maxWidth: '100%', overflowX: 'hidden' }}>
             <Markdown 
               remarkPlugins={[remarkGfm]} 
               rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
               components={{
-                pre: (props: any) => <CodeBlock>{props.children}</CodeBlock>,
+                pre: (props: any) => <CodeBlock isCollapsible={!!msg.filePath}>{props.children}</CodeBlock>,
                 code(props: any) {
                   const { children, className, node, ...rest } = props;
                   const match = /language-(\w+)/.exec(className || '');
@@ -521,6 +542,15 @@ function App() {
 
       const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
 
+      if (data.subType === 'tool_noti') {
+        if (messageId) {
+          setMessages(prev => prev.map(m =>
+            m.id === messageId ? { ...m, toolNotiText: data.content } : m
+          ));
+        }
+        return;
+      }
+
       if (data.subType === 'step_noti') {
         if (messageId) {
           setMessages(prev => {
@@ -614,6 +644,7 @@ function App() {
                 isError = data.subType === 'error';
                 newContent += (newContent ? '\n\n' : '') + data.content;
                 break;
+
               case 'chat_chunk':
                 // /chat, /explain 전용 스트리밍
                 newContent += data.content;
@@ -632,6 +663,7 @@ function App() {
                 break;
             }
 
+            const isCompletionEvent = ['task_step', 'task_success', 'error', 'task_cancelled'].includes(data.subType);
             updated[index] = {
               ...existing,
               content:         newContent,
@@ -642,6 +674,7 @@ function App() {
               subType:         data.subType,
               isSuccess:       data.isSuccess !== 'false' ? true : existing.isSuccess,
               modifiedFullCode: modifiedFullCode,
+              toolNotiText:    isCompletionEvent ? undefined : existing.toolNotiText,
             };
             return updated;
           }
