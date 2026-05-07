@@ -1,7 +1,7 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
 import com.intellij.openapi.diagnostic.Logger
-import net.ib.ixpert.ops.wuwagent.client.OllamaClient
+import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ProjectSummaryFormatter
 
@@ -22,7 +22,7 @@ data class RequirementAnalysisResult(
 /**
  * [Phase 2a] 자연어 요구사항을 분석하여 수정/신규 대상 파일 목록을 추출하는 파이프라인.
  */
-class RequirementAnalysisPipeline(private val client: OllamaClient) {
+class RequirementAnalysisPipeline(private val client: LLMClient) {
 
     companion object {
         var lastResult: RequirementAnalysisResult? = null
@@ -70,7 +70,7 @@ class RequirementAnalysisPipeline(private val client: OllamaClient) {
 
         val userMessage = "## 요구사항\n$requirement"
 
-        val response = client.callChatApiStream(systemPrompt, userMessage, onChunk)
+        val response = client.chat(systemPrompt, userMessage, onChunk)
         val rawResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
 
         val result = parseResponse(rawResponse)

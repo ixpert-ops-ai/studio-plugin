@@ -9,7 +9,6 @@ import net.ib.ixpert.ops.wuwagent.agent.TaskAgent
 import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.agent.IntentAnalyzer
 import net.ib.ixpert.ops.wuwagent.agent.TaskPipeline
-import net.ib.ixpert.ops.wuwagent.client.OllamaClient
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 import com.intellij.openapi.diagnostic.Logger
 

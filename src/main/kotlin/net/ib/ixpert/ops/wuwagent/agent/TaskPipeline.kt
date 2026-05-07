@@ -1,7 +1,7 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
 import com.intellij.openapi.diagnostic.Logger
-import net.ib.ixpert.ops.wuwagent.client.OllamaClient
+import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
 import net.ib.ixpert.ops.wuwagent.service.EditorApplyService
 import net.ib.ixpert.ops.wuwagent.service.EditorContextService
@@ -224,7 +224,7 @@ sealed class TaskPipeline {
          */
         fun executeSync(
             context: AgentContext,
-            client: OllamaClient,
+            client: LLMClient,
             onChunk: ((String) -> Unit)? = null,
             previousStepResult: String? = null,
             allPreviousResults: List<StepResult> = emptyList(),
@@ -259,7 +259,7 @@ sealed class TaskPipeline {
                 val userMessage = "위 원본 코드와 개선된 코드를 비교하여 안정성을 평가하세요."
 
                 logger.info("AgentStep[${label}]: 안정성 평가 LLM 호출 시작")
-                val response = client.callChatApiStream(stabilitySystemPrompt, userMessage, onChunk)
+                val response = client.chat(stabilitySystemPrompt, userMessage, onChunk)
                 val rawLlmResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
                 val llmResponse = rawLlmResponse.trimEnd()
                 val isError = llmResponse.startsWith("[오류]") || llmResponse.startsWith("[Error]")
@@ -478,7 +478,7 @@ sealed class TaskPipeline {
 
             val filteredOnChunk = onChunk
 
-            val response    = client.callChatApiStream(systemPrompt, userMessage, filteredOnChunk)
+            val response    = client.chat(systemPrompt, userMessage, filteredOnChunk)
             val rawLlmResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
 
             val llmResponse = rawLlmResponse.trimEnd()

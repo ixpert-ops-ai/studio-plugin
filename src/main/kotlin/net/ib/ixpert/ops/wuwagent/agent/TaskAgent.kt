@@ -5,7 +5,8 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.application.ApplicationManager
-import net.ib.ixpert.ops.wuwagent.client.OllamaClient
+import net.ib.ixpert.ops.wuwagent.client.LLMClient
+import net.ib.ixpert.ops.wuwagent.service.WuwLlmService
 import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 
 /**
@@ -24,7 +25,7 @@ class TaskAgent(
 ) : WuwAgent {
 
     private val logger = Logger.getInstance(TaskAgent::class.java)
-    private val client = OllamaClient()
+    private val client: LLMClient = WuwLlmService.getClient()
 
     override fun execute(
         context: AgentContext, 

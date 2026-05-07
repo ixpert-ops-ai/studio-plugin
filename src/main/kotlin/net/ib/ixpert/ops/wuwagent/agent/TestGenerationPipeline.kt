@@ -2,7 +2,7 @@ package net.ib.ixpert.ops.wuwagent.agent
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
-import net.ib.ixpert.ops.wuwagent.client.OllamaClient
+import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.*
 
@@ -15,7 +15,7 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.*
  */
 class TestGenerationPipeline(
     private val project: Project,
-    private val llmClient: OllamaClient
+    private val llmClient: LLMClient
 ) {
 
     private val logger = Logger.getInstance(TestGenerationPipeline::class.java)
@@ -92,7 +92,7 @@ class TestGenerationPipeline(
 
             try {
                 // LLM 호출 (스트리밍)
-                llmClient.callChatApiStream(systemPrompt, userPrompt) { chunk ->
+                llmClient.chat(systemPrompt, userPrompt) { chunk ->
                     onChunk(chunk)
                 }
             } catch (e: Exception) {
