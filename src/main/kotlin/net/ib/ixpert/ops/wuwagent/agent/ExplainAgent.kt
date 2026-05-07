@@ -110,7 +110,7 @@ class ExplainAgent : BaseAgent() {
 
         val wrappedOnChunk: (String) -> Unit = { chunk ->
             if (isFirstChunk) {
-                val banner = buildBanner(fileName, isPartial, startLine, endLine)
+                val banner = buildBanner(promptVars, isPartial, startLine, endLine)
                 val firstChunkWithBanner = banner + chunk
                 finalContentWithBanner = firstChunkWithBanner
                 onChunk?.invoke(firstChunkWithBanner)
@@ -200,16 +200,45 @@ class ExplainAgent : BaseAgent() {
      * 분석 대상 정보를 표시하는 배너 문자열을 생성합니다.
      */
     private fun buildBanner(
-        fileName: String,
+        promptVars: Map<String, String>,
         isPartial: Boolean,
         startLine: Int?,
         endLine: Int?
     ): String {
-        return if (isPartial && startLine != null && endLine != null) {
+        val fileName = promptVars["FILE_NAME"] ?: "Unknown"
+        val packageName = promptVars["PACKAGE_NAME"] ?: "(식별 불가)"
+        val language = promptVars["LANGUAGE"] ?: "Unknown"
+        val fileType = promptVars["FILE_TYPE"] ?: "script"
+        val dateStr = promptVars["ANALYZED_DATE"] ?: java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_DATE)
+        
+        val rawDeps = promptVars["DEPENDENCIES"]
+        val dependenciesStr = if (rawDeps.isNullOrBlank()) {
+            "[]"
+        } else {
+            """["$rawDeps"]"""
+        }
+
+        val yamlFrontmatter = """
+            ```yaml
+            ---
+            file: "$fileName"
+            package: "$packageName"
+            language: "$language"
+            type: "$fileType"
+            dependencies: $dependenciesStr
+            analyzed_date: "$dateStr"
+            ---
+            ```
+            
+        """.trimIndent()
+
+        val bannerTitle = if (isPartial && startLine != null && endLine != null) {
             "### 🎯 분석 대상: `$fileName` (Line $startLine ~ $endLine)\n\n"
         } else {
             "### 🎯 분석 대상: `$fileName` (전체)\n\n"
         }
+        
+        return yamlFrontmatter + bannerTitle
     }
 
     /**

@@ -243,6 +243,7 @@ $thymeleafNotice"""
             "PACKAGE_NAME" to (structure.packageName ?: "(식별 불가)"),
             "ANALYZED_DATE" to java.time.LocalDate.now().toString(),
             "FILE_TYPE" to (structure.classes.firstOrNull()?.kind?.displayName ?: "script"),
+            "DEPENDENCIES" to structure.getExternalDependencies().joinToString("\", \""),
             "EXTRACTION_METHOD" to structure.extractionMethod.displayName,
             "STRUCTURE_INFO" to formatStructureInfo(structure),
             "THYMELEAF_INFO" to formatThymeleafInfo(structure),

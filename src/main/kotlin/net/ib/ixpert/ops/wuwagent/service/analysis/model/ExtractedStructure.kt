@@ -24,7 +24,10 @@ data class ExtractedStructure(
 
     fun getExternalDependencies(): List<String> {
         return imports.filter { imp ->
-            !imp.contains("net.ib.ixpert") && !imp.contains("kr.co.ib")
+            !imp.contains("net.ib.ixpert") && 
+            !imp.contains("kr.co.ib") &&
+            !imp.startsWith("java.") &&
+            !imp.startsWith("javax.")
         }
     }
 

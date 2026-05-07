@@ -18,10 +18,15 @@ repositories {
 dependencies {
     intellijPlatform {
         intellijIdeaCommunity("2024.3.5")
-        bundledPlugins("com.intellij.java", "org.jetbrains.kotlin")
+        bundledPlugin("com.intellij.java")
+        bundledPlugin("org.jetbrains.kotlin")
+        testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
+        testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Plugin.Java)
         pluginVerifier()
         zipSigner()
     }
+    testImplementation(kotlin("test"))
+    testImplementation("junit:junit:4.13.2")
 }
 
 // Node.js 자동 다운로드 및 설정
@@ -42,9 +47,6 @@ tasks {
 
     withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
         kotlinOptions.jvmTarget = "17"
-        if (name.contains("Test")) {
-            enabled = false
-        }
     }
 
     patchPluginXml {
