@@ -102,6 +102,124 @@ class WebviewActionRouter(private val project: Project) {
                     )
                 }
 
+                // ── 요구사항 기반 파일 추출 (Phase 2a) ────────
+                "/analyze" -> {
+                    logger.info("Router: /analyze 분기")
+                    val messageId = "analyze_${System.currentTimeMillis()}"
+                    bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프를 분석하여 요구사항 대상 파일을 추출하고 있습니다...", messageId)
+                    
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
+                            val projectGraph = graphLoader.loadGraph() ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
+                            
+                            val client = OllamaClient()
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(client)
+                            
+                            val result = pipeline.analyze(textBody, projectGraph) { chunk ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessageChunk(messageId, chunk)
+                                }
+                            }
+                            
+                            ApplicationManager.getApplication().invokeLater {
+                                if (result.targetFiles.isNotEmpty()) {
+                                    val extraText = "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
+                                    bridge.sendMessageChunk(messageId, extraText)
+                                }
+                                bridge.sendMessage("chat", "", messageId) // 스트리밍 종료 신호
+                            }
+                        } catch (e: Exception) {
+                            logger.error("RequirementAnalysisPipeline Error", e)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", "요구사항 분석 중 오류가 발생했습니다: ${e.message}", messageId)
+                            }
+                        }
+                    }
+                }
+
+                // ── 자동 코드 작성 스텁 (Phase 2b) ────────
+                "/implement" -> {
+                    logger.info("Router: /implement 분기")
+                    val messageId = "implement_${System.currentTimeMillis()}"
+                    
+                    val cachedResult = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline.lastResult
+                    if (cachedResult == null || cachedResult.targetFiles.isEmpty()) {
+                        bridge.sendMessage("chat_start", "", messageId)
+                        bridge.sendMessage("error", "분석된 타겟 파일이 없습니다. 먼저 `/analyze 요구사항`을 실행해주세요.", messageId)
+                        return@invokeLater
+                    }
+                    
+                    bridge.sendMessage("chat_start", "🚀 **Phase 2b 코드 수정 파이프라인**\n타겟 파일 소스 코드를 분석하여 수정을 시작합니다...", messageId)
+                    
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            val client = OllamaClient()
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.ImplementationPipeline(client, project)
+                            
+                            pipeline.execute(cachedResult) { chunk ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessageChunk(messageId, chunk)
+                                }
+                            }
+                            
+                            // [Phase 2c] 실행 완료 후 컨텍스트 캐시 저장 (파이프라인 내부에서 이미 저장하지만, 완료 메시지는 여기서 처리)
+                            val extraText = "\n\n💡 수정된 파일들의 테스트 코드를 일괄 생성하려면 `/test-all`을 입력하세요."
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessageChunk(messageId, extraText)
+                                bridge.sendMessage("chat", "", messageId)
+                            }
+                        } catch (e: Exception) {
+                            logger.error("ImplementationPipeline Error", e)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", "코드 생성 중 오류가 발생했습니다: ${e.message}", messageId)
+                            }
+                        }
+                    }
+                }
+
+                // ── 단위 테스트 코드 일괄 생성 (Phase 2c) ────────
+                "/test-all" -> {
+                    logger.info("Router: /test-all 분기")
+                    val messageId = "test_${System.currentTimeMillis()}"
+                    val trimmedQuery = textBody.removePrefix("/test-all").trim()
+
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            if (trimmedQuery.isBlank() && net.ib.ixpert.ops.wuwagent.agent.TestGenerationPipeline.lastImplementContext == null) {
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("chat_start", "", messageId)
+                                    bridge.sendMessage("error", "⚠️ 테스트를 생성할 컨텍스트가 없습니다.\n먼저 `/implement`를 실행하거나, `/test-all 클래스명`으로 특정 클래스를 지정하세요.", messageId)
+                                }
+                                return@executeOnPooledThread
+                            }
+
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("chat_start", "🧪 **단위 테스트 자동 생성**을 시작합니다...", messageId)
+                            }
+
+                            val client = OllamaClient()
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.TestGenerationPipeline(project, client)
+
+                            val target = if (trimmedQuery.isBlank()) null else trimmedQuery
+                            pipeline.execute(explicitTarget = target) { chunk ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessageChunk(messageId, chunk)
+                                }
+                            }
+
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("chat", "", messageId)
+                            }
+                        } catch (e: Exception) {
+                            logger.error("TestGenerationPipeline Error", e)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", "테스트 생성 중 오류가 발생했습니다: ${e.message}", messageId)
+                            }
+                        }
+                    }
+                }
+
                 // ── 분석 문서 MD 생성 (디렉토리 선택 → 일괄 분석) ────────
                 "/doc" -> {
                     logger.info("Router: /doc 분기 → 디렉토리 선택 다이얼로그")
@@ -218,6 +336,53 @@ class WebviewActionRouter(private val project: Project) {
                             }
                         )
                     }
+                }
+
+                // ── 프로젝트 메타 그래프 생성 ────────────────
+                "/metagraph" -> {
+                    logger.info("Router: /metagraph 분기 → 프로젝트 메타 그래프 생성")
+                    val messageId = "metagraph_${System.currentTimeMillis()}"
+                    val progressId = "${messageId}_progress"
+                    bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다...", messageId)
+
+                    val builder = net.ib.ixpert.ops.wuwagent.service.metagraph.ProjectGraphBuilder(project)
+                    builder.buildGraphAsync(
+                        onProgress = { statusMsg ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("step_noti", statusMsg, progressId)
+                            }
+                        },
+                        onComplete = { graph ->
+                            val stats = graph.statistics
+                            val summary = buildString {
+                                appendLine("# 📊 프로젝트 메타 그래프 생성 완료")
+                                appendLine()
+                                appendLine("## 분석 결과 요약")
+                                appendLine("| 항목 | 수량 |")
+                                appendLine("| :--- | ---: |")
+                                appendLine("| 전체 파일 | ${stats.totalFiles}개 |")
+                                appendLine("| Controller | ${stats.controllers}개 |")
+                                appendLine("| Service | ${stats.services}개 |")
+                                appendLine("| Repository | ${stats.repositories}개 |")
+                                appendLine("| Entity | ${stats.entities}개 |")
+                                appendLine("| Configuration | ${stats.configs}개 |")
+                                appendLine("| 기타 | ${stats.others}개 |")
+                                appendLine("| 관계 (Relationships) | ${stats.totalRelationships}개 |")
+                                appendLine()
+                                appendLine("📁 저장 위치: `.meta/project-graph.json`")
+                            }
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("step_noti", "완료되었습니다.", progressId, mapOf("status" to "completed"))
+                                bridge.sendMessage("explain", summary, messageId)
+                            }
+                        },
+                        onError = { errorMsg ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("step_noti", "오류 발생: $errorMsg", progressId, mapOf("status" to "failed"))
+                                bridge.sendMessage("error", errorMsg, messageId)
+                            }
+                        }
+                    )
                 }
 
                 "/openTabs" -> {

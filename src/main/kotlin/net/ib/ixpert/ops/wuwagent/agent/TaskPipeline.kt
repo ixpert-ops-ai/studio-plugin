@@ -275,6 +275,10 @@ sealed class TaskPipeline {
                 )
             }
 
+            // [Phase 1b] 메타그래프 컨텍스트 자동 주입
+            val contextAssembler = context.project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ContextAssembler::class.java)
+            val graphContext = contextAssembler.assemble(context, context.payloadText)
+
             // 프롬프트 파일을 템플릿으로 먼저 로드; 치환은 코드 추출 후 수행
             val promptTemplate = PromptManager.loadPrompt(promptFile)
 
@@ -456,11 +460,15 @@ sealed class TaskPipeline {
             }
 
             // usesPromptVars=true이면 코드 추출 결과로 플레이스홀더 치환
-            val systemPrompt = if (usesPromptVars && originalCode.isNotBlank()) {
+            var systemPrompt = if (usesPromptVars && originalCode.isNotBlank()) {
                 onToolNoti?.invoke("코드 구조 추출 중...")
                 PromptManager.loadPromptWithVars(promptFile, buildPromptVars(context, originalCode, applyScope))
             } else {
                 promptTemplate
+            }
+
+            if (graphContext.isNotBlank()) {
+                systemPrompt = "$graphContext\n\n$systemPrompt"
             }
 
             val modelName = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state.model

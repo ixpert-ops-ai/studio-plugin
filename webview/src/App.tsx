@@ -780,16 +780,28 @@ function App() {
       command = '/task';
       payload = '코드를 개선해주세요.';
     } else if (text === '/analyze' || text.startsWith('/analyze ')) {
-      command = '/task';
-      payload = '영향도를 분석해주세요.';
+      command = '/analyze';
+      payload = text.startsWith('/analyze ') ? text.slice(9).trim() : '요구사항 대상 파일을 추출해주세요.';
+    } else if (text === '/implement' || text.startsWith('/implement ')) {
+      command = '/implement';
+      payload = '';
     } else if (text === '/query' || text.startsWith('/query ')) {
       command = '/task';
       payload = '쿼리를 검증해주세요.';
+    } else if (text === '/test' || text.startsWith('/test ')) {
+      command = '/task';
+      payload = '테스트 코드를 생성해주세요.';
+    } else if (text === '/test-all' || text.startsWith('/test-all ')) {
+      command = '/test-all';
+      payload = text.startsWith('/test-all ') ? text.slice(10).trim() : '';
     } else if (text === '/doc' || text.startsWith('/doc ')) {
       command = '/doc';
       payload = '';
     } else if (text === '/ragdoc' || text.startsWith('/ragdoc ')) {
       command = '/ragdoc';
+      payload = '';
+    } else if (text === '/metagraph' || text.startsWith('/metagraph ')) {
+      command = '/metagraph';
       payload = '';
     } else if (/개선|리팩토링|리팩|refactor|improve|최적화|optimize/i.test(text)) {
       command = '/task';
@@ -817,10 +829,11 @@ function App() {
     const cmds = [
       { cmd: '/explain', desc: '코드를 설명해줘' },
       { cmd: '/improve', desc: '코드를 개선해줘' },
-      { cmd: '/analyze', desc: '영향도를 분석해줘' },
+      { cmd: '/test', desc: '테스트 코드를 생성해줘' },
+      { cmd: '/analyze', desc: '요구사항 기반 수정 대상 파일 추출' },
       { cmd: '/query', desc: '쿼리를 검증해줘' },
       { cmd: '/doc', desc: '디렉토리 분석 문서 생성' },
-      { cmd: '/ragdoc', desc: 'RAG 전용 분석 문서 생성 (FAQ 포함)' }
+      { cmd: '/metagraph', desc: '프로젝트 메타 그래프 생성' }
     ];
     cmds.forEach(c => items.push({ type: 'cmd', cmd: c.cmd, desc: c.desc, index: idx++ }));
     items.push({ type: 'settings', cmd: '/openSettings', label: '설정', index: idx++ });
