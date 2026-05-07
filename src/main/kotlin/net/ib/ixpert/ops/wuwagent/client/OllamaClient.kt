@@ -8,6 +8,7 @@ import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.model.OllamaChatRequest
 import net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse
 import net.ib.ixpert.ops.wuwagent.model.OllamaMessage
+import net.ib.ixpert.ops.wuwagent.service.DebugManager
 import java.io.IOException
 
 @Suppress("UnstableApiUsage")
@@ -40,11 +41,19 @@ class OllamaClient : LLMClient {
             )
         )
         val jsonPayload = gson.toJson(requestBody)
+        val isStreaming = onChunk != null
 
-        logger.info("Ollama API Call (Stream=${onChunk != null}): url=$serverUrl, model=${settings.model}")
+        logger.info("Ollama API Call (Stream=$isStreaming): url=$serverUrl, model=${settings.model}")
+
+        val startMs = System.currentTimeMillis()
+        val debugEntry = if (settings.enableLlmDebug) {
+            try {
+                DebugManager.getInstance().newEntry(settings.model, serverUrl, jsonPayload, messages.size, isStreaming)
+            } catch (_: Exception) { null }
+        } else null
 
         return try {
-            HttpRequests.post(serverUrl, "application/json")
+            val result = HttpRequests.post(serverUrl, "application/json")
                 .tuner { connection ->
                     if (settings.apiKey.isNotBlank()) {
                         connection.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
@@ -97,6 +106,11 @@ class OllamaClient : LLMClient {
                             TaskCancellationToken.activeInputStream = null
                         }
 
+                        try {
+                            debugEntry?.responseText = fullContent
+                            debugEntry?.responseLength = fullContent.length
+                        } catch (_: Exception) {}
+
                         OllamaChatResponse(
                             model = lastResponse?.model,
                             createdAt = lastResponse?.createdAt,
@@ -109,6 +123,10 @@ class OllamaClient : LLMClient {
                         try {
                             val responseString = request.readString()
                             logger.info("Ollama API Raw Response (len=${responseString.length})")
+                            try {
+                                debugEntry?.responseText = responseString
+                                debugEntry?.responseLength = responseString.length
+                            } catch (_: Exception) {}
                             gson.fromJson(responseString, OllamaChatResponse::class.java)
                         } catch (e: IOException) {
                             if (TaskCancellationToken.isCancelled.get()) {
@@ -122,6 +140,14 @@ class OllamaClient : LLMClient {
                         }
                     }
                 }
+            try {
+                if (debugEntry != null) {
+                    debugEntry.durationMs = System.currentTimeMillis() - startMs
+                    debugEntry.isSuccess = true
+                    DebugManager.getInstance().addLog(debugEntry)
+                }
+            } catch (_: Exception) {}
+            result
         } catch (e: IOException) {
             val errorMsg = when {
                 e.message?.contains("timeout", ignoreCase = true) == true ->
@@ -132,10 +158,26 @@ class OllamaClient : LLMClient {
                     "[Error] Ollama 서버 통신 실패: ${e.message} ($serverUrl)"
             }
             logger.error(errorMsg, e)
+            try {
+                if (debugEntry != null) {
+                    debugEntry.durationMs = System.currentTimeMillis() - startMs
+                    debugEntry.isSuccess = false
+                    debugEntry.errorMessage = errorMsg
+                    DebugManager.getInstance().addLog(debugEntry)
+                }
+            } catch (_: Exception) {}
             OllamaChatResponse(null, null, OllamaMessage("assistant", errorMsg), true)
         } catch (e: Exception) {
             val errorMsg = "[Error] 예상치 못한 전송/파싱 오류: ${e.message} ($serverUrl)"
             logger.error(errorMsg, e)
+            try {
+                if (debugEntry != null) {
+                    debugEntry.durationMs = System.currentTimeMillis() - startMs
+                    debugEntry.isSuccess = false
+                    debugEntry.errorMessage = errorMsg
+                    DebugManager.getInstance().addLog(debugEntry)
+                }
+            } catch (_: Exception) {}
             OllamaChatResponse(null, null, OllamaMessage("assistant", errorMsg), true)
         }
     }

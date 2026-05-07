@@ -7,6 +7,7 @@ import com.intellij.util.io.HttpRequests
 import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse
 import net.ib.ixpert.ops.wuwagent.model.OllamaMessage
+import net.ib.ixpert.ops.wuwagent.service.DebugManager
 import java.io.IOException
 
 @Suppress("UnstableApiUsage")
@@ -22,22 +23,31 @@ class OpenAIClient : LLMClient {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
         val serverUrl = "${settings.baseUrl.trimEnd('/')}/v1/chat/completions"
 
+        val messagesList = listOf(
+            mapOf("role" to "system", "content" to systemPrompt),
+            mapOf("role" to "user", "content" to userCode)
+        )
         val requestBody = mapOf(
             "model" to settings.model,
-            "messages" to listOf(
-                mapOf("role" to "system", "content" to systemPrompt),
-                mapOf("role" to "user", "content" to userCode)
-            ),
+            "messages" to messagesList,
             "stream" to (onChunk != null),
             "temperature" to settings.temperature,
             "max_tokens" to 4096
         )
         val jsonPayload = gson.toJson(requestBody)
+        val isStreaming = onChunk != null
 
-        logger.info("OpenAI API Call (Stream=${onChunk != null}): url=$serverUrl, model=${settings.model}")
+        logger.info("OpenAI API Call (Stream=$isStreaming): url=$serverUrl, model=${settings.model}")
+
+        val startMs = System.currentTimeMillis()
+        val debugEntry = if (settings.enableLlmDebug) {
+            try {
+                DebugManager.getInstance().newEntry(settings.model, serverUrl, jsonPayload, messagesList.size, isStreaming)
+            } catch (_: Exception) { null }
+        } else null
 
         return try {
-            HttpRequests.post(serverUrl, "application/json")
+            val result = HttpRequests.post(serverUrl, "application/json")
                 .tuner { connection ->
                     if (settings.apiKey.isNotBlank()) {
                         connection.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
@@ -91,6 +101,11 @@ class OpenAIClient : LLMClient {
                             TaskCancellationToken.activeInputStream = null
                         }
 
+                        try {
+                            debugEntry?.responseText = fullContent
+                            debugEntry?.responseLength = fullContent.length
+                        } catch (_: Exception) {}
+
                         OllamaChatResponse(
                             model = settings.model,
                             createdAt = null,
@@ -103,6 +118,10 @@ class OpenAIClient : LLMClient {
                         try {
                             val responseString = request.readString()
                             logger.info("OpenAI API Raw Response (len=${responseString.length})")
+                            try {
+                                debugEntry?.responseText = responseString
+                                debugEntry?.responseLength = responseString.length
+                            } catch (_: Exception) {}
                             val json = JsonParser.parseString(responseString).asJsonObject
                             val content = json.getAsJsonArray("choices")
                                 ?.get(0)?.asJsonObject
@@ -126,6 +145,14 @@ class OpenAIClient : LLMClient {
                         }
                     }
                 }
+            try {
+                if (debugEntry != null) {
+                    debugEntry.durationMs = System.currentTimeMillis() - startMs
+                    debugEntry.isSuccess = true
+                    DebugManager.getInstance().addLog(debugEntry)
+                }
+            } catch (_: Exception) {}
+            result
         } catch (e: IOException) {
             val errorMsg = when {
                 e.message?.contains("timeout", ignoreCase = true) == true ->
@@ -136,10 +163,26 @@ class OpenAIClient : LLMClient {
                     "[Error] OpenAI 서버 통신 실패: ${e.message} ($serverUrl)"
             }
             logger.error(errorMsg, e)
+            try {
+                if (debugEntry != null) {
+                    debugEntry.durationMs = System.currentTimeMillis() - startMs
+                    debugEntry.isSuccess = false
+                    debugEntry.errorMessage = errorMsg
+                    DebugManager.getInstance().addLog(debugEntry)
+                }
+            } catch (_: Exception) {}
             OllamaChatResponse(null, null, OllamaMessage("assistant", errorMsg), true)
         } catch (e: Exception) {
             val errorMsg = "[Error] 예상치 못한 전송/파싱 오류: ${e.message} ($serverUrl)"
             logger.error(errorMsg, e)
+            try {
+                if (debugEntry != null) {
+                    debugEntry.durationMs = System.currentTimeMillis() - startMs
+                    debugEntry.isSuccess = false
+                    debugEntry.errorMessage = errorMsg
+                    DebugManager.getInstance().addLog(debugEntry)
+                }
+            } catch (_: Exception) {}
             OllamaChatResponse(null, null, OllamaMessage("assistant", errorMsg), true)
         }
     }

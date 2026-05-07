@@ -26,6 +26,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     private var contextWindowSpinner: JBTextField? = null
     private var fetchModelsButton: JButton? = null
     private var testConnectionButton: JButton? = null
+    private var enableLlmDebugCheckBox: javax.swing.JCheckBox? = null
 
     override fun getId(): String = "net.ib.ixpert.ops.wuwagent.setting.WuwSettingsConfigurable"
 
@@ -89,6 +90,12 @@ class WuwSettingsConfigurable : SearchableConfigurable {
                 row("Context Window:") {
                     contextWindowSpinner = textField()
                         .columns(10)
+                        .component
+                }
+            }
+            group("Debug") {
+                row {
+                    enableLlmDebugCheckBox = checkBox("LLM Debug 패널 활성화 (LLM Debug ToolWindow에서 요청/응답 확인)")
                         .component
                 }
             }
@@ -199,7 +206,8 @@ class WuwSettingsConfigurable : SearchableConfigurable {
                 modelComboBox?.selectedItem != state.model ||
                 temperatureSpinner?.text != state.temperature.toString() ||
                 timeoutSpinner?.text != state.timeoutSeconds.toString() ||
-                contextWindowSpinner?.text != state.contextWindow.toString()
+                contextWindowSpinner?.text != state.contextWindow.toString() ||
+                enableLlmDebugCheckBox?.isSelected != state.enableLlmDebug
     }
 
     override fun apply() {
@@ -211,6 +219,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         state.temperature = temperatureSpinner?.text?.toFloatOrNull() ?: 0.1f
         state.timeoutSeconds = timeoutSpinner?.text?.toIntOrNull() ?: 300
         state.contextWindow = contextWindowSpinner?.text?.toIntOrNull() ?: 32768
+        state.enableLlmDebug = enableLlmDebugCheckBox?.isSelected ?: false
 
         com.intellij.openapi.project.ProjectManager.getInstance().openProjects.forEach { project ->
             net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(project).sendMessage("selected_model", state.model)
@@ -226,6 +235,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         temperatureSpinner?.setText(state.temperature.toString())
         timeoutSpinner?.setText(state.timeoutSeconds.toString())
         contextWindowSpinner?.setText(state.contextWindow.toString())
+        enableLlmDebugCheckBox?.isSelected = state.enableLlmDebug
 
         autoFetchModels()
     }
