@@ -120,12 +120,17 @@ const MermaidChart = React.memo(({ chart }: { chart: string }) => {
 // ─────────────────────────────────────────────
 //  컴포넌트: CodeBlock (에디터 스타일 코드블록)
 // ─────────────────────────────────────────────
-const CodeBlock = ({ children }: { children: React.ReactNode }) => {
+const CodeBlock = ({ children, isCollapsible = false }: { children: React.ReactNode, isCollapsible?: boolean }) => {
   const [copied, setCopied] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const codeEl = Array.isArray(children) ? children[0] : children;
   const lang = /language-(\w+)/.exec((codeEl as any)?.props?.className || '')?.[1] ?? '';
   const codeText = String((codeEl as any)?.props?.children ?? '').replace(/\n$/, '');
+
+  const lineCount = codeText.split('\n').length;
+  // 코드가 20줄 이상일 때만 접기 적용
+  const shouldCollapse = isCollapsible && lineCount >= 20;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(codeText).catch(() => {});
@@ -141,7 +146,19 @@ const CodeBlock = ({ children }: { children: React.ReactNode }) => {
           {copied ? '✓ 복사됨' : 'Copy'}
         </button>
       </div>
-      <pre className="code-block-pre">{children}</pre>
+      {/* 실제 코드는 수정하지 않고 CSS(max-height, overflow)로 표시 영역만 제한합니다. */}
+      <div className={`code-block-content ${shouldCollapse && !isExpanded ? 'collapsed' : ''}`}>
+        <pre className="code-block-pre">{children}</pre>
+        {shouldCollapse && !isExpanded && <div className="code-block-fade" />}
+      </div>
+      {shouldCollapse && (
+        <button 
+          className="btn-text-action btn-code-toggle" 
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          {isExpanded ? '접기 ▲' : '펼치기 ▼'}
+        </button>
+      )}
     </div>
   );
 };
@@ -212,7 +229,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
               remarkPlugins={[remarkGfm]} 
               rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
               components={{
-                pre: (props: any) => <CodeBlock>{props.children}</CodeBlock>,
+                pre: (props: any) => <CodeBlock isCollapsible={!!msg.filePath}>{props.children}</CodeBlock>,
                 code(props: any) {
                   const { children, className, node, ...rest } = props;
                   const match = /language-(\w+)/.exec(className || '');
