@@ -36,7 +36,7 @@ class OllamaClient : LLMClient {
                 "temperature" to settings.temperature,
                 "num_ctx" to settings.contextWindow,
                 "num_predict" to 4096,
-                "repeat_penalty" to 1.5,
+                "repeat_penalty" to 1.1,
                 "repeat_last_n" to 256
             )
         )

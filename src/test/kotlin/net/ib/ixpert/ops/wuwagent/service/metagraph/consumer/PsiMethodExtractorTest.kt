@@ -1,6 +1,8 @@
 package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
 
 import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase
+import kotlin.test.*
+
 
 /**
  * PsiMethodExtractor 단위 테스트.
@@ -14,7 +16,7 @@ class PsiMethodExtractorTest : LightJavaCodeInsightFixtureTestCase() {
 
     override fun setUp() {
         super.setUp()
-        extractor = PsiMethodExtractor(project)
+        extractor = PsiMethodExtractor(getProject())
     }
 
     // ──────────────────────────────────────────────
@@ -76,7 +78,7 @@ class PsiMethodExtractorTest : LightJavaCodeInsightFixtureTestCase() {
             "exportSurveyResultToExcel",
             setOf("survey", "excel", "export", "result")
         )
-        assertTrue("매칭 점수가 임계값 이상이어야 함", score >= 0.5)
+        assertTrue(score >= 0.5, "매칭 점수가 임계값 이상이어야 함")
     }
 
     fun testCalculateMatchScore_NoMatch() {
@@ -84,7 +86,7 @@ class PsiMethodExtractorTest : LightJavaCodeInsightFixtureTestCase() {
             "findUserById",
             setOf("survey", "excel", "download")
         )
-        assertTrue("매칭 점수가 0이어야 함", score < PsiMethodExtractor.KEYWORD_MATCH_THRESHOLD)
+        assertTrue(score < PsiMethodExtractor.KEYWORD_MATCH_THRESHOLD, "매칭 점수가 0이어야 함")
     }
 
     fun testCalculateMatchScore_EmptyKeywords() {
@@ -111,17 +113,17 @@ class PsiMethodExtractorTest : LightJavaCodeInsightFixtureTestCase() {
         // PsiMethodExtractor를 직접 호출하는 대신
         // PSI 접근이 가능한 fixture 환경에서 내부 로직을 검증
         val psiJavaFile = psiFile as? com.intellij.psi.PsiJavaFile
-        assertNotNull("PsiJavaFile이어야 함", psiJavaFile)
+        assertNotNull(psiJavaFile, "PsiJavaFile이어야 함")
 
         val psiClass = psiJavaFile!!.classes.firstOrNull()
-        assertNotNull("클래스가 존재해야 함", psiClass)
+        assertNotNull(psiClass, "클래스가 존재해야 함")
 
         // 어노테이션 포함 검증
         val classAnnotations = psiClass!!.annotations.map { it.text }
-        assertTrue("@Service 어노테이션 포함", classAnnotations.any { it.contains("Service") })
+        assertTrue(classAnnotations.any { it.contains("Service") }, "@Service 어노테이션 포함")
 
         // 메서드 수 검증
-        assertTrue("10개 이상 메서드", psiClass.methods.size >= 10)
+        assertTrue(psiClass.methods.size >= 10, "10개 이상 메서드")
 
         // 키워드 매칭 검증: "survey excel download" 키워드로 연관 메서드 필터링
         val keywords = extractor.extractKeywords("설문 결과를 Excel로 다운로드")
@@ -133,7 +135,7 @@ class PsiMethodExtractorTest : LightJavaCodeInsightFixtureTestCase() {
             }
         }
         // 전체 메서드 중 일부만 매칭되어야 함 (전부 매칭되면 키워드가 너무 넓음)
-        assertTrue("일부 메서드만 매칭 (전체의 50% 미만)", matchedCount < psiClass.methods.size / 2)
+        assertTrue(matchedCount < psiClass.methods.size / 2, "일부 메서드만 매칭 (전체의 50% 미만)")
     }
 
     /**
@@ -151,7 +153,7 @@ class PsiMethodExtractorTest : LightJavaCodeInsightFixtureTestCase() {
         if (transactionalMethods.isNotEmpty()) {
             val method = transactionalMethods.first()
             val annotations = method.annotations.map { it.text }
-            assertTrue("어노테이션 목록에 @Transactional 포함", annotations.any { it.contains("Transactional") })
+            assertTrue(annotations.any { it.contains("Transactional") }, "어노테이션 목록에 @Transactional 포함")
         }
     }
 
@@ -182,12 +184,12 @@ class PsiMethodExtractorTest : LightJavaCodeInsightFixtureTestCase() {
         )
 
         val text = skeleton.toPromptText()
-        assertTrue("파일 경로 포함", text.contains("// 파일: src/main/java/com/example/TestService.java"))
-        assertTrue("클래스 선언 포함", text.contains("public class TestService implements ITestService"))
-        assertTrue("필드 포함", text.contains("@Autowired private UserDao userDao;"))
-        assertTrue("시그니처 포함", text.contains("findAll"))
-        assertTrue("연관 메서드 바디 포함", text.contains("return userDao.findAll()"))
-        assertTrue("위치 힌트 포함", text.contains("📍 위치: 라인 25~28"))
-        assertTrue("신규 메서드 삽입 안내 포함", text.contains("=== 새 메서드를 여기에 추가하세요 ==="))
+        assertTrue(text.contains("// 파일: src/main/java/com/example/TestService.java"), "파일 경로 포함")
+        assertTrue(text.contains("public class TestService implements ITestService"), "클래스 선언 포함")
+        assertTrue(text.contains("@Autowired private UserDao userDao;"), "필드 포함")
+        assertTrue(text.contains("findAll"), "시그니처 포함")
+        assertTrue(text.contains("return userDao.findAll()"), "연관 메서드 바디 포함")
+        assertTrue(text.contains("📍 위치: 라인 25~28"), "위치 힌트 포함")
+        assertTrue(text.contains("=== 새 메서드를 여기에 추가하세요 ==="), "신규 메서드 삽입 안내 포함")
     }
 }

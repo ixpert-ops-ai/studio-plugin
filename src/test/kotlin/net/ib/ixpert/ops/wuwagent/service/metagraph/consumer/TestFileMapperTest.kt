@@ -1,6 +1,8 @@
 package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
 
 import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase
+import kotlin.test.*
+
 
 class TestFileMapperTest : LightJavaCodeInsightFixtureTestCase() {
 
@@ -8,7 +10,7 @@ class TestFileMapperTest : LightJavaCodeInsightFixtureTestCase() {
 
     override fun setUp() {
         super.setUp()
-        mapper = TestFileMapper(project)
+        mapper = TestFileMapper(getProject())
     }
 
     // ──────────────────────────────────────────────
@@ -53,7 +55,7 @@ class TestFileMapperTest : LightJavaCodeInsightFixtureTestCase() {
 
     fun testResolve_UnmappablePath() {
         val result = mapper.resolve("resources/application.yml")
-        assertNull("매핑 불가 경로는 null 반환", result)
+        assertNull(result, "매핑 불가 경로는 null 반환")
     }
 
     fun testResolve_NestedPackage() {
