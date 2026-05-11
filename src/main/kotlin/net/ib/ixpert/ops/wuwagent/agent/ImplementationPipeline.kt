@@ -26,14 +26,45 @@ class ImplementationPipeline(
 
     /**
      * 파일 경로를 기반으로 계층 가중치를 계산합니다. (Phase 2a의 계층 역순 정렬 보완)
+     * Phase 1의 project-graph.json이 있다면 그 분류를 우선 사용합니다.
      */
     private fun getLayerWeight(path: String): Int {
+        // 1순위: project-graph.json의 파일 분류(SpringFileType) 기반
+        val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
+        val graph = graphLoader?.loadGraph()
+        
+        if (graph != null) {
+            val normalizedPath = path.replace("\\", "/").removePrefix("/")
+            val fileNode = graph.files.values.find { it.path.replace("\\", "/").endsWith(normalizedPath) }
+            
+            if (fileNode != null) {
+                return when (fileNode.fileType) {
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.ENTITY,
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.REPOSITORY,
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.MAPPER -> 1 // PERSISTENCE
+                    
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.SERVICE -> 2 // BUSINESS
+                    
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.CONTROLLER,
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.REST_CONTROLLER,
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.VIEW -> 3 // PRESENTATION
+                    
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.DTO,
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.VO -> 4 // DATA TRANSFER
+                    
+                    else -> 5 // COMMON (CONFIG, UTIL, FILTER 등)
+                }
+            }
+        }
+
+        // 2순위: 그래프에 파일이 없는 경우(신규 파일 등) 기존 경로 패턴 Fallback
         val lowerPath = path.lowercase()
         return when {
-            lowerPath.contains("dao") || lowerPath.contains("repository") || lowerPath.contains("entity") -> 1 // PERSISTENCE
-            lowerPath.contains("service") || lowerPath.contains("biz") -> 2 // BUSINESS
-            lowerPath.contains("controller") || lowerPath.contains("api") || lowerPath.contains("web") -> 3 // PRESENTATION
-            else -> 4 // COMMON (dto, util, config 등)
+            lowerPath.contains("dao") || lowerPath.contains("repository") || lowerPath.contains("entity") || lowerPath.contains("mapper") -> 1
+            lowerPath.contains("service") || lowerPath.contains("biz") -> 2
+            lowerPath.contains("controller") || lowerPath.contains("api") || lowerPath.contains("web") || lowerPath.contains("view") -> 3
+            lowerPath.contains("dto") || lowerPath.contains("vo") -> 4
+            else -> 5
         }
     }
 
@@ -43,7 +74,10 @@ class ImplementationPipeline(
         analysisResult: RequirementAnalysisResult,
         onChunk: (String) -> Unit
     ) {
-        val sortedTargets = analysisResult.targetFiles.sortedBy { getLayerWeight(it.path) }
+        val sortedTargets = analysisResult.targetFiles.sortedWith(
+            compareBy<net.ib.ixpert.ops.wuwagent.agent.TargetFileSpec> { getLayerWeight(it.path) }
+            .thenBy { if (it.path.lowercase().contains("impl")) 0 else 1 }
+        )
         
         logger.info("ImplementationPipeline: 총 ${sortedTargets.size}개 파일 순차 처리 시작")
 
@@ -60,10 +94,36 @@ class ImplementationPipeline(
             onChunk(progressHeader)
 
             // 파일 및 프롬프트 생성 로직
-            val isNewFile = target.type.contains("신규")
-            val isDtoOrEntity = target.path.lowercase().let { p ->
-                p.contains("dto") || p.contains("entity") || p.contains("vo") || p.contains("model")
+            var isNewFile = target.type.contains("신규")
+            if (isNewFile) {
+                val absolutePath = "${project.basePath}/${target.path}".replace("//", "/")
+                val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath)
+                if (virtualFile != null && virtualFile.exists()) {
+                    logger.warn("기존 파일을 신규로 잘못 분류함. '수정'으로 자동 교정: ${target.path}")
+                    isNewFile = false
+                }
             }
+            val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
+            val graph = graphLoader?.loadGraph()
+            
+            val isDtoOrEntity = if (graph != null) {
+                val normalizedPath = target.path.replace("\\", "/").removePrefix("/")
+                val fileNode = graph.files.values.find { it.path.replace("\\", "/").endsWith(normalizedPath) }
+                if (fileNode != null) {
+                    fileNode.fileType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.DTO ||
+                    fileNode.fileType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.VO ||
+                    fileNode.fileType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.ENTITY
+                } else {
+                    target.path.lowercase().let { p ->
+                        p.contains("dto") || p.contains("entity") || p.contains("vo") || p.contains("model")
+                    }
+                }
+            } else {
+                target.path.lowercase().let { p ->
+                    p.contains("dto") || p.contains("entity") || p.contains("vo") || p.contains("model")
+                }
+            }
+
             val isInterface = target.path.lowercase().let { p ->
                 !p.contains("impl") && (
                     p.endsWith("dao.java") ||
@@ -72,10 +132,18 @@ class ImplementationPipeline(
                     p.endsWith("mapper.java")
                 )
             }
-            val isLargeFile = !isNewFile && !isDtoOrEntity && runReadAction { psiMethodExtractor.isLargeFile(target.path) }
+            // 인터페이스는 신규가 아니면 무조건 ACTION_BASED (Snippet) 적용
+            val isLargeFile = !isNewFile && !isDtoOrEntity && (isInterface || runReadAction { psiMethodExtractor.isLargeFile(target.path) })
             
-            val systemPrompt = if (isLargeFile) buildLargeFileSystemPrompt(isInterface) else buildSmallFileSystemPrompt(isInterface)
-            val userPrompt = buildUserPromptForFile(target, contextChain, analysisResult.summary, sortedTargets)
+            val systemPrompt = when {
+                isDtoOrEntity && !isNewFile -> buildDtoOnlySystemPrompt()
+                isLargeFile -> buildLargeFileSystemPrompt(isInterface)
+                else -> buildSmallFileSystemPrompt(isInterface)
+            }
+            val userPrompt = when {
+                isDtoOrEntity && !isNewFile -> buildDtoOnlyUserPrompt(target, contextChain, analysisResult.summary, sortedTargets)
+                else -> buildUserPromptForFile(target, contextChain, analysisResult.summary, sortedTargets)
+            }
 
             // Fallback guide returned from buildUserPromptForFile means skipping
             if (userPrompt.startsWith("> ⚠️")) {
@@ -142,9 +210,9 @@ class ImplementationPipeline(
 
                 val finalResponseText = response?.message?.content ?: fullResponse
 
-                // 인터페이스 파일인 경우 환각 메서드 필터링
+                // 인터페이스 파일인 경우 환각 메서드 필터링, DTO 파일인 경우 스니펫 병합
                 val processedResponse = if (isInterface) {
-                    val filtered = runReadAction { filterInterfaceHallucination(finalResponseText, target, sortedTargets) }
+                    val filtered = runReadAction { filterInterfaceHallucination(finalResponseText, target, sortedTargets, contextChain) }
                     if (filtered != finalResponseText) {
                         logger.info("인터페이스 환각 필터링 적용: ${target.path}")
                         // 필터링된 결과를 사용자에게 다시 표시 (원본 스트리밍 응답이 이미 출력되었으므로 추가 안내)
@@ -152,6 +220,17 @@ class ImplementationPipeline(
                         onChunk("// 파일: ${target.path} (수정됨)\n```java\n$filtered\n```\n")
                     }
                     filtered
+                } else if (isDtoOrEntity && !isNewFile) {
+                    val absolutePath = "${project.basePath}/${target.path}".replace("//", "/")
+                    val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath)
+                    if (virtualFile != null && virtualFile.exists()) {
+                        val originalSource = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
+                        val merged = ImplementationPipelineUtils.mergeDtoSnippet(originalSource, finalResponseText)
+                        onChunk("\n\n> 🔧 **DTO 자동 병합 완료**\n\n")
+                        merged
+                    } else {
+                        finalResponseText
+                    }
                 } else {
                     finalResponseText
                 }
@@ -359,6 +438,7 @@ class ImplementationPipeline(
             
             ## 이전 단계까지의 수정 요약 (참고용 컨텍스트)
             $contextChainStr
+            ${if (targetFile.path.lowercase().let { !it.contains("impl") && (it.endsWith("dao.java") || it.endsWith("service.java") || it.endsWith("repository.java") || it.endsWith("mapper.java")) }) "\n⚠️ **주의**: 이 파일은 인터페이스입니다. 위의 [이전 단계까지의 수정 요약]을 반드시 확인하고, 구현체에서 생성된 메서드 시그니처와 완전히 동일하게 선언하세요." else ""}
             
             ---
             
@@ -376,6 +456,44 @@ class ImplementationPipeline(
         return buildCommonUserPrompt(
             targetFile, contextChain, requirementSummary, allTargetFiles, 
             "이 파일은 신규 생성입니다. 요구사항에 맞는 전체 코드를 새로 작성하세요."
+        )
+    }
+
+    private fun buildDtoOnlySystemPrompt(): String {
+        return """
+            당신은 Spring Boot 시니어 개발자입니다.
+            현재 타겟 파일은 기존에 존재하는 DTO/VO 파일입니다.
+            DTO에는 오직 새로 추가되는 필드와 해당 필드의 Getter/Setter만 스니펫 형태로 생성해야 합니다.
+            
+            ## DTO 전용 규칙
+            1. 클래스 선언부, 기존 필드, 기존 메서드를 절대 출력하지 마세요.
+            2. 오직 새 필드(`private Type fieldName;`)와 새 메서드(`public Type getFieldName() {...}`)만 출력하세요.
+            3. 응답은 반드시 ````java` 코드 블록 하나만 포함해야 합니다.
+            4. 주석이나 부가 설명은 절대 작성하지 마세요.
+            5. 코드 블록의 맨 끝에는 `[MODIFIED_SIGNATURES]`와 함께 추가된 메서드 시그니처를 한 줄씩 요약하세요.
+            
+            출력 예시:
+            ```java
+            private String newField;
+            
+            public String getNewField() { return newField; }
+            public void setNewField(String newField) { this.newField = newField; }
+            ```
+            [MODIFIED_SIGNATURES]
+            + public String getNewField()
+            + public void setNewField(String newField)
+        """.trimIndent()
+    }
+
+    private fun buildDtoOnlyUserPrompt(
+        targetFile: TargetFileSpec,
+        contextChain: List<String>,
+        requirementSummary: String,
+        allTargetFiles: List<TargetFileSpec>
+    ): String {
+        return buildCommonUserPrompt(
+            targetFile, contextChain, requirementSummary, allTargetFiles, 
+            "이 파일은 기존 DTO 파일입니다. 전체 코드를 재작성하지 말고, 새롭게 추가할 필드와 메서드만 생성하세요."
         )
     }
 
@@ -446,6 +564,10 @@ class ImplementationPipeline(
             8. DAO/Repository 파일에는 인증(JWT/Session) 검증 로직을 넣지 마세요.
             9. **오직 현재 타겟 파일 하나만 생성하세요.** 요구사항에 없는 새로운 파일(Filter, EntryPoint 등)을 임의로 만들지 마세요.
             10. 유틸리티 클래스(JwtUtil 등) 호출 시, 이전 단계에서 정의된 static/instance 패턴을 정확히 따르세요. `@Component`로 정의된 경우 static 호출을 하지 마세요.
+            11. **Controller 처리 규칙**: 
+                - 기존 `@Value` 필드나 `@Autowired` 필드를 절대 재선언하거나 나열하지 마세요.
+                - 기존 엔드포인트 메서드의 시그니처나 바디를 반복 출력하지 마세요.
+                - 오직 새로 추가하거나 수정하는 부분(메서드나 필드)만 `[CODE]` 블록에 작성하세요.
         """.trimIndent()
 
         val interfaceRule = if (isInterface) """
@@ -507,6 +629,11 @@ class ImplementationPipeline(
             14. 유틸리티 클래스 호출 시 static/instance 성격을 구분하세요. `@Component` 인스턴스 메서드를 static으로 호출하지 마세요.
             15. **신규 메서드 생성 제한**: 요구사항에 명시되지 않은 메서드를 임의로 대량 생성하지 마세요. (최대 5개 제한)
             16. **생략 금지**: 기존 메서드를 교체할 때 `// ... 기존 코드 ...` 같은 생략 표현을 절대 사용하지 마세요.
+            17. **Controller 처리 규칙**: 
+                - 기존 `@Value` 필드나 `@Autowired` 필드를 절대 재선언하거나 나열하지 마세요.
+                - 기존 엔드포인트 메서드의 시그니처나 바디를 반복 출력하지 마세요.
+                - 오직 새로 추가하거나 수정하는 부분(메서드나 필드)만 `[CODE]` 블록에 작성하세요.
+                - 코드 주석은 메서드당 최대 1줄로 제한합니다. 설명적 주석을 반복해서 출력하지 마세요.
         """.trimIndent()
 
         val interfaceRule = if (isInterface) """
@@ -526,7 +653,8 @@ class ImplementationPipeline(
     private fun filterInterfaceHallucination(
         responseText: String,
         targetFile: TargetFileSpec,
-        allTargetFiles: List<TargetFileSpec>
+        allTargetFiles: List<TargetFileSpec>,
+        contextChain: List<String>
     ): String {
         logger.warn("=== filterInterfaceHallucination 호출됨: ${targetFile.path} ===")
         logger.warn("=== 응답 길이: ${responseText.length}자 ===")
@@ -562,14 +690,11 @@ class ImplementationPipeline(
 
         logger.info("신규 메서드 감지: $newMethods (${targetFile.path})")
 
-        // 구현체 파일들의 description에서 키워드 추출
-        val implDescriptions = allTargetFiles
-            .filter { it.path.lowercase().contains("impl") }
-            .joinToString(" ") { it.description + " " + it.path }
-            .lowercase()
+        // [수정 3] 구현체 descriptions가 아닌, contextChain 전체에서 메서드명을 검색하여 검증
+        val contextText = contextChain.joinToString("\n").lowercase()
 
         val hallucinatedMethods = newMethods.filter { methodName ->
-            !implDescriptions.contains(methodName.lowercase())
+            !contextText.contains(methodName.lowercase())
         }
 
         if (hallucinatedMethods.isEmpty()) return responseText

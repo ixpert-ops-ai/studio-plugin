@@ -32,7 +32,7 @@ class SpringEndpointAnalyzer {
 
         // 2. 메서드 순회하며 매핑 어노테이션 확인
         for (method in psiClass.methods) {
-            val endpoint = extractEndpointFromMethod(method, classLevelPath)
+            val endpoint = extractEndpointFromMethod(method, classLevelPath, psiClass.name ?: "")
             if (endpoint != null) {
                 endpoints.add(endpoint)
             }
@@ -46,7 +46,7 @@ class SpringEndpointAnalyzer {
         return extractPathFromAnnotation(requestMapping)
     }
 
-    private fun extractEndpointFromMethod(method: PsiMethod, classLevelPath: String): ApiEndpoint? {
+    private fun extractEndpointFromMethod(method: PsiMethod, classLevelPath: String, controllerClass: String): ApiEndpoint? {
         for ((annotationFqn, httpMethod) in MAPPING_ANNOTATIONS) {
             val annotation = method.getAnnotation(annotationFqn)
             if (annotation != null) {
@@ -56,10 +56,15 @@ class SpringEndpointAnalyzer {
                 // ReturnType 추출 (선택적)
                 val returnType = method.returnType?.presentableText ?: "void"
                 
+                // 파라미터 타입 목록 추출
+                val params = method.parameterList.parameters.map { it.type.presentableText }
+                
                 return ApiEndpoint(
                     httpMethod = httpMethod,
                     path = fullPath,
+                    controllerClass = controllerClass,
                     handlerMethod = method.name,
+                    params = params,
                     returnType = returnType
                 )
             }

@@ -338,6 +338,52 @@ class WebviewActionRouter(private val project: Project) {
                     }
                 }
 
+                // ── MetaGraph 기반 영향도 분석 (Phase 2d) ───────
+                "/impact" -> {
+                    logger.info("Router: /impact 분기")
+                    val messageId = "impact_${System.currentTimeMillis()}"
+                    
+                    // 1. 타겟 파일 경로 결정 (인자 우선 -> 현재 에디터 차선)
+                    var targetPath = textBody.removePrefix("/impact").trim()
+                    if (targetPath.isBlank()) {
+                        targetPath = editor?.virtualFile?.path ?: ""
+                    }
+                    
+                    if (targetPath.isBlank()) {
+                        bridge.sendMessage("error", "분석 대상 파일을 지정하거나 에디터에서 파일을 열어주세요.")
+                        return@invokeLater
+                    }
+
+                    // 2. 프로젝트 상대 경로로 변환
+                    val projectBasePath = project.basePath ?: ""
+                    val relativePath = if (targetPath.startsWith(projectBasePath)) {
+                        targetPath.removePrefix(projectBasePath).removePrefix("/").removePrefix("\\")
+                    } else {
+                        targetPath
+                    }.replace("\\", "/")
+
+                    bridge.sendMessage("explain_start", "🔍 `${relativePath}`의 변경 파급 효과를 분석하고 있습니다...", messageId)
+                    
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
+                            val projectGraph = graphLoader.loadGraph() ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 `/metagraph` 명령어로 그래프를 생성해주세요.")
+                            
+                            val impactResult = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.MetaImpactAnalyzer.analyze(projectGraph, relativePath)
+                            val formattedReport = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ImpactGraphFormatter.format(impactResult)
+                            
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("explain", formattedReport, messageId)
+                            }
+                        } catch (e: Exception) {
+                            logger.error("MetaImpact Error", e)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", "영향 분석 중 오류가 발생했습니다: ${e.message}", messageId)
+                            }
+                        }
+                    }
+                }
+
                 // ── 프로젝트 메타 그래프 생성 ────────────────
                 "/metagraph" -> {
                     logger.info("Router: /metagraph 분기 → 프로젝트 메타 그래프 생성")
@@ -363,9 +409,13 @@ class WebviewActionRouter(private val project: Project) {
                                 appendLine("| 전체 파일 | ${stats.totalFiles}개 |")
                                 appendLine("| Controller | ${stats.controllers}개 |")
                                 appendLine("| Service | ${stats.services}개 |")
-                                appendLine("| Repository | ${stats.repositories}개 |")
+                                appendLine("| Repository/Mapper | ${stats.repositories}개 |")
                                 appendLine("| Entity | ${stats.entities}개 |")
                                 appendLine("| Configuration | ${stats.configs}개 |")
+                                appendLine("| DTO/VO | ${stats.dtos}개 |")
+                                appendLine("| View | ${stats.views}개 |")
+                                appendLine("| Component/Filter | ${stats.components}개 |")
+                                appendLine("| Utils | ${stats.utils}개 |")
                                 appendLine("| 기타 | ${stats.others}개 |")
                                 appendLine("| 관계 (Relationships) | ${stats.totalRelationships}개 |")
                                 appendLine()

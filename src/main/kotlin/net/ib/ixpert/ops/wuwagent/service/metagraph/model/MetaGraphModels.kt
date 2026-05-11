@@ -36,8 +36,7 @@ data class FileNode(
     val entityRelations: List<EntityRelation> = emptyList(),
     val dependsOn: MutableList<String> = mutableListOf(),
     val dependedBy: MutableList<String> = mutableListOf(),
-    val changeRisk: ChangeRisk = ChangeRisk.NOT_CALCULATED,
-    val riskScore: Int = 0
+    var riskAssessment: RiskAssessment = RiskAssessment(0, ChangeRisk.NOT_CALCULATED, emptyList())
 )
 
 /**
@@ -58,7 +57,8 @@ data class Relationship(
     val target: String,
     val type: RelationshipType,
     val strength: RelationshipStrength = RelationshipStrength.DIRECT,
-    val detail: String? = null
+    val detail: String? = null,
+    val callType: String? = null // STATIC or INSTANCE
 )
 
 /**
@@ -80,6 +80,10 @@ data class GraphStatistics(
     val repositories: Int = 0,
     val entities: Int = 0,
     val configs: Int = 0,
+    val dtos: Int = 0,
+    val utils: Int = 0,
+    val views: Int = 0,
+    val components: Int = 0,
     val others: Int = 0,
     val totalRelationships: Int = 0
 )
@@ -89,8 +93,11 @@ data class GraphStatistics(
 data class ApiEndpoint(
     val httpMethod: String,
     val path: String,
+    val controllerClass: String = "",
     val handlerMethod: String,
-    val returnType: String? = null
+    val params: List<String> = emptyList(),
+    val returnType: String? = null,
+    val relatedServiceMethod: String = ""
 )
 
 data class BeanDefinition(
@@ -124,6 +131,9 @@ enum class SpringFileType(val displayName: String) {
     FILTER("Filter"),
     INTERCEPTOR("Interceptor"),
     EXCEPTION_HANDLER("ExceptionHandler"),
+    EXCEPTION("Exception"),
+    UTIL("Util"),
+    VIEW("View"),
     TEST("Test"),
     UNKNOWN("Unknown")
 }
@@ -145,7 +155,8 @@ enum class RelationshipType {
     EXTENDS,
     IMPLEMENTS,
     CONFIGURES,
-    ENTITY_RELATION
+    ENTITY_RELATION,
+    CALLS
 }
 
 enum class RelationshipStrength {
@@ -155,6 +166,12 @@ enum class RelationshipStrength {
 enum class ChangeRisk {
     NOT_CALCULATED, LOW, MEDIUM, HIGH, CRITICAL
 }
+
+data class RiskAssessment(
+    val riskScore: Int,
+    val changeRisk: ChangeRisk,
+    val riskReasons: List<String>
+)
 
 // ── TypeResolver 유틸 ─────────────────────────────
 
@@ -242,3 +259,27 @@ object TypeResolver {
         return parts
     }
 }
+
+// ── Impact Graph 모델 ─────────────────────────────
+
+/**
+ * 변경 영향 분석 결과.
+ */
+data class ImpactResult(
+    val targetFile: String,
+    val directImpact: List<ImpactNode>,      // depth 1
+    val indirectImpact: List<ImpactNode>,    // depth 2-3
+    val totalAffectedFiles: Int,
+    val maxRiskInChain: RiskAssessment
+)
+
+/**
+ * 영향 전파 노드.
+ */
+data class ImpactNode(
+    val filePath: String,
+    val className: String,
+    val depth: Int,
+    val relationChain: List<String>,         // 예: ["CALLS", "INJECTS"]
+    val riskAssessment: RiskAssessment
+)

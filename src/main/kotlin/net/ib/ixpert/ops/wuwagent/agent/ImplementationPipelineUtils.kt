@@ -29,19 +29,20 @@ object ImplementationPipelineUtils {
     fun decideStrategy(
         targetFile: TargetFileSpec,
         lineCount: Int,
-        originalSourceContainsInterface: Boolean = false
+        originalSourceContainsInterface: Boolean = false,
+        fileType: String? = null
     ): ImplementationPipeline.EditStrategy {
         val path = (targetFile.path as String).lowercase()
 
-        if (isDtoFile(path)) {
+        if (path.contains("interface") || originalSourceContainsInterface) {
+            return ImplementationPipeline.EditStrategy.ACTION_BASED
+        }
+
+        if (fileType == "DTO" || fileType == "VO" || isDtoFile(path)) {
             return ImplementationPipeline.EditStrategy.DTO_ONLY
         }
 
         if (targetFile.type == "create") {
-            return ImplementationPipeline.EditStrategy.WHOLE
-        }
-
-        if (path.contains("interface") || originalSourceContainsInterface) {
             return ImplementationPipeline.EditStrategy.WHOLE
         }
 

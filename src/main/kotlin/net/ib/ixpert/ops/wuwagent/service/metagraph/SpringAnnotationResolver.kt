@@ -44,7 +44,10 @@ class SpringAnnotationResolver {
             SpringFileType.CONFIG to ArchitectureLayer.COMMON,
             SpringFileType.COMPONENT to ArchitectureLayer.COMMON,
             SpringFileType.FILTER to ArchitectureLayer.COMMON,
-            SpringFileType.INTERCEPTOR to ArchitectureLayer.COMMON
+            SpringFileType.INTERCEPTOR to ArchitectureLayer.COMMON,
+            SpringFileType.UTIL to ArchitectureLayer.COMMON,
+            SpringFileType.VIEW to ArchitectureLayer.PRESENTATION,
+            SpringFileType.EXCEPTION to ArchitectureLayer.COMMON
         )
 
         // ── DI 관련 어노테이션 FQN ──
@@ -68,7 +71,7 @@ class SpringAnnotationResolver {
      * @param relativePath 프로젝트 루트 기준 상대 경로
      */
     fun resolve(psiClass: PsiClass, relativePath: String): FileNode {
-        val fileType = resolveFileType(psiClass)
+        val fileType = resolveFileType(psiClass, relativePath)
         val layer = LAYER_MAP[fileType] ?: ArchitectureLayer.COMMON
         val annotations = extractAnnotationNames(psiClass)
         val injections = resolveDependencyInjections(psiClass, fileType)
@@ -96,7 +99,7 @@ class SpringAnnotationResolver {
 
     // ── 타입 판정 ──────────────────────────────────
 
-    private fun resolveFileType(psiClass: PsiClass): SpringFileType {
+    private fun resolveFileType(psiClass: PsiClass, relativePath: String): SpringFileType {
         var annotationType = SpringFileType.UNKNOWN
         
         // 1. 어노테이션 비교 (FQN 및 Simple Name 폴백)
@@ -119,33 +122,92 @@ class SpringAnnotationResolver {
             }
         }
 
-        // @Component는 범용이므로, 클래스명 패턴이 더 구체적이면 그걸 우선 (예: AuthDto에 @Component가 붙은 경우)
+        // @Component는 범용이므로, 클래스명/경로 패턴이 더 구체적이면 그걸 우선 (예: AuthDto에 @Component가 붙은 경우)
         if (annotationType == SpringFileType.COMPONENT) {
-            val nameType = inferFromClassName(psiClass)
+            val nameType = inferFromClassAndPath(psiClass, relativePath)
             if (nameType != SpringFileType.UNKNOWN) return nameType
         }
 
         if (annotationType != SpringFileType.UNKNOWN) return annotationType
 
-        // 2. 클래스명 패턴 폴백
-        return inferFromClassName(psiClass)
+        // 2. 클래스명 및 경로, 내용 기반 패턴 폴백
+        return inferFromClassAndPath(psiClass, relativePath)
     }
 
-    private fun inferFromClassName(psiClass: PsiClass): SpringFileType {
+    private fun inferFromClassAndPath(psiClass: PsiClass, relativePath: String): SpringFileType {
         val name = psiClass.name ?: return SpringFileType.UNKNOWN
+        val lowerPath = relativePath.lowercase()
 
+        // 1순위: 확실한 기본 타입 및 PSI 상속 관계
+        if (psiClass.isEnum) return SpringFileType.ENUM
+        if (psiClass.isInterface) return SpringFileType.INTERFACE
+        if (psiClass.hasModifierProperty(PsiModifier.ABSTRACT)) return SpringFileType.ABSTRACT_CLASS
+
+        val superClassName = psiClass.superClass?.name ?: ""
+        val interfaceNames = psiClass.interfaces.map { it.name }
+
+        if (superClassName.contains("View")) return SpringFileType.VIEW
+        if (superClassName.contains("Filter") || interfaceNames.any { it?.contains("Filter") == true }) return SpringFileType.FILTER
+        if (superClassName.contains("Interceptor") || interfaceNames.any { it?.contains("Interceptor") == true }) return SpringFileType.INTERCEPTOR
+        if (superClassName.contains("HttpServletRequestWrapper")) return SpringFileType.FILTER
+
+        // 2순위: 클래스명 강제 규칙 (명확한 접미사/키워드)
+        // DTO 판별 로직을 건너뛰도록 강제합니다.
+        if (name.lowercase() == "temp") return SpringFileType.UNKNOWN
+        if (name.endsWith("Util") || name.endsWith("Utils") || name.endsWith("Helper")) return SpringFileType.UTIL
+        if (name.contains("Repository")) return SpringFileType.REPOSITORY
+        if (name.contains("Filter")) return SpringFileType.FILTER
+        if (name == "SessionVal") return SpringFileType.UTIL
+
+        // 3순위: Getter/Setter 밀도 기반 DTO 판별
+        if (isDtoByGetterSetterDensity(psiClass)) {
+            return SpringFileType.DTO
+        }
+
+        // 3순위: 경로 패턴 (Path Fallback)
+        when {
+            "/dto/" in lowerPath -> return SpringFileType.DTO
+            "/vo/" in lowerPath -> return SpringFileType.VO
+            "/entity/" in lowerPath || "/entities/" in lowerPath -> return SpringFileType.ENTITY
+            "/config/" in lowerPath || "/configuration/" in lowerPath -> return SpringFileType.CONFIG
+            "/filter/" in lowerPath -> return SpringFileType.FILTER
+            "/interceptor/" in lowerPath -> return SpringFileType.INTERCEPTOR
+            "/util/" in lowerPath || "/utils/" in lowerPath || "/common/" in lowerPath -> return SpringFileType.UTIL
+            "/view/" in lowerPath -> return SpringFileType.VIEW
+            "/exception/" in lowerPath -> return SpringFileType.EXCEPTION
+            "/controller/" in lowerPath -> return SpringFileType.CONTROLLER
+            "/service/" in lowerPath -> return SpringFileType.SERVICE
+            "/dao/" in lowerPath || "/repository/" in lowerPath || "/mapper/" in lowerPath -> return SpringFileType.REPOSITORY
+        }
+
+        // 5순위: 파일명 접미사 패턴 (기존 로직)
         return when {
-            psiClass.isEnum -> SpringFileType.ENUM
-            psiClass.isInterface -> SpringFileType.INTERFACE
-            psiClass.hasModifierProperty(PsiModifier.ABSTRACT) -> SpringFileType.ABSTRACT_CLASS
             name.endsWith("DTO") || name.endsWith("Dto") -> SpringFileType.DTO
             name.endsWith("VO") || name.endsWith("Vo") -> SpringFileType.VO
             name.endsWith("Mapper") -> SpringFileType.MAPPER
-            name.endsWith("Filter") -> SpringFileType.FILTER
             name.endsWith("Interceptor") -> SpringFileType.INTERCEPTOR
             name.endsWith("Test") || name.endsWith("Tests") -> SpringFileType.TEST
+            name.endsWith("View") -> SpringFileType.VIEW
+            name.endsWith("Exception") -> SpringFileType.EXCEPTION
             else -> SpringFileType.UNKNOWN
         }
+    }
+
+    /**
+     * 전체 메서드 중 getter/setter의 비율이 60% 이상이면 DTO로 간주합니다.
+     */
+    private fun isDtoByGetterSetterDensity(psiClass: PsiClass): Boolean {
+        val methods = psiClass.methods
+        val totalMethods = methods.size
+        
+        if (totalMethods < 4) return false // 메서드가 너무 적으면 판별 불가
+
+        val getterSetterCount = methods.count { method ->
+            val mName = method.name
+            (mName.startsWith("get") || mName.startsWith("set") || mName.startsWith("is"))
+        }
+
+        return (getterSetterCount.toDouble() / totalMethods) >= 0.6
     }
 
     // ── 어노테이션 추출 ───────────────────────────
