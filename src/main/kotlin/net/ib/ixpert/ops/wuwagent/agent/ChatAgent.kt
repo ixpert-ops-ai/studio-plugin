@@ -19,7 +19,14 @@ class ChatAgent : BaseAgent() {
             return
         }
 
-        val systemPrompt = PromptManager.loadPrompt("chat_prompt.txt")
+        var systemPrompt = PromptManager.loadPrompt("chat_prompt.txt")
+
+        // [Phase 1b] 메타그래프 컨텍스트 자동 주입
+        val contextAssembler = context.project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ContextAssembler::class.java)
+        val graphContext = contextAssembler.assemble(context, userQuery)
+        if (graphContext.isNotBlank()) {
+            systemPrompt = "$graphContext\n\n$systemPrompt"
+        }
 
         callLlmStreamAsync(context.project, "iXpert AI Assistant: Answering Chat", systemPrompt, userQuery, onSuccess, onChunk, onError)
     }

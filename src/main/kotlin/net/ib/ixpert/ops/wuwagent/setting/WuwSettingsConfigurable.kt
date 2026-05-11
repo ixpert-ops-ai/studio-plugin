@@ -17,6 +17,7 @@ import net.ib.ixpert.ops.wuwagent.service.WuwLlmService
 class WuwSettingsConfigurable : SearchableConfigurable {
     private val settings = SettingsState.getInstance()
 
+    private var apiTypeComboBox: ComboBox<String>? = null
     private var baseUrlField: JBTextField? = null
     private var apiKeyField: JBPasswordField? = null
     private var modelComboBox: ComboBox<String>? = null
@@ -25,6 +26,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     private var contextWindowSpinner: JBTextField? = null
     private var fetchModelsButton: JButton? = null
     private var testConnectionButton: JButton? = null
+    private var enableLlmDebugCheckBox: javax.swing.JCheckBox? = null
 
     override fun getId(): String = "net.ib.ixpert.ops.wuwagent.setting.WuwSettingsConfigurable"
 
@@ -32,6 +34,13 @@ class WuwSettingsConfigurable : SearchableConfigurable {
 
     override fun createComponent(): JComponent {
         return panel {
+            group("API 설정") {
+                row("API Type:") {
+                    apiTypeComboBox = comboBox(
+                        DefaultComboBoxModel(arrayOf("Ollama", "OpenAI Compatible"))
+                    ).component
+                }
+            }
             group("LLM Server Connection") {
                 row("Base URL:") {
                     baseUrlField = textField()
@@ -84,19 +93,35 @@ class WuwSettingsConfigurable : SearchableConfigurable {
                         .component
                 }
             }
+            group("Debug") {
+                row {
+                    enableLlmDebugCheckBox = checkBox("LLM Debug 패널 활성화 (LLM Debug ToolWindow에서 요청/응답 확인)")
+                        .component
+                }
+            }
         }
     }
+
+    private fun getCurrentApiType(): SettingsState.ApiType {
+        val selected = apiTypeComboBox?.selectedItem as? String ?: return SettingsState.ApiType.OLLAMA
+        return if (selected == "OpenAI Compatible") SettingsState.ApiType.OPENAI_COMPATIBLE
+               else SettingsState.ApiType.OLLAMA
+    }
+
+    private fun apiTypeToDisplayName(apiType: SettingsState.ApiType): String =
+        if (apiType == SettingsState.ApiType.OPENAI_COMPATIBLE) "OpenAI Compatible" else "Ollama"
 
     private fun fetchModels() {
         val baseUrl = baseUrlField?.text ?: return
         val apiKey = String(apiKeyField?.password ?: charArrayOf())
+        val apiType = getCurrentApiType()
         val parent = baseUrlField?.let { SwingUtilities.getWindowAncestor(it) }
 
         val originalText = fetchModelsButton?.text
         fetchModelsButton?.isEnabled = false
         fetchModelsButton?.text = "Fetching..."
 
-        WuwLlmService.fetchModels(parent, baseUrl, apiKey, onComplete = {
+        WuwLlmService.fetchModels(parent, baseUrl, apiKey, apiType, onComplete = {
             fetchModelsButton?.isEnabled = true
             fetchModelsButton?.text = originalText
         }) { models ->
@@ -107,12 +132,12 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     private fun autoFetchModels() {
         val baseUrl = baseUrlField?.text ?: return
         val apiKey = String(apiKeyField?.password ?: charArrayOf())
+        val apiType = getCurrentApiType()
         val comboBox = modelComboBox ?: return
 
-        // "로딩 중..." 표시 로직
         val currentItems = (0 until comboBox.itemCount).map { comboBox.getItemAt(it) }
         val loadingText = "로딩 중..."
-        
+
         if (!currentItems.contains(loadingText)) {
             comboBox.addItem(loadingText)
         }
@@ -120,14 +145,13 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         comboBox.isEnabled = false
 
         ApplicationManager.getApplication().executeOnPooledThread {
-            val models = net.ib.ixpert.ops.wuwagent.agent.SettingsAgent.fetchModelsSilent(baseUrl, apiKey)
-            
+            val models = net.ib.ixpert.ops.wuwagent.agent.SettingsAgent.fetchModelsSilent(baseUrl, apiKey, apiType)
+
             ApplicationManager.getApplication().invokeLater {
                 comboBox.isEnabled = true
                 if (models != null && models.isNotEmpty()) {
                     updateModelComboBox(models)
                 } else {
-                    // 실패 시 "로딩 중..." 제거하고 기존 값 복구
                     comboBox.removeItem(loadingText)
                     comboBox.selectedItem = settings.state.model
                 }
@@ -139,8 +163,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         modelComboBox?.let { comboBox ->
             val loadingText = "로딩 중..."
             val savedModel = settings.state.model
-            
-            // 현재 선택된 값이 "로딩 중..."이면 무시하고 저장된 설정을 기본으로 함
+
             val selected = comboBox.selectedItem as? String
             val currentModel = if (selected == loadingText || selected.isNullOrBlank()) {
                 savedModel
@@ -152,18 +175,9 @@ class WuwSettingsConfigurable : SearchableConfigurable {
             models.forEach { comboBox.addItem(it) }
 
             when {
-                // 1. 저장된 모델이나 현재 선택했던 모델이 목록에 있으면 그것을 선택
-                models.contains(currentModel) -> {
-                    comboBox.selectedItem = currentModel
-                }
-                // 2. 저장된 모델이 목록에 있으면 그것을 선택 (currentModel이 다른 값이었을 경우 대비)
-                models.contains(savedModel) -> {
-                    comboBox.selectedItem = savedModel
-                }
-                // 3. 둘 다 없으면 첫 번째 항목 선택
-                models.isNotEmpty() -> {
-                    comboBox.selectedIndex = 0
-                }
+                models.contains(currentModel) -> comboBox.selectedItem = currentModel
+                models.contains(savedModel) -> comboBox.selectedItem = savedModel
+                models.isNotEmpty() -> comboBox.selectedIndex = 0
             }
         }
     }
@@ -171,13 +185,14 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     private fun testConnection() {
         val baseUrl = baseUrlField?.text ?: return
         val apiKey = String(apiKeyField?.password ?: charArrayOf())
+        val apiType = getCurrentApiType()
         val parent = baseUrlField?.let { SwingUtilities.getWindowAncestor(it) }
 
         val originalText = testConnectionButton?.text
         testConnectionButton?.isEnabled = false
         testConnectionButton?.text = "Testing..."
 
-        WuwLlmService.testConnection(parent, baseUrl, apiKey) {
+        WuwLlmService.testConnection(parent, baseUrl, apiKey, apiType) {
             testConnectionButton?.isEnabled = true
             testConnectionButton?.text = originalText
         }
@@ -185,24 +200,27 @@ class WuwSettingsConfigurable : SearchableConfigurable {
 
     override fun isModified(): Boolean {
         val state = settings.state
-        return baseUrlField?.text != state.baseUrl ||
+        return apiTypeComboBox?.selectedItem != apiTypeToDisplayName(state.apiType) ||
+                baseUrlField?.text != state.baseUrl ||
                 String(apiKeyField?.password ?: charArrayOf()) != state.apiKey ||
                 modelComboBox?.selectedItem != state.model ||
                 temperatureSpinner?.text != state.temperature.toString() ||
                 timeoutSpinner?.text != state.timeoutSeconds.toString() ||
-                contextWindowSpinner?.text != state.contextWindow.toString()
+                contextWindowSpinner?.text != state.contextWindow.toString() ||
+                enableLlmDebugCheckBox?.isSelected != state.enableLlmDebug
     }
 
     override fun apply() {
         val state = settings.state
+        state.apiType = getCurrentApiType()
         state.baseUrl = baseUrlField?.text ?: ""
         state.apiKey = String(apiKeyField?.password ?: charArrayOf())
         state.model = modelComboBox?.selectedItem as? String ?: ""
         state.temperature = temperatureSpinner?.text?.toFloatOrNull() ?: 0.1f
         state.timeoutSeconds = timeoutSpinner?.text?.toIntOrNull() ?: 300
         state.contextWindow = contextWindowSpinner?.text?.toIntOrNull() ?: 32768
+        state.enableLlmDebug = enableLlmDebugCheckBox?.isSelected ?: false
 
-        // 변경된 모델 정보를 모든 열린 프로젝트의 WebView로 동기화
         com.intellij.openapi.project.ProjectManager.getInstance().openProjects.forEach { project ->
             net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(project).sendMessage("selected_model", state.model)
         }
@@ -210,14 +228,15 @@ class WuwSettingsConfigurable : SearchableConfigurable {
 
     override fun reset() {
         val state = settings.state
+        apiTypeComboBox?.selectedItem = apiTypeToDisplayName(state.apiType)
         baseUrlField?.setText(state.baseUrl)
         apiKeyField?.setText(state.apiKey)
         modelComboBox?.selectedItem = state.model
         temperatureSpinner?.setText(state.temperature.toString())
         timeoutSpinner?.setText(state.timeoutSeconds.toString())
         contextWindowSpinner?.setText(state.contextWindow.toString())
+        enableLlmDebugCheckBox?.isSelected = state.enableLlmDebug
 
-        // 설정 창 진입 시 자동 모델 조회 트리거
         autoFetchModels()
     }
 }

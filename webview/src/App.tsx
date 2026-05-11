@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Plus, MessageSquare, Square, Terminal, Send, ArrowDown } from 'lucide-react';
+import { Settings, Plus, MessageSquare, Square, Terminal, Send, ArrowDown, ChevronUp, ChevronDown } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -44,6 +44,7 @@ interface Message {
   isStreaming?: boolean;
   currentStatus?: string;
   stepNotiStatus?: 'started' | 'completed' | 'failed';
+  toolNotiText?: string;
 }
 
 // ─────────────────────────────────────────────
@@ -119,12 +120,17 @@ const MermaidChart = React.memo(({ chart }: { chart: string }) => {
 // ─────────────────────────────────────────────
 //  컴포넌트: CodeBlock (에디터 스타일 코드블록)
 // ─────────────────────────────────────────────
-const CodeBlock = ({ children }: { children: React.ReactNode }) => {
+const CodeBlock = ({ children, isCollapsible = false }: { children: React.ReactNode, isCollapsible?: boolean }) => {
   const [copied, setCopied] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const codeEl = Array.isArray(children) ? children[0] : children;
   const lang = /language-(\w+)/.exec((codeEl as any)?.props?.className || '')?.[1] ?? '';
   const codeText = String((codeEl as any)?.props?.children ?? '').replace(/\n$/, '');
+
+  const lineCount = codeText.split('\n').length;
+  // 코드가 20줄 이상일 때만 접기 적용
+  const shouldCollapse = isCollapsible && lineCount >= 20;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(codeText).catch(() => {});
@@ -140,7 +146,19 @@ const CodeBlock = ({ children }: { children: React.ReactNode }) => {
           {copied ? '✓ 복사됨' : 'Copy'}
         </button>
       </div>
-      <pre className="code-block-pre">{children}</pre>
+      {/* 실제 코드는 수정하지 않고 CSS(max-height, overflow)로 표시 영역만 제한합니다. */}
+      <div className={`code-block-content ${shouldCollapse && !isExpanded ? 'collapsed' : ''}`}>
+        <pre className="code-block-pre">{children}</pre>
+        {shouldCollapse && !isExpanded && <div className="code-block-fade" />}
+      </div>
+      {shouldCollapse && (
+        <button 
+          className="btn-text-action btn-code-toggle" 
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          {isExpanded ? '접기 ▲' : '펼치기 ▼'}
+        </button>
+      )}
     </div>
   );
 };
@@ -199,16 +217,19 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
 
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
-    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`}>
+    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`} data-message-role="ai">
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
+        {msg.toolNotiText && (
+          <div className="tool-noti-text">{msg.toolNotiText}</div>
+        )}
         {msg.content && (
           <div className="markdown-body" style={{ maxWidth: '100%', overflowX: 'hidden' }}>
             <Markdown 
               remarkPlugins={[remarkGfm]} 
               rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
               components={{
-                pre: (props: any) => <CodeBlock>{props.children}</CodeBlock>,
+                pre: (props: any) => <CodeBlock isCollapsible={!!msg.filePath}>{props.children}</CodeBlock>,
                 code(props: any) {
                   const { children, className, node, ...rest } = props;
                   const match = /language-(\w+)/.exec(className || '');
@@ -267,6 +288,9 @@ function App() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적 (자동 스크롤용)
   const [showScrollButton, setShowScrollButton] = useState(false); // 스크롤 하단 이동 버튼 노출 여부
+  const [hasScrollArea, setHasScrollArea] = useState(false); // 전체 스크롤 영역 존재 여부
+  const [canScrollPrev, setCanScrollPrev] = useState(false); // 이전 AI 메시지로 이동 가능 여부
+  const [canScrollNext, setCanScrollNext] = useState(false); // 다음 AI 메시지로 이동 가능 여부
   const isComposing = useRef(false); // 한글 IME composition 상태 추적 (JCEF 자모 분리 방지)
   const atTriggerPos = useRef<number>(-1); // @ 타이핑으로 팝업 열린 경우 @ 위치
 
@@ -310,7 +334,28 @@ function App() {
       const hasScroll = el.scrollHeight > el.clientHeight;
       const notAtBottom = el.scrollTop + el.clientHeight < el.scrollHeight - 10;
       
+      setHasScrollArea(hasScroll);
       setShowScrollButton(hasScroll && notAtBottom);
+
+      // AI 답변 탐색 버튼 활성화 여부 계산
+      if (hasScroll) {
+        const aiMessages = el.querySelectorAll('[data-message-role="ai"]');
+        const scrollTop = el.scrollTop;
+        let foundPrev = false;
+        let foundNext = false;
+        
+        aiMessages.forEach(msgNode => {
+          const top = (msgNode as HTMLElement).offsetTop;
+          if (top < scrollTop - 10) foundPrev = true;
+          else if (top > scrollTop + 10) foundNext = true;
+        });
+        
+        setCanScrollPrev(foundPrev);
+        setCanScrollNext(foundNext);
+      } else {
+        setCanScrollPrev(false);
+        setCanScrollNext(false);
+      }
     };
 
     el.addEventListener('scroll', handleScroll, { passive: true });
@@ -334,6 +379,37 @@ function App() {
 
   const scrollToBottom = () => {
     chatListRef.current?.scrollTo({ top: chatListRef.current.scrollHeight, behavior: 'smooth' });
+  };
+
+  const scrollToNearestAi = (direction: 'up' | 'down') => {
+    const el = chatListRef.current;
+    if (!el) return;
+    const aiMessages = el.querySelectorAll('[data-message-role="ai"]');
+    const scrollTop = el.scrollTop;
+    
+    let targetMsg: HTMLElement | null = null;
+    
+    if (direction === 'up') {
+      for (let i = aiMessages.length - 1; i >= 0; i--) {
+        const msgNode = aiMessages[i] as HTMLElement;
+        if (msgNode.offsetTop < scrollTop - 10) {
+          targetMsg = msgNode;
+          break;
+        }
+      }
+    } else {
+      for (let i = 0; i < aiMessages.length; i++) {
+        const msgNode = aiMessages[i] as HTMLElement;
+        if (msgNode.offsetTop > scrollTop + 10) {
+          targetMsg = msgNode;
+          break;
+        }
+      }
+    }
+
+    if (targetMsg) {
+      targetMsg.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   // 플러그인 시작 시 마지막 채팅 자동 복원
@@ -466,6 +542,15 @@ function App() {
 
       const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
 
+      if (data.subType === 'tool_noti') {
+        if (messageId) {
+          setMessages(prev => prev.map(m =>
+            m.id === messageId ? { ...m, toolNotiText: data.content } : m
+          ));
+        }
+        return;
+      }
+
       if (data.subType === 'step_noti') {
         if (messageId) {
           setMessages(prev => {
@@ -559,6 +644,7 @@ function App() {
                 isError = data.subType === 'error';
                 newContent += (newContent ? '\n\n' : '') + data.content;
                 break;
+
               case 'chat_chunk':
                 // /chat, /explain 전용 스트리밍
                 newContent += data.content;
@@ -577,6 +663,7 @@ function App() {
                 break;
             }
 
+            const isCompletionEvent = ['task_step', 'task_success', 'error', 'task_cancelled'].includes(data.subType);
             updated[index] = {
               ...existing,
               content:         newContent,
@@ -587,6 +674,7 @@ function App() {
               subType:         data.subType,
               isSuccess:       data.isSuccess !== 'false' ? true : existing.isSuccess,
               modifiedFullCode: modifiedFullCode,
+              toolNotiText:    isCompletionEvent ? undefined : existing.toolNotiText,
             };
             return updated;
           }
@@ -709,16 +797,28 @@ function App() {
       command = '/task';
       payload = '코드를 개선해주세요.';
     } else if (text === '/analyze' || text.startsWith('/analyze ')) {
-      command = '/task';
-      payload = '영향도를 분석해주세요.';
+      command = '/analyze';
+      payload = text.startsWith('/analyze ') ? text.slice(9).trim() : '요구사항 대상 파일을 추출해주세요.';
+    } else if (text === '/implement' || text.startsWith('/implement ')) {
+      command = '/implement';
+      payload = '';
     } else if (text === '/query' || text.startsWith('/query ')) {
       command = '/task';
       payload = '쿼리를 검증해주세요.';
+    } else if (text === '/test' || text.startsWith('/test ')) {
+      command = '/task';
+      payload = '테스트 코드를 생성해주세요.';
+    } else if (text === '/test-all' || text.startsWith('/test-all ')) {
+      command = '/test-all';
+      payload = text.startsWith('/test-all ') ? text.slice(10).trim() : '';
     } else if (text === '/doc' || text.startsWith('/doc ')) {
       command = '/doc';
       payload = '';
     } else if (text === '/ragdoc' || text.startsWith('/ragdoc ')) {
       command = '/ragdoc';
+      payload = '';
+    } else if (text === '/metagraph' || text.startsWith('/metagraph ')) {
+      command = '/metagraph';
       payload = '';
     } else if (/개선|리팩토링|리팩|refactor|improve|최적화|optimize/i.test(text)) {
       command = '/task';
@@ -746,10 +846,11 @@ function App() {
     const cmds = [
       { cmd: '/explain', desc: '코드를 설명해줘' },
       { cmd: '/improve', desc: '코드를 개선해줘' },
-      { cmd: '/analyze', desc: '영향도를 분석해줘' },
+      { cmd: '/test', desc: '테스트 코드를 생성해줘' },
+      { cmd: '/analyze', desc: '요구사항 기반 수정 대상 파일 추출' },
       { cmd: '/query', desc: '쿼리를 검증해줘' },
       { cmd: '/doc', desc: '디렉토리 분석 문서 생성' },
-      { cmd: '/ragdoc', desc: 'RAG 전용 분석 문서 생성 (FAQ 포함)' }
+      { cmd: '/metagraph', desc: '프로젝트 메타 그래프 생성' }
     ];
     cmds.forEach(c => items.push({ type: 'cmd', cmd: c.cmd, desc: c.desc, index: idx++ }));
     items.push({ type: 'settings', cmd: '/openSettings', label: '설정', index: idx++ });
@@ -947,10 +1048,33 @@ function App() {
       </div>
 
       <div className="chat-input-area">
-        {showScrollButton && (
-          <button className="scroll-bottom-btn" onClick={scrollToBottom}>
-            <ArrowDown size={14} />
-          </button>
+        {hasScrollArea && (
+          <div className="scroll-nav-group">
+            <button 
+              className="scroll-nav-btn"
+              onClick={() => canScrollPrev && scrollToNearestAi('up')}
+              disabled={!canScrollPrev}
+              title="이전 AI 답변"
+            >
+              <ChevronUp size={14} />
+            </button>
+            <button 
+              className="scroll-nav-btn"
+              onClick={() => canScrollNext && scrollToNearestAi('down')}
+              disabled={!canScrollNext}
+              title="다음 AI 답변"
+            >
+              <ChevronDown size={14} />
+            </button>
+            <button 
+              className="scroll-nav-btn" 
+              onClick={() => showScrollButton && scrollToBottom()} 
+              disabled={!showScrollButton}
+              title="맨 아래로"
+            >
+              <ArrowDown size={14} />
+            </button>
+          </div>
         )}
         <div className="input-toolbar">
           <button className="toolbar-btn" onClick={handleFileButtonClick}>@ 파일</button>

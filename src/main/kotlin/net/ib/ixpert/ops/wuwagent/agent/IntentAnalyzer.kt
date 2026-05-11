@@ -1,7 +1,7 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
 import com.intellij.openapi.diagnostic.Logger
-import net.ib.ixpert.ops.wuwagent.client.OllamaClient
+import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
 
 /**
@@ -26,7 +26,7 @@ object IntentAnalyzer {
         listOf("쿼리 검증", "query validation", "sql 검증")                             to TaskPipeline.QueryValidation
     )
 
-    fun analyze(userInput: String, client: OllamaClient): TaskPipeline {
+    fun analyze(userInput: String, client: LLMClient): TaskPipeline {
         val lower = userInput.lowercase().trim()
 
         // 1단계: 키워드 빠른 매핑
@@ -41,7 +41,7 @@ object IntentAnalyzer {
         logger.info("IntentAnalyzer: 키워드 매핑 실패 → LLM 분류 시도")
         return try {
             val systemPrompt = PromptManager.loadPrompt("intent_prompt.txt")
-            val response = client.callChatApi(systemPrompt, userInput)
+            val response = client.chat(systemPrompt, userInput)
             val intent = response?.message?.content?.trim()?.uppercase() ?: "CHAT"
             logger.info("IntentAnalyzer: LLM 분류 결과 → $intent")
 

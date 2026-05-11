@@ -38,25 +38,8 @@
 위 Strictly Prohibited 규칙을 반드시 준수하며, 아래 섹션의 제목과 형식을 엄격히 준수하여 응답하세요.
 각 섹션에서 분석할 내용이 전혀 없는 경우 "해당 사항 없음"으로 표시하세요.
 
----
-
-## 0. 문서 메타데이터
-- 응답 최상단에 아래 형식의 YAML Frontmatter를 작성하세요.
-- 코드에서 식별 가능한 항목만 작성하고, 식별할 수 없는 항목은 생략하세요.
-```yaml
----
-file: "{{FILE_NAME}}"
-package: "{{PACKAGE_NAME}}"
-language: "{{LANGUAGE}}"
-type: "{{FILE_TYPE}}"
-pattern: "(식별 가능한 디자인 패턴, 없으면 생략)"
-dependencies: ["{{LANGUAGE}}"]
-analyzed_date: "{{ANALYZED_DATE}}"
----
-```
-
 ## 문맥 앵커 규칙
-아래 섹션 1~7 각각의 첫 줄에 다음 형식의 문맥 앵커를 반드시 삽입하세요:
+아래 섹션 1~6 각각의 첫 줄에 다음 형식의 문맥 앵커를 반드시 삽입하세요:
 > 📄 파일: `{FILE_NAME}` | 클래스/모듈: `{주요_식별자명}` | 언어: {LANGUAGE}
 
 ## 1. 코드의 전체적인 목적

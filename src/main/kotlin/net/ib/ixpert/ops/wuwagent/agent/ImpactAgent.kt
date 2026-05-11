@@ -6,7 +6,6 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.psi.*
 import com.intellij.psi.util.PsiTreeUtil
-import net.ib.ixpert.ops.wuwagent.client.OllamaClient
 import net.ib.ixpert.ops.wuwagent.prompt.ImpactFormatter
 import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
 import net.ib.ixpert.ops.wuwagent.service.EditorContextService
@@ -132,7 +131,7 @@ class ImpactAgent : BaseAgent() {
                     }
                 }
 
-                val response = ollamaClient.callChatApiStream(systemPrompt, userMessage, wrappedOnChunk)
+                val response = ollamaClient.chat(systemPrompt, userMessage, wrappedOnChunk)
 
                 if (TaskCancellationToken.isCancelled.get()) {
                     onError("__cancelled__")

@@ -13,13 +13,17 @@ import com.intellij.openapi.application.ApplicationManager
 )
 class SettingsState : PersistentStateComponent<SettingsState.State> {
 
+    enum class ApiType { OLLAMA, OPENAI_COMPATIBLE }
+
     data class State(
+        var apiType: ApiType = ApiType.OLLAMA,
         var baseUrl: String = "http://ollama.ixpertops.cloud",
         var apiKey: String = "ollama",
         var model: String = "qwen3-coder:30b",
         var temperature: Float = 0.1f,
         var timeoutSeconds: Int = 300,
-        var contextWindow: Int = 32768
+        var contextWindow: Int = 32768,
+        var enableLlmDebug: Boolean = false
     )
 
     private var myState = State()

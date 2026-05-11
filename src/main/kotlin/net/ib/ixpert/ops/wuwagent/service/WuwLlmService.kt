@@ -5,23 +5,33 @@ import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ui.Messages
 import com.intellij.util.io.HttpRequests
-import com.google.gson.JsonParser
 import java.io.IOException
 import java.awt.Component
 import javax.swing.SwingUtilities
+import net.ib.ixpert.ops.wuwagent.client.LLMClient
+import net.ib.ixpert.ops.wuwagent.client.OllamaClient
+import net.ib.ixpert.ops.wuwagent.client.OpenAIClient
+import net.ib.ixpert.ops.wuwagent.setting.SettingsState
 
-/**
- * Ollama 서버 통신 및 결과 알림을 총괄하는 서비스입니다.
- * 모든 서버 호출은 비동기로 수행되며, 결과는 IntelliJ 네이티브 메시지 박스로 표시됩니다.
- */
 @Suppress("UnstableApiUsage")
 object WuwLlmService {
     private val logger = Logger.getInstance(WuwLlmService::class.java)
 
-    /**
-     * 서버 연결 상태를 테스트하고 결과를 메시지로 표시합니다.
-     */
-    fun testConnection(parent: Component?, baseUrl: String, apiKey: String, onComplete: ((Boolean) -> Unit)? = null) {
+    fun getClient(): LLMClient {
+        val apiType = SettingsState.getInstance().state.apiType
+        return when (apiType) {
+            SettingsState.ApiType.OLLAMA -> OllamaClient()
+            SettingsState.ApiType.OPENAI_COMPATIBLE -> OpenAIClient()
+        }
+    }
+
+    fun testConnection(
+        parent: Component?,
+        baseUrl: String,
+        apiKey: String,
+        apiType: SettingsState.ApiType = SettingsState.getInstance().state.apiType,
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
         val cleanUrl = baseUrl.trimEnd('/')
         if (cleanUrl.isBlank()) {
             Messages.showErrorDialog(parent, "Base URL이 입력되지 않았습니다.", "Test Connection")
@@ -31,7 +41,10 @@ object WuwLlmService {
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                val url = "$cleanUrl/api/tags"
+                val url = when (apiType) {
+                    SettingsState.ApiType.OPENAI_COMPATIBLE -> "$cleanUrl/v1/models"
+                    SettingsState.ApiType.OLLAMA -> "$cleanUrl/api/tags"
+                }
                 HttpRequests.request(url).tuner {
                     if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
                     it.connectTimeout = 5000
@@ -40,9 +53,9 @@ object WuwLlmService {
 
                 ApplicationManager.getApplication().invokeLater({
                     if (parent != null) {
-                        Messages.showInfoMessage(parent, "Ollama 서버 연결에 성공했습니다!", "Test Connection")
+                        Messages.showInfoMessage(parent, "LLM 서버 연결에 성공했습니다!", "Test Connection")
                     } else {
-                        Messages.showInfoMessage("Ollama 서버 연결에 성공했습니다!", "Test Connection")
+                        Messages.showInfoMessage("LLM 서버 연결에 성공했습니다!", "Test Connection")
                     }
                     onComplete?.invoke(true)
                 }, ModalityState.any())
@@ -60,13 +73,11 @@ object WuwLlmService {
         }
     }
 
-    /**
-     * 사용 가능한 모델 목록을 조회하고 콤보박스를 갱신하거나 성공 메시지를 표시합니다.
-     */
     fun fetchModels(
         parent: Component?,
         baseUrl: String,
         apiKey: String,
+        apiType: SettingsState.ApiType = SettingsState.getInstance().state.apiType,
         onComplete: ((Boolean) -> Unit)? = null,
         onSuccess: (List<String>) -> Unit
     ) {
@@ -78,17 +89,13 @@ object WuwLlmService {
         }
 
         ApplicationManager.getApplication().executeOnPooledThread {
-            try {
-                val url = "$cleanUrl/api/tags"
-                val response = HttpRequests.request(url).tuner {
-                    if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
-                    it.connectTimeout = 5000
-                    it.readTimeout = 5000
-                }.readString()
+            val client: LLMClient = when (apiType) {
+                SettingsState.ApiType.OPENAI_COMPATIBLE -> OpenAIClient()
+                SettingsState.ApiType.OLLAMA -> OllamaClient()
+            }
 
-                val jsonObject = JsonParser.parseString(response).asJsonObject
-                val modelsArray = jsonObject.getAsJsonArray("models")
-                val models = modelsArray?.mapNotNull { it.asJsonObject.get("name")?.asString } ?: emptyList()
+            try {
+                val models = client.fetchModels(cleanUrl, apiKey) ?: emptyList()
 
                 ApplicationManager.getApplication().invokeLater({
                     if (models.isEmpty()) {

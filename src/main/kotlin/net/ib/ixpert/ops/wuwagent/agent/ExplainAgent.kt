@@ -90,9 +90,17 @@ class ExplainAgent : BaseAgent() {
             includeFaq = includeFaq
         )
 
-        val systemPrompt = PromptManager.loadPromptWithVars("explain_prompt.txt", promptVars)
+        var systemPrompt = PromptManager.loadPromptWithVars("explain_prompt.txt", promptVars)
+        
+        // [Phase 1b] 메타그래프 컨텍스트 자동 주입
+        val contextAssembler = context.project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ContextAssembler::class.java)
+        val graphContext = contextAssembler.assemble(context, context.payloadText)
+        if (graphContext.isNotBlank()) {
+            systemPrompt = "$graphContext\n\n$systemPrompt"
+        }
+        
         val userPrompt = """
-            제공된 정보와 코드를 바탕으로 시스템 메시지의 4가지 섹션 형식에 맞춰 분석해 주세요.
+            제공된 정보와 코드를 바탕으로 시스템 메시지의 정해진 섹션 형식에 맞춰 분석해 주세요.
             [중요] 코드 개선 제안이나 추측성 분석은 절대 하지 마세요.
         """.trimIndent()
 
@@ -102,7 +110,7 @@ class ExplainAgent : BaseAgent() {
 
         val wrappedOnChunk: (String) -> Unit = { chunk ->
             if (isFirstChunk) {
-                val banner = buildBanner(fileName, isPartial, startLine, endLine)
+                val banner = buildBanner(promptVars, isPartial, startLine, endLine)
                 val firstChunkWithBanner = banner + chunk
                 finalContentWithBanner = firstChunkWithBanner
                 onChunk?.invoke(firstChunkWithBanner)
@@ -192,16 +200,45 @@ class ExplainAgent : BaseAgent() {
      * 분석 대상 정보를 표시하는 배너 문자열을 생성합니다.
      */
     private fun buildBanner(
-        fileName: String,
+        promptVars: Map<String, String>,
         isPartial: Boolean,
         startLine: Int?,
         endLine: Int?
     ): String {
-        return if (isPartial && startLine != null && endLine != null) {
+        val fileName = promptVars["FILE_NAME"] ?: "Unknown"
+        val packageName = promptVars["PACKAGE_NAME"] ?: "(식별 불가)"
+        val language = promptVars["LANGUAGE"] ?: "Unknown"
+        val fileType = promptVars["FILE_TYPE"] ?: "script"
+        val dateStr = promptVars["ANALYZED_DATE"] ?: java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_DATE)
+        
+        val rawDeps = promptVars["DEPENDENCIES"]
+        val dependenciesStr = if (rawDeps.isNullOrBlank()) {
+            "[]"
+        } else {
+            """["$rawDeps"]"""
+        }
+
+        val yamlFrontmatter = """
+            ```yaml
+            ---
+            file: "$fileName"
+            package: "$packageName"
+            language: "$language"
+            type: "$fileType"
+            dependencies: $dependenciesStr
+            analyzed_date: "$dateStr"
+            ---
+            ```
+            
+        """.trimIndent()
+
+        val bannerTitle = if (isPartial && startLine != null && endLine != null) {
             "### 🎯 분석 대상: `$fileName` (Line $startLine ~ $endLine)\n\n"
         } else {
             "### 🎯 분석 대상: `$fileName` (전체)\n\n"
         }
+        
+        return yamlFrontmatter + bannerTitle
     }
 
     /**
