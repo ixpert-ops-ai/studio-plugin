@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch *)",
+      "Bash(./gradlew compileKotlin)",
+      "Bash(git checkout *)",
+      "Bash(git pull *)"
+    ]
+  }
+}
