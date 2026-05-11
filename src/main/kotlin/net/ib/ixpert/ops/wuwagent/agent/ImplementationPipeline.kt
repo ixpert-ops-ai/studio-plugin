@@ -25,46 +25,67 @@ class ImplementationPipeline(
     }
 
     /**
-     * 파일 경로를 기반으로 계층 가중치를 계산합니다. (Phase 2a의 계층 역순 정렬 보완)
-     * Phase 1의 project-graph.json이 있다면 그 분류를 우선 사용합니다.
+     * Contract-First 생성 순서를 결정합니다.
+     * Top-Down 순서: DTO/Entity → Interface → Impl(Persistence) → Impl(Business) → Utility → Controller
+     *
+     * 이 순서가 중요한 이유:
+     * - Interface를 Impl보다 먼저 생성하면 @Override를 통해 시그니처가 자연스럽게 일치
+     * - Controller(Caller)를 마지막에 생성하면 확정된 Service/Utility 시그니처를 참조 가능
+     * - DTO를 가장 먼저 생성하면 모든 파일이 동일한 데이터 구조를 참조
+     *
+     * MetaGraph가 있으면 fileType/isInterface 기반으로 정확히 분류하고,
+     * 없으면 파일명 패턴 기반 Fallback으로 동작합니다.
+     *
+     * NOTE: ExcelDownUtil 같은 AbstractView 상속 유틸은 MetaGraph에서 fileType=VIEW로
+     * 분류될 수 있으므로, fileType과 파일명 문자열 매칭을 OR 조건으로 결합하여 처리합니다.
      */
-    private fun getLayerWeight(path: String): Int {
-        // 1순위: project-graph.json의 파일 분류(SpringFileType) 기반
+    private fun getGenerationOrder(path: String): Int {
+        val lowerPath = path.lowercase().replace("\\", "/")
         val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
         val graph = graphLoader?.loadGraph()
-        
-        if (graph != null) {
-            val normalizedPath = path.replace("\\", "/").removePrefix("/")
-            val fileNode = graph.files.values.find { it.path.replace("\\", "/").endsWith(normalizedPath) }
-            
-            if (fileNode != null) {
-                return when (fileNode.fileType) {
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.ENTITY,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.REPOSITORY,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.MAPPER -> 1 // PERSISTENCE
-                    
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.SERVICE -> 2 // BUSINESS
-                    
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.CONTROLLER,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.REST_CONTROLLER,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.VIEW -> 3 // PRESENTATION
-                    
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.DTO,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.VO -> 4 // DATA TRANSFER
-                    
-                    else -> 5 // COMMON (CONFIG, UTIL, FILTER 등)
-                }
-            }
+        val fileNode = graph?.files?.values?.find {
+            it.path.replace("\\", "/").endsWith(lowerPath.removePrefix("/"))
         }
 
-        // 2순위: 그래프에 파일이 없는 경우(신규 파일 등) 기존 경로 패턴 Fallback
-        val lowerPath = path.lowercase()
         return when {
-            lowerPath.contains("dao") || lowerPath.contains("repository") || lowerPath.contains("entity") || lowerPath.contains("mapper") -> 1
-            lowerPath.contains("service") || lowerPath.contains("biz") -> 2
-            lowerPath.contains("controller") || lowerPath.contains("api") || lowerPath.contains("web") || lowerPath.contains("view") -> 3
-            lowerPath.contains("dto") || lowerPath.contains("vo") -> 4
-            else -> 5
+            // 1순위: DTO/Entity/VO — 다른 모든 파일이 참조하는 데이터 구조를 먼저 확정
+            fileNode?.fileType in listOf(
+                net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.DTO,
+                net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.VO,
+                net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.ENTITY
+            ) -> 1
+            lowerPath.let { it.contains("dto") || it.contains("entity") || it.contains("vo") || it.contains("model") }
+                && !lowerPath.contains("controller") -> 1
+
+            // 2순위: Interface (DAO, Service, Repository, Mapper 인터페이스)
+            fileNode?.isInterface == true -> 2
+            !lowerPath.contains("impl") && lowerPath.let {
+                it.endsWith("dao.java") || it.endsWith("service.java") ||
+                it.endsWith("repository.java") || it.endsWith("mapper.java")
+            } -> 2
+
+            // 3순위: Persistence 구현체 (DaoImpl, RepositoryImpl)
+            lowerPath.contains("impl") && lowerPath.let {
+                it.contains("dao") || it.contains("repository") || it.contains("mapper")
+            } -> 3
+
+            // 4순위: Business 구현체 (ServiceImpl)
+            lowerPath.contains("impl") && lowerPath.contains("service") -> 4
+
+            // 5순위: Utility — fileType=UTIL 또는 파일명에 "util"/"helper"/"exporter" 포함
+            // (ExcelDownUtil 등 AbstractView 상속 클래스는 MetaGraph에서 VIEW로 분류되므로 파일명 매칭 필요)
+            fileNode?.fileType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.UTIL -> 5
+            lowerPath.let { it.contains("util") || it.contains("helper") || it.contains("exporter") } -> 5
+
+            // 6순위: Controller/Caller — 확정된 Service interface와 Utility 시그니처를 참조
+            fileNode?.fileType in listOf(
+                net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.CONTROLLER,
+                net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.REST_CONTROLLER
+            ) -> 6
+            lowerPath.contains("controller") -> 6
+
+            // 7순위: 기타 (Config, Filter, Interceptor 등)
+            else -> 7
         }
     }
 
@@ -75,8 +96,7 @@ class ImplementationPipeline(
         onChunk: (String) -> Unit
     ) {
         val sortedTargets = analysisResult.targetFiles.sortedWith(
-            compareBy<net.ib.ixpert.ops.wuwagent.agent.TargetFileSpec> { getLayerWeight(it.path) }
-            .thenBy { if (it.path.lowercase().contains("impl")) 0 else 1 }
+            compareBy<net.ib.ixpert.ops.wuwagent.agent.TargetFileSpec> { getGenerationOrder(it.path) }
         )
         
         logger.info("ImplementationPipeline: 총 ${sortedTargets.size}개 파일 순차 처리 시작")
