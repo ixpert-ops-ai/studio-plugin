@@ -52,7 +52,6 @@ class ImproveAction : AnAction() {
         }
 
         val stepNotiIdx = intArrayOf(0)
-        var analysisHeaderSent = false
         val onStepStart = { stepLabel: String, stepMsgId: String, isApplyable: Boolean ->
             logger.info("ImproveAction: Step 시작 → $stepLabel (stepMsgId=$stepMsgId, isApplyable=$isApplyable)")
             val notiId = "${messageId}_noti_${stepNotiIdx[0]}"
@@ -60,24 +59,23 @@ class ImproveAction : AnAction() {
             ApplicationManager.getApplication().invokeLater {
                 bridge.sendMessage("step_noti", stepLabel, notiId, mapOf("status" to "started"))
                 if (stepMsgId == messageId) {
-                    // Step 1: 기존 말풍선에 진행 상태 업데이트 + 파일명/범위 헤더 즉시 전송
+                    // Step 1: 기존 말풍선에 진행 상태 업데이트 + 분석 대상 tool_noti 전송
                     bridge.sendMessage("task_progress", "$stepLabel LLM 응답 대기 중...", stepMsgId)
-                    if (!analysisHeaderSent) {
-                        analysisHeaderSent = true
-                        val scopeText = if (hasSelection) "선택 영역" else "전체 파일"
-                        bridge.sendMessageChunk(messageId, "### 분석 대상: `$fileName` ($scopeText)\n\n")
-                    }
+                    val scopeText = if (hasSelection) "선택 범위" else "전체 파일"
+                    bridge.sendMessage("tool_noti", "분석 대상 확정: $fileName ($scopeText)", stepMsgId)
                 } else if (!isApplyable && stepMsgId.endsWith("_s3")) {
-                    // Step 3: 안정성 평가 - 새 말풍선, 파일 메타 없음
+                    // Step 3: 안정성 평가 - 새 말풍선 생성 후 tool_noti
                     bridge.sendMessage("task_start", "$stepLabel LLM 응답 대기 중...", stepMsgId)
+                    bridge.sendMessage("tool_noti", "안정성 검사 중...", stepMsgId)
                 } else if (!isApplyable) {
-                    // Step 2: 텍스트 스트리밍 step - 새 말풍선 생성 + Diff 버튼용 메타 전달
+                    // Step 2: 텍스트 스트리밍 step - 새 말풍선 생성 + Diff 버튼용 메타 전달 후 tool_noti
                     bridge.sendMessage("task_start", "$stepLabel LLM 응답 대기 중...", stepMsgId,
                         mapOf(
                             "filePath"     to (editor.virtualFile?.path ?: ""),
                             "hasSelection" to hasSelection.toString(),
                             "selectedText" to selectedText
                         ))
+                    bridge.sendMessage("tool_noti", "개선 코드 생성 중...", stepMsgId)
                 } else {
                     // Step 2+, 코드 카드 step: 진행 상태만 기존 말풍선에 업데이트
                     bridge.sendMessage("task_progress", "$stepLabel LLM 응답 대기 중...", messageId)
