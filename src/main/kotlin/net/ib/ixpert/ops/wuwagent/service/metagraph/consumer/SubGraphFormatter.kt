@@ -66,7 +66,7 @@ object SubGraphFormatter {
                 } else ""
                 
                 // 1차 영향도 노드 중 ChangeRisk가 HIGH 이상이면 경고 태그 추가
-                val riskTag = if (depth == 1 && (node.changeRisk == ChangeRisk.HIGH || node.changeRisk == ChangeRisk.CRITICAL)) {
+                val riskTag = if (depth == 1 && (node.riskAssessment.changeRisk == ChangeRisk.HIGH || node.riskAssessment.changeRisk == ChangeRisk.CRITICAL)) {
                     " ⚠️ HIGH RISK"
                 } else ""
                 

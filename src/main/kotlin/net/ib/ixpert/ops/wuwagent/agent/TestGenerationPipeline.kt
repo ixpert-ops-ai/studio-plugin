@@ -176,7 +176,7 @@ class TestGenerationPipeline(
                 testFileInfo = testFileInfo,
                 productionContext = productionContext,
                 modifiedSignatures = "",  // 독립 실행이므로 없음
-                changeRisk = fileNode.changeRisk?.name ?: "NOT_CALCULATED"
+                changeRisk = fileNode.riskAssessment.changeRisk.name
             )
         )
     }
@@ -296,7 +296,7 @@ class TestGenerationPipeline(
      */
     private fun resolveChangeRisk(filePath: String): String {
         val graph = graphLoader?.loadGraph() ?: return "NOT_CALCULATED"
-        return graph.files[filePath]?.changeRisk?.name ?: "NOT_CALCULATED"
+        return graph.files[filePath]?.riskAssessment?.changeRisk?.name ?: "NOT_CALCULATED"
     }
 
     /**

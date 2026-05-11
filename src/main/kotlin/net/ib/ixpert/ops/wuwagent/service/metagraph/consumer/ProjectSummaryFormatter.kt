@@ -35,7 +35,7 @@ object ProjectSummaryFormatter {
         }
 
         for ((path, node) in sortedFiles) {
-            sb.append("| ${node.className} | ${node.fileType} | ${node.layer} | ${node.changeRisk} | $path |\n")
+            sb.append("| ${node.className} | ${node.fileType} | ${node.layer} | ${node.riskAssessment.changeRisk} | $path |\n")
         }
 
         return sb.toString()
