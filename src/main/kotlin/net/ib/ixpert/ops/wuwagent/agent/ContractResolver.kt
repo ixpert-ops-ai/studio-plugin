@@ -18,13 +18,30 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.*
 /**
  * 단일 메서드의 시그니처 계약.
  * 모든 관련 파일이 이 계약을 준수해야 합니다.
+ *
+ * calledBy/calls 필드로 호출 방향을 명시하여,
+ * 각 파일 생성 시 “누가 이 메서드를 호출하는지”와 “이 메서드가 누구를 호출하는지”를 프롬프트에 주입합니다.
  */
 data class MethodContract(
     val methodName: String,
     val returnType: String,
     val paramSignature: String,
     val isStatic: Boolean,
-    val sourceFile: String
+    val sourceFile: String,
+    val calledBy: List<String> = emptyList(),  // 예: ["IpsController.downloadCsv()"]
+    val calls: List<String> = emptyList()       // 예: ["SurveyDao.selectSurveyRawList()"]
+)
+
+/**
+ * 파일별 호출 관계 정보.
+ * 이 파일이 호출하는 대상과 호출당하는 출처를 명시합니다.
+ */
+data class CallRelation(
+    val callerFile: String,
+    val callerClass: String,
+    val calleeFile: String,
+    val calleeClass: String,
+    val methodHint: String? = null  // detail 필드에서 추출된 메서드명 힌트
 )
 
 /**
@@ -33,7 +50,9 @@ data class MethodContract(
 data class FileContract(
     val filePath: String,
     val role: FileRole,
-    val methods: List<MethodContract>
+    val methods: List<MethodContract>,
+    val callsTo: List<CallRelation> = emptyList(),    // 이 파일이 호출하는 대상
+    val calledFrom: List<CallRelation> = emptyList()  // 이 파일을 호출하는 출처
 )
 
 enum class FileRole {
@@ -123,18 +142,99 @@ class ContractResolver(
             return null
         }
 
-        // Step 5: FileContract 조립
+        // Step 5: MetaGraph에서 호출 관계(CALLS) 추출
+        val callRelationsMap = resolveCallRelations(targets, graph)
+
+        // Step 6: 호출 관계를 MethodContract에 반영
+        val enrichedMethods = sharedMethods.map { method ->
+            val calledBy = callRelationsMap.values.flatten()
+                .filter { rel -> rel.calleeFile.let { targets.any { t -> t.path.endsWith(it) || it.endsWith(t.path) } } }
+                .filter { rel -> rel.methodHint?.contains(method.methodName, ignoreCase = true) == true }
+                .map { "${it.callerClass}.${it.methodHint ?: "?"}()" }
+                .distinct()
+            val calls = callRelationsMap.values.flatten()
+                .filter { rel -> rel.callerFile.let { targets.any { t -> t.path.endsWith(it) || it.endsWith(t.path) } } }
+                .filter { rel -> rel.methodHint?.contains(method.methodName, ignoreCase = true) == true }
+                .map { "${it.calleeClass}.${it.methodHint ?: "?"}()" }
+                .distinct()
+            method.copy(calledBy = calledBy, calls = calls)
+        }
+
+        // Step 7: FileContract 조립 (호출 관계 포함)
         val fileContracts = targets.map { target ->
             val role = fileRoles[target.path] ?: FileRole.CALLER
+            val normalizedPath = target.path.replace("\\", "/")
+            val callsTo = callRelationsMap[normalizedPath]?.filter { it.callerFile == normalizedPath } ?: emptyList()
+            val calledFrom = callRelationsMap.values.flatten().filter { it.calleeFile == normalizedPath }
             FileContract(
                 filePath = target.path,
                 role = role,
-                methods = sharedMethods
+                methods = enrichedMethods,
+                callsTo = callsTo,
+                calledFrom = calledFrom
             )
         }
 
-        logger.info("ContractResolver: Contract 생성 완료 — 공유 메서드 ${sharedMethods.size}개, 파일 ${fileContracts.size}개")
-        return ImplementationContract(fileContracts, sharedMethods)
+        logger.info("ContractResolver: Contract 생성 완료 — 공유 메서드 ${enrichedMethods.size}개, 파일 ${fileContracts.size}개")
+        return ImplementationContract(fileContracts, enrichedMethods)
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Step 5: MetaGraph CALLS 관계에서 호출 체인 추출
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * MetaGraph의 CALLS 관계를 분석하여 대상 파일들의 호출 관계를 추출합니다.
+     * 
+     * 예: IpsController → SurveyService → SurveyDao 체인을 식별하여,
+     * SurveyServiceImpl 생성 시 "IpsController에서 호출됨"이라는 컨텍스트를 제공합니다.
+     *
+     * @return Map<파일경로, List<CallRelation>> — 해당 파일이 관련된 호출 관계 목록
+     */
+    private fun resolveCallRelations(
+        targets: List<TargetFileSpec>,
+        graph: ProjectGraph
+    ): Map<String, List<CallRelation>> {
+        val result = mutableMapOf<String, MutableList<CallRelation>>()
+        val targetPaths = targets.map { it.path.replace("\\", "/") }.toSet()
+
+        // MetaGraph의 CALLS 관계 필터링: 대상 파일과 관련된 것만
+        val callRelationships = graph.relationships.filter { rel ->
+            rel.type == RelationshipType.CALLS
+        }
+
+        for (rel in callRelationships) {
+            val sourcePath = rel.source.replace("\\", "/")
+            val targetPath = rel.target.replace("\\", "/")
+
+            // source 또는 target이 대상 파일 목록에 포함되어야 함
+            val sourceMatch = targetPaths.any { it.endsWith(sourcePath) || sourcePath.endsWith(it) }
+            val targetMatch = targetPaths.any { it.endsWith(targetPath) || targetPath.endsWith(it) }
+
+            if (!sourceMatch && !targetMatch) continue
+
+            // 클래스명 추출
+            val sourceNode = graph.files[rel.source] ?: graph.files.values.find { 
+                it.path.replace("\\", "/") == sourcePath 
+            }
+            val targetNode = graph.files[rel.target] ?: graph.files.values.find { 
+                it.path.replace("\\", "/") == targetPath 
+            }
+
+            val callRelation = CallRelation(
+                callerFile = sourcePath,
+                callerClass = sourceNode?.className ?: sourcePath.substringAfterLast("/").removeSuffix(".java"),
+                calleeFile = targetPath,
+                calleeClass = targetNode?.className ?: targetPath.substringAfterLast("/").removeSuffix(".java"),
+                methodHint = rel.detail  // MetaGraph의 detail 필드에 메서드명 힌트가 있을 수 있음
+            )
+
+            result.getOrPut(sourcePath) { mutableListOf() }.add(callRelation)
+            result.getOrPut(targetPath) { mutableListOf() }.add(callRelation)
+        }
+
+        logger.info("ContractResolver: 호출 관계 ${result.values.sumOf { it.size }}건 추출 (${result.keys.size}개 파일)")
+        return result
     }
 
     // ═══════════════════════════════════════════════════════════════

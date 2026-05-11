@@ -834,8 +834,64 @@ class ImplementationPipeline(
                 appendLine("- **반환 타입**: `${method.returnType}`")
                 appendLine("- **파라미터**: `${method.paramSignature}`")
                 if (method.isStatic) appendLine("- **호출 방식**: `static`")
+                if (method.calledBy.isNotEmpty()) {
+                    appendLine("- **이 메서드의 호출자**: ${method.calledBy.joinToString(", ") { "`$it`" }}")
+                }
+                if (method.calls.isNotEmpty()) {
+                    appendLine("- **이 메서드가 호출하는 대상**: ${method.calls.joinToString(", ") { "`$it`" }}")
+                }
                 appendLine()
             }
+
+            // 호출 관계 컨텍스트 (파일 단위)
+            if (fileContract.calledFrom.isNotEmpty() || fileContract.callsTo.isNotEmpty()) {
+                appendLine("## 🔗 호출 관계 (이 파일의 위치)")
+                if (fileContract.calledFrom.isNotEmpty()) {
+                    appendLine("**이 파일을 호출하는 곳:**")
+                    fileContract.calledFrom.distinctBy { it.callerClass }.forEach {
+                        appendLine("- `${it.callerClass}` → 이 파일의 메서드를 호출합니다. 반환 타입이 호출자의 기대와 일치해야 합니다.")
+                    }
+                }
+                if (fileContract.callsTo.isNotEmpty()) {
+                    appendLine("**이 파일이 호출하는 곳:**")
+                    fileContract.callsTo.distinctBy { it.calleeClass }.forEach {
+                        appendLine("- 이 파일 → `${it.calleeClass}`의 메서드를 호출합니다. 파라미터 타입이 대상의 시그니처와 일치해야 합니다.")
+                    }
+                }
+                appendLine()
+            }
+
+            // 계층 아키텍처 규칙 주입
+            val lowerPath = targetFile.path.lowercase()
+            appendLine("## 🏗️ 계층 아키텍처 규칙")
+            when {
+                lowerPath.contains("service") && !lowerPath.contains("controller") -> {
+                    appendLine("이 파일은 **Service 계층**입니다:")
+                    appendLine("- ❌ `HttpServletRequest`, `HttpServletResponse`를 파라미터로 받지 마세요 — Controller의 역할입니다.")
+                    appendLine("- ❌ `SqlSession`, MyBatis XML 매퍼를 직접 호출하지 마세요 — DAO의 역할입니다.")
+                    appendLine("- ✅ DAO/Repository를 주입받아 호출하고, 비즈니스 로직만 처리하세요.")
+                    appendLine("- ✅ 파라미터는 `Map`, `DTO`, 또는 기본 타입만 사용하세요.")
+                }
+                lowerPath.contains("dao") || (lowerPath.contains("repository") && !lowerPath.contains("controller")) -> {
+                    appendLine("이 파일은 **DAO/Repository 계층**입니다:")
+                    appendLine("- ❌ `HttpServletRequest`, `HttpServletResponse`를 파라미터로 받지 마세요.")
+                    appendLine("- ❌ 인증(JWT/Session) 검증 로직을 넣지 마세요 — Controller/Filter의 역할입니다.")
+                    appendLine("- ✅ 오직 DB 접근(SQL 실행, MyBatis 호출)만 담당하세요.")
+                }
+                lowerPath.contains("controller") -> {
+                    appendLine("이 파일은 **Controller 계층**입니다:")
+                    appendLine("- ❌ `SqlSession`, MyBatis XML 매퍼를 직접 호출하지 마세요 — DAO의 역할입니다.")
+                    appendLine("- ✅ Service를 주입받아 호출하고, 요청/응답 변환만 처리하세요.")
+                    appendLine("- ✅ `HttpServletRequest`, `HttpServletResponse`는 이 계층에서만 사용 가능합니다.")
+                }
+                lowerPath.let { it.contains("util") || it.contains("helper") } -> {
+                    appendLine("이 파일은 **Utility 계층**입니다:")
+                    appendLine("- ✅ 입력 파라미터 타입을 Contract에 명시된 타입과 정확히 일치시키세요.")
+                    appendLine("- ✅ Service나 Controller에서 전달받은 데이터를 가공하는 역할입니다.")
+                }
+                else -> {}
+            }
+            appendLine()
 
             // Few-shot: 올바른 예시
             appendLine("## ✅ 올바른 예시")
@@ -860,7 +916,7 @@ class ImplementationPipeline(
             appendLine("## ❌ 잘못된 예시 (절대 금지)")
             for (method in fileContract.methods) {
                 val wrongType = when {
-                    method.returnType.contains("HashMap") -> method.returnType.replace("HashMap", "SurveyDto").let { "List<SurveyDto>" }
+                    method.returnType.contains("HashMap") -> "List<SurveyDto>"
                     method.returnType.contains("List") -> "JSONArray"
                     else -> "Object"
                 }
