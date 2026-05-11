@@ -101,6 +101,18 @@ class ImplementationPipeline(
         
         logger.info("ImplementationPipeline: 총 ${sortedTargets.size}개 파일 순차 처리 시작")
 
+        // [Phase 1] Contract-First: 코드 생성 전에 시그니처 계약을 확정
+        val contract = try {
+            ContractResolver(project, client).resolve(analysisResult)
+        } catch (e: Exception) {
+            logger.warn("ContractResolver 실행 실패, Contract 없이 진행합니다: ${e.message}")
+            null
+        }
+        if (contract != null) {
+            logger.info("Contract 확정: 공유 메서드 ${contract.sharedMethods.size}개")
+            onChunk("\n> 📋 **시그니처 계약 확정**: ${contract.sharedMethods.size}개 메서드의 타입이 사전 합의되었습니다.\n\n")
+        }
+
         val contextChain = mutableListOf<String>()
         val generatedSnippets = mutableMapOf<String, String>()
 
@@ -160,9 +172,12 @@ class ImplementationPipeline(
                 isLargeFile -> buildLargeFileSystemPrompt(isInterface)
                 else -> buildSmallFileSystemPrompt(isInterface)
             }
+            // [Phase 2] Contract 섹션 구성: 해당 파일의 계약 정보를 프롬프트에 주입
+            val contractSection = buildContractSection(contract, target)
+
             val userPrompt = when {
                 isDtoOrEntity && !isNewFile -> buildDtoOnlyUserPrompt(target, contextChain, analysisResult.summary, sortedTargets)
-                else -> buildUserPromptForFile(target, contextChain, analysisResult.summary, sortedTargets)
+                else -> buildUserPromptForFile(target, contextChain, analysisResult.summary, sortedTargets, contractSection)
             }
 
             // Fallback guide returned from buildUserPromptForFile means skipping
@@ -271,6 +286,16 @@ class ImplementationPipeline(
                     consistencyWarnings.forEach { onChunk("> - $it\n") }
                 }
 
+                // [Phase 3] Contract 기반 반환 타입 검증
+                val fileContract = contract?.fileContracts?.find { it.filePath == target.path }
+                if (fileContract != null) {
+                    val contractWarnings = SignatureValidator.validateAgainstContract(processedResponse, fileContract)
+                    if (contractWarnings.isNotEmpty()) {
+                        onChunk("\n\n> ⚠️ **Contract 시그니처 위반 감지:**\n")
+                        contractWarnings.forEach { onChunk("> - $it\n") }
+                    }
+                }
+
                 if (processedResponse.contains("[MODIFIED_SIGNATURES]")) {
                     val signaturesText = processedResponse.substringAfter("[MODIFIED_SIGNATURES]").trim()
                     if (signaturesText.isNotBlank()) {
@@ -348,7 +373,8 @@ class ImplementationPipeline(
         targetFile: TargetFileSpec,
         contextChain: List<String>,
         requirementSummary: String,
-        allTargetFiles: List<TargetFileSpec>
+        allTargetFiles: List<TargetFileSpec>,
+        contractSection: String = ""
     ): String {
         var actualType = targetFile.type
         
@@ -371,11 +397,11 @@ class ImplementationPipeline(
         }
 
         return if (correctedTarget.type.contains("신규")) {
-            buildNewFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
+            buildNewFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles, contractSection)
         } else if (!isDtoOrEntity && runReadAction { psiMethodExtractor.isLargeFile(correctedTarget.path) }) {
-            buildLargeFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
+            buildLargeFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles, contractSection)
         } else {
-            buildSmallFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
+            buildSmallFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles, contractSection)
         }
     }
 
@@ -384,7 +410,8 @@ class ImplementationPipeline(
         contextChain: List<String>,
         requirementSummary: String,
         allTargetFiles: List<TargetFileSpec>,
-        sourceCodeSection: String
+        sourceCodeSection: String,
+        contractSection: String = ""
     ): String {
         val overallPlan = allTargetFiles.joinToString("\n") { 
             val marker = if (it.path == targetFile.path) "👉 " else "   "
@@ -445,6 +472,7 @@ class ImplementationPipeline(
             
             **주의**: 오직 위 파일 하나에 대해서만 코드를 생성하세요. 계획에 없는 다른 파일(Security Filter 등)을 임의로 생성하지 마세요.
             $bypassTemplate
+            $contractSection
             
             $guidelines
             
@@ -471,11 +499,13 @@ class ImplementationPipeline(
         targetFile: TargetFileSpec,
         contextChain: List<String>,
         requirementSummary: String,
-        allTargetFiles: List<TargetFileSpec>
+        allTargetFiles: List<TargetFileSpec>,
+        contractSection: String = ""
     ): String {
         return buildCommonUserPrompt(
             targetFile, contextChain, requirementSummary, allTargetFiles, 
-            "이 파일은 신규 생성입니다. 요구사항에 맞는 전체 코드를 새로 작성하세요."
+            "이 파일은 신규 생성입니다. 요구사항에 맞는 전체 코드를 새로 작성하세요.",
+            contractSection
         )
     }
 
@@ -521,7 +551,8 @@ class ImplementationPipeline(
         targetFile: TargetFileSpec,
         contextChain: List<String>,
         requirementSummary: String,
-        allTargetFiles: List<TargetFileSpec>
+        allTargetFiles: List<TargetFileSpec>,
+        contractSection: String = ""
     ): String {
         val absolutePath = "${project.basePath}/${targetFile.path}".replace("//", "/")
         val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath)
@@ -531,14 +562,15 @@ class ImplementationPipeline(
             return "> ⚠️ **파일을 찾을 수 없어 건너뜁니다:** `${targetFile.path}`\n\n"
         }
         val sourceCode = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
-        return buildCommonUserPrompt(targetFile, contextChain, requirementSummary, allTargetFiles, "```java\n$sourceCode\n```")
+        return buildCommonUserPrompt(targetFile, contextChain, requirementSummary, allTargetFiles, "```java\n$sourceCode\n```", contractSection)
     }
 
     private fun buildLargeFilePrompt(
         targetFile: TargetFileSpec,
         contextChain: List<String>,
         requirementSummary: String,
-        allTargetFiles: List<TargetFileSpec>
+        allTargetFiles: List<TargetFileSpec>,
+        contractSection: String = ""
     ): String {
         val skeleton = runReadAction {
             psiMethodExtractor.extract(
@@ -559,7 +591,7 @@ class ImplementationPipeline(
             ${skeleton.toPromptText()}
         """.trimIndent()
         
-        return buildCommonUserPrompt(targetFile, contextChain, requirementSummary, allTargetFiles, sourceCodeSection)
+        return buildCommonUserPrompt(targetFile, contextChain, requirementSummary, allTargetFiles, sourceCodeSection, contractSection)
     }
 
     private fun buildSmallFileSystemPrompt(isInterface: Boolean = false): String {
@@ -736,4 +768,74 @@ class ImplementationPipeline(
         return filteredResponse
     }
     // 가이드 및 프롬프트 생성 유틸들
+
+    /**
+     * [Phase 2] Contract 기반 프롬프트 섹션을 구성합니다.
+     * 확정된 시그니처 계약과 Few-shot 예시(올바른/잘못된)를 포함합니다.
+     *
+     * @param contract 전체 Contract (null이면 빈 문자열 반환)
+     * @param targetFile 현재 생성 대상 파일
+     * @return 프롬프트에 삽입할 Contract 섹션 텍스트
+     */
+    private fun buildContractSection(contract: ImplementationContract?, targetFile: TargetFileSpec): String {
+        if (contract == null) return ""
+
+        val fileContract = contract.fileContracts.find { it.filePath == targetFile.path }
+        if (fileContract == null || fileContract.methods.isEmpty()) return ""
+
+        return buildString {
+            appendLine()
+            appendLine("## 📋 확정 시그니처 계약 (반드시 준수)")
+            appendLine("아래 시그니처는 이미 다른 파일들과 합의된 계약입니다. **절대 변경하지 마세요.**")
+            appendLine()
+
+            for (method in fileContract.methods) {
+                appendLine("- **메서드명**: `${method.methodName}`")
+                appendLine("- **반환 타입**: `${method.returnType}`")
+                appendLine("- **파라미터**: `${method.paramSignature}`")
+                if (method.isStatic) appendLine("- **호출 방식**: `static`")
+                appendLine()
+            }
+
+            // Few-shot: 올바른 예시
+            appendLine("## ✅ 올바른 예시")
+            for (method in fileContract.methods) {
+                val roleHint = when (fileContract.role) {
+                    FileRole.INTERFACE_DECLARATION -> {
+                        "```java\n${method.returnType} ${method.methodName}(${method.paramSignature});\n```"
+                    }
+                    FileRole.OVERRIDE_IMPLEMENTATION -> {
+                        "```java\n@Override\npublic ${method.returnType} ${method.methodName}(${method.paramSignature}) {\n    // 구현 코드\n}\n```"
+                    }
+                    FileRole.CALLER -> {
+                        "```java\n${method.returnType} result = service.${method.methodName}(paramMap);\n```"
+                    }
+                    else -> ""
+                }
+                if (roleHint.isNotBlank()) appendLine(roleHint)
+            }
+
+            // Few-shot: 잘못된 예시
+            appendLine()
+            appendLine("## ❌ 잘못된 예시 (절대 금지)")
+            for (method in fileContract.methods) {
+                val wrongType = when {
+                    method.returnType.contains("HashMap") -> method.returnType.replace("HashMap", "SurveyDto").let { "List<SurveyDto>" }
+                    method.returnType.contains("List") -> "JSONArray"
+                    else -> "Object"
+                }
+                appendLine("```java")
+                appendLine("public $wrongType ${method.methodName}(...) // ← 반환 타입 변경 금지")
+                appendLine("```")
+            }
+
+            appendLine()
+            appendLine("## ⚠️ 금지 사항")
+            for (method in fileContract.methods) {
+                appendLine("- `${method.methodName}`의 반환 타입을 `${method.returnType}` 외의 타입으로 변경 금지")
+                appendLine("- 파라미터 타입을 `${method.paramSignature}` 외의 타입으로 변경 금지")
+            }
+            appendLine()
+        }
+    }
 }
