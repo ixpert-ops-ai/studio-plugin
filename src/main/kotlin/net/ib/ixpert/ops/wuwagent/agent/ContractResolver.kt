@@ -73,6 +73,12 @@ class ContractResolver(
     private val logger = Logger.getInstance(ContractResolver::class.java)
 
     /**
+     * 동일 세션 내 반복 resolve 시 중복 PSI 탐색을 방지하는 시그니처 캐시.
+     * key: 메서드명, value: 확정된 MethodContract
+     */
+    private val signatureCache = java.util.concurrent.ConcurrentHashMap<String, MethodContract>()
+
+    /**
      * 요구사항 분석 결과를 기반으로 시그니처 계약을 생성합니다.
      *
      * @param analysisResult Phase 2a의 결과 (targetFiles + summary)
@@ -108,6 +114,10 @@ class ContractResolver(
 
         // Step 4: 공유 메서드 목록 확정
         val sharedMethods = (existingSignatures + newMethodSignatures).distinctBy { it.methodName }
+
+        // 캐시 업데이트: 확정된 시그니처를 캐시에 저장
+        sharedMethods.forEach { signatureCache[it.methodName] = it }
+
         if (sharedMethods.isEmpty()) {
             logger.info("ContractResolver: 공유 메서드가 없어 Contract를 생략합니다.")
             return null
@@ -208,6 +218,15 @@ class ContractResolver(
 
             for (method in psiClass.methods) {
                 if (method.name in processedMethods) continue
+
+                // 캐시에 이미 있으면 캐시된 계약 사용 (중복 PSI 탐색 방지)
+                val cached = signatureCache[method.name]
+                if (cached != null) {
+                    contracts.add(cached)
+                    processedMethods.add(method.name)
+                    continue
+                }
+
                 if (methodHints.isEmpty() || methodHints.any { hint ->
                     method.name.contains(hint, ignoreCase = true) || hint.contains(method.name, ignoreCase = true)
                 }) {
@@ -217,14 +236,16 @@ class ContractResolver(
                     }
                     val isStatic = method.hasModifierProperty("static")
 
-                    contracts.add(MethodContract(
+                    val contract = MethodContract(
                         methodName = method.name,
                         returnType = returnType,
                         paramSignature = params,
                         isStatic = isStatic,
                         sourceFile = target.path
-                    ))
+                    )
+                    contracts.add(contract)
                     processedMethods.add(method.name)
+                    signatureCache[method.name] = contract  // 캐시에 저장
                     logger.info("ContractResolver: PSI 시그니처 추출 → ${method.name}($params): $returnType [${target.path}]")
                 }
             }
@@ -320,7 +341,9 @@ class ContractResolver(
             val responseText = response?.message?.content ?: ""
             parseMethodContracts(responseText)
         } catch (e: Exception) {
-            logger.error("ContractResolver: LLM 시그니처 확정 실패", e)
+            // LLM 호출 실패 시 PSI 추출 결과만으로 partial contract 생성
+            // (네트워크 오류, 토큰 초과 등)
+            logger.warn("ContractResolver: LLM 시그니처 확정 실패 — PSI 기반 partial contract로 진행: ${e.message}")
             emptyList()
         }
     }

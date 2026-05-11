@@ -246,7 +246,7 @@ class ImplementationPipeline(
                 val finalResponseText = response?.message?.content ?: fullResponse
 
                 // 인터페이스 파일인 경우 환각 메서드 필터링, DTO 파일인 경우 스니펫 병합
-                val processedResponse = if (isInterface) {
+                var processedResponse = if (isInterface) {
                     val filtered = runReadAction { filterInterfaceHallucination(finalResponseText, target, sortedTargets, contextChain) }
                     if (filtered != finalResponseText) {
                         logger.info("인터페이스 환각 필터링 적용: ${target.path}")
@@ -286,13 +286,53 @@ class ImplementationPipeline(
                     consistencyWarnings.forEach { onChunk("> - $it\n") }
                 }
 
-                // [Phase 3] Contract 기반 반환 타입 검증
+                // [Phase 3] Contract 기반 반환 타입 검증 + 1회 자동 재생성
                 val fileContract = contract?.fileContracts?.find { it.filePath == target.path }
                 if (fileContract != null) {
                     val contractWarnings = SignatureValidator.validateAgainstContract(processedResponse, fileContract)
                     if (contractWarnings.isNotEmpty()) {
-                        onChunk("\n\n> ⚠️ **Contract 시그니처 위반 감지:**\n")
+                        onChunk("\n\n> ⚠️ **Contract 시그니처 위반 감지 — 자동 재생성을 시도합니다:**\n")
                         contractWarnings.forEach { onChunk("> - $it\n") }
+
+                        // 1회 자동 retry: 위반 내용을 명시하여 재생성 요청
+                        val correctionPrompt = buildString {
+                            appendLine(userPrompt)
+                            appendLine()
+                            appendLine("## ⛔ 이전 생성 결과에서 다음 시그니처 위반이 감지되었습니다:")
+                            contractWarnings.forEach { appendLine("- $it") }
+                            appendLine()
+                            appendLine("위 위반 사항을 반드시 수정하여 다시 생성하세요.")
+                            appendLine("계약에 명시된 반환 타입과 파라미터 타입을 정확히 사용해야 합니다.")
+                        }
+
+                        onChunk("\n> 🔄 **재생성 중...**\n\n")
+                        onChunk("````text\n")
+
+                        var retryResponse = ""
+                        try {
+                            client.chat(systemPrompt, correctionPrompt) { chunk ->
+                                retryResponse += chunk
+                                onChunk(chunk)
+                            }
+                        } catch (e: Exception) {
+                            logger.warn("Contract 위반 재생성 실패: ${e.message}")
+                        }
+
+                        onChunk("\n````\n")
+
+                        if (retryResponse.isNotBlank()) {
+                            // 재생성 결과로 교체
+                            val retryWarnings = SignatureValidator.validateAgainstContract(retryResponse, fileContract)
+                            if (retryWarnings.isEmpty()) {
+                                onChunk("\n> ✅ **재생성 성공 — 시그니처가 계약과 일치합니다.**\n\n")
+                                processedResponse = retryResponse
+                                generatedSnippets[target.path] = processedResponse
+                            } else {
+                                onChunk("\n> ⚠️ **재생성 후에도 위반이 남아있습니다. 수동 확인이 필요합니다:**\n")
+                                retryWarnings.forEach { onChunk("> - $it\n") }
+                                // 무한 루프 방지: 2회 이상 retry하지 않음
+                            }
+                        }
                     }
                 }
 
