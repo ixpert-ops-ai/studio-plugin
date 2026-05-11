@@ -1,11 +1,11 @@
 package net.ib.ixpert.ops.wuwagent.service
 
+import com.google.gson.Gson
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ui.Messages
 import com.intellij.util.io.HttpRequests
-import java.io.IOException
 import java.awt.Component
 import javax.swing.SwingUtilities
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
@@ -16,20 +16,30 @@ import net.ib.ixpert.ops.wuwagent.setting.SettingsState
 @Suppress("UnstableApiUsage")
 object WuwLlmService {
     private val logger = Logger.getInstance(WuwLlmService::class.java)
+    private val gson = Gson()
 
     fun getClient(): LLMClient {
         val apiType = SettingsState.getInstance().state.apiType
         return when (apiType) {
             SettingsState.ApiType.OLLAMA -> OllamaClient()
-            SettingsState.ApiType.OPENAI_COMPATIBLE -> OpenAIClient()
+            SettingsState.ApiType.OPENAI_COMPATIBLE,
+            SettingsState.ApiType.AIPRO -> OpenAIClient()
         }
     }
 
+    /**
+     * 서버 연결 상태를 테스트합니다.
+     * - Ollama: GET /api/tags
+     * - OpenAI Compatible: POST /v1/chat/completions 에 최소 요청 (max_tokens=1)
+     *
+     * @param model OpenAI 모드일 때 사용할 모델명 (설정 화면 현재 입력값)
+     */
     fun testConnection(
         parent: Component?,
         baseUrl: String,
         apiKey: String,
         apiType: SettingsState.ApiType = SettingsState.getInstance().state.apiType,
+        model: String = SettingsState.getInstance().state.model,
         onComplete: ((Boolean) -> Unit)? = null
     ) {
         val cleanUrl = baseUrl.trimEnd('/')
@@ -41,15 +51,34 @@ object WuwLlmService {
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                val url = when (apiType) {
-                    SettingsState.ApiType.OPENAI_COMPATIBLE -> "$cleanUrl/v1/models"
-                    SettingsState.ApiType.OLLAMA -> "$cleanUrl/api/tags"
+                when (apiType) {
+                    SettingsState.ApiType.OLLAMA -> {
+                        // Ollama: 모델 목록 조회로 연결 확인
+                        HttpRequests.request("$cleanUrl/api/tags").tuner {
+                            if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
+                            it.connectTimeout = 5000
+                            it.readTimeout = 5000
+                        }.readString()
+                    }
+                    SettingsState.ApiType.OPENAI_COMPATIBLE,
+                    SettingsState.ApiType.AIPRO -> {
+                        // OpenAI Compatible / aipro: 실제 chat completions 엔드포인트에 최소 요청
+                        val requestModel = model.ifBlank { "model" }
+                        val payload = gson.toJson(mapOf(
+                            "model" to requestModel,
+                            "messages" to listOf(mapOf("role" to "user", "content" to "hi")),
+                            "max_tokens" to 1
+                        ))
+                        HttpRequests.post("$cleanUrl/v1/chat/completions", "application/json").tuner {
+                            if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
+                            it.connectTimeout = 5000
+                            it.readTimeout = 10000
+                        }.connect { req ->
+                            req.write(payload)
+                            req.readString()
+                        }
+                    }
                 }
-                HttpRequests.request(url).tuner {
-                    if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
-                    it.connectTimeout = 5000
-                    it.readTimeout = 5000
-                }.readString()
 
                 ApplicationManager.getApplication().invokeLater({
                     if (parent != null) {
@@ -59,6 +88,7 @@ object WuwLlmService {
                     }
                     onComplete?.invoke(true)
                 }, ModalityState.any())
+
             } catch (e: Exception) {
                 logger.warn("Connection test failed", e)
                 ApplicationManager.getApplication().invokeLater({
@@ -73,6 +103,11 @@ object WuwLlmService {
         }
     }
 
+    /**
+     * 사용 가능한 모델 목록을 조회합니다.
+     * OpenAI Compatible 모드에서는 /v1/models 미지원 서버가 많으므로
+     * 실패 시 오류 다이얼로그를 표시합니다.
+     */
     fun fetchModels(
         parent: Component?,
         baseUrl: String,
@@ -90,8 +125,9 @@ object WuwLlmService {
 
         ApplicationManager.getApplication().executeOnPooledThread {
             val client: LLMClient = when (apiType) {
-                SettingsState.ApiType.OPENAI_COMPATIBLE -> OpenAIClient()
                 SettingsState.ApiType.OLLAMA -> OllamaClient()
+                SettingsState.ApiType.OPENAI_COMPATIBLE,
+                SettingsState.ApiType.AIPRO -> OpenAIClient()
             }
 
             try {

@@ -13,7 +13,7 @@ import com.intellij.openapi.application.ApplicationManager
 )
 class SettingsState : PersistentStateComponent<SettingsState.State> {
 
-    enum class ApiType { OLLAMA, OPENAI_COMPATIBLE }
+    enum class ApiType { OLLAMA, OPENAI_COMPATIBLE, AIPRO }
 
     data class State(
         var apiType: ApiType = ApiType.OLLAMA,
