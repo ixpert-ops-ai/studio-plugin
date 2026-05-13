@@ -199,7 +199,7 @@ class ImplementationPipeline(
             onChunk("````text\n")
 
             try {
-                val response = client.chat(systemPrompt, userPrompt) { chunk ->
+                val response = client.chat(systemPrompt, userPrompt, onChunk = { chunk ->
                     if (abortReason != null) return@chat
 
                     fullResponse += chunk
@@ -224,7 +224,7 @@ class ImplementationPipeline(
 
                     // UI로 실시간 전송 (태그 제거 없이 필터링)
                     onChunk(chunk)
-                }
+                })
 
                 // [수정] 4-backtick UI wrapping 종료
                 onChunk("\n````\n")
@@ -310,10 +310,10 @@ class ImplementationPipeline(
 
                         var retryResponse = ""
                         try {
-                            client.chat(systemPrompt, correctionPrompt) { chunk ->
+                            client.chat(systemPrompt, correctionPrompt, onChunk = { chunk ->
                                 retryResponse += chunk
                                 onChunk(chunk)
-                            }
+                            })
                         } catch (e: Exception) {
                             logger.warn("Contract 위반 재생성 실패: ${e.message}")
                         }

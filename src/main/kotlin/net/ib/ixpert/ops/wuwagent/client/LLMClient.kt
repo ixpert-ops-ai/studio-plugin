@@ -6,6 +6,7 @@ interface LLMClient {
     fun chat(
         systemPrompt: String,
         userCode: String,
+        maxTokens: Int? = null,
         onChunk: ((String) -> Unit)? = null
     ): OllamaChatResponse?
 
