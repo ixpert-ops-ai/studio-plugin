@@ -1,7 +1,7 @@
 :root {
   --bg-main: #2b2b2b;
   --bg-sidebar: #3c3f41;
-  --bg-bubble-user: #3d59a1;
+  --bg-bubble-user: #334155;
   --bg-bubble-ai: #3c3f41;
   --bg-tool: #2b2b2b;
   --bg-card-action: #3c3f41;
@@ -91,7 +91,7 @@ body {
 .msg-user {
   align-self: flex-end;
   background-color: var(--bg-bubble-user);
-  color: #fff;
+  color: #f8fafc;
   padding: 10px 14px;
   border-radius: 12px;
   max-width: 85%;
@@ -206,29 +206,27 @@ body {
 /* AI Bubble (Refactored for UX) */
 .msg-ai {
   align-self: flex-start;
-  background-color: var(--bg-bubble-ai);
+  background-color: #323232;
   border-radius: 12px;
   padding: 10px 14px;
   max-width: 90%;
   width: fit-content;
   min-width: 300px;
-  border: 1px solid var(--border-card-action);
+  border: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
   transition: all 0.3s ease;
 }
 
 .msg-ai.analysis {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
+  background-color: #323232;
 }
 
 .msg-ai.improvement {
-  background: rgba(75, 110, 175, 0.08);
-  border-color: rgba(75, 110, 175, 0.3);
+  background-color: #363636;
 }
 
 .msg-ai.error {
-  background: rgba(207, 102, 121, 0.08);
-  border-color: rgba(207, 102, 121, 0.3);
+  background-color: #3d282c;
 }
 
 
@@ -421,31 +419,31 @@ body {
 }
 
 .toolbar-btn {
-  background: #333;
-  border: 1px solid #444;
-  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #9ca3af;
   padding: 4px 10px;
   border-radius: 4px;
   font-size: 11px;
   cursor: pointer;
 }
 
-.toolbar-btn:hover { background: #444; color: #fff; }
+.toolbar-btn:hover { background: rgba(255, 255, 255, 0.05); color: #d1d5db; }
 
 .textarea-wrapper {
-  background: #333;
-  border: 1px solid #3a3b3e; /* default border per design */
+  background: #202020;
+  border: 1px solid transparent;
   border-radius: 8px;
   padding: 8px;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.15s, box-shadow 0.15s; /* transition animation */
+  transition: border-color 0.15s;
   position: relative;
 }
 
 .textarea-wrapper:focus-within {
-  border-color: var(--text-blue);
-  box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.15); /* #7aa2f7 glow */
+  border-color: #3b82f6;
+  box-shadow: none;
 }
 
 .textarea-wrapper textarea {
@@ -480,43 +478,50 @@ body {
 
 .btn-danger { background: #cf6679; color: #fff; border: none; padding: 6px 16px; border-radius: 4px; }
 
-/* Overlay Circular Send/Stop Button */
-.btn-circle {
+/* Overlay Flat Send/Stop Button */
+.btn-icon {
   position: absolute;
   right: 12px;
   bottom: 12px;
   width: 32px;
   height: 32px;
-  border-radius: 50%; /* 심플한 원형 */
   display: flex;
   justify-content: center;
   align-items: center;
+  background: transparent;
   border: none;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  color: #fff;
+  transition: all 0.2s ease;
 }
 
-.btn-circle.send {
-  background-color: #7c6af7;
+.btn-icon.send {
+  color: #60a5fa;
 }
 
-.btn-circle.send:hover:not(:disabled) {
-  background-color: #8f7ff9;
+.btn-icon.send:hover:not(:disabled) {
+  color: #3b82f6;
 }
 
-.btn-circle.send:disabled {
-  background-color: #7c6af7;
-  opacity: 0.4;
-  cursor: not-allowed;
-  transform: none;
+.btn-icon.send:disabled {
+  color: #9ca3af;
+  cursor: default;
 }
 
-.btn-circle.stop {
-  background-color: #cf6679;
+.btn-icon.stop {
+  color: #ef4444;
 }
-.btn-circle.stop:hover {
-  background-color: #e27d8f;
+.btn-icon.stop:hover {
+  color: #dc2626;
+}
+
+.spinner-ring {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.05);
+  border-top-color: #60a5fa;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  pointer-events: none;
 }
 
 /* Model Status Footer */
@@ -529,6 +534,7 @@ body {
   font-size: 10px;
   color: var(--text-muted);
   letter-spacing: 0.2px;
+  opacity: 0.4;
 }
 
 .model-status-footer strong {

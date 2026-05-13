@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Plus, MessageSquare, Square, Terminal, Send, ArrowDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -1230,7 +1230,7 @@ function App() {
             onKeyDown={handleKeyDown}
           />
           {messages.some(m => m.isLoading || m.isStreaming) ? (
-            <button className="btn-circle stop" onClick={() => {
+            <button className="btn-icon stop" onClick={() => {
               setMessages(prev => prev.map(m => {
                 if (m.isLoading || m.isStreaming)
                   return { ...m, isLoading: false, isStreaming: false, currentStatus: undefined };
@@ -1240,15 +1240,16 @@ function App() {
               }));
               window.sendToIde?.(JSON.stringify({ command: '/cancel' }));
             }}>
-              <Square size={14} fill="currentColor" />
+              <div className="spinner-ring"></div>
+              <Square size={12} fill="currentColor" />
             </button>
           ) : (
             <button 
-              className="btn-circle send" 
+              className="btn-icon send" 
               onClick={handleSend}
               disabled={!inputText.trim()}
             >
-              <Send size={14} />
+              <ArrowRight size={18} />
             </button>
           )}
         </div>
