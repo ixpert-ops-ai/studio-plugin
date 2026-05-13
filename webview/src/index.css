@@ -834,10 +834,11 @@ body {
   bottom: 100%;
   left: 0;
   width: 300px;
-  background-color: #1a1b2e;
-  border: 1px solid #4a4d4f;
+  background-color: rgba(40, 42, 45, 0.85); /* 짙은 반투명 그레이 */
+  border: 1px solid rgba(255, 255, 255, 0.1); /* 얇은 라이트 그레이 반투명 선 */
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); /* 드롭 섀도 */
+  backdrop-filter: blur(8px); /* Glassmorphism */
   margin-bottom: 8px;
   z-index: 100;
   display: flex;
@@ -859,8 +860,8 @@ body {
   padding: 8px 12px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.03);
+  color: #9ca3af; /* 뮤트된 그레이 */
+  background: transparent;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -875,22 +876,28 @@ body {
   color: #e0e0e0;
   background: transparent;
   border: none;
+  border-left: 2px solid transparent; /* 인디케이터 자리 확보 */
   text-align: left;
   transition: background 0.15s;
 }
 
-.popup-item:hover, .popup-item.selected {
-  background: rgba(255, 255, 255, 0.08);
+.popup-item:hover {
+  background: rgba(255, 255, 255, 0.05); /* 메인보다 살짝 밝은 얇은 배경 */
+}
+
+.popup-item.selected {
+  background: rgba(255, 255, 255, 0.02);
+  border-left-color: #3b82f6; /* 포인트 블루 컬러 선 */
 }
 
 .popup-item-command {
   font-weight: 600;
-  color: var(--text-blue);
+  color: #f8fafc; /* 밝은 화이트/그레이 */
   min-width: 70px;
 }
 
 .popup-item-desc {
-  color: var(--text-muted);
+  color: #9ca3af; /* 뮤트된 그레이 */
   font-size: 12px;
 }
 

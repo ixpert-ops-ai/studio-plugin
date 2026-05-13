@@ -690,7 +690,7 @@ function App() {
                 break;
             }
 
-            const isCompletionEvent = ['task_step', 'task_success', 'error', 'task_cancelled'].includes(data.subType);
+            const isCompletionEvent = ['task_step', 'task_success', 'error', 'task_cancelled', 'chat', 'explain'].includes(data.subType);
             updated[index] = {
               ...existing,
               content:         newContent,
@@ -703,6 +703,15 @@ function App() {
               modifiedFullCode: modifiedFullCode,
               toolNotiText:    isCompletionEvent ? undefined : existing.toolNotiText,
             };
+
+            // [Bug Fix] 응답 완료 신호가 오면 전체 메시지의 로딩/스트리밍 상태를 강제로 초기화하여 UI(전송 버튼 등)가 Stuck 되는 현상 방지
+            if (isCompletionEvent || (!isLoading && !isStreaming)) {
+              updated.forEach((m, idx) => {
+                if (m.isLoading || m.isStreaming) {
+                  updated[idx] = { ...m, isLoading: false, isStreaming: false, currentStatus: undefined };
+                }
+              });
+            }
             return updated;
           }
 
