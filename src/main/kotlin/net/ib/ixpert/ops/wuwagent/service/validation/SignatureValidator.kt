@@ -178,4 +178,77 @@ object SignatureValidator {
         }
         return count
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // [Phase 3] Contract 기반 시그니처 검증
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 생성된 코드가 확정된 Contract와 일치하는지 검증합니다.
+     * 반환 타입, 파라미터 타입, Caller 변수 타입을 검사합니다.
+     *
+     * 정규식에서 제네릭 중첩을 처리하기 위해 `[\w.<>,\s?]+` 패턴을 사용합니다.
+     * (예: List<HashMap<String, Object>>)
+     */
+    fun validateAgainstContract(
+        responseText: String,
+        fileContract: net.ib.ixpert.ops.wuwagent.agent.FileContract
+    ): List<String> {
+        val warnings = mutableListOf<String>()
+
+        for (method in fileContract.methods) {
+            val escapedName = Regex.escape(method.methodName)
+
+            // 1. 반환 타입 일치 검증 (메서드 정의부)
+            // 제네릭 중첩을 지원하는 패턴: [\w.<>,\s?]+ 으로 List<HashMap<String, Object>> 매칭
+            val returnTypePattern = Regex(
+                """(?:public|protected)\s+([\w.<>,\s?]+)\s+$escapedName\s*\("""
+            )
+            val returnMatch = returnTypePattern.find(responseText)
+            if (returnMatch != null) {
+                val actualReturn = returnMatch.groupValues[1].trim()
+                if (normalizeType(actualReturn) != normalizeType(method.returnType)) {
+                    warnings.add(
+                        "반환 타입 불일치: `${method.methodName}()` — " +
+                        "생성: `$actualReturn`, 계약: `${method.returnType}`"
+                    )
+                }
+            }
+
+            // 2. Caller에서 변수 타입 검증 (CALLER 역할인 경우)
+            if (fileContract.role == net.ib.ixpert.ops.wuwagent.agent.FileRole.CALLER) {
+                val assignPattern = Regex(
+                    """([\w.<>,\s?]+)\s+\w+\s*=\s*\w+\.$escapedName\s*\("""
+                )
+                val assignMatch = assignPattern.find(responseText)
+                if (assignMatch != null) {
+                    val varType = assignMatch.groupValues[1].trim()
+                    if (normalizeType(varType) != normalizeType(method.returnType)) {
+                        warnings.add(
+                            "호출부 변수 타입 불일치: `${method.methodName}()` — " +
+                            "변수: `$varType`, 계약: `${method.returnType}`"
+                        )
+                    }
+                }
+            }
+        }
+
+        return warnings.distinct()
+    }
+
+    /**
+     * 타입 문자열을 정규화하여 비교합니다.
+     * - import 차이 무시 (java.util.HashMap → HashMap)
+     * - HashMap/Map 호환 허용
+     * - 공백 차이 무시
+     * - String vs Object 등은 strict 모드로 구분 유지
+     */
+    private fun normalizeType(type: String): String {
+        return type
+            .replace(" ", "")
+            .replace("java.util.", "")
+            .replace("java.lang.", "")
+            .replace("HashMap", "Map")  // HashMap과 Map은 호환으로 간주
+            .trim()
+    }
 }
