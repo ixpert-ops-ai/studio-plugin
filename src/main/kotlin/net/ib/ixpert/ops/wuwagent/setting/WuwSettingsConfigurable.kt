@@ -28,11 +28,18 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     private var isResetting = false
 
     private var apiTypeComboBox: ComboBox<String>? = null
-    private var baseUrlField: JBTextField? = null
     private var apiKeyField: JBPasswordField? = null
 
-    // Base URL 아래 힌트 행 (OpenAI Compatible 전용)
-    private var baseUrlHintRow: Row? = null
+    // API 타입별 URL 입력 필드 + 행
+    private var ollamaUrlField: JBTextField? = null
+    private var ollamaUrlRow: Row? = null
+
+    private var openaiUrlField: JBTextField? = null
+    private var openaiUrlRow: Row? = null
+    private var openaiUrlHintRow: Row? = null
+
+    private var aiproUrlField: JBTextField? = null
+    private var aiproUrlRow: Row? = null
 
     // Ollama 전용: 드롭박스 + Fetch Models 버튼
     private var modelComboBox: ComboBox<String>? = null
@@ -62,23 +69,38 @@ class WuwSettingsConfigurable : SearchableConfigurable {
                     ).component
                     apiTypeComboBox?.addActionListener {
                         if (!isResetting) onApiTypeChanged()
-                        else updateModelRowVisibility()
+                        else updateRowVisibility()
                     }
                 }
             }
             group("LLM Server Connection") {
-                row("Base URL:") {
-                    baseUrlField = textField()
+                // Ollama 전용 URL 행
+                ollamaUrlRow = row("Base URL:") {
+                    ollamaUrlField = textField()
                         .columns(COLUMNS_MEDIUM)
                         .component
                 }
-                // OpenAI Compatible 모드에서만 보이는 경로 안내
-                baseUrlHintRow = row {
+
+                // OpenAI Compatible 전용 URL 행 + 힌트
+                openaiUrlRow = row("Base URL:") {
+                    openaiUrlField = textField()
+                        .columns(COLUMNS_MEDIUM)
+                        .component
+                }
+                openaiUrlHintRow = row {
                     label("⚠ 경로까지 포함해서 입력하세요 (예: https://host:port/open/api)").applyToComponent {
                         foreground = java.awt.Color(160, 100, 0)
                         font = font.deriveFont(font.size2D - 0.5f)
                     }
                 }
+
+                // aipro 전용 URL 행
+                aiproUrlRow = row("Base URL:") {
+                    aiproUrlField = textField()
+                        .columns(COLUMNS_MEDIUM)
+                        .component
+                }
+
                 row("API Key:") {
                     val pwdField = passwordField()
                         .columns(COLUMNS_MEDIUM)
@@ -154,7 +176,9 @@ class WuwSettingsConfigurable : SearchableConfigurable {
 
         // aipro 선택 시 기본값 자동 입력
         if (type == SettingsState.ApiType.AIPRO) {
-            baseUrlField?.setText(AIPRO_DEFAULT_URL)
+            if (aiproUrlField?.text.isNullOrBlank()) {
+                aiproUrlField?.setText(AIPRO_DEFAULT_URL)
+            }
             if (modelTextField?.text.isNullOrBlank()) {
                 modelTextField?.setText(AIPRO_DEFAULT_MODEL)
             } else {
@@ -162,18 +186,30 @@ class WuwSettingsConfigurable : SearchableConfigurable {
             }
         }
 
-        updateModelRowVisibility()
+        updateRowVisibility()
     }
 
-    /** API 타입에 따라 행 표시/숨김 + 힌트 표시/숨김 */
-    private fun updateModelRowVisibility() {
+    /** API 타입에 따라 URL 행 및 모델 행 표시/숨김 */
+    private fun updateRowVisibility() {
         val type = getCurrentApiType()
         val isOllama = type == SettingsState.ApiType.OLLAMA
-        val isOpenAICompatible = type == SettingsState.ApiType.OPENAI_COMPATIBLE
+        val isOpenAI = type == SettingsState.ApiType.OPENAI_COMPATIBLE
+        val isAipro  = type == SettingsState.ApiType.AIPRO
+
+        ollamaUrlRow?.visible(isOllama)
+        openaiUrlRow?.visible(isOpenAI)
+        openaiUrlHintRow?.visible(isOpenAI)
+        aiproUrlRow?.visible(isAipro)
 
         ollamaModelRow?.visible(isOllama)
         openaiModelRow?.visible(!isOllama)
-        baseUrlHintRow?.visible(isOpenAICompatible)  // 힌트는 OpenAI Compatible만 (aipro는 자동입력이라 불필요)
+    }
+
+    /** 현재 API 타입에 맞는 URL 필드 반환 */
+    private fun getCurrentUrlField(): JBTextField? = when (getCurrentApiType()) {
+        SettingsState.ApiType.OLLAMA             -> ollamaUrlField
+        SettingsState.ApiType.OPENAI_COMPATIBLE  -> openaiUrlField
+        SettingsState.ApiType.AIPRO              -> aiproUrlField
     }
 
     /** 현재 API 타입에 맞는 모델 입력값 반환 */
@@ -204,10 +240,10 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     // ──────────────────────────────────────────────────────────────
 
     private fun fetchModels() {
-        val baseUrl = baseUrlField?.text ?: return
+        val baseUrl = getCurrentUrlField()?.text ?: return
         val apiKey = String(apiKeyField?.password ?: charArrayOf())
         val apiType = getCurrentApiType()
-        val parent = baseUrlField?.let { SwingUtilities.getWindowAncestor(it) }
+        val parent = ollamaUrlField?.let { SwingUtilities.getWindowAncestor(it) }
 
         val originalText = fetchModelsButton?.text
         fetchModelsButton?.isEnabled = false
@@ -225,7 +261,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         // Ollama 모드에서만 자동 모델 조회
         if (getCurrentApiType() != SettingsState.ApiType.OLLAMA) return
 
-        val baseUrl = baseUrlField?.text ?: return
+        val baseUrl = ollamaUrlField?.text ?: return
         val apiKey = String(apiKeyField?.password ?: charArrayOf())
         val comboBox = modelComboBox ?: return
 
@@ -271,11 +307,11 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     }
 
     private fun testConnection() {
-        val baseUrl = baseUrlField?.text ?: return
+        val baseUrl = getCurrentUrlField()?.text ?: return
         val apiKey = String(apiKeyField?.password ?: charArrayOf())
         val apiType = getCurrentApiType()
         val model = getCurrentModelValue()
-        val parent = baseUrlField?.let { SwingUtilities.getWindowAncestor(it) }
+        val parent = getCurrentUrlField()?.let { SwingUtilities.getWindowAncestor(it) }
 
         val originalText = testConnectionButton?.text
         testConnectionButton?.isEnabled = false
@@ -294,7 +330,9 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     override fun isModified(): Boolean {
         val state = settings.state
         return apiTypeComboBox?.selectedItem != apiTypeToDisplayName(state.apiType) ||
-                baseUrlField?.text != state.baseUrl ||
+                ollamaUrlField?.text != state.ollamaServerUrl ||
+                openaiUrlField?.text != state.openaiServerUrl ||
+                aiproUrlField?.text != state.aiproServerUrl ||
                 String(apiKeyField?.password ?: charArrayOf()) != state.apiKey ||
                 getCurrentModelValue() != state.model ||
                 temperatureSpinner?.text != state.temperature.toString() ||
@@ -306,7 +344,9 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     override fun apply() {
         val state = settings.state
         state.apiType = getCurrentApiType()
-        state.baseUrl = baseUrlField?.text ?: ""
+        state.ollamaServerUrl = ollamaUrlField?.text ?: ""
+        state.openaiServerUrl = openaiUrlField?.text ?: ""
+        state.aiproServerUrl  = aiproUrlField?.text ?: ""
         state.apiKey = String(apiKeyField?.password ?: charArrayOf())
         state.model = getCurrentModelValue()
         state.temperature = temperatureSpinner?.text?.toFloatOrNull() ?: 0.1f
@@ -325,7 +365,9 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         val state = settings.state
 
         apiTypeComboBox?.selectedItem = apiTypeToDisplayName(state.apiType)
-        baseUrlField?.setText(state.baseUrl)
+        ollamaUrlField?.setText(state.ollamaServerUrl)
+        openaiUrlField?.setText(state.openaiServerUrl)
+        aiproUrlField?.setText(state.aiproServerUrl)
         apiKeyField?.setText(state.apiKey)
 
         // API 타입에 맞는 모델 필드에 저장값 복원
@@ -343,7 +385,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         isResetting = false
 
         // 행 가시성 적용 후 Ollama면 자동 모델 조회
-        updateModelRowVisibility()
+        updateRowVisibility()
         autoFetchModels()
     }
 }
