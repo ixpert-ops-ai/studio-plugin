@@ -215,9 +215,32 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
     }));
   };
 
+  const handleOpenInEditor = () => {
+    if (!window.sendToIde || !msg.filePath) return;
+    window.sendToIde(JSON.stringify({ command: '/openInEditor', filePath: msg.filePath }));
+  };
+
+  // Step2 말풍선 파일명: 경로의 마지막 세그먼트만 표시
+  const fileBaseName = msg.filePath
+    ? (msg.filePath.split('/').pop() ?? msg.filePath)
+    : null;
+
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
     <div className={`msg-ai ${isError ? 'error' : 'analysis'}`} data-message-role="ai">
+
+      {/* Step2 파일명 헤더 — filePath가 있는 말풍선(Improve Step2)에만 표시 */}
+      {fileBaseName && (
+        <div className="msg-ai-file-header">
+          <button
+            className="msg-ai-filename-link"
+            onClick={handleOpenInEditor}
+            title={msg.filePath}
+          >
+            📄 {fileBaseName}
+          </button>
+        </div>
+      )}
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
         {msg.toolNotiText && (
@@ -840,6 +863,12 @@ function App() {
       text: payload,
       ...(filesToSend.length > 0 ? { files: JSON.stringify(filesToSend) } : {})
     }));
+
+    // 메시지 전송 시 자동으로 최하단 스크롤 (스트리밍 시에도 락다운 유지)
+    setTimeout(() => {
+      scrollToBottom();
+      isNearBottom.current = true;
+    }, 50);
   };
 
   // 팝업 아이템 로직 (모델 및 명령어 조합)
@@ -1214,7 +1243,11 @@ function App() {
               <Square size={14} fill="currentColor" />
             </button>
           ) : (
-            <button className="btn-circle send" onClick={handleSend}>
+            <button 
+              className="btn-circle send" 
+              onClick={handleSend}
+              disabled={!inputText.trim()}
+            >
               <Send size={14} />
             </button>
           )}

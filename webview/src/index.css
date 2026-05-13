@@ -175,6 +175,34 @@ body {
 .step-noti.completed .step-noti-badge { color: var(--text-success); }
 .step-noti.failed    .step-noti-badge { color: var(--danger-color); }
 
+/* ── Step2 파일명 헤더 (Improve 말풍선 상단) ── */
+/* msg-ai의 padding(10px 14px)을 음수 마진으로 상쇄해 버블 가장자리까지 채움 */
+.msg-ai-file-header {
+  margin: -10px -14px 8px;
+  padding: 7px 14px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px 12px 0 0;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.msg-ai-filename-link {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 0;
+  opacity: 0.85;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  transition: opacity 0.15s;
+}
+
+.msg-ai-filename-link:hover {
+  opacity: 1;
+}
+
 /* AI Bubble (Refactored for UX) */
 .msg-ai {
   align-self: flex-start;
@@ -459,28 +487,36 @@ body {
   bottom: 12px;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 50%; /* 심플한 원형 */
   display: flex;
   justify-content: center;
   align-items: center;
   border: none;
   cursor: pointer;
-  transition: all 0.2s ease-in-out;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   color: #fff;
 }
 
 .btn-circle.send {
-  background-color: #5c8aff;
+  background-color: #7c6af7;
 }
-.btn-circle.send:hover {
-  background-color: #4a6ee0;
+
+.btn-circle.send:hover:not(:disabled) {
+  background-color: #8f7ff9;
+}
+
+.btn-circle.send:disabled {
+  background-color: #7c6af7;
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .btn-circle.stop {
-  background-color: #f472b6;
+  background-color: #cf6679;
 }
 .btn-circle.stop:hover {
-  background-color: #ec4899;
+  background-color: #e27d8f;
 }
 
 /* Model Status Footer */

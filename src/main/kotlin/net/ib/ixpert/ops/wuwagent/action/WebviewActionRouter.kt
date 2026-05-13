@@ -1029,6 +1029,27 @@ class WebviewActionRouter(private val project: Project) {
                     }
                 }
 
+                // ── Open In Editor: 파일 경로로 IDE 에디터 열기 ──────────────
+                "/openInEditor" -> {
+                    val filePath = payload["filePath"] ?: textBody
+                    logger.info("Router: /openInEditor → $filePath")
+                    if (filePath.isBlank()) {
+                        bridge.sendMessage("error", "파일 경로가 없습니다.")
+                        return@invokeLater
+                    }
+                    val vFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                        .findFileByPath(filePath)
+                    if (vFile == null) {
+                        com.intellij.openapi.ui.Messages.showInfoMessage(
+                            project,
+                            "파일을 찾을 수 없습니다:\n$filePath",
+                            "iXpert AI Assistant"
+                        )
+                        return@invokeLater
+                    }
+                    FileEditorManager.getInstance(project).openFile(vFile, true)
+                }
+
                 else -> {
                     logger.warn("Router: 정의되지 않은 명령어 수신 → $command")
                     bridge.sendMessage("error", "알 수 없는 명령어: $command")
