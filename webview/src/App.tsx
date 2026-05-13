@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Plus, MessageSquare, Square, Terminal, Send, ArrowDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -215,9 +215,32 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
     }));
   };
 
+  const handleOpenInEditor = () => {
+    if (!window.sendToIde || !msg.filePath) return;
+    window.sendToIde(JSON.stringify({ command: '/openInEditor', filePath: msg.filePath }));
+  };
+
+  // Step2 말풍선 파일명: 경로의 마지막 세그먼트만 표시
+  const fileBaseName = msg.filePath
+    ? (msg.filePath.split('/').pop() ?? msg.filePath)
+    : null;
+
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
     <div className={`msg-ai ${isError ? 'error' : 'analysis'}`} data-message-role="ai">
+
+      {/* Step2 파일명 헤더 — filePath가 있는 말풍선(Improve Step2)에만 표시 */}
+      {fileBaseName && (
+        <div className="msg-ai-file-header">
+          <button
+            className="msg-ai-filename-link"
+            onClick={handleOpenInEditor}
+            title={msg.filePath}
+          >
+            📄 {fileBaseName}
+          </button>
+        </div>
+      )}
 
       <div className={`msg-ai-content ${isError ? 'error-text' : ''}`}>
         {msg.toolNotiText && (
@@ -667,7 +690,7 @@ function App() {
                 break;
             }
 
-            const isCompletionEvent = ['task_step', 'task_success', 'error', 'task_cancelled'].includes(data.subType);
+            const isCompletionEvent = ['task_step', 'task_success', 'error', 'task_cancelled', 'chat', 'explain'].includes(data.subType);
             updated[index] = {
               ...existing,
               content:         newContent,
@@ -680,6 +703,15 @@ function App() {
               modifiedFullCode: modifiedFullCode,
               toolNotiText:    isCompletionEvent ? undefined : existing.toolNotiText,
             };
+
+            // [Bug Fix] 응답 완료 신호가 오면 전체 메시지의 로딩/스트리밍 상태를 강제로 초기화하여 UI(전송 버튼 등)가 Stuck 되는 현상 방지
+            if (isCompletionEvent || (!isLoading && !isStreaming)) {
+              updated.forEach((m, idx) => {
+                if (m.isLoading || m.isStreaming) {
+                  updated[idx] = { ...m, isLoading: false, isStreaming: false, currentStatus: undefined };
+                }
+              });
+            }
             return updated;
           }
 
@@ -840,6 +872,12 @@ function App() {
       text: payload,
       ...(filesToSend.length > 0 ? { files: JSON.stringify(filesToSend) } : {})
     }));
+
+    // 메시지 전송 시 자동으로 최하단 스크롤 (스트리밍 시에도 락다운 유지)
+    setTimeout(() => {
+      scrollToBottom();
+      isNearBottom.current = true;
+    }, 50);
   };
 
   // 팝업 아이템 로직 (모델 및 명령어 조합)
@@ -1201,7 +1239,7 @@ function App() {
             onKeyDown={handleKeyDown}
           />
           {messages.some(m => m.isLoading || m.isStreaming) ? (
-            <button className="btn-circle stop" onClick={() => {
+            <button className="btn-icon stop" onClick={() => {
               setMessages(prev => prev.map(m => {
                 if (m.isLoading || m.isStreaming)
                   return { ...m, isLoading: false, isStreaming: false, currentStatus: undefined };
@@ -1211,11 +1249,16 @@ function App() {
               }));
               window.sendToIde?.(JSON.stringify({ command: '/cancel' }));
             }}>
-              <Square size={14} fill="currentColor" />
+              <div className="spinner-ring"></div>
+              <Square size={12} fill="currentColor" />
             </button>
           ) : (
-            <button className="btn-circle send" onClick={handleSend}>
-              <Send size={14} />
+            <button 
+              className="btn-icon send" 
+              onClick={handleSend}
+              disabled={!inputText.trim()}
+            >
+              <ArrowRight size={18} />
             </button>
           )}
         </div>

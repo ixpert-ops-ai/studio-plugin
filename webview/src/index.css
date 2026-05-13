@@ -1,7 +1,7 @@
 :root {
   --bg-main: #2b2b2b;
   --bg-sidebar: #3c3f41;
-  --bg-bubble-user: #3d59a1;
+  --bg-bubble-user: #334155;
   --bg-bubble-ai: #3c3f41;
   --bg-tool: #2b2b2b;
   --bg-card-action: #3c3f41;
@@ -91,7 +91,7 @@ body {
 .msg-user {
   align-self: flex-end;
   background-color: var(--bg-bubble-user);
-  color: #fff;
+  color: #f8fafc;
   padding: 10px 14px;
   border-radius: 12px;
   max-width: 85%;
@@ -175,32 +175,58 @@ body {
 .step-noti.completed .step-noti-badge { color: var(--text-success); }
 .step-noti.failed    .step-noti-badge { color: var(--danger-color); }
 
+/* ── Step2 파일명 헤더 (Improve 말풍선 상단) ── */
+/* msg-ai의 padding(10px 14px)을 음수 마진으로 상쇄해 버블 가장자리까지 채움 */
+.msg-ai-file-header {
+  margin: -10px -14px 8px;
+  padding: 7px 14px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px 12px 0 0;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.msg-ai-filename-link {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 0;
+  opacity: 0.85;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  transition: opacity 0.15s;
+}
+
+.msg-ai-filename-link:hover {
+  opacity: 1;
+}
+
 /* AI Bubble (Refactored for UX) */
 .msg-ai {
   align-self: flex-start;
-  background-color: var(--bg-bubble-ai);
+  background-color: #323232;
   border-radius: 12px;
   padding: 10px 14px;
   max-width: 90%;
   width: fit-content;
   min-width: 300px;
-  border: 1px solid var(--border-card-action);
+  border: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
   transition: all 0.3s ease;
 }
 
 .msg-ai.analysis {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
+  background-color: #323232;
 }
 
 .msg-ai.improvement {
-  background: rgba(75, 110, 175, 0.08);
-  border-color: rgba(75, 110, 175, 0.3);
+  background-color: #363636;
 }
 
 .msg-ai.error {
-  background: rgba(207, 102, 121, 0.08);
-  border-color: rgba(207, 102, 121, 0.3);
+  background-color: #3d282c;
 }
 
 
@@ -393,31 +419,31 @@ body {
 }
 
 .toolbar-btn {
-  background: #333;
-  border: 1px solid #444;
-  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #9ca3af;
   padding: 4px 10px;
   border-radius: 4px;
   font-size: 11px;
   cursor: pointer;
 }
 
-.toolbar-btn:hover { background: #444; color: #fff; }
+.toolbar-btn:hover { background: rgba(255, 255, 255, 0.05); color: #d1d5db; }
 
 .textarea-wrapper {
-  background: #333;
-  border: 1px solid #3a3b3e; /* default border per design */
+  background: #202020;
+  border: 1px solid transparent;
   border-radius: 8px;
   padding: 8px;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.15s, box-shadow 0.15s; /* transition animation */
+  transition: border-color 0.15s;
   position: relative;
 }
 
 .textarea-wrapper:focus-within {
-  border-color: var(--text-blue);
-  box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.15); /* #7aa2f7 glow */
+  border-color: #3b82f6;
+  box-shadow: none;
 }
 
 .textarea-wrapper textarea {
@@ -452,35 +478,50 @@ body {
 
 .btn-danger { background: #cf6679; color: #fff; border: none; padding: 6px 16px; border-radius: 4px; }
 
-/* Overlay Circular Send/Stop Button */
-.btn-circle {
+/* Overlay Flat Send/Stop Button */
+.btn-icon {
   position: absolute;
   right: 12px;
   bottom: 12px;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
   display: flex;
   justify-content: center;
   align-items: center;
+  background: transparent;
   border: none;
   cursor: pointer;
-  transition: all 0.2s ease-in-out;
-  color: #fff;
+  transition: all 0.2s ease;
 }
 
-.btn-circle.send {
-  background-color: #5c8aff;
-}
-.btn-circle.send:hover {
-  background-color: #4a6ee0;
+.btn-icon.send {
+  color: #60a5fa;
 }
 
-.btn-circle.stop {
-  background-color: #f472b6;
+.btn-icon.send:hover:not(:disabled) {
+  color: #3b82f6;
 }
-.btn-circle.stop:hover {
-  background-color: #ec4899;
+
+.btn-icon.send:disabled {
+  color: #9ca3af;
+  cursor: default;
+}
+
+.btn-icon.stop {
+  color: #ef4444;
+}
+.btn-icon.stop:hover {
+  color: #dc2626;
+}
+
+.spinner-ring {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.05);
+  border-top-color: #60a5fa;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  pointer-events: none;
 }
 
 /* Model Status Footer */
@@ -493,6 +534,7 @@ body {
   font-size: 10px;
   color: var(--text-muted);
   letter-spacing: 0.2px;
+  opacity: 0.4;
 }
 
 .model-status-footer strong {
@@ -792,10 +834,11 @@ body {
   bottom: 100%;
   left: 0;
   width: 300px;
-  background-color: #1a1b2e;
-  border: 1px solid #4a4d4f;
+  background-color: rgba(40, 42, 45, 0.85); /* 짙은 반투명 그레이 */
+  border: 1px solid rgba(255, 255, 255, 0.1); /* 얇은 라이트 그레이 반투명 선 */
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); /* 드롭 섀도 */
+  backdrop-filter: blur(8px); /* Glassmorphism */
   margin-bottom: 8px;
   z-index: 100;
   display: flex;
@@ -817,8 +860,8 @@ body {
   padding: 8px 12px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.03);
+  color: #9ca3af; /* 뮤트된 그레이 */
+  background: transparent;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -833,22 +876,28 @@ body {
   color: #e0e0e0;
   background: transparent;
   border: none;
+  border-left: 2px solid transparent; /* 인디케이터 자리 확보 */
   text-align: left;
   transition: background 0.15s;
 }
 
-.popup-item:hover, .popup-item.selected {
-  background: rgba(255, 255, 255, 0.08);
+.popup-item:hover {
+  background: rgba(255, 255, 255, 0.05); /* 메인보다 살짝 밝은 얇은 배경 */
+}
+
+.popup-item.selected {
+  background: rgba(255, 255, 255, 0.02);
+  border-left-color: #3b82f6; /* 포인트 블루 컬러 선 */
 }
 
 .popup-item-command {
   font-weight: 600;
-  color: var(--text-blue);
+  color: #f8fafc; /* 밝은 화이트/그레이 */
   min-width: 70px;
 }
 
 .popup-item-desc {
-  color: var(--text-muted);
+  color: #9ca3af; /* 뮤트된 그레이 */
   font-size: 12px;
 }
 
