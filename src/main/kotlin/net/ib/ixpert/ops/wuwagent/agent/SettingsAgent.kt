@@ -26,8 +26,9 @@ object SettingsAgent {
 
         return try {
             val client = when (apiType) {
-                SettingsState.ApiType.OPENAI_COMPATIBLE -> OpenAIClient()
                 SettingsState.ApiType.OLLAMA -> OllamaClient()
+                SettingsState.ApiType.OPENAI_COMPATIBLE,
+                SettingsState.ApiType.AIPRO -> OpenAIClient()
             }
             client.fetchModels(cleanUrl, apiKey)
         } catch (e: Exception) {

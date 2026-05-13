@@ -234,6 +234,10 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
                   const { children, className, node, ...rest } = props;
                   const match = /language-(\w+)/.exec(className || '');
                   if (match && match[1] === 'mermaid') {
+                    if (msg.isStreaming) {
+                      // 스트리밍 중에는 일반 코드 블록으로 표시하여 깜빡임 방지
+                      return <code className={className} {...rest}>{children}</code>;
+                    }
                     return <MermaidChart chart={String(children).replace(/\n$/, '')} />;
                   }
                   return <code className={className} {...rest}>{children}</code>;

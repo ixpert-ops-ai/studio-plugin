@@ -21,7 +21,11 @@ class OpenAIClient : LLMClient {
         onChunk: ((String) -> Unit)?
     ): OllamaChatResponse? {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
-        val serverUrl = "${settings.baseUrl.trimEnd('/')}/v1/chat/completions"
+        val baseUrl = when (settings.apiType) {
+            net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
+            else -> settings.openaiServerUrl
+        }
+        val serverUrl = "${baseUrl.trimEnd('/')}/v1/chat/completions"
 
         val messagesList = listOf(
             mapOf("role" to "system", "content" to systemPrompt),

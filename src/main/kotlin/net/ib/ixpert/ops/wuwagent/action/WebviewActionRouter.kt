@@ -917,7 +917,12 @@ class WebviewActionRouter(private val project: Project) {
                 // ── Test Connection: Ollama 서버 연결 테스트 ──────────────
                 "/testConnection" -> {
                     val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
-                    val baseUrl = payload["baseUrl"] ?: settings.baseUrl
+                    val defaultUrl = when (settings.apiType) {
+                        net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OLLAMA -> settings.ollamaServerUrl
+                        net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
+                        else -> settings.openaiServerUrl
+                    }
+                    val baseUrl = payload["baseUrl"] ?: defaultUrl
                     val apiKey = payload["apiKey"] ?: settings.apiKey
                     logger.info("Router: /testConnection 실행 (baseUrl=$baseUrl)")
                     net.ib.ixpert.ops.wuwagent.service.WuwLlmService.testConnection(null, baseUrl, apiKey)
@@ -926,7 +931,12 @@ class WebviewActionRouter(private val project: Project) {
                 // ── Fetch Models: 모델 리스트 조회 ──────────────
                 "/fetchModels" -> {
                     val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
-                    val baseUrl = payload["baseUrl"] ?: settings.baseUrl
+                    val defaultUrl = when (settings.apiType) {
+                        net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OLLAMA -> settings.ollamaServerUrl
+                        net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
+                        else -> settings.openaiServerUrl
+                    }
+                    val baseUrl = payload["baseUrl"] ?: defaultUrl
                     val apiKey = payload["apiKey"] ?: settings.apiKey
                     logger.info("Router: /fetchModels 실행 (baseUrl=$baseUrl)")
                     

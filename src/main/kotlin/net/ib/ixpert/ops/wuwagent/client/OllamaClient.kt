@@ -22,7 +22,7 @@ class OllamaClient : LLMClient {
         onChunk: ((String) -> Unit)?
     ): OllamaChatResponse? {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
-        val serverUrl = "${settings.baseUrl.trimEnd('/')}/api/chat"
+        val serverUrl = "${settings.ollamaServerUrl.trimEnd('/')}/api/chat"
 
         val messages = listOf(
             OllamaMessage(role = "system", content = systemPrompt),
