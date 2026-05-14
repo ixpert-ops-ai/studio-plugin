@@ -580,9 +580,8 @@ body {
   display: flex;
   align-items: center;
   font-size: 10px;
-  color: var(--text-muted);
+  color: #999;
   letter-spacing: 0.2px;
-  opacity: 0.4;
 }
 
 .model-status-footer strong {
