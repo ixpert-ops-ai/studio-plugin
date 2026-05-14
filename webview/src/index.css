@@ -254,28 +254,29 @@ body {
 /* AI Bubble (Refactored for UX) */
 .msg-ai {
   align-self: flex-start;
-  background-color: #323232;
+  background-color: #1e2035;
   border-radius: 12px;
   padding: 10px 14px;
   width: 100%;
   min-width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  border: none;
+  border: 1px solid #2d2f4a;
   box-shadow: 0 1px 3px rgba(0,0,0,0.15);
   transition: all 0.3s ease;
 }
 
 .msg-ai.analysis {
-  background-color: #323232;
+  background-color: #1e2035;
 }
 
 .msg-ai.improvement {
-  background-color: #363636;
+  background-color: #252640;
 }
 
 .msg-ai.error {
   background-color: #3d282c;
+  border: 1px solid #5a353c;
 }
 
 
