@@ -1,16 +1,16 @@
 :root {
-  --bg-main: #2b2b2b;
-  --bg-sidebar: #3c3f41;
-  --bg-bubble-user: #334155;
-  --bg-bubble-ai: #3c3f41;
-  --bg-tool: #2b2b2b;
-  --bg-card-action: #3c3f41;
-  --bg-card-success: rgba(106, 191, 105, 0.1);
+  --bg-main: #1c1d1f;
+  --bg-sidebar: #242527;
+  --bg-bubble-user: #2a3547;
+  --bg-bubble-ai: #1E1F22;
+  --bg-tool: #1c1d1f;
+  --bg-card-action: #2a2b2e;
+  --bg-card-success: rgba(106, 191, 105, 0.08);
   --border-card-success: #6abf69;
-  --border-card-action: #4a4d4f;
+  --border-card-action: #3a3b3e;
   
-  --text-main: #cccccc;
-  --text-muted: #888888;
+  --text-main: #ADB5BD;         /* 스틸 실버 그레이 */
+  --text-muted: #6b7280;
   --text-blue: #7aa2f7;
   --text-success: #6abf69;
   
@@ -19,7 +19,7 @@
   --danger-color: #cf6679;
   
   --font-size-base: 13px;
-  --radius-bubble: 8px;
+  --radius-bubble: 6px;
   --radius-card: 4px;
 }
 
@@ -51,7 +51,7 @@ body {
 .header .title {
   font-size: 15px;
   font-weight: 600;
-  color: #fff;
+  color: #C9D1D9; /* 휘트 아닌 연한 실버 */
 }
 
 .icon-btn {
@@ -139,13 +139,13 @@ body {
 .msg-user {
   align-self: flex-end;
   background-color: var(--bg-bubble-user);
-  color: #f8fafc;
+  color: #C9D1D9; /* 휘트 금지, 실버 그레이 */
   padding: 10px 14px;
-  border-radius: 12px;
+  border-radius: 8px;
   max-width: 85%;
   word-wrap: break-word;
   line-height: 1.5;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 
 /* Tool/Status Item */
@@ -251,32 +251,32 @@ body {
   opacity: 1;
 }
 
-/* AI Bubble (Refactored for UX) */
+/* AI Bubble — 다크 차콜 스틸 그레이 */
 .msg-ai {
   align-self: flex-start;
-  background-color: #1e2035;
-  border-radius: 12px;
+  background-color: #1E1F22;
+  border-radius: 6px; /* 더 날카롭고 단단한 느낌 */
   padding: 10px 14px;
   width: 100%;
   min-width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  border: 1px solid #2d2f4a;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-  transition: all 0.3s ease;
+  border: 1px solid #2c2d30; /* 배경보다 아주 살짝 밝은 선만 */
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  transition: all 0.2s ease;
 }
 
 .msg-ai.analysis {
-  background-color: #1e2035;
+  background-color: #1E1F22;
 }
 
 .msg-ai.improvement {
-  background-color: #252640;
+  background-color: #212225;
 }
 
 .msg-ai.error {
-  background-color: #3d282c;
-  border: 1px solid #5a353c;
+  background-color: #2d1e21;
+  border: 1px solid #4a2e33;
 }
 
 
@@ -558,10 +558,10 @@ body {
 }
 
 .btn-icon.stop {
-  color: #ef4444;
+  color: #b05a6a; /* 주위를 압도록 먹인 레드 */
 }
 .btn-icon.stop:hover {
-  color: #dc2626;
+  color: #cf6679;
 }
 
 .spinner-ring {
@@ -657,16 +657,16 @@ body {
   gap: 4px;
   padding: 4px 10px;
   font-size: 11px;
-  color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #6b7280; /* 은은한 머튰 그레이 */
+  background: transparent; /* 평소엔 투명 */
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 .btn-text-action:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06); /* 호버 시만 연한 그레이 */
+  color: #ADB5BD;
 }
 
 /* ─── Markdown Body 스타일 ─── */
@@ -679,17 +679,18 @@ body {
 .markdown-body h2,
 .markdown-body h3,
 .markdown-body h4 {
-  color: #e0e0e0;
+  color: #C9D1D9; /* 순백색 금지, 말김한 실버 */
   margin: 16px 0 8px;
   font-weight: 700;
 }
 
-.markdown-body h1 { font-size: 18px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; }
+.markdown-body h1 { font-size: 18px; border-bottom: 1px solid rgba(255,255,255,0.07); padding-bottom: 6px; }
 .markdown-body h2 { font-size: 16px; }
 .markdown-body h3 { font-size: 14px; }
 
 .markdown-body p {
   margin: 8px 0;
+  color: #ADB5BD;
 }
 
 .markdown-body ul,
@@ -700,20 +701,21 @@ body {
 
 .markdown-body li {
   margin: 4px 0;
+  color: #ADB5BD;
 }
 
 .markdown-body code {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.35);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 12px;
   font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-  color: #e8c87a;
+  color: #d4a96a;
 }
 
 .markdown-body pre {
-  background: #1e1e1e;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #131416; /* 말풍선(#1E1F22)보다 확실히 어두운 코드 블록 */
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
   padding: 12px;
   overflow-x: auto;
@@ -851,7 +853,7 @@ body {
 }
 
 .markdown-body strong {
-  color: #e0e0e0;
+  color: #E9ECEF; /* Bold: 가장 밝은 글자도 #E9ECEF로 제한 */
   font-weight: 700;
 }
 
