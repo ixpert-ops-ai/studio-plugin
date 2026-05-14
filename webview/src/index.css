@@ -82,10 +82,55 @@ body {
   scroll-behavior: smooth;
   will-change: transform;
   transform: translateZ(0);
+  scroll-padding-top: 48px; /* 플로팅 배너 공간 확보 */
 }
 
 .chat-list::-webkit-scrollbar { width: 6px; }
 .chat-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 3px; }
+
+/* Floating Question Banner */
+.floating-banner {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: rgba(40, 42, 45, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 14px;
+  border-radius: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  max-width: 80%;
+  font-size: 11px;
+  color: #f8fafc;
+  pointer-events: auto;
+}
+
+.floating-banner .banner-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.floating-banner .close-btn {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 50%;
+  margin-left: 4px;
+}
+
+.floating-banner .close-btn:hover {
+  color: #fff;
+}
 
 /* User Bubble */
 .msg-user {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown, X } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -227,7 +227,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
 
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
-    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`} data-message-role="ai">
+    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`} data-message-role="ai" data-message-id={msg.id}>
 
       {/* Step2 파일명 헤더 — filePath가 있는 말풍선(Improve Step2)에만 표시 */}
       {fileBaseName && (
@@ -325,6 +325,7 @@ function App() {
   const [showCommandPopup, setShowCommandPopup] = useState(false);
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [floatingQuestion, setFloatingQuestion] = useState<{ id: string, text: string } | null>(null);
   const [modelsError, setModelsError] = useState('');
   const [popupSelectedIndex, setPopupSelectedIndex] = useState(0);
   const commandPopupRef = useRef<HTMLDivElement>(null);
@@ -363,6 +364,11 @@ function App() {
       
       setHasScrollArea(hasScroll);
       setShowScrollButton(hasScroll && notAtBottom);
+
+      // 최하단 도달 시 플로팅 배너 숨김
+      if (!notAtBottom) {
+        setFloatingQuestion(prev => (prev ? null : prev));
+      }
 
       // AI 답변 탐색 버튼 활성화 여부 계산
       if (hasScroll) {
@@ -436,6 +442,17 @@ function App() {
 
     if (targetMsg) {
       targetMsg.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const msgId = targetMsg.getAttribute('data-message-id');
+      if (msgId) {
+        const msgIndex = messages.findIndex(m => m.id === msgId);
+        // 바로 위쪽의 user 메시지 찾기
+        for (let j = msgIndex - 1; j >= 0; j--) {
+          if (messages[j].role === 'user') {
+            setFloatingQuestion({ id: msgId, text: messages[j].content });
+            break;
+          }
+        }
+      }
     }
   };
 
@@ -818,6 +835,7 @@ function App() {
     const filesToSend = [...selectedFiles];
     setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text }]);
     setInputText('');
+    setFloatingQuestion(null); // 새 질문 전송 시 배너 숨김
     setShowCommandPopup(false);
     setShowFilePopup(false);
     setSelectedFiles([]);
@@ -1040,6 +1058,18 @@ function App() {
           </button>
         </div>
       </header>
+
+      {floatingQuestion && (
+        <div className="floating-banner">
+          <MessageSquare size={12} />
+          <span className="banner-text">
+            {floatingQuestion.text.split('\n')[0]}
+          </span>
+          <button className="close-btn" onClick={() => setFloatingQuestion(null)} title="닫기">
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
       {showChatListPopup && (
         <div
