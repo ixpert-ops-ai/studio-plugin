@@ -257,9 +257,10 @@ body {
   background-color: #323232;
   border-radius: 12px;
   padding: 10px 14px;
-  max-width: 90%;
-  width: fit-content;
-  min-width: 300px;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   border: none;
   box-shadow: 0 1px 3px rgba(0,0,0,0.15);
   transition: all 0.3s ease;
