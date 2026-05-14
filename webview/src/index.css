@@ -135,17 +135,17 @@ body {
   color: #fff;
 }
 
-/* User Bubble */
+/* User Bubble — Outline Minimal */
 .msg-user {
   align-self: flex-end;
-  background-color: var(--bg-bubble-user);
-  color: #C9D1D9; /* 휘트 금지, 실버 그레이 */
+  background-color: transparent;   /* 완전 투명 */
+  color: #C9D1D9;
   padding: 10px 14px;
-  border-radius: 8px;
+  border-radius: 4px;              /* 소프트 엣지 4px */
+  border: 1px solid #424242;       /* 없은 듯 있는 없함을 논는 업를없이 송의한 선 */
   max-width: 85%;
   word-wrap: break-word;
   line-height: 1.5;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 
 /* Tool/Status Item */
@@ -544,17 +544,26 @@ body {
   transition: all 0.2s ease;
 }
 
+/* 대기(idle): 연한 회색 화살표 */
 .btn-icon.send {
-  color: #60a5fa;
+  color: #4b5563;
 }
 
+/* 입력 중(active): 프이트 블루로 활성화 */
 .btn-icon.send:hover:not(:disabled) {
-  color: #3b82f6;
+  color: #7aa2f7;
 }
 
+/* 입력값 있을 때: CSS로는 :not(:disabled)로 제어 불가능하므로 App.tsx에서도 케어 */
+/* disabled 상태에서도 색상 동일하게 유지 */
 .btn-icon.send:disabled {
-  color: #9ca3af;
+  color: #4b5563;
   cursor: default;
+}
+
+/* 입력값이 있을 때(active 클래스 부여됨): 블루 활성화 */
+.btn-icon.send.active {
+  color: #7aa2f7;
 }
 
 .btn-icon.stop {

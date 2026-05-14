@@ -1343,8 +1343,8 @@ function App() {
               <Square size={12} fill="currentColor" />
             </button>
           ) : (
-            <button 
-              className="btn-icon send" 
+            <button
+              className={`btn-icon send${inputText.trim() ? ' active' : ''}`}
               onClick={handleSend}
               disabled={!inputText.trim()}
             >
