@@ -650,6 +650,13 @@ function App() {
 
       // 공통 처리 로직: messageId가 있는 모든 AI 응답
       if (messageId) {
+        if (data.subType?.endsWith('_start')) {
+          const isNew = !messagesRef.current.some(m => m.id === messageId);
+          if (isNew) {
+            setTimeout(scrollToBottom, 100);
+          }
+        }
+
         setMessages(prev => {
           const index = prev.findIndex(m => m.id === messageId);
           
@@ -1115,7 +1122,6 @@ function App() {
 
       {floatingQuestion && (
         <div className="floating-banner">
-          <MessageSquare size={12} />
           <span className="banner-text">
             {floatingQuestion.text.split('\n')[0]}
           </span>
