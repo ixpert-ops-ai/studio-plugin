@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown, X } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -227,7 +227,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
 
   // ── 텍스트 말풍선 (텍스트 + Copy + Save) ──────────────────────────
   return (
-    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`} data-message-role="ai">
+    <div className={`msg-ai ${isError ? 'error' : 'analysis'}`} data-message-role="ai" data-message-id={msg.id}>
 
       {/* Step2 파일명 헤더 — filePath가 있는 말풍선(Improve Step2)에만 표시 */}
       {fileBaseName && (
@@ -325,6 +325,7 @@ function App() {
   const [showCommandPopup, setShowCommandPopup] = useState(false);
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [floatingQuestion, setFloatingQuestion] = useState<{ id: string, text: string } | null>(null);
   const [modelsError, setModelsError] = useState('');
   const [popupSelectedIndex, setPopupSelectedIndex] = useState(0);
   const commandPopupRef = useRef<HTMLDivElement>(null);
@@ -346,6 +347,11 @@ function App() {
   const chatListPopupRef = useRef<HTMLDivElement>(null);
   const isLoadingChat = useRef(false);
 
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
   // 스크롤 위치 감지: 하단 50px 이내이면 자동 스크롤 활성화 및 버튼 표시 여부 업데이트
   useEffect(() => {
     const el = chatListRef.current;
@@ -364,6 +370,11 @@ function App() {
       setHasScrollArea(hasScroll);
       setShowScrollButton(hasScroll && notAtBottom);
 
+      // 최하단 도달 시 플로팅 배너 숨김
+      if (!notAtBottom) {
+        setFloatingQuestion(prev => (prev ? null : prev));
+      }
+
       // AI 답변 탐색 버튼 활성화 여부 계산
       if (hasScroll) {
         const aiMessages = el.querySelectorAll('[data-message-role="ai"]');
@@ -371,14 +382,37 @@ function App() {
         let foundPrev = false;
         let foundNext = false;
         
+        let currentActiveMsg: HTMLElement | null = null;
         aiMessages.forEach(msgNode => {
           const top = (msgNode as HTMLElement).offsetTop;
-          if (top < scrollTop - 10) foundPrev = true;
-          else if (top > scrollTop + 10) foundNext = true;
+          if (top < scrollTop + 40) foundPrev = true;
+          else if (top > scrollTop + 55) foundNext = true;
+
+          // 현재 뷰포트 영역(상단 200px 이내)에 걸쳐있는 가장 마지막 AI 답변을 찾음
+          if (top <= scrollTop + 200) {
+            currentActiveMsg = msgNode as HTMLElement;
+          }
         });
         
         setCanScrollPrev(foundPrev);
         setCanScrollNext(foundNext);
+
+        if (notAtBottom && currentActiveMsg) {
+          const msgId = (currentActiveMsg as HTMLElement).getAttribute('data-message-id');
+          if (msgId) {
+            const msgs = messagesRef.current;
+            const msgIndex = msgs.findIndex(m => m.id === msgId);
+            let found = false;
+            for (let j = msgIndex - 1; j >= 0; j--) {
+              if (msgs[j].role === 'user') {
+                setFloatingQuestion({ id: msgId, text: msgs[j].content });
+                found = true;
+                break;
+              }
+            }
+            if (!found) setFloatingQuestion(prev => (prev ? null : prev));
+          }
+        }
       } else {
         setCanScrollPrev(false);
         setCanScrollNext(false);
@@ -419,7 +453,7 @@ function App() {
     if (direction === 'up') {
       for (let i = aiMessages.length - 1; i >= 0; i--) {
         const msgNode = aiMessages[i] as HTMLElement;
-        if (msgNode.offsetTop < scrollTop - 10) {
+        if (msgNode.offsetTop < scrollTop + 40) {
           targetMsg = msgNode;
           break;
         }
@@ -427,7 +461,7 @@ function App() {
     } else {
       for (let i = 0; i < aiMessages.length; i++) {
         const msgNode = aiMessages[i] as HTMLElement;
-        if (msgNode.offsetTop > scrollTop + 10) {
+        if (msgNode.offsetTop > scrollTop + 55) {
           targetMsg = msgNode;
           break;
         }
@@ -436,6 +470,7 @@ function App() {
 
     if (targetMsg) {
       targetMsg.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // 배너 업데이트는 스크롤 시 handleScroll에 의해 자동 처리됩니다.
     }
   };
 
@@ -615,6 +650,13 @@ function App() {
 
       // 공통 처리 로직: messageId가 있는 모든 AI 응답
       if (messageId) {
+        if (data.subType?.endsWith('_start')) {
+          const isNew = !messagesRef.current.some(m => m.id === messageId);
+          if (isNew) {
+            setTimeout(scrollToBottom, 100);
+          }
+        }
+
         setMessages(prev => {
           const index = prev.findIndex(m => m.id === messageId);
           
@@ -737,6 +779,41 @@ function App() {
             return prev;
           }
 
+          const newMessages = [...prev];
+          
+          // [기능 추가] 컨텍스트 메뉴(우클릭) 등 외부에서 실행되어 직전에 user 메시지가 없는 경우 가상 사용자 메시지 추가
+          // 단, 서브태스크(_s, _step 등)가 아닌 루트 태스크에 대해서만 추가
+          const isSubTask = messageId.includes('_s') || messageId.includes('_step');
+          const lastMsg = prev[prev.length - 1];
+          
+          if (!isSubTask && (!lastMsg || lastMsg.role !== 'user')) {
+             const contentText = data.content || '';
+             let reqType = '코드 개선 요청'; // 기본값
+             
+             if (data.subType === 'explain_start') {
+                 if (contentText.includes('영향')) reqType = '영향도 분석 요청';
+                 else if (contentText.includes('쿼리')) reqType = '쿼리 검증 요청';
+                 else if (contentText.includes('테스트')) reqType = '테스트 코드 생성 요청';
+                 else reqType = '코드 설명 요청';
+             } else if (data.subType === 'task_start' || data.subType === 'chat_start' || data.subType === 'analyze_start') {
+                 if (contentText.includes('리뷰')) reqType = '코드 리뷰 요청';
+                 else if (contentText.includes('테스트')) reqType = '테스트 코드 생성 요청';
+                 else reqType = '코드 개선 요청';
+             }
+
+             let fakeContent = reqType;
+             if (data.filePath) {
+               const fileName = data.filePath.split(/[\\/]/).pop() || data.filePath;
+               fakeContent = `[${fileName}] ${reqType}`;
+             }
+             
+             newMessages.push({
+               id: `user_fake_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+               role: 'user',
+               content: fakeContent
+             });
+          }
+
           const newMsg: Message = {
             id: messageId,
             role: 'ai',
@@ -748,7 +825,8 @@ function App() {
             hasSelection: data.hasSelection === 'true',
             selectedText: data.selectedText
           };
-          return [...prev, newMsg];
+          newMessages.push(newMsg);
+          return newMessages;
         });
       }
     };
@@ -818,6 +896,7 @@ function App() {
     const filesToSend = [...selectedFiles];
     setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text }]);
     setInputText('');
+    setFloatingQuestion(null); // 새 질문 전송 시 배너 숨김
     setShowCommandPopup(false);
     setShowFilePopup(false);
     setSelectedFiles([]);
@@ -1041,6 +1120,17 @@ function App() {
         </div>
       </header>
 
+      {floatingQuestion && (
+        <div className="floating-banner">
+          <span className="banner-text">
+            {floatingQuestion.text.split('\n')[0]}
+          </span>
+          <button className="close-btn" onClick={() => setFloatingQuestion(null)} title="닫기">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {showChatListPopup && (
         <div
           className="command-popup"
@@ -1253,8 +1343,8 @@ function App() {
               <Square size={12} fill="currentColor" />
             </button>
           ) : (
-            <button 
-              className="btn-icon send" 
+            <button
+              className={`btn-icon send${inputText.trim() ? ' active' : ''}`}
               onClick={handleSend}
               disabled={!inputText.trim()}
             >

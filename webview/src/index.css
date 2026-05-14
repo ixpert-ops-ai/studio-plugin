@@ -1,16 +1,16 @@
 :root {
-  --bg-main: #2b2b2b;
-  --bg-sidebar: #3c3f41;
-  --bg-bubble-user: #334155;
-  --bg-bubble-ai: #3c3f41;
-  --bg-tool: #2b2b2b;
-  --bg-card-action: #3c3f41;
-  --bg-card-success: rgba(106, 191, 105, 0.1);
+  --bg-main: #1c1d1f;
+  --bg-sidebar: #242527;
+  --bg-bubble-user: #2a3547;
+  --bg-bubble-ai: #1E1F22;
+  --bg-tool: #1c1d1f;
+  --bg-card-action: #2a2b2e;
+  --bg-card-success: rgba(106, 191, 105, 0.08);
   --border-card-success: #6abf69;
-  --border-card-action: #4a4d4f;
+  --border-card-action: #3a3b3e;
   
-  --text-main: #cccccc;
-  --text-muted: #888888;
+  --text-main: #ADB5BD;         /* 스틸 실버 그레이 */
+  --text-muted: #6b7280;
   --text-blue: #7aa2f7;
   --text-success: #6abf69;
   
@@ -19,7 +19,7 @@
   --danger-color: #cf6679;
   
   --font-size-base: 13px;
-  --radius-bubble: 8px;
+  --radius-bubble: 6px;
   --radius-card: 4px;
 }
 
@@ -51,7 +51,7 @@ body {
 .header .title {
   font-size: 15px;
   font-weight: 600;
-  color: #fff;
+  color: #C9D1D9; /* 휘트 아닌 연한 실버 */
 }
 
 .icon-btn {
@@ -82,22 +82,70 @@ body {
   scroll-behavior: smooth;
   will-change: transform;
   transform: translateZ(0);
+  scroll-padding-top: 48px; /* 플로팅 배너 공간 확보 */
 }
 
 .chat-list::-webkit-scrollbar { width: 6px; }
 .chat-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 3px; }
 
-/* User Bubble */
+/* Floating Question Banner */
+.floating-banner {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background-color: rgba(26, 27, 46, 0.85); /* #1a1b2e 계열 반투명 다크 */
+  border: none;
+  border-bottom: 1px solid rgba(122, 162, 247, 0.2); /* 얇은 하단 테두리 */
+  padding: 8px 16px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(12px);
+  max-width: 85%;
+  font-size: 13px;
+  font-weight: 400;
+  color: #e2e8f0;
+  pointer-events: auto;
+}
+
+.floating-banner .banner-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.floating-banner .close-btn {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 50%;
+  margin-left: 6px;
+}
+
+.floating-banner .close-btn:hover {
+  color: #fff;
+}
+
+/* User Bubble — Outline Minimal */
 .msg-user {
   align-self: flex-end;
-  background-color: var(--bg-bubble-user);
-  color: #f8fafc;
+  background-color: transparent;   /* 완전 투명 */
+  color: #C9D1D9;
   padding: 10px 14px;
-  border-radius: 12px;
+  border-radius: 4px;              /* 소프트 엣지 4px */
+  border: 1px solid #424242;       /* 없은 듯 있는 없함을 논는 업를없이 송의한 선 */
   max-width: 85%;
   word-wrap: break-word;
   line-height: 1.5;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
 /* Tool/Status Item */
@@ -203,30 +251,32 @@ body {
   opacity: 1;
 }
 
-/* AI Bubble (Refactored for UX) */
+/* AI Bubble — 다크 차콜 스틸 그레이 */
 .msg-ai {
   align-self: flex-start;
-  background-color: #323232;
-  border-radius: 12px;
+  background-color: #1E1F22;
+  border-radius: 6px; /* 더 날카롭고 단단한 느낌 */
   padding: 10px 14px;
-  max-width: 90%;
-  width: fit-content;
-  min-width: 300px;
-  border: none;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-  transition: all 0.3s ease;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #2c2d30; /* 배경보다 아주 살짝 밝은 선만 */
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  transition: all 0.2s ease;
 }
 
 .msg-ai.analysis {
-  background-color: #323232;
+  background-color: #1E1F22;
 }
 
 .msg-ai.improvement {
-  background-color: #363636;
+  background-color: #212225;
 }
 
 .msg-ai.error {
-  background-color: #3d282c;
+  background-color: #2d1e21;
+  border: 1px solid #4a2e33;
 }
 
 
@@ -494,24 +544,33 @@ body {
   transition: all 0.2s ease;
 }
 
+/* 대기(idle): 연한 회색 화살표 */
 .btn-icon.send {
-  color: #60a5fa;
+  color: #4b5563;
 }
 
+/* 입력 중(active): 프이트 블루로 활성화 */
 .btn-icon.send:hover:not(:disabled) {
-  color: #3b82f6;
+  color: #7aa2f7;
 }
 
+/* 입력값 있을 때: CSS로는 :not(:disabled)로 제어 불가능하므로 App.tsx에서도 케어 */
+/* disabled 상태에서도 색상 동일하게 유지 */
 .btn-icon.send:disabled {
-  color: #9ca3af;
+  color: #4b5563;
   cursor: default;
 }
 
+/* 입력값이 있을 때(active 클래스 부여됨): 블루 활성화 */
+.btn-icon.send.active {
+  color: #7aa2f7;
+}
+
 .btn-icon.stop {
-  color: #ef4444;
+  color: #b05a6a; /* 주위를 압도록 먹인 레드 */
 }
 .btn-icon.stop:hover {
-  color: #dc2626;
+  color: #cf6679;
 }
 
 .spinner-ring {
@@ -532,9 +591,8 @@ body {
   display: flex;
   align-items: center;
   font-size: 10px;
-  color: var(--text-muted);
+  color: #999;
   letter-spacing: 0.2px;
-  opacity: 0.4;
 }
 
 .model-status-footer strong {
@@ -608,16 +666,16 @@ body {
   gap: 4px;
   padding: 4px 10px;
   font-size: 11px;
-  color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #6b7280; /* 은은한 머튰 그레이 */
+  background: transparent; /* 평소엔 투명 */
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 .btn-text-action:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06); /* 호버 시만 연한 그레이 */
+  color: #ADB5BD;
 }
 
 /* ─── Markdown Body 스타일 ─── */
@@ -630,17 +688,18 @@ body {
 .markdown-body h2,
 .markdown-body h3,
 .markdown-body h4 {
-  color: #e0e0e0;
+  color: #C9D1D9; /* 순백색 금지, 말김한 실버 */
   margin: 16px 0 8px;
   font-weight: 700;
 }
 
-.markdown-body h1 { font-size: 18px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; }
+.markdown-body h1 { font-size: 18px; border-bottom: 1px solid rgba(255,255,255,0.07); padding-bottom: 6px; }
 .markdown-body h2 { font-size: 16px; }
 .markdown-body h3 { font-size: 14px; }
 
 .markdown-body p {
   margin: 8px 0;
+  color: #ADB5BD;
 }
 
 .markdown-body ul,
@@ -651,20 +710,21 @@ body {
 
 .markdown-body li {
   margin: 4px 0;
+  color: #ADB5BD;
 }
 
 .markdown-body code {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.35);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 12px;
   font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-  color: #e8c87a;
+  color: #d4a96a;
 }
 
 .markdown-body pre {
-  background: #1e1e1e;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #131416; /* 말풍선(#1E1F22)보다 확실히 어두운 코드 블록 */
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
   padding: 12px;
   overflow-x: auto;
@@ -802,7 +862,7 @@ body {
 }
 
 .markdown-body strong {
-  color: #e0e0e0;
+  color: #E9ECEF; /* Bold: 가장 밝은 글자도 #E9ECEF로 제한 */
   font-weight: 700;
 }
 

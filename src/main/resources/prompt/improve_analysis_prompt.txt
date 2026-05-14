@@ -17,9 +17,20 @@
 {{STRUCTURE_INFO}}
 {{KEY_CODE}}
 
+# Language-Specific Best Practices
+{{LANGUAGE}}에 맞는 관점으로 추가 분석하세요.
+
+- kotlin: null safety (?.  ?:), 코루틴 적절성, data class 활용, 스코프 함수(let/apply/run/also/with), sealed class 활용, when 표현식 활용
+- java: Optional 활용, Stream API 활용, final 키워드, 불필요한 null 체크, 디자인 패턴 적용 여부
+- python: list comprehension, with 문, 타입 힌트, f-string, 제너레이터 활용
+- sql: 인덱스 활용, N+1 문제, 서브쿼리 vs 조인, 불필요한 SELECT *
+- typescript/javascript: 타입 안정성, async/await 적절성, 불필요한 any 타입, 옵셔널 체이닝
+- xml: 불필요한 중첩, 리소스 재사용, 하드코딩된 값
+
+해당 언어가 위 목록에 없으면 일반적인 코드 품질 관점으로 분석하세요.
+
 # Instructions
 분석 전에 코드의 전체 구조를 충분히 파악한 뒤 응답을 시작하세요.
-위 Strictly Prohibited 규칙을 반드시 준수하며,
 아래 3개 섹션의 제목과 형식을 엄격히 준수하여 응답하세요.
 각 섹션은 최대 3개 항목만 기재하고, 유사한 문제는 하나로 묶으세요.
 
