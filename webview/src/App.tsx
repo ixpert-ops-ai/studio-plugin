@@ -153,10 +153,11 @@ const CodeBlock = ({ children, isCollapsible = false }: { children: React.ReactN
       </div>
       {shouldCollapse && (
         <button 
-          className="btn-text-action btn-code-toggle" 
+          className="btn-code-toggle" 
           onClick={() => setIsExpanded(!isExpanded)}
+          title={isExpanded ? '접기' : '펼치기'}
         >
-          {isExpanded ? '접기 ▲' : '펼치기 ▼'}
+          {isExpanded ? '∧' : '∨'}
         </button>
       )}
     </div>
@@ -1329,7 +1330,9 @@ function App() {
             onKeyDown={handleKeyDown}
           />
           {messages.some(m => m.isLoading || m.isStreaming) ? (
-            <button className="btn-icon stop" onClick={() => {
+            // key="stop" → React가 stop/send 전환 시 DOM 엘리먼트를 재사용하지 않고
+            // 새로 마운트하도록 강제. transition: all 에 의한 빨간색 색상 블리딩 방지.
+            <button key="stop" className="btn-icon stop" onClick={() => {
               setMessages(prev => prev.map(m => {
                 if (m.isLoading || m.isStreaming)
                   return { ...m, isLoading: false, isStreaming: false, currentStatus: undefined };
@@ -1344,6 +1347,7 @@ function App() {
             </button>
           ) : (
             <button
+              key="send"
               className={`btn-icon send${inputText.trim() ? ' active' : ''}`}
               onClick={handleSend}
               disabled={!inputText.trim()}
