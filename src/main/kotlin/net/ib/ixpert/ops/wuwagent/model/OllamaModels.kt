@@ -18,5 +18,6 @@ data class OllamaChatResponse(
     @SerializedName("model") val model: String?,
     @SerializedName("created_at") val createdAt: String?,
     @SerializedName("message") val message: OllamaMessage?,
-    @SerializedName("done") val done: Boolean?
+    @SerializedName("done") val done: Boolean?,
+    @SerializedName("error") val error: String? = null
 )
