@@ -124,7 +124,20 @@ class WebviewActionRouter(private val project: Project) {
                             
                             ApplicationManager.getApplication().invokeLater {
                                 if (result.targetFiles.isNotEmpty()) {
-                                    val extraText = "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
+                                    var extraText = ""
+                                    
+                                    val hasCorrections = result.targetFiles.any { it.description.contains("[AI 교정") || it.description.contains("[경고") }
+                                    if (hasCorrections) {
+                                        extraText += "\n\n> 🤖 **TargetFileValidator 자동 교정 결과**\n"
+                                        extraText += "> LLM의 환각이 감지되어 실제 프로젝트 메타그래프 기반으로 아래와 같이 안전하게 교정되었습니다.\n\n"
+                                        extraText += "| 순서 | 파일 경로 | 유형 | 작업 내용 |\n"
+                                        extraText += "|:---:|:---|:---:|:---|\n"
+                                        result.targetFiles.forEach { file ->
+                                            extraText += "| ${file.order} | ${file.path} | **${file.type}** | ${file.description} |\n"
+                                        }
+                                    }
+
+                                    extraText += "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
                                     bridge.sendMessageChunk(messageId, extraText)
                                 }
                                 bridge.sendMessage("chat", "", messageId) // 스트리밍 종료 신호
@@ -624,9 +637,9 @@ class WebviewActionRouter(private val project: Project) {
 
                         TaskPipeline.ExplainTask -> {
                             ExplainAgent().execute(context,
-                                onSuccess = { _ ->
+                                onSuccess = { res ->
                                     ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                        bridge.sendMessage("explain", res, messageId)
                                     }
                                 },
                                 onChunk = { chunk ->
@@ -644,9 +657,9 @@ class WebviewActionRouter(private val project: Project) {
 
                         TaskPipeline.Impact -> {
                             ImpactAgent().execute(context,
-                                onSuccess = { _ ->
+                                onSuccess = { res ->
                                     ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                        bridge.sendMessage("explain", res, messageId)
                                     }
                                 },
                                 onChunk = { chunk ->
@@ -664,9 +677,9 @@ class WebviewActionRouter(private val project: Project) {
 
                         TaskPipeline.QueryValidation -> {
                             QueryValidationAgent().execute(context,
-                                onSuccess = { _ ->
+                                onSuccess = { res ->
                                     ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                        bridge.sendMessage("explain", res, messageId)
                                     }
                                 },
                                 onChunk = { chunk ->

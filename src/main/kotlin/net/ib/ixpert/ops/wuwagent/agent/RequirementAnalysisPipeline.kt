@@ -4,6 +4,7 @@ import com.intellij.openapi.diagnostic.Logger
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ProjectSummaryFormatter
+import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.RepoMapFormatter
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.RelevanceFilter
 
 data class TargetFileSpec(
@@ -43,13 +44,30 @@ class RequirementAnalysisPipeline(private val client: LLMClient) {
             val filterResult = RelevanceFilter.filter(requirement, projectGraph, client) { progress ->
                 onChunk?.invoke(progress)
             }
+            // Ollama 서버의 연속 호출(키워드 추출 -> 전체 분석) 시 컨텍스트 정리 및 커넥션 안정화를 위한 대기
+            // OpenAI, AIPro 등 클라우드 API는 비동기 병렬 처리가 원활하므로 딜레이 제외
+            val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+            if (settings.apiType == net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OLLAMA) {
+                Thread.sleep(2000)
+            }
             filterResult.filteredGraph to filterResult.keywords
         } else {
             onChunk?.invoke("> 📊 프로젝트 규모: **${projectGraph.files.size}개 파일** — 전체 분석합니다.\n\n")
             projectGraph to emptyList()
         }
 
-        val summaryContext = ProjectSummaryFormatter.format(workingGraph)
+        val oldSummaryContext = ProjectSummaryFormatter.format(workingGraph)
+        val summaryContext = RepoMapFormatter.format(workingGraph)
+        
+        val reductionRate = if (oldSummaryContext.isNotEmpty()) {
+            (oldSummaryContext.length - summaryContext.length).toDouble() / oldSummaryContext.length * 100
+        } else 0.0
+        
+        logger.info("==== Phase 1 Token Test ====")
+        logger.info("Old Markdown Length: ${oldSummaryContext.length} chars")
+        logger.info("New RepoMap Length: ${summaryContext.length} chars")
+        logger.info(String.format("Reduction Rate: %.1f%%", reductionRate))
+        logger.info("============================")
 
         val filterNote = if (keywords.isNotEmpty()) {
             "\n\n> ℹ️ 아래 파일 목록은 요구사항 키워드(${keywords.joinToString(", ")}) 기반으로 필터링된 결과입니다. " +
@@ -96,12 +114,12 @@ class RequirementAnalysisPipeline(private val client: LLMClient) {
         val response = client.chat(systemPrompt, userMessage, onChunk = onChunk)
         val rawResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
 
-        val result = parseResponse(rawResponse)
+        val result = parseResponse(rawResponse, projectGraph)
         lastResult = result
         return result
     }
 
-    fun parseResponse(rawResponse: String): RequirementAnalysisResult {
+    fun parseResponse(rawResponse: String, projectGraph: ProjectGraph): RequirementAnalysisResult {
         val lines = rawResponse.lines()
         
         var summary = ""
@@ -172,9 +190,11 @@ class RequirementAnalysisPipeline(private val client: LLMClient) {
             }
         }
 
+        val validatedTargetFiles = TargetFileValidator.validate(targetFiles, projectGraph)
+
         return RequirementAnalysisResult(
             summary = summary.trim(),
-            targetFiles = targetFiles,
+            targetFiles = validatedTargetFiles,
             warnings = warnings.trim(),
             rawResponse = rawResponse
         )

@@ -84,6 +84,15 @@ class TaskAgent(
                         bridge.sendMessage("tool_noti", notiText, stepMsgId)
                     }
 
+                    // Ollama 다중 Step 연속 호출 시 컨텍스트 정리 및 커넥션 안정화를 위한 대기
+                    if (idx > 0) {
+                        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+                        if (settings.apiType == net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OLLAMA) {
+                            logger.info("TaskAgent: Ollama 다중 Step 연속 호출 대비 2초 대기")
+                            Thread.sleep(2000)
+                        }
+                    }
+
                     try {
                         val result = step.executeSync(context, client, stepChunkHandler, previousStepResult, allCompletedResults.toList(), toolNotiHandler)
 
