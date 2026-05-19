@@ -105,12 +105,12 @@ class WuwToolWindowFactory : ToolWindowFactory {
             "iXpert AI Assistant는 JCEF 기반 웹뷰가 필요합니다." to Font.PLAIN,
             "아래 방법으로 활성화 후 IDE를 재시작해 주세요." to Font.PLAIN,
             "" to Font.PLAIN,
-            "1. Help > Find Action > Registry 검색 후 실행" to Font.PLAIN,
-            "   ide.browser.jcef.enabled = true 로 변경" to Font.PLAIN,
+            "1. Help → Find Action 클릭" to Font.PLAIN,
+            "2. \"Choose Boot Java Runtime for the IDE\" 검색" to Font.PLAIN,
+            "3. 목록에서 JCEF가 포함된 버전 선택" to Font.PLAIN,
+            "4. OK 클릭 후 IDE 재시작" to Font.PLAIN,
             "" to Font.PLAIN,
-            "2. 또는 Android Studio 설정에서" to Font.PLAIN,
-            "   Settings > Appearance > Enable JCEF 활성화" to Font.PLAIN,
-            "" to Font.PLAIN,
+            "※ 이 설정은 최초 1회만 필요합니다." to Font.PLAIN,
             "문제가 지속되면 IDE를 최신 버전으로 업데이트해 주세요." to Font.PLAIN,
         )
 
