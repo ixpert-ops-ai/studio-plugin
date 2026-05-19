@@ -496,6 +496,10 @@ class WebviewActionRouter(private val project: Project) {
                             ?.groupValues?.get(1)?.replace("\\\\", "\\") ?: ""
                     }
                     val improveFilePath = firstAttachedFilePath.ifBlank { editor.virtualFile?.path ?: "" }
+                    // 선택 범위 Diff 수정용: 백그라운드 실행 전 EDT에서 선택 상태 선제 캡처
+                    // (ImproveAction 방식과 동일 — 이후 스레드에서 selection이 해제될 수 있음)
+                    val selectedEditorText = if (editor.selectionModel.hasSelection())
+                        editor.selectionModel.selectedText ?: "" else ""
 
                     // 🛎 즉시 시작 알림 (UI 스레드 큐로 보냄)
                     ApplicationManager.getApplication().invokeLater {
@@ -578,16 +582,36 @@ class WebviewActionRouter(private val project: Project) {
                                 }
                             }
                             else -> {
+                                // Step2 선택 범위 케이스: 원본 풀코드에서 선택 범위를 개선 코드로 교체
+                                // → 3-way Diff용 modifiedFullCode 생성 (ImproveAction과 동일 방식)
+                                // Step3(안정성 평가) 및 @파일 케이스(applyScope ≠ "선택 영역") 제외
+                                val modifiedFullCode = if (
+                                    result.applyScope == "선택 영역" &&
+                                    stepMsgId != messageId &&
+                                    !stepMsgId.endsWith("_s3") &&
+                                    result.isSuccess &&
+                                    selectedEditorText.isNotBlank()
+                                ) {
+                                    val fullCode = ApplicationManager.getApplication().runReadAction(
+                                        com.intellij.openapi.util.Computable { editor.document.text }
+                                    )
+                                    val improvedCode = EditorApplyService.extractCodeBlock(result.llmResponse)
+                                        .takeIf { it.isNotBlank() } ?: result.llmResponse
+                                    fullCode.replaceFirst(selectedEditorText, improvedCode)
+                                } else ""
+
                                 ApplicationManager.getApplication().invokeLater {
+                                    val meta = mutableMapOf(
+                                        "stepLabel" to stepLabel,
+                                        "applyable" to "false",
+                                        "isSuccess" to result.isSuccess.toString()
+                                    )
+                                    if (modifiedFullCode.isNotBlank()) meta["modifiedFullCode"] = modifiedFullCode
                                     bridge.sendMessage(
                                         subType = "task_step",
                                         content = result.llmResponse,
                                         messageId = stepMsgId,
-                                        meta = mapOf(
-                                            "stepLabel" to stepLabel,
-                                            "applyable" to "false",
-                                            "isSuccess" to result.isSuccess.toString()
-                                        )
+                                        meta = meta
                                     )
                                 }
                             }
@@ -917,7 +941,12 @@ class WebviewActionRouter(private val project: Project) {
                 // ── Test Connection: Ollama 서버 연결 테스트 ──────────────
                 "/testConnection" -> {
                     val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
-                    val baseUrl = payload["baseUrl"] ?: settings.baseUrl
+                    val defaultUrl = when (settings.apiType) {
+                        net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OLLAMA -> settings.ollamaServerUrl
+                        net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
+                        else -> settings.openaiServerUrl
+                    }
+                    val baseUrl = payload["baseUrl"] ?: defaultUrl
                     val apiKey = payload["apiKey"] ?: settings.apiKey
                     logger.info("Router: /testConnection 실행 (baseUrl=$baseUrl)")
                     net.ib.ixpert.ops.wuwagent.service.WuwLlmService.testConnection(null, baseUrl, apiKey)
@@ -926,7 +955,12 @@ class WebviewActionRouter(private val project: Project) {
                 // ── Fetch Models: 모델 리스트 조회 ──────────────
                 "/fetchModels" -> {
                     val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
-                    val baseUrl = payload["baseUrl"] ?: settings.baseUrl
+                    val defaultUrl = when (settings.apiType) {
+                        net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OLLAMA -> settings.ollamaServerUrl
+                        net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
+                        else -> settings.openaiServerUrl
+                    }
+                    val baseUrl = payload["baseUrl"] ?: defaultUrl
                     val apiKey = payload["apiKey"] ?: settings.apiKey
                     logger.info("Router: /fetchModels 실행 (baseUrl=$baseUrl)")
                     
@@ -1017,6 +1051,27 @@ class WebviewActionRouter(private val project: Project) {
                     ApplicationManager.getApplication().executeOnPooledThread {
                         net.ib.ixpert.ops.wuwagent.service.ChatHistoryService.deleteChat(id)
                     }
+                }
+
+                // ── Open In Editor: 파일 경로로 IDE 에디터 열기 ──────────────
+                "/openInEditor" -> {
+                    val filePath = payload["filePath"] ?: textBody
+                    logger.info("Router: /openInEditor → $filePath")
+                    if (filePath.isBlank()) {
+                        bridge.sendMessage("error", "파일 경로가 없습니다.")
+                        return@invokeLater
+                    }
+                    val vFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                        .findFileByPath(filePath)
+                    if (vFile == null) {
+                        com.intellij.openapi.ui.Messages.showInfoMessage(
+                            project,
+                            "파일을 찾을 수 없습니다:\n$filePath",
+                            "iXpert AI Assistant"
+                        )
+                        return@invokeLater
+                    }
+                    FileEditorManager.getInstance(project).openFile(vFile, true)
                 }
 
                 else -> {

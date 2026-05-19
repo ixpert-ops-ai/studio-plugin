@@ -18,10 +18,15 @@ class OpenAIClient : LLMClient {
     override fun chat(
         systemPrompt: String,
         userCode: String,
+        maxTokens: Int?,
         onChunk: ((String) -> Unit)?
     ): OllamaChatResponse? {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
-        val serverUrl = "${settings.baseUrl.trimEnd('/')}/v1/chat/completions"
+        val baseUrl = when (settings.apiType) {
+            net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
+            else -> settings.openaiServerUrl
+        }
+        val serverUrl = "${baseUrl.trimEnd('/')}/v1/chat/completions"
 
         val messagesList = listOf(
             mapOf("role" to "system", "content" to systemPrompt),
@@ -32,7 +37,7 @@ class OpenAIClient : LLMClient {
             "messages" to messagesList,
             "stream" to (onChunk != null),
             "temperature" to settings.temperature,
-            "max_tokens" to 4096
+            "max_tokens" to (maxTokens ?: 4096)
         )
         val jsonPayload = gson.toJson(requestBody)
         val isStreaming = onChunk != null

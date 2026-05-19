@@ -25,46 +25,67 @@ class ImplementationPipeline(
     }
 
     /**
-     * 파일 경로를 기반으로 계층 가중치를 계산합니다. (Phase 2a의 계층 역순 정렬 보완)
-     * Phase 1의 project-graph.json이 있다면 그 분류를 우선 사용합니다.
+     * Contract-First 생성 순서를 결정합니다.
+     * Top-Down 순서: DTO/Entity → Interface → Impl(Persistence) → Impl(Business) → Utility → Controller
+     *
+     * 이 순서가 중요한 이유:
+     * - Interface를 Impl보다 먼저 생성하면 @Override를 통해 시그니처가 자연스럽게 일치
+     * - Controller(Caller)를 마지막에 생성하면 확정된 Service/Utility 시그니처를 참조 가능
+     * - DTO를 가장 먼저 생성하면 모든 파일이 동일한 데이터 구조를 참조
+     *
+     * MetaGraph가 있으면 fileType/isInterface 기반으로 정확히 분류하고,
+     * 없으면 파일명 패턴 기반 Fallback으로 동작합니다.
+     *
+     * NOTE: ExcelDownUtil 같은 AbstractView 상속 유틸은 MetaGraph에서 fileType=VIEW로
+     * 분류될 수 있으므로, fileType과 파일명 문자열 매칭을 OR 조건으로 결합하여 처리합니다.
      */
-    private fun getLayerWeight(path: String): Int {
-        // 1순위: project-graph.json의 파일 분류(SpringFileType) 기반
+    private fun getGenerationOrder(path: String): Int {
+        val lowerPath = path.lowercase().replace("\\", "/")
         val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
         val graph = graphLoader?.loadGraph()
-        
-        if (graph != null) {
-            val normalizedPath = path.replace("\\", "/").removePrefix("/")
-            val fileNode = graph.files.values.find { it.path.replace("\\", "/").endsWith(normalizedPath) }
-            
-            if (fileNode != null) {
-                return when (fileNode.fileType) {
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.ENTITY,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.REPOSITORY,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.MAPPER -> 1 // PERSISTENCE
-                    
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.SERVICE -> 2 // BUSINESS
-                    
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.CONTROLLER,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.REST_CONTROLLER,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.VIEW -> 3 // PRESENTATION
-                    
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.DTO,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.VO -> 4 // DATA TRANSFER
-                    
-                    else -> 5 // COMMON (CONFIG, UTIL, FILTER 등)
-                }
-            }
+        val fileNode = graph?.files?.values?.find {
+            it.path.replace("\\", "/").endsWith(lowerPath.removePrefix("/"))
         }
 
-        // 2순위: 그래프에 파일이 없는 경우(신규 파일 등) 기존 경로 패턴 Fallback
-        val lowerPath = path.lowercase()
         return when {
-            lowerPath.contains("dao") || lowerPath.contains("repository") || lowerPath.contains("entity") || lowerPath.contains("mapper") -> 1
-            lowerPath.contains("service") || lowerPath.contains("biz") -> 2
-            lowerPath.contains("controller") || lowerPath.contains("api") || lowerPath.contains("web") || lowerPath.contains("view") -> 3
-            lowerPath.contains("dto") || lowerPath.contains("vo") -> 4
-            else -> 5
+            // 1순위: DTO/Entity/VO — 다른 모든 파일이 참조하는 데이터 구조를 먼저 확정
+            fileNode?.fileType in listOf(
+                net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.DTO,
+                net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.VO,
+                net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.ENTITY
+            ) -> 1
+            lowerPath.let { it.contains("dto") || it.contains("entity") || it.contains("vo") || it.contains("model") }
+                && !lowerPath.contains("controller") -> 1
+
+            // 2순위: Interface (DAO, Service, Repository, Mapper 인터페이스)
+            fileNode?.isInterface == true -> 2
+            !lowerPath.contains("impl") && lowerPath.let {
+                it.endsWith("dao.java") || it.endsWith("service.java") ||
+                it.endsWith("repository.java") || it.endsWith("mapper.java")
+            } -> 2
+
+            // 3순위: Persistence 구현체 (DaoImpl, RepositoryImpl)
+            lowerPath.contains("impl") && lowerPath.let {
+                it.contains("dao") || it.contains("repository") || it.contains("mapper")
+            } -> 3
+
+            // 4순위: Business 구현체 (ServiceImpl)
+            lowerPath.contains("impl") && lowerPath.contains("service") -> 4
+
+            // 5순위: Utility — fileType=UTIL 또는 파일명에 "util"/"helper"/"exporter" 포함
+            // (ExcelDownUtil 등 AbstractView 상속 클래스는 MetaGraph에서 VIEW로 분류되므로 파일명 매칭 필요)
+            fileNode?.fileType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.UTIL -> 5
+            lowerPath.let { it.contains("util") || it.contains("helper") || it.contains("exporter") } -> 5
+
+            // 6순위: Controller/Caller — 확정된 Service interface와 Utility 시그니처를 참조
+            fileNode?.fileType in listOf(
+                net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.CONTROLLER,
+                net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.REST_CONTROLLER
+            ) -> 6
+            lowerPath.contains("controller") -> 6
+
+            // 7순위: 기타 (Config, Filter, Interceptor 등)
+            else -> 7
         }
     }
 
@@ -75,11 +96,22 @@ class ImplementationPipeline(
         onChunk: (String) -> Unit
     ) {
         val sortedTargets = analysisResult.targetFiles.sortedWith(
-            compareBy<net.ib.ixpert.ops.wuwagent.agent.TargetFileSpec> { getLayerWeight(it.path) }
-            .thenBy { if (it.path.lowercase().contains("impl")) 0 else 1 }
+            compareBy<net.ib.ixpert.ops.wuwagent.agent.TargetFileSpec> { getGenerationOrder(it.path) }
         )
         
         logger.info("ImplementationPipeline: 총 ${sortedTargets.size}개 파일 순차 처리 시작")
+
+        // [Phase 1] Contract-First: 코드 생성 전에 시그니처 계약을 확정
+        val contract = try {
+            ContractResolver(project, client).resolve(analysisResult)
+        } catch (e: Exception) {
+            logger.warn("ContractResolver 실행 실패, Contract 없이 진행합니다: ${e.message}")
+            null
+        }
+        if (contract != null) {
+            logger.info("Contract 확정: 공유 메서드 ${contract.sharedMethods.size}개")
+            onChunk("\n> 📋 **시그니처 계약 확정**: ${contract.sharedMethods.size}개 메서드의 타입이 사전 합의되었습니다.\n\n")
+        }
 
         val contextChain = mutableListOf<String>()
         val generatedSnippets = mutableMapOf<String, String>()
@@ -140,9 +172,12 @@ class ImplementationPipeline(
                 isLargeFile -> buildLargeFileSystemPrompt(isInterface)
                 else -> buildSmallFileSystemPrompt(isInterface)
             }
+            // [Phase 2] Contract 섹션 구성: 해당 파일의 계약 정보를 프롬프트에 주입
+            val contractSection = buildContractSection(contract, target)
+
             val userPrompt = when {
                 isDtoOrEntity && !isNewFile -> buildDtoOnlyUserPrompt(target, contextChain, analysisResult.summary, sortedTargets)
-                else -> buildUserPromptForFile(target, contextChain, analysisResult.summary, sortedTargets)
+                else -> buildUserPromptForFile(target, contextChain, analysisResult.summary, sortedTargets, contractSection)
             }
 
             // Fallback guide returned from buildUserPromptForFile means skipping
@@ -164,7 +199,7 @@ class ImplementationPipeline(
             onChunk("````text\n")
 
             try {
-                val response = client.chat(systemPrompt, userPrompt) { chunk ->
+                val response = client.chat(systemPrompt, userPrompt, onChunk = { chunk ->
                     if (abortReason != null) return@chat
 
                     fullResponse += chunk
@@ -189,7 +224,7 @@ class ImplementationPipeline(
 
                     // UI로 실시간 전송 (태그 제거 없이 필터링)
                     onChunk(chunk)
-                }
+                })
 
                 // [수정] 4-backtick UI wrapping 종료
                 onChunk("\n````\n")
@@ -211,7 +246,7 @@ class ImplementationPipeline(
                 val finalResponseText = response?.message?.content ?: fullResponse
 
                 // 인터페이스 파일인 경우 환각 메서드 필터링, DTO 파일인 경우 스니펫 병합
-                val processedResponse = if (isInterface) {
+                var processedResponse = if (isInterface) {
                     val filtered = runReadAction { filterInterfaceHallucination(finalResponseText, target, sortedTargets, contextChain) }
                     if (filtered != finalResponseText) {
                         logger.info("인터페이스 환각 필터링 적용: ${target.path}")
@@ -249,6 +284,56 @@ class ImplementationPipeline(
                 if (consistencyWarnings.isNotEmpty()) {
                     onChunk("\n\n> ⚠️ **시그니처 일관성 주의:**\n")
                     consistencyWarnings.forEach { onChunk("> - $it\n") }
+                }
+
+                // [Phase 3] Contract 기반 반환 타입 검증 + 1회 자동 재생성
+                val fileContract = contract?.fileContracts?.find { it.filePath == target.path }
+                if (fileContract != null) {
+                    val contractWarnings = SignatureValidator.validateAgainstContract(processedResponse, fileContract)
+                    if (contractWarnings.isNotEmpty()) {
+                        onChunk("\n\n> ⚠️ **Contract 시그니처 위반 감지 — 자동 재생성을 시도합니다:**\n")
+                        contractWarnings.forEach { onChunk("> - $it\n") }
+
+                        // 1회 자동 retry: 위반 내용을 명시하여 재생성 요청
+                        val correctionPrompt = buildString {
+                            appendLine(userPrompt)
+                            appendLine()
+                            appendLine("## ⛔ 이전 생성 결과에서 다음 시그니처 위반이 감지되었습니다:")
+                            contractWarnings.forEach { appendLine("- $it") }
+                            appendLine()
+                            appendLine("위 위반 사항을 반드시 수정하여 다시 생성하세요.")
+                            appendLine("계약에 명시된 반환 타입과 파라미터 타입을 정확히 사용해야 합니다.")
+                        }
+
+                        onChunk("\n> 🔄 **재생성 중...**\n\n")
+                        onChunk("````text\n")
+
+                        var retryResponse = ""
+                        try {
+                            client.chat(systemPrompt, correctionPrompt, onChunk = { chunk ->
+                                retryResponse += chunk
+                                onChunk(chunk)
+                            })
+                        } catch (e: Exception) {
+                            logger.warn("Contract 위반 재생성 실패: ${e.message}")
+                        }
+
+                        onChunk("\n````\n")
+
+                        if (retryResponse.isNotBlank()) {
+                            // 재생성 결과로 교체
+                            val retryWarnings = SignatureValidator.validateAgainstContract(retryResponse, fileContract)
+                            if (retryWarnings.isEmpty()) {
+                                onChunk("\n> ✅ **재생성 성공 — 시그니처가 계약과 일치합니다.**\n\n")
+                                processedResponse = retryResponse
+                                generatedSnippets[target.path] = processedResponse
+                            } else {
+                                onChunk("\n> ⚠️ **재생성 후에도 위반이 남아있습니다. 수동 확인이 필요합니다:**\n")
+                                retryWarnings.forEach { onChunk("> - $it\n") }
+                                // 무한 루프 방지: 2회 이상 retry하지 않음
+                            }
+                        }
+                    }
                 }
 
                 if (processedResponse.contains("[MODIFIED_SIGNATURES]")) {
@@ -328,7 +413,8 @@ class ImplementationPipeline(
         targetFile: TargetFileSpec,
         contextChain: List<String>,
         requirementSummary: String,
-        allTargetFiles: List<TargetFileSpec>
+        allTargetFiles: List<TargetFileSpec>,
+        contractSection: String = ""
     ): String {
         var actualType = targetFile.type
         
@@ -351,11 +437,11 @@ class ImplementationPipeline(
         }
 
         return if (correctedTarget.type.contains("신규")) {
-            buildNewFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
+            buildNewFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles, contractSection)
         } else if (!isDtoOrEntity && runReadAction { psiMethodExtractor.isLargeFile(correctedTarget.path) }) {
-            buildLargeFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
+            buildLargeFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles, contractSection)
         } else {
-            buildSmallFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles)
+            buildSmallFilePrompt(correctedTarget, contextChain, requirementSummary, allTargetFiles, contractSection)
         }
     }
 
@@ -364,7 +450,8 @@ class ImplementationPipeline(
         contextChain: List<String>,
         requirementSummary: String,
         allTargetFiles: List<TargetFileSpec>,
-        sourceCodeSection: String
+        sourceCodeSection: String,
+        contractSection: String = ""
     ): String {
         val overallPlan = allTargetFiles.joinToString("\n") { 
             val marker = if (it.path == targetFile.path) "👉 " else "   "
@@ -425,6 +512,7 @@ class ImplementationPipeline(
             
             **주의**: 오직 위 파일 하나에 대해서만 코드를 생성하세요. 계획에 없는 다른 파일(Security Filter 등)을 임의로 생성하지 마세요.
             $bypassTemplate
+            $contractSection
             
             $guidelines
             
@@ -451,11 +539,13 @@ class ImplementationPipeline(
         targetFile: TargetFileSpec,
         contextChain: List<String>,
         requirementSummary: String,
-        allTargetFiles: List<TargetFileSpec>
+        allTargetFiles: List<TargetFileSpec>,
+        contractSection: String = ""
     ): String {
         return buildCommonUserPrompt(
             targetFile, contextChain, requirementSummary, allTargetFiles, 
-            "이 파일은 신규 생성입니다. 요구사항에 맞는 전체 코드를 새로 작성하세요."
+            "이 파일은 신규 생성입니다. 요구사항에 맞는 전체 코드를 새로 작성하세요.",
+            contractSection
         )
     }
 
@@ -501,7 +591,8 @@ class ImplementationPipeline(
         targetFile: TargetFileSpec,
         contextChain: List<String>,
         requirementSummary: String,
-        allTargetFiles: List<TargetFileSpec>
+        allTargetFiles: List<TargetFileSpec>,
+        contractSection: String = ""
     ): String {
         val absolutePath = "${project.basePath}/${targetFile.path}".replace("//", "/")
         val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath)
@@ -511,14 +602,15 @@ class ImplementationPipeline(
             return "> ⚠️ **파일을 찾을 수 없어 건너뜁니다:** `${targetFile.path}`\n\n"
         }
         val sourceCode = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
-        return buildCommonUserPrompt(targetFile, contextChain, requirementSummary, allTargetFiles, "```java\n$sourceCode\n```")
+        return buildCommonUserPrompt(targetFile, contextChain, requirementSummary, allTargetFiles, "```java\n$sourceCode\n```", contractSection)
     }
 
     private fun buildLargeFilePrompt(
         targetFile: TargetFileSpec,
         contextChain: List<String>,
         requirementSummary: String,
-        allTargetFiles: List<TargetFileSpec>
+        allTargetFiles: List<TargetFileSpec>,
+        contractSection: String = ""
     ): String {
         val skeleton = runReadAction {
             psiMethodExtractor.extract(
@@ -539,7 +631,7 @@ class ImplementationPipeline(
             ${skeleton.toPromptText()}
         """.trimIndent()
         
-        return buildCommonUserPrompt(targetFile, contextChain, requirementSummary, allTargetFiles, sourceCodeSection)
+        return buildCommonUserPrompt(targetFile, contextChain, requirementSummary, allTargetFiles, sourceCodeSection, contractSection)
     }
 
     private fun buildSmallFileSystemPrompt(isInterface: Boolean = false): String {
@@ -716,4 +808,130 @@ class ImplementationPipeline(
         return filteredResponse
     }
     // 가이드 및 프롬프트 생성 유틸들
+
+    /**
+     * [Phase 2] Contract 기반 프롬프트 섹션을 구성합니다.
+     * 확정된 시그니처 계약과 Few-shot 예시(올바른/잘못된)를 포함합니다.
+     *
+     * @param contract 전체 Contract (null이면 빈 문자열 반환)
+     * @param targetFile 현재 생성 대상 파일
+     * @return 프롬프트에 삽입할 Contract 섹션 텍스트
+     */
+    private fun buildContractSection(contract: ImplementationContract?, targetFile: TargetFileSpec): String {
+        if (contract == null) return ""
+
+        val fileContract = contract.fileContracts.find { it.filePath == targetFile.path }
+        if (fileContract == null || fileContract.methods.isEmpty()) return ""
+
+        return buildString {
+            appendLine()
+            appendLine("## 📋 확정 시그니처 계약 (반드시 준수)")
+            appendLine("아래 시그니처는 이미 다른 파일들과 합의된 계약입니다. **절대 변경하지 마세요.**")
+            appendLine()
+
+            for (method in fileContract.methods) {
+                appendLine("- **메서드명**: `${method.methodName}`")
+                appendLine("- **반환 타입**: `${method.returnType}`")
+                appendLine("- **파라미터**: `${method.paramSignature}`")
+                if (method.isStatic) appendLine("- **호출 방식**: `static`")
+                if (method.calledBy.isNotEmpty()) {
+                    appendLine("- **이 메서드의 호출자**: ${method.calledBy.joinToString(", ") { "`$it`" }}")
+                }
+                if (method.calls.isNotEmpty()) {
+                    appendLine("- **이 메서드가 호출하는 대상**: ${method.calls.joinToString(", ") { "`$it`" }}")
+                }
+                appendLine()
+            }
+
+            // 호출 관계 컨텍스트 (파일 단위)
+            if (fileContract.calledFrom.isNotEmpty() || fileContract.callsTo.isNotEmpty()) {
+                appendLine("## 🔗 호출 관계 (이 파일의 위치)")
+                if (fileContract.calledFrom.isNotEmpty()) {
+                    appendLine("**이 파일을 호출하는 곳:**")
+                    fileContract.calledFrom.distinctBy { it.callerClass }.forEach {
+                        appendLine("- `${it.callerClass}` → 이 파일의 메서드를 호출합니다. 반환 타입이 호출자의 기대와 일치해야 합니다.")
+                    }
+                }
+                if (fileContract.callsTo.isNotEmpty()) {
+                    appendLine("**이 파일이 호출하는 곳:**")
+                    fileContract.callsTo.distinctBy { it.calleeClass }.forEach {
+                        appendLine("- 이 파일 → `${it.calleeClass}`의 메서드를 호출합니다. 파라미터 타입이 대상의 시그니처와 일치해야 합니다.")
+                    }
+                }
+                appendLine()
+            }
+
+            // 계층 아키텍처 규칙 주입
+            val lowerPath = targetFile.path.lowercase()
+            appendLine("## 🏗️ 계층 아키텍처 규칙")
+            when {
+                lowerPath.contains("service") && !lowerPath.contains("controller") -> {
+                    appendLine("이 파일은 **Service 계층**입니다:")
+                    appendLine("- ❌ `HttpServletRequest`, `HttpServletResponse`를 파라미터로 받지 마세요 — Controller의 역할입니다.")
+                    appendLine("- ❌ `SqlSession`, MyBatis XML 매퍼를 직접 호출하지 마세요 — DAO의 역할입니다.")
+                    appendLine("- ✅ DAO/Repository를 주입받아 호출하고, 비즈니스 로직만 처리하세요.")
+                    appendLine("- ✅ 파라미터는 `Map`, `DTO`, 또는 기본 타입만 사용하세요.")
+                }
+                lowerPath.contains("dao") || (lowerPath.contains("repository") && !lowerPath.contains("controller")) -> {
+                    appendLine("이 파일은 **DAO/Repository 계층**입니다:")
+                    appendLine("- ❌ `HttpServletRequest`, `HttpServletResponse`를 파라미터로 받지 마세요.")
+                    appendLine("- ❌ 인증(JWT/Session) 검증 로직을 넣지 마세요 — Controller/Filter의 역할입니다.")
+                    appendLine("- ✅ 오직 DB 접근(SQL 실행, MyBatis 호출)만 담당하세요.")
+                }
+                lowerPath.contains("controller") -> {
+                    appendLine("이 파일은 **Controller 계층**입니다:")
+                    appendLine("- ❌ `SqlSession`, MyBatis XML 매퍼를 직접 호출하지 마세요 — DAO의 역할입니다.")
+                    appendLine("- ✅ Service를 주입받아 호출하고, 요청/응답 변환만 처리하세요.")
+                    appendLine("- ✅ `HttpServletRequest`, `HttpServletResponse`는 이 계층에서만 사용 가능합니다.")
+                }
+                lowerPath.let { it.contains("util") || it.contains("helper") } -> {
+                    appendLine("이 파일은 **Utility 계층**입니다:")
+                    appendLine("- ✅ 입력 파라미터 타입을 Contract에 명시된 타입과 정확히 일치시키세요.")
+                    appendLine("- ✅ Service나 Controller에서 전달받은 데이터를 가공하는 역할입니다.")
+                }
+                else -> {}
+            }
+            appendLine()
+
+            // Few-shot: 올바른 예시
+            appendLine("## ✅ 올바른 예시")
+            for (method in fileContract.methods) {
+                val roleHint = when (fileContract.role) {
+                    FileRole.INTERFACE_DECLARATION -> {
+                        "```java\n${method.returnType} ${method.methodName}(${method.paramSignature});\n```"
+                    }
+                    FileRole.OVERRIDE_IMPLEMENTATION -> {
+                        "```java\n@Override\npublic ${method.returnType} ${method.methodName}(${method.paramSignature}) {\n    // 구현 코드\n}\n```"
+                    }
+                    FileRole.CALLER -> {
+                        "```java\n${method.returnType} result = service.${method.methodName}(paramMap);\n```"
+                    }
+                    else -> ""
+                }
+                if (roleHint.isNotBlank()) appendLine(roleHint)
+            }
+
+            // Few-shot: 잘못된 예시
+            appendLine()
+            appendLine("## ❌ 잘못된 예시 (절대 금지)")
+            for (method in fileContract.methods) {
+                val wrongType = when {
+                    method.returnType.contains("HashMap") -> "List<SurveyDto>"
+                    method.returnType.contains("List") -> "JSONArray"
+                    else -> "Object"
+                }
+                appendLine("```java")
+                appendLine("public $wrongType ${method.methodName}(...) // ← 반환 타입 변경 금지")
+                appendLine("```")
+            }
+
+            appendLine()
+            appendLine("## ⚠️ 금지 사항")
+            for (method in fileContract.methods) {
+                appendLine("- `${method.methodName}`의 반환 타입을 `${method.returnType}` 외의 타입으로 변경 금지")
+                appendLine("- 파라미터 타입을 `${method.paramSignature}` 외의 타입으로 변경 금지")
+            }
+            appendLine()
+        }
+    }
 }

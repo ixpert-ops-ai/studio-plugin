@@ -131,7 +131,7 @@ class ImpactAgent : BaseAgent() {
                     }
                 }
 
-                val response = ollamaClient.chat(systemPrompt, userMessage, wrappedOnChunk)
+                val response = ollamaClient.chat(systemPrompt, userMessage, onChunk = wrappedOnChunk)
 
                 if (TaskCancellationToken.isCancelled.get()) {
                     onError("__cancelled__")

@@ -19,10 +19,11 @@ class OllamaClient : LLMClient {
     override fun chat(
         systemPrompt: String,
         userCode: String,
+        maxTokens: Int?,
         onChunk: ((String) -> Unit)?
     ): OllamaChatResponse? {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
-        val serverUrl = "${settings.baseUrl.trimEnd('/')}/api/chat"
+        val serverUrl = "${settings.ollamaServerUrl.trimEnd('/')}/api/chat"
 
         val messages = listOf(
             OllamaMessage(role = "system", content = systemPrompt),
@@ -35,7 +36,7 @@ class OllamaClient : LLMClient {
             options = mapOf(
                 "temperature" to settings.temperature,
                 "num_ctx" to settings.contextWindow,
-                "num_predict" to 4096,
+                "num_predict" to (maxTokens ?: 4096),
                 "repeat_penalty" to 1.1,
                 "repeat_last_n" to 256
             )

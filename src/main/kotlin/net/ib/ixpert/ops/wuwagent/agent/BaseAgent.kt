@@ -56,7 +56,7 @@ abstract class BaseAgent : WuwAgent {
                 logger.info("BaseAgent: 프롬프트 전달 완료. messageId=$messageId, Stream=${onChunk != null}")
 
                 // 1. Client HTTP 스트리밍/블로킹 호출
-                val response = ollamaClient.chat(systemPrompt, userMessage, onChunk)
+                val response = ollamaClient.chat(systemPrompt, userMessage, onChunk = onChunk)
                 logger.info("BaseAgent: LLM 응답 수신 완료 여부 = ${response?.message != null}")
 
                 // 2. 취소 여부 확인 — onError("__cancelled__") 로 Router에 전달

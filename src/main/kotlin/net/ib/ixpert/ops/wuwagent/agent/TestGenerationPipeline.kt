@@ -92,9 +92,9 @@ class TestGenerationPipeline(
 
             try {
                 // LLM 호출 (스트리밍)
-                llmClient.chat(systemPrompt, userPrompt) { chunk ->
+                llmClient.chat(systemPrompt, userPrompt, onChunk = { chunk ->
                     onChunk(chunk)
-                }
+                })
             } catch (e: Exception) {
                 logger.error("Error generating test for ${target.targetFile.path}", e)
                 onChunk("\n\n> ❌ **테스트 생성 중 에러가 발생하여 이 파일을 건너뜁니다:** `${e.message}`\n\n")

@@ -13,11 +13,13 @@ import com.intellij.openapi.application.ApplicationManager
 )
 class SettingsState : PersistentStateComponent<SettingsState.State> {
 
-    enum class ApiType { OLLAMA, OPENAI_COMPATIBLE }
+    enum class ApiType { OLLAMA, OPENAI_COMPATIBLE, AIPRO }
 
     data class State(
         var apiType: ApiType = ApiType.OLLAMA,
-        var baseUrl: String = "http://ollama.ixpertops.cloud",
+        var ollamaServerUrl: String = "http://ollama.ixpertops.cloud",
+        var openaiServerUrl: String = "http://ollama.ixpertops.cloud",
+        var aiproServerUrl: String = "https://aipro.samsungcard.biz:20443/open/api",
         var apiKey: String = "ollama",
         var model: String = "qwen3-coder:30b",
         var temperature: Float = 0.1f,

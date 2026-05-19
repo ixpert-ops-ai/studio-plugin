@@ -4,6 +4,7 @@ import com.intellij.openapi.diagnostic.Logger
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ProjectSummaryFormatter
+import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.RelevanceFilter
 
 data class TargetFileSpec(
     val order: Int,
@@ -26,12 +27,34 @@ class RequirementAnalysisPipeline(private val client: LLMClient) {
 
     companion object {
         var lastResult: RequirementAnalysisResult? = null
+
+        /**
+         * 이 파일 수 이하이면 필터링 없이 전체 전달 (소규모 프로젝트는 필터링 불필요).
+         */
+        private const val FILE_COUNT_THRESHOLD = 10
     }
 
     private val logger = Logger.getInstance(RequirementAnalysisPipeline::class.java)
 
     fun analyze(requirement: String, projectGraph: ProjectGraph, onChunk: ((String) -> Unit)? = null): RequirementAnalysisResult {
-        val summaryContext = ProjectSummaryFormatter.format(projectGraph)
+        // 대형 프로젝트(500+ 파일)는 RelevanceFilter로 관련 파일만 추출
+        val (workingGraph, keywords) = if (projectGraph.files.size > FILE_COUNT_THRESHOLD) {
+            onChunk?.invoke("> 📊 프로젝트 규모: **${projectGraph.files.size}개 파일** — 관련 파일만 필터링합니다.\n\n")
+            val filterResult = RelevanceFilter.filter(requirement, projectGraph, client) { progress ->
+                onChunk?.invoke(progress)
+            }
+            filterResult.filteredGraph to filterResult.keywords
+        } else {
+            onChunk?.invoke("> 📊 프로젝트 규모: **${projectGraph.files.size}개 파일** — 전체 분석합니다.\n\n")
+            projectGraph to emptyList()
+        }
+
+        val summaryContext = ProjectSummaryFormatter.format(workingGraph)
+
+        val filterNote = if (keywords.isNotEmpty()) {
+            "\n\n> ℹ️ 아래 파일 목록은 요구사항 키워드(${keywords.joinToString(", ")}) 기반으로 필터링된 결과입니다. " +
+            "목록에 없는 파일이 필요하면 \"신규\"로 표시하세요."
+        } else ""
 
         val systemPrompt = """
             당신은 Spring Boot 프로젝트의 구조를 분석하는 시니어 아키텍트입니다.
@@ -46,7 +69,7 @@ class RequirementAnalysisPipeline(private val client: LLMClient) {
             6. 파일 경로는 프로젝트 루트 기준 상대 경로로 작성하세요 (실제 경로와 정확히 일치해야 함).
             
             ## 응답 포맷
-            반드시 아래 포맷으로만 응답하세요. 포맷 외의 설명은 금지합니다.
+            아래 포맷을 준수하여 분석 결과를 작성하세요. 필요하다면 분석 과정을 서술해도 좋습니다.
             
             ### 요구사항 요약
             (요구사항을 1~2문장으로 재정리)
@@ -60,17 +83,17 @@ class RequirementAnalysisPipeline(private val client: LLMClient) {
             
             ### 작업 시 주의사항
             (ChangeRisk, 의존성 전파 관련 주의사항 2~3줄)
-            
+            $filterNote
             ---
             ## 프로젝트 파일 목록
             $summaryContext
         """.trimIndent()
 
-        logger.info("==== Phase 2a: LLM에 전달되는 Project Summary Context ====\n$summaryContext\n==================================================")
+        logger.info("==== Phase 2a: LLM에 전달되는 Project Summary Context (${workingGraph.files.size}개 파일) ====\n$summaryContext\n==================================================")
 
-        val userMessage = "## 요구사항\n$requirement"
+        val userMessage = "## 요구사항\n$requirement\n\n위 요구사항을 분석하여 응답을 작성해주세요. 자유롭게 생각 과정을 거친 후, 최종 결과는 지정된 포맷(테이블 포함)에 맞게 출력하세요."
 
-        val response = client.chat(systemPrompt, userMessage, onChunk)
+        val response = client.chat(systemPrompt, userMessage, onChunk = onChunk)
         val rawResponse = response?.message?.content ?: "[오류] LLM 응답을 받지 못했습니다."
 
         val result = parseResponse(rawResponse)
