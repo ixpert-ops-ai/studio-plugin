@@ -36,6 +36,9 @@
                                  id="net.ib.ixpert.ops.wuwagent.setting.WuwSettingsConfigurable"
                                  displayName="iXpert AI Assistant"
                                  parentId="tools"/>
+
+        <!-- 최초 실행 시 웰컴 다이얼로그 표시 (isFirstRun=true 인 경우에만 동작) -->
+        <postStartupActivity implementation="net.ib.ixpert.ops.wuwagent.startup.FirstRunStartupActivity"/>
     </extensions>
 
     <actions>

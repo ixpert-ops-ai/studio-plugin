@@ -25,7 +25,8 @@ class SettingsState : PersistentStateComponent<SettingsState.State> {
         var temperature: Float = 0.1f,
         var timeoutSeconds: Int = 300,
         var contextWindow: Int = 32768,
-        var enableLlmDebug: Boolean = false
+        var enableLlmDebug: Boolean = false,
+        var isFirstRun: Boolean = true   // 최초 실행 여부 — 웰컴 다이얼로그 표시 제어
     )
 
     private var myState = State()
