@@ -1,6 +1,7 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.Project
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ProjectSummaryFormatter
@@ -24,7 +25,8 @@ data class RequirementAnalysisResult(
 /**
  * [Phase 2a] 자연어 요구사항을 분석하여 수정/신규 대상 파일 목록을 추출하는 파이프라인.
  */
-class RequirementAnalysisPipeline(private val client: LLMClient) {
+class RequirementAnalysisPipeline(private val project: Project?, private val client: LLMClient) {
+    constructor(client: LLMClient) : this(null, client)
 
     companion object {
         var lastResult: RequirementAnalysisResult? = null
@@ -38,10 +40,16 @@ class RequirementAnalysisPipeline(private val client: LLMClient) {
     private val logger = Logger.getInstance(RequirementAnalysisPipeline::class.java)
 
     fun analyze(requirement: String, projectGraph: ProjectGraph, onChunk: ((String) -> Unit)? = null): RequirementAnalysisResult {
-        // 대형 프로젝트(500+ 파일)는 RelevanceFilter로 관련 파일만 추출
-        val (workingGraph, keywords) = if (projectGraph.files.size > FILE_COUNT_THRESHOLD) {
-            onChunk?.invoke("> 📊 프로젝트 규모: **${projectGraph.files.size}개 파일** — 관련 파일만 필터링합니다.\n\n")
-            val filterResult = RelevanceFilter.filter(requirement, projectGraph, client) { progress ->
+        // 멀티모듈 레벨 1이거나 대형 프로젝트(10+ 파일)인 경우 RelevanceFilter로 관련 파일만 추출
+        val (workingGraph, keywords) = if (projectGraph.graphType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.GraphType.MULTI_LEVEL_1 || projectGraph.files.size > FILE_COUNT_THRESHOLD) {
+            val filterMsg = if (projectGraph.graphType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.GraphType.MULTI_LEVEL_1) {
+                "> 📊 멀티 모듈 요약 그래프가 감지되었습니다. 요구사항과 관련 있는 모듈 및 파일만 필터링합니다.\n\n"
+            } else {
+                "> 📊 프로젝트 규모: **${projectGraph.files.size}개 파일** — 관련 파일만 필터링합니다.\n\n"
+            }
+            onChunk?.invoke(filterMsg)
+            
+            val filterResult = RelevanceFilter.filter(requirement, projectGraph, client, project) { progress ->
                 onChunk?.invoke(progress)
             }
             // Ollama 서버의 연속 호출(키워드 추출 -> 전체 분석) 시 컨텍스트 정리 및 커넥션 안정화를 위한 대기
@@ -119,7 +127,7 @@ class RequirementAnalysisPipeline(private val client: LLMClient) {
         return result
     }
 
-    fun parseResponse(rawResponse: String, projectGraph: ProjectGraph): RequirementAnalysisResult {
+    fun parseResponse(rawResponse: String, projectGraph: ProjectGraph? = null): RequirementAnalysisResult {
         val lines = rawResponse.lines()
         
         var summary = ""
@@ -190,7 +198,11 @@ class RequirementAnalysisPipeline(private val client: LLMClient) {
             }
         }
 
-        val validatedTargetFiles = TargetFileValidator.validate(targetFiles, projectGraph)
+        val validatedTargetFiles = if (projectGraph != null) {
+            TargetFileValidator.validate(targetFiles, projectGraph)
+        } else {
+            targetFiles
+        }
 
         return RequirementAnalysisResult(
             summary = summary.trim(),

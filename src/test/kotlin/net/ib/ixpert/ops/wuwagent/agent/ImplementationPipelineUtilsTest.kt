@@ -61,7 +61,7 @@ class ImplementationPipelineUtilsTest {
     fun testStrategyInterface() {
         val target = TargetFileSpec(1, "src/main/java/com/dao/SurveyDao.java", "modify", "Add declaration")
         assertEquals(
-            ImplementationPipeline.EditStrategy.WHOLE,
+            ImplementationPipeline.EditStrategy.ACTION_BASED,
             ImplementationPipelineUtils.decideStrategy(target, 50, originalSourceContainsInterface = true)
         )
     }

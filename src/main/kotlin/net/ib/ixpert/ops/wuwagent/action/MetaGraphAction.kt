@@ -2,6 +2,8 @@ package net.ib.ixpert.ops.wuwagent.action
 
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.fileChooser.FileChooser
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import net.ib.ixpert.ops.wuwagent.service.metagraph.ProjectGraphBuilder
@@ -11,8 +13,16 @@ class MetaGraphAction : AnAction("Generate Project MetaGraph", "Analyzes the pro
     override fun actionPerformed(e: AnActionEvent) {
         val project: Project = e.project ?: return
         
+        val descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor().apply {
+            title = "Select Project Root for MetaGraph"
+            description = "메타그래프를 생성할 최상위 디렉토리를 선택하세요."
+        }
+        
+        val selectedDir = FileChooser.chooseFile(descriptor, project, project.baseDir)
+        if (selectedDir == null) return // Cancelled by user
+        
         // 백그라운드 태스크로 메타그래프 생성 실행
-        val builder = ProjectGraphBuilder(project)
+        val builder = ProjectGraphBuilder(project, selectedDir)
         
         builder.buildGraphAsync(
             onProgress = { msg -> 
