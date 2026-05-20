@@ -111,10 +111,10 @@ class WebviewActionRouter(private val project: Project) {
                     ApplicationManager.getApplication().executeOnPooledThread {
                         try {
                             val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
-                            val projectGraph = graphLoader.loadGraph() ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
+                            val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
                             
                             val client = WuwLlmService.getClient()
-                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(client)
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
                             
                             val result = pipeline.analyze(textBody, projectGraph) { chunk ->
                                 ApplicationManager.getApplication().invokeLater {
@@ -402,16 +402,29 @@ class WebviewActionRouter(private val project: Project) {
                     logger.info("Router: /metagraph 분기 → 프로젝트 메타 그래프 생성")
                     val messageId = "metagraph_${System.currentTimeMillis()}"
                     val progressId = "${messageId}_progress"
-                    bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다...", messageId)
 
-                    val builder = net.ib.ixpert.ops.wuwagent.service.metagraph.ProjectGraphBuilder(project)
-                    builder.buildGraphAsync(
-                        onProgress = { statusMsg ->
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("step_noti", statusMsg, progressId)
-                            }
-                        },
-                        onComplete = { graph ->
+                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                        val descriptor = com.intellij.openapi.fileChooser.FileChooserDescriptorFactory.createSingleFolderDescriptor().apply {
+                            title = "Select Project Root for MetaGraph"
+                            description = "메타그래프를 생성할 최상위 디렉토리를 선택하세요."
+                        }
+                        
+                        val selectedDir = com.intellij.openapi.fileChooser.FileChooser.chooseFile(descriptor, project, project.baseDir)
+                        if (selectedDir == null) {
+                            bridge.sendMessage("error", "분석이 취소되었습니다.", messageId)
+                            return@invokeLater
+                        }
+                        
+                        bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다...", messageId)
+
+                        val builder = net.ib.ixpert.ops.wuwagent.service.metagraph.ProjectGraphBuilder(project, selectedDir)
+                        builder.buildGraphAsync(
+                            onProgress = { statusMsg ->
+                                com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("step_noti", statusMsg, progressId)
+                                }
+                            },
+                            onComplete = { graph ->
                             val stats = graph.statistics
                             val summary = buildString {
                                 appendLine("# 📊 프로젝트 메타 그래프 생성 완료")
@@ -446,6 +459,7 @@ class WebviewActionRouter(private val project: Project) {
                             }
                         }
                     )
+                    }
                 }
 
                 "/openTabs" -> {

@@ -4,7 +4,7 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import net.ib.ixpert.ops.wuwagent.agent.AgentContext
-import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
+import net.ib.ixpert.ops.wuwagent.service.metagraph.model.*
 
 /**
  * 프로젝트 그래프, 질문, 에디터 상태를 조합하여 메타그래프 컨텍스트를 구성합니다.
@@ -58,13 +58,55 @@ class ContextAssembler(private val project: Project) {
 
     private fun formatLayer1Only(graph: ProjectGraph): String {
         val finalText = buildString {
-            append("## 프로젝트 구조 컨텍스트\n")
-            append("- 프레임워크: ${graph.framework} / 총 ${graph.statistics.totalFiles}개 파일\n\n")
+            append("## 프로젝트 모듈 및 API 컨텍스트 (Level 1)\n")
+            append("- 프레임워크: ${graph.framework}\n")
+            append("- 총 파일 수: ${graph.statistics.totalFiles}개\n")
+            append("- **프로젝트 구성 통계:**\n")
+            append("  - Controller: ${graph.statistics.controllers}개\n")
+            append("  - Service: ${graph.statistics.services}개\n")
+            append("  - Repository: ${graph.statistics.repositories}개\n")
+            if (graph.statistics.entities > 0) append("  - Entity: ${graph.statistics.entities}개\n")
+            if (graph.statistics.dtos > 0) append("  - DTO: ${graph.statistics.dtos}개\n")
+            append("\n")
+
+            if (graph.graphType == GraphType.MULTI_LEVEL_1 && graph.modules != null) {
+                append("### 멀티 모듈 구성 정보\n")
+                for (module in graph.modules) {
+                    append("- **모듈명:** `${module.name}` (경로: `${module.rootPath}`)\n")
+                    append("  - 파일 수: ${module.fileCount ?: 0}개\n")
+                    if (!module.publicApis.isNullOrEmpty()) {
+                        append("  - 노출 API Endpoints:\n")
+                        module.publicApis.take(15).forEach { api ->
+                            append("    - `$api`\n")
+                        }
+                        if (module.publicApis.size > 15) {
+                            append("    - ... 외 ${module.publicApis.size - 15}개 더 있음\n")
+                        }
+                    }
+                    if (module.dependsOnModules.isNotEmpty()) {
+                        append("  - 의존 모듈: `${module.dependsOnModules.joinToString()}`\n")
+                    }
+                    append("\n")
+                }
+            } else {
+                // SINGLE 또는 MULTI_LEVEL_2 상세 그래프인 경우 주요 API Endpoints를 추출하여 보여줌
+                val allEndpoints = graph.files.values.flatMap { it.apiEndpoints }
+                if (allEndpoints.isNotEmpty()) {
+                    append("### 노출 API Endpoints\n")
+                    allEndpoints.sortedBy { it.path }.take(15).forEach { api ->
+                        append("- `[${api.httpMethod}] ${api.path}` (핸들러: `${api.controllerClass.substringAfterLast('.')}.${api.handlerMethod}`)\n")
+                    }
+                    if (allEndpoints.size > 15) {
+                        append("- ... 외 ${allEndpoints.size - 15}개 더 있음\n")
+                    }
+                    append("\n")
+                }
+            }
+
             append("> [지시사항]\n")
-            append("> 이 프로젝트는 ${graph.framework} 기반으로 총 ${graph.statistics.totalFiles}개의 파일로 구성되어 있습니다.\n")
-            append("> 타겟 파일이 명확하지 않아 부분 구조 정보만 제공됩니다.")
+            append("> 위 프로젝트 구성 및 API 인터페이스 정보를 바탕으로, 사용자의 질문 해결에 핵심이 되는 타겟 모듈과 파일을 탐색하여 답변을 작성하세요.\n")
         }
-        logger.info("ContextAssembler: 조립 완료 (타겟: 없음(Layer 1만 제공), 크기: ${finalText.length} chars, 약 ${finalText.length / 4} 토큰 추정)")
+        logger.info("ContextAssembler: 조립 완료 (Level 1 구조 요약 제공, 크기: ${finalText.length} chars, 약 ${finalText.length / 4} 토큰 추정)")
         return finalText
     }
 }

@@ -1,11 +1,18 @@
 package net.ib.ixpert.ops.wuwagent.service.metagraph.model
 
+enum class GraphType {
+    SINGLE,
+    MULTI_LEVEL_1,
+    MULTI_LEVEL_2
+}
+
 /**
  * 프로젝트 전체 구조 그래프.
  * 메타파일(.meta/project-graph.json)의 최상위 구조입니다.
  */
 data class ProjectGraph(
     val version: String = "1.0",
+    val graphType: GraphType = GraphType.SINGLE,
     val generatedAt: String,
     val projectRoot: String,
     val framework: String = "spring-boot",
@@ -62,12 +69,16 @@ data class Relationship(
 )
 
 /**
- * 멀티모듈 정보 (Phase 1b에서 데이터 채움).
+ * 멀티모듈 정보.
  */
 data class ModuleInfo(
     val name: String,
-    val path: String,
-    val dependsOnModules: List<String> = emptyList()
+    val rootPath: String,
+    val metadataPath: String,
+    val dependsOnModules: List<String> = emptyList(),
+    val lastIndexedAt: Long? = null,
+    val fileCount: Int? = null,
+    val publicApis: List<String>? = null
 )
 
 /**
