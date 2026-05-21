@@ -126,18 +126,23 @@ class DependencyResolver(private val project: Project) {
     fun buildRelationships(nodes: Map<String, FileNode>): List<Relationship> {
         val relationships = mutableListOf<Relationship>()
 
-        // FQN → path 역 인덱스 구축
+        // FQN -> path 및 Simple Name -> path 역 인덱스 구축
         val fqnToPath = mutableMapOf<String, String>()
+        val simpleToPath = mutableMapOf<String, String>()
         for ((path, node) in nodes) {
             val fqn = if (node.packageName != null) "${node.packageName}.${node.className}" else node.className
             fqnToPath[fqn] = path
+            simpleToPath[node.className] = path
         }
 
         for ((sourcePath, sourceNode) in nodes) {
             // DI 주입 관계
             for (injection in sourceNode.injections) {
                 val targetFqn = injection.resolvedImpl ?: injection.targetType
-                val targetPath = fqnToPath[targetFqn] ?: continue
+                val targetPath = fqnToPath[targetFqn]
+                    ?: simpleToPath[targetFqn]
+                    ?: simpleToPath[targetFqn.substringAfterLast(".")]
+                    ?: continue
 
                 sourceNode.dependsOn.add(targetPath)
                 nodes[targetPath]?.dependedBy?.add(sourcePath)
@@ -153,7 +158,10 @@ class DependencyResolver(private val project: Project) {
 
             // 상속 관계
             sourceNode.superClass?.let { superFqn ->
-                val targetPath = fqnToPath[superFqn] ?: return@let
+                val targetPath = fqnToPath[superFqn]
+                    ?: simpleToPath[superFqn]
+                    ?: simpleToPath[superFqn.substringAfterLast(".")]
+                    ?: return@let
                 sourceNode.dependsOn.add(targetPath)
                 nodes[targetPath]?.dependedBy?.add(sourcePath)
 
@@ -166,7 +174,10 @@ class DependencyResolver(private val project: Project) {
 
             // 인터페이스 구현 관계
             for (ifaceFqn in sourceNode.implementedInterfaces) {
-                val targetPath = fqnToPath[ifaceFqn] ?: continue
+                val targetPath = fqnToPath[ifaceFqn]
+                    ?: simpleToPath[ifaceFqn]
+                    ?: simpleToPath[ifaceFqn.substringAfterLast(".")]
+                    ?: continue
                 sourceNode.dependsOn.add(targetPath)
                 nodes[targetPath]?.dependedBy?.add(sourcePath)
 

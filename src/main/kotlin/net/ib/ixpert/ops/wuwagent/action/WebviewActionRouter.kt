@@ -111,10 +111,10 @@ class WebviewActionRouter(private val project: Project) {
                     ApplicationManager.getApplication().executeOnPooledThread {
                         try {
                             val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
-                            val projectGraph = graphLoader.loadGraph() ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
+                            val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
                             
                             val client = WuwLlmService.getClient()
-                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(client)
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
                             
                             val result = pipeline.analyze(textBody, projectGraph) { chunk ->
                                 ApplicationManager.getApplication().invokeLater {
@@ -124,7 +124,20 @@ class WebviewActionRouter(private val project: Project) {
                             
                             ApplicationManager.getApplication().invokeLater {
                                 if (result.targetFiles.isNotEmpty()) {
-                                    val extraText = "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
+                                    var extraText = ""
+                                    
+                                    val hasCorrections = result.targetFiles.any { it.description.contains("[AI 교정") || it.description.contains("[경고") }
+                                    if (hasCorrections) {
+                                        extraText += "\n\n> 🤖 **TargetFileValidator 자동 교정 결과**\n"
+                                        extraText += "> LLM의 환각이 감지되어 실제 프로젝트 메타그래프 기반으로 아래와 같이 안전하게 교정되었습니다.\n\n"
+                                        extraText += "| 순서 | 파일 경로 | 유형 | 작업 내용 |\n"
+                                        extraText += "|:---:|:---|:---:|:---|\n"
+                                        result.targetFiles.forEach { file ->
+                                            extraText += "| ${file.order} | ${file.path} | **${file.type}** | ${file.description} |\n"
+                                        }
+                                    }
+
+                                    extraText += "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
                                     bridge.sendMessageChunk(messageId, extraText)
                                 }
                                 bridge.sendMessage("chat", "", messageId) // 스트리밍 종료 신호
@@ -389,16 +402,58 @@ class WebviewActionRouter(private val project: Project) {
                     logger.info("Router: /metagraph 분기 → 프로젝트 메타 그래프 생성")
                     val messageId = "metagraph_${System.currentTimeMillis()}"
                     val progressId = "${messageId}_progress"
-                    bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다...", messageId)
 
-                    val builder = net.ib.ixpert.ops.wuwagent.service.metagraph.ProjectGraphBuilder(project)
-                    builder.buildGraphAsync(
-                        onProgress = { statusMsg ->
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("step_noti", statusMsg, progressId)
-                            }
-                        },
-                        onComplete = { graph ->
+                    com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+                        val options = arrayOf("Spring Boot (기본)", "Anyframe Enterprise")
+                        val initialValue = if (settings.state.frameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME) {
+                            "Anyframe Enterprise"
+                        } else {
+                            "Spring Boot (기본)"
+                        }
+
+                        val selectedIdx = com.intellij.openapi.ui.Messages.showChooseDialog(
+                            project,
+                            "메타그래프를 분석할 대상 프레임워크를 선택하세요.",
+                            "대상 프레임워크 선택",
+                            com.intellij.openapi.ui.Messages.getQuestionIcon(),
+                            options,
+                            initialValue
+                        )
+
+                        if (selectedIdx == -1) {
+                            bridge.sendMessage("error", "분석이 취소되었습니다.", messageId)
+                            return@invokeLater
+                        }
+
+                        val chosenType = if (selectedIdx == 1) {
+                            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME
+                        } else {
+                            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT
+                        }
+                        settings.state.frameworkType = chosenType
+
+                        val descriptor = com.intellij.openapi.fileChooser.FileChooserDescriptorFactory.createSingleFolderDescriptor().apply {
+                            title = "Select Project Root for MetaGraph"
+                            description = "메타그래프를 생성할 최상위 디렉토리를 선택하세요."
+                        }
+                        
+                        val selectedDir = com.intellij.openapi.fileChooser.FileChooser.chooseFile(descriptor, project, project.baseDir)
+                        if (selectedDir == null) {
+                            bridge.sendMessage("error", "분석이 취소되었습니다.", messageId)
+                            return@invokeLater
+                        }
+                        
+                        bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다... (대상 프레임워크: ${chosenType.displayName})", messageId)
+
+                        val builder = net.ib.ixpert.ops.wuwagent.service.metagraph.ProjectGraphBuilder(project, selectedDir)
+                        builder.buildGraphAsync(
+                            onProgress = { statusMsg ->
+                                com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("step_noti", statusMsg, progressId)
+                                }
+                            },
+                            onComplete = { graph ->
                             val stats = graph.statistics
                             val summary = buildString {
                                 appendLine("# 📊 프로젝트 메타 그래프 생성 완료")
@@ -406,6 +461,7 @@ class WebviewActionRouter(private val project: Project) {
                                 appendLine("## 분석 결과 요약")
                                 appendLine("| 항목 | 수량 |")
                                 appendLine("| :--- | ---: |")
+                                appendLine("| 대상 프레임워크 | ${graph.frameworkType.displayName} |")
                                 appendLine("| 전체 파일 | ${stats.totalFiles}개 |")
                                 appendLine("| Controller | ${stats.controllers}개 |")
                                 appendLine("| Service | ${stats.services}개 |")
@@ -433,6 +489,7 @@ class WebviewActionRouter(private val project: Project) {
                             }
                         }
                     )
+                    }
                 }
 
                 "/openTabs" -> {
@@ -624,9 +681,9 @@ class WebviewActionRouter(private val project: Project) {
 
                         TaskPipeline.ExplainTask -> {
                             ExplainAgent().execute(context,
-                                onSuccess = { _ ->
+                                onSuccess = { res ->
                                     ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                        bridge.sendMessage("explain", res, messageId)
                                     }
                                 },
                                 onChunk = { chunk ->
@@ -644,9 +701,9 @@ class WebviewActionRouter(private val project: Project) {
 
                         TaskPipeline.Impact -> {
                             ImpactAgent().execute(context,
-                                onSuccess = { _ ->
+                                onSuccess = { res ->
                                     ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                        bridge.sendMessage("explain", res, messageId)
                                     }
                                 },
                                 onChunk = { chunk ->
@@ -664,9 +721,9 @@ class WebviewActionRouter(private val project: Project) {
 
                         TaskPipeline.QueryValidation -> {
                             QueryValidationAgent().execute(context,
-                                onSuccess = { _ ->
+                                onSuccess = { res ->
                                     ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                        bridge.sendMessage("explain", res, messageId)
                                     }
                                 },
                                 onChunk = { chunk ->

@@ -1,14 +1,22 @@
 package net.ib.ixpert.ops.wuwagent.service.metagraph.model
 
+enum class GraphType {
+    SINGLE,
+    MULTI_LEVEL_1,
+    MULTI_LEVEL_2
+}
+
 /**
  * 프로젝트 전체 구조 그래프.
  * 메타파일(.meta/project-graph.json)의 최상위 구조입니다.
  */
 data class ProjectGraph(
     val version: String = "1.0",
+    val graphType: GraphType = GraphType.SINGLE,
     val generatedAt: String,
     val projectRoot: String,
     val framework: String = "spring-boot",
+    val frameworkType: FrameworkType = FrameworkType.SPRING_BOOT,
     val modules: List<ModuleInfo>? = null,
     val files: Map<String, FileNode>,
     val relationships: List<Relationship>,
@@ -36,7 +44,13 @@ data class FileNode(
     val entityRelations: List<EntityRelation> = emptyList(),
     val dependsOn: MutableList<String> = mutableListOf(),
     val dependedBy: MutableList<String> = mutableListOf(),
-    var riskAssessment: RiskAssessment = RiskAssessment(0, ChangeRisk.NOT_CALCULATED, emptyList())
+    var riskAssessment: RiskAssessment = RiskAssessment(0, ChangeRisk.NOT_CALCULATED, emptyList()),
+    // Anyframe 지원 필드 추가
+    val anyframeRole: AnyframeRole? = null,
+    val demMethods: List<DemMethodInfo>? = null,
+    val serviceEndpoints: List<ServiceEndpoint>? = null,
+    val localName: String? = null,
+    val datasource: String? = null
 )
 
 /**
@@ -58,16 +72,21 @@ data class Relationship(
     val type: RelationshipType,
     val strength: RelationshipStrength = RelationshipStrength.DIRECT,
     val detail: String? = null,
-    val callType: String? = null // STATIC or INSTANCE
+    val callType: String? = null, // STATIC or INSTANCE
+    val metadata: Map<String, String>? = null
 )
 
 /**
- * 멀티모듈 정보 (Phase 1b에서 데이터 채움).
+ * 멀티모듈 정보.
  */
 data class ModuleInfo(
     val name: String,
-    val path: String,
-    val dependsOnModules: List<String> = emptyList()
+    val rootPath: String,
+    val metadataPath: String,
+    val dependsOnModules: List<String> = emptyList(),
+    val lastIndexedAt: Long? = null,
+    val fileCount: Int? = null,
+    val publicApis: List<String>? = null
 )
 
 /**
@@ -156,7 +175,15 @@ enum class RelationshipType {
     IMPLEMENTS,
     CONFIGURES,
     ENTITY_RELATION,
-    CALLS
+    CALLS,
+    
+    // Anyframe 관계 타입 추가
+    EXPOSES_SERVICE,
+    CALLS_BIZ,
+    CALLS_DEM_METHOD,
+    MAPS_TO_TABLE,
+    USES_DVO,
+    TRANSFORMS_VO
 }
 
 enum class RelationshipStrength {
@@ -283,3 +310,41 @@ data class ImpactNode(
     val relationChain: List<String>,         // 예: ["CALLS", "INJECTS"]
     val riskAssessment: RiskAssessment
 )
+
+// ── Anyframe 전용 모델 ──────────────────────────────
+
+enum class AnyframeRole {
+    SVC, SVC_IMPL, BIZ, BIZ_UTIL, DEM, DQM, SVO, BVO, DVO, UNKNOWN
+}
+
+data class ServiceEndpoint(
+    val serviceId: String,             // 예: "SAPCMM0204S01"
+    val methodName: String,            // 예: "selPsnzInf"
+    val localName: String?,            // 예: "개인화정보조회"
+    val inputSvo: String?,             // 예: "APCMMPsnzInfSVO"
+    val outputSvo: String?             // 예: "APCMMPsnzInfSVO"
+)
+
+data class DemMethodInfo(
+    val methodName: String,            // 예: "selSpacdMbCt"
+    val sqlId: String?,                // 주석 내 /*SQL_ID: ... */ 추출값
+    val inputDvoClass: String?,        // 파라미터 DVO 클래스명
+    val returnDvoClass: String?,       // 리턴 DVO 클래스명
+    val tables: List<String>,          // DEM: 1개, DQM: 복수 조인 테이블 목록
+    val operationType: SqlOpType,      // SELECT, INSERT, UPDATE, DELETE
+    val localName: String?             // 메서드 상단 @LocalName의 한글 설명
+)
+
+enum class SqlOpType { SELECT, INSERT, UPDATE, DELETE, UNKNOWN }
+
+data class VoTransformation(
+    val sourceVo: String,           // 예: "APCMMPsnzInfSVO"
+    val targetVo: String,           // 예: "APCMMPsnzInfBVO"
+    val direction: VoDirection,     // INBOUND (SVO->BVO->DVO) or OUTBOUND (DVO->BVO->SVO)
+    val transformMethod: String?,   // 변환이 일어난 메서드명
+    val transformType: VoTransformType
+)
+
+enum class VoDirection { INBOUND, OUTBOUND }
+enum class VoTransformType { BEAN_UTILS_COPY, MANUAL_SETTER, CONSTRUCTOR, NAMING_CONVENTION }
+

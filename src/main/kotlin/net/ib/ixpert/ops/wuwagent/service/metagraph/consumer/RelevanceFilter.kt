@@ -1,9 +1,10 @@
 package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
 
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.Project
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.*
-import java.util.concurrent.CompletableFuture
+
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
@@ -55,6 +56,7 @@ object RelevanceFilter {
         requirement: String,
         graph: ProjectGraph,
         client: LLMClient,
+        project: Project?,
         onProgress: ((String) -> Unit)? = null
     ): FilterResult {
         // Step 1: 한글 요구사항 → 영문 키워드 추출
@@ -69,53 +71,293 @@ object RelevanceFilter {
 
         onProgress?.invoke("> 📋 키워드: ${keywords.joinToString(", ")}\n")
 
-        // Step 2: 키워드로 파일 매칭
-        onProgress?.invoke("> 🔍 ${graph.files.size}개 파일에서 관련 파일을 검색합니다...\n")
-        val directMatches = matchFilesByKeywords(keywords, graph)
-        logger.info("RelevanceFilter: 직접 매칭 ${directMatches.size}개 파일")
+        // [Stage 0: Module Selection & Dynamic Loading]
+        // 멀티모듈 레벨 1(요약 그래프) 구조인 경우, 키워드 매칭을 통해 필요한 모듈만 동적으로 로딩하여 메모리 최소화
+        val workingGraph = if (graph.graphType == GraphType.MULTI_LEVEL_1 && graph.modules != null) {
+            onProgress?.invoke("> 📦 [Stage 0] 요구사항 기반으로 관련 서브 모듈을 식별하고 있습니다...\n")
+            val targetModules = mutableListOf<String>()
+            
+            for (module in graph.modules) {
+                val nameLower = module.name.lowercase()
+                val rootPathLower = module.rootPath.lowercase()
+                
+                // 1. 모듈명/경로와 매칭
+                val isNameMatched = keywords.any { nameLower.contains(it) || it.contains(nameLower) }
+                val isPathMatched = keywords.any { rootPathLower.contains(it) || it.contains(rootPathLower) }
+                
+                // 2. 노출 API Endpoint와 매칭
+                val isApiMatched = module.publicApis?.any { api ->
+                    keywords.any { api.lowercase().contains(it) }
+                } ?: false
+                
+                if (isNameMatched || isPathMatched || isApiMatched) {
+                    targetModules.add(module.name)
+                }
+            }
 
-        // Step 3: 1-depth 확장 (dependsOn/dependedBy + IMPLEMENTS)
-        val expanded = expandOneDepth(directMatches, graph)
-        logger.info("RelevanceFilter: 1-depth 확장 후 ${expanded.size}개 파일")
-
-        // Step 3.5: 매칭 결과가 너무 적으면 패키지 확장
-        val finalMatches = if (expanded.size < MIN_FILES && directMatches.isNotEmpty()) {
-            val packageExpanded = expandByPackage(directMatches, graph)
-            logger.info("RelevanceFilter: 패키지 확장 후 ${packageExpanded.size}개 파일")
-            (expanded + packageExpanded).distinctBy { it.first }
+            if (targetModules.isNotEmpty()) {
+                onProgress?.invoke("> 🎯 연관 서브 모듈 선정: ${targetModules.joinToString(", ")} (총 ${targetModules.size}개/전체 ${graph.modules.size}개)\n")
+                if (project != null) {
+                    onProgress?.invoke("> 📥 해당 모듈의 상세 메타데이터(Level 2)만 동적으로 병합 로드합니다...\n")
+                    val graphLoader = project.getService(GraphLoader::class.java)
+                    val loaded = graphLoader.loadGraph(targetModules = targetModules)
+                    if (loaded != null) {
+                        loaded
+                    } else {
+                        onProgress?.invoke("> ⚠️ 동적 로딩 실패. 전체 모듈 데이터를 폴백 로딩합니다.\n")
+                        graphLoader.loadGraph() ?: graph
+                    }
+                } else {
+                    onProgress?.invoke("> ⚠️ Project 객체가 제공되지 않아 동적 모듈 로딩을 건너뛰고 전체 데이터를 기반으로 진행합니다.\n")
+                    graph
+                }
+            } else {
+                onProgress?.invoke("> ⚠️ 매칭된 서브 모듈이 없습니다. 전체 모듈 데이터를 로딩하여 분석합니다 (Fallback).\n")
+                if (project != null) {
+                    val graphLoader = project.getService(GraphLoader::class.java)
+                    graphLoader.loadGraph() ?: graph
+                } else {
+                    graph
+                }
+            }
         } else {
-            expanded
+            graph
         }
 
-        // Step 4: 상한 적용 (직접 매칭은 무조건 포함, 나머지는 riskScore 순)
-        val capped = capResults(finalMatches, directMatches)
+        // Step 2: 진입점 식별 (Entry Point Identification)
+        onProgress?.invoke("> 🎯 진입점(Entry Point) 파일을 식별하고 있습니다...\n")
+        val entryPoints = identifyEntryPoints(requirement, keywords, workingGraph, client, onProgress)
+        logger.info("RelevanceFilter: 최종 진입점 ${entryPoints.size}개 파일 확정")
 
-        // Step 4.5: 최종 fallback (매칭 결과 0건이면 riskScore 상위 파일)
-        val finalCapped = if (capped.isEmpty()) {
-            logger.warn("RelevanceFilter: 매칭 결과 0건, riskScore 상위 파일로 fallback")
-            onProgress?.invoke("> ⚠️ 키워드 매칭 결과가 없습니다. 주요 파일을 기준으로 분석합니다.\n")
-            graph.files.entries
+        val finalMatches = if (entryPoints.isEmpty()) {
+            logger.warn("RelevanceFilter: 진입점 식별 결과 0건, riskScore 상위 파일로 fallback")
+            onProgress?.invoke("> ⚠️ 매칭 결과가 없습니다. 주요 파일을 기준으로 분석합니다.\n")
+            workingGraph.files.entries
                 .sortedByDescending { it.value.riskAssessment.riskScore }
                 .take(MAX_FILES)
                 .map { (path, node) -> path to node }
         } else {
-            capped
+            // Step 3: BFS 기반 2-depth 탐색 (의존성 확장)
+            onProgress?.invoke("> 🕸️ 진입점을 기준으로 의존성 그래프를 확장합니다 (depth=2)...\n")
+            val expanded = expandFromEntryPoints(entryPoints, workingGraph, depth = 2)
+            logger.info("RelevanceFilter: BFS 확장 후 ${expanded.size}개 파일")
+            expanded
         }
 
+        // Step 4: 상한 적용
+        val capped = capResults(finalMatches, entryPoints)
+
         // 필터링된 ProjectGraph 생성
-        val filteredFiles = finalCapped.associate { (path, node) -> path to node }
-        val filteredRelationships = graph.relationships.filter { rel ->
+        val filteredFiles = capped.associate { (path, node) -> path to node }
+        val filteredRelationships = workingGraph.relationships.filter { rel ->
             filteredFiles.containsKey(rel.source) || filteredFiles.containsKey(rel.target)
         }
-        val filteredGraph = graph.copy(
+        val filteredGraph = workingGraph.copy(
             files = filteredFiles,
             relationships = filteredRelationships
         )
 
-        onProgress?.invoke("> ✅ ${graph.files.size}개 → **${filteredFiles.size}개** 파일로 필터링 완료\n\n")
-        logger.info("RelevanceFilter: 최종 ${filteredFiles.size}개 파일 (원본 ${graph.files.size}개)")
+        onProgress?.invoke("> ✅ ${workingGraph.files.size}개 → **${filteredFiles.size}개** 파일로 필터링 완료\n\n")
+        logger.info("RelevanceFilter: 최종 ${filteredFiles.size}개 파일 (로드 대상 ${workingGraph.files.size}개)")
 
         return FilterResult(filteredGraph, keywords)
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Step 2: 진입점 식별 (Entry Point Identification)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 3단계 Cascade 전략으로 진입점을 식별합니다.
+     */
+    private fun identifyEntryPoints(
+        requirement: String,
+        keywords: List<String>,
+        graph: ProjectGraph,
+        client: LLMClient,
+        onProgress: ((String) -> Unit)?
+    ): List<Pair<String, FileNode>> {
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+
+        if (isAnyframe) {
+            val anyframeStage1Matches = mutableSetOf<String>()
+            graph.files.forEach { (path, node) ->
+                // Check class-level localName
+                if (node.localName != null && (requirement.contains(node.localName) || node.localName.contains(requirement))) {
+                    anyframeStage1Matches.add(path)
+                }
+                
+                // Check serviceEndpoints
+                node.serviceEndpoints?.forEach { endpoint ->
+                    if (requirement.contains(endpoint.serviceId, ignoreCase = true)) {
+                        anyframeStage1Matches.add(path)
+                    }
+                    if (endpoint.localName != null && (requirement.contains(endpoint.localName) || endpoint.localName.contains(requirement))) {
+                        anyframeStage1Matches.add(path)
+                    }
+                }
+            }
+            if (anyframeStage1Matches.isNotEmpty()) {
+                onProgress?.invoke("> 🎯 [Anyframe Stage 1] @LocalName 또는 ServiceId 매칭을 통해 진입점을 식별했습니다.\n")
+                return anyframeStage1Matches.mapNotNull { path -> graph.files[path]?.let { path to it } }
+            }
+        }
+
+        // [Stage 1] Deterministic Match (Regex / API Path)
+        val stage1Matches = mutableSetOf<String>()
+        
+        // 1-1. API Path matching
+        val httpMethods = listOf("GET", "POST", "PUT", "DELETE", "PATCH")
+        val hasApiMethod = httpMethods.any { requirement.contains(it, ignoreCase = true) }
+        val apiPathPattern = Regex("""/[a-zA-Z0-9_\-\/]+""")
+        val paths = apiPathPattern.findAll(requirement).map { it.value }.toList()
+        
+        if (hasApiMethod || paths.isNotEmpty()) {
+            graph.files.forEach { (path, node) ->
+                node.apiEndpoints.forEach { endpoint ->
+                    if (paths.any { endpoint.path.contains(it, ignoreCase = true) }) {
+                        stage1Matches.add(path)
+                    }
+                }
+            }
+        }
+        
+        // 1-2. Explicit Class Name matching (Regex + Impl removal)
+        val classPattern = Regex("""(?i)[a-z][a-z0-9]*(Controller|Service|Dao|Repository|Impl|Util)""")
+        val classMatches = classPattern.findAll(requirement).map { it.value }.toList()
+        
+        // translation mapping for korean
+        val translatedClasses = mutableListOf<String>()
+        if (requirement.contains("서비스")) translatedClasses.add("Service")
+        if (requirement.contains("컨트롤러")) translatedClasses.add("Controller")
+        if (requirement.contains("레포지토리") || requirement.contains("저장소")) translatedClasses.add("Repository")
+        
+        val classCandidates = (classMatches + translatedClasses).distinct()
+        
+        graph.files.forEach { (path, node) ->
+            for (candidate in classCandidates) {
+                val extractedName = candidate.replace("Impl", "", ignoreCase = true)
+                if (extractedName.length > 3) {
+                    val baseName = node.className.replace("Impl", "", ignoreCase = true)
+                    if (baseName.equals(extractedName, ignoreCase = true) || node.className.equals(extractedName, ignoreCase = true)) {
+                        stage1Matches.add(path)
+                    }
+                }
+            }
+        }
+        
+        if (stage1Matches.isNotEmpty()) {
+            onProgress?.invoke("> 🎯 [Stage 1] 명시적 단서로 진입점을 찾았습니다.\n")
+            return stage1Matches.mapNotNull { path -> graph.files[path]?.let { path to it } }
+        }
+        
+        // [Stage 2] Heuristic Layer-Weighted Scoring
+        val candidateScores = mutableMapOf<String, Double>()
+        
+        val splitKeywords = keywords
+            .flatMap { it.split(" ", "-", "_") }
+            .map { it.trim().lowercase() }
+            .filter { it.length >= 2 && it !in STOP_WORDS }
+            .distinct()
+        
+        graph.files.forEach { (path, node) ->
+            var matchScore = 0.0
+            
+            splitKeywords.forEach { keyword ->
+                if (node.className.lowercase().contains(keyword)) matchScore += 3.0
+                if (node.apiEndpoints.any { it.path.contains(keyword, ignoreCase = true) }) matchScore += 2.0
+                if (node.packageName?.lowercase()?.contains(keyword) == true) matchScore += 1.0
+            }
+            
+            if (matchScore > 0.0) {
+                val layerWeight = when (node.layer?.toString()?.uppercase()) {
+                    "CONTROLLER", "SERVICE" -> 1.2
+                    "REPOSITORY", "DAO" -> 1.0
+                    "UTIL", "COMMON" -> 0.5
+                    "DTO", "ENTITY", "VO" -> 0.3
+                    else -> 0.5
+                }
+                
+                val finalWeight = layerWeight
+                
+                candidateScores[path] = matchScore * finalWeight
+            }
+        }
+        
+        val sortedCandidates = candidateScores.entries.sortedByDescending { it.value }
+        if (sortedCandidates.isEmpty()) {
+            return emptyList()
+        }
+        
+        val top1 = sortedCandidates.getOrNull(0)
+        val top2 = sortedCandidates.getOrNull(1)
+        
+        // Triggers for Stage 3 (LLM Fallback)
+        var triggerLLM = false
+        if (top1 != null && top2 != null) {
+            val diff = (top1.value - top2.value) / top1.value
+            if (diff < 0.20) triggerLLM = true
+        }
+        
+        val significantThreshold = top1!!.value * 0.5
+        val significantCandidates = sortedCandidates.count { it.value >= significantThreshold }
+        if (significantCandidates > 5) {
+            triggerLLM = true
+        }
+        
+        logger.info("RelevanceFilter [Stage 2] 스코어 분포: " +
+            sortedCandidates.take(10).joinToString { "${graph.files[it.key]?.className}: ${it.value}" }
+        )
+        logger.info("RelevanceFilter [Stage 2] significantCandidates=$significantCandidates, triggerLLM=$triggerLLM")
+        
+        val top3Stage2 = sortedCandidates.take(3).mapNotNull { pathScore -> graph.files[pathScore.key]?.let { pathScore.key to it } }
+        
+        if (!triggerLLM) {
+            onProgress?.invoke("> 🎯 [Stage 2] 스코어링을 통해 진입점을 찾았습니다.\n")
+            val threshold = top1!!.value * 0.6
+            return sortedCandidates
+                .takeWhile { it.value >= threshold }
+                .take(3)
+                .mapNotNull { graph.files[it.key]?.let { node -> it.key to node } }
+        }
+        
+        // [Stage 3] LLM Fallback
+        onProgress?.invoke("> 🤖 진입점이 모호하여 LLM을 통해 최적의 진입점을 판별합니다...\n")
+        val candidatePaths = sortedCandidates.take(10).map { it.key }
+        val prompt = """
+            User requirement: "$requirement"
+            
+            From the following list of candidate files, select 1 to 2 core entry point files that are most relevant to resolving this requirement.
+            - Select ONLY the most essential files.
+            - Output format (only output the file paths, one per line):
+            <path1>
+            <path2>
+            
+            Candidate list:
+            ${candidatePaths.joinToString("\n")}
+        """.trimIndent()
+        
+        try {
+            val future = com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService().submit(java.util.concurrent.Callable {
+                client.chat("You are an expert system architect.", prompt, 150, null)
+            })
+            val response = future.get(LLM_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            val content = response?.message?.content?.trim() ?: ""
+            
+            val llmSelected = content.lines().map { it.trim() }.filter { candidatePaths.contains(it) }
+            
+            if (llmSelected.isNotEmpty()) {
+                onProgress?.invoke("> 🎯 [Stage 3] LLM이 진입점을 확정했습니다.\n")
+                return llmSelected.mapNotNull { path -> graph.files[path]?.let { path to it } }
+            }
+        } catch (e: Exception) {
+            logger.warn("RelevanceFilter: LLM Fallback 호출 실패", e)
+        }
+        
+        // LLM Fallback 실패 또는 빈 응답시 Stage 2 Top 3 반환
+        onProgress?.invoke("> ⚠️ LLM 판별에 실패하여 스코어 상위 3개 파일을 진입점으로 사용합니다.\n")
+        return top3Stage2
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -253,147 +495,61 @@ object RelevanceFilter {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Step 2: 키워드 기반 파일 매칭
+    // Step 3: BFS 기반 의존성 확장
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * 키워드로 파일을 매칭합니다.
-     * 매칭 대상: path, className, packageName, apiEndpoints[].path, handlerMethod
+     * 식별된 진입점(들)에서 시작하여 BFS로 의존성을 확장합니다.
+     * depth 횟수만큼 dependsOn, dependedBy(유틸성 폭발 방지 조건부), IMPLEMENTS 관계를 탐색합니다.
      */
-    private fun matchFilesByKeywords(
-        keywords: List<String>,
-        graph: ProjectGraph
+    private fun expandFromEntryPoints(
+        entryPoints: List<Pair<String, FileNode>>,
+        graph: ProjectGraph,
+        depth: Int
     ): List<Pair<String, FileNode>> {
-        if (keywords.isEmpty()) return emptyList()
-
-        return graph.files.entries.filter { (path, node) ->
-            val searchableText = buildSearchableText(path, node)
-            keywords.any { keyword ->
-                searchableText.contains(keyword, ignoreCase = true)
-            }
-        }.map { (path, node) -> path to node }
-    }
-
-    /**
-     * 파일의 검색 가능 텍스트를 구성합니다.
-     * camelCase를 분리하여 개별 단어도 매칭 가능하게 합니다.
-     */
-    private fun buildSearchableText(path: String, node: FileNode): String {
-        return buildString {
-            append(path.lowercase())
-            append(" ")
-            // className을 camelCase 분리하여 추가
-            append(node.className.lowercase())
-            append(" ")
-            append(splitCamelCase(node.className))
-            append(" ")
-            append(node.packageName?.lowercase() ?: "")
-            append(" ")
-            // API 엔드포인트 URL 경로도 검색 대상
-            for (endpoint in node.apiEndpoints) {
-                append(endpoint.path.lowercase())
-                append(" ")
-                append(endpoint.handlerMethod.lowercase())
-                append(" ")
-                append(splitCamelCase(endpoint.handlerMethod))
-                append(" ")
-            }
-            // 어노테이션
-            for (annotation in node.annotations) {
-                append(annotation.lowercase())
-                append(" ")
-            }
-        }
-    }
-
-    /**
-     * camelCase 문자열을 공백으로 분리합니다.
-     * 예: "SurveyServiceImpl" → "survey service impl"
-     */
-    private fun splitCamelCase(text: String): String {
-        return text
-            .replace(Regex("([a-z])([A-Z])"), "$1 $2")
-            .replace(Regex("([A-Z]+)([A-Z][a-z])"), "$1 $2")
-            .lowercase()
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Step 3: 1-depth 의존성 확장
-    // ═══════════════════════════════════════════════════════════════
-
-    /**
-     * 직접 매칭된 파일의 dependsOn/dependedBy와 IMPLEMENTS 관계를 1-depth 확장합니다.
-     * Interface ↔ Impl 쌍이 반드시 함께 포함되도록 보장합니다.
-     * 공통 유틸(dependedBy > 임계값)의 역방향 확장은 제한합니다.
-     */
-    private fun expandOneDepth(
-        directMatches: List<Pair<String, FileNode>>,
-        graph: ProjectGraph
-    ): List<Pair<String, FileNode>> {
-        val matchedPaths = directMatches.map { it.first }.toMutableSet()
-        val result = directMatches.toMutableList()
-
-        for ((_, node) in directMatches) {
-            // dependsOn 확장
-            for (dep in node.dependsOn) {
-                if (dep !in matchedPaths && graph.files.containsKey(dep)) {
-                    matchedPaths.add(dep)
-                    result.add(dep to graph.files[dep]!!)
-                }
-            }
-            // dependedBy 확장 (공통 유틸 폭발 방지)
-            if (node.dependedBy.size <= MAX_DEPENDED_BY_FOR_EXPANSION) {
-                for (dep in node.dependedBy) {
-                    if (dep !in matchedPaths && graph.files.containsKey(dep)) {
-                        matchedPaths.add(dep)
-                        result.add(dep to graph.files[dep]!!)
+        val visited = mutableSetOf<String>()
+        val result = mutableListOf<Pair<String, FileNode>>()
+        var currentLevel = entryPoints.map { it.first }.toSet()
+        
+        // 인터페이스 관계 추출 (미리 캐싱하여 성능 최적화)
+        val implementsRelations = graph.relationships.filter { it.type == RelationshipType.IMPLEMENTS }
+        
+        for (i in 0..depth) {
+            val nextLevel = mutableSetOf<String>()
+            
+            for (path in currentLevel) {
+                if (path !in visited && graph.files.containsKey(path)) {
+                    visited.add(path)
+                    val node = graph.files[path]!!
+                    result.add(path to node)
+                    
+                    if (i < depth) {
+                        // dependsOn 확장
+                        node.dependsOn.forEach { nextLevel.add(it) }
+                        
+                        // dependedBy 확장 (공통 유틸 폭발 방지)
+                        if (node.dependedBy.size <= MAX_DEPENDED_BY_FOR_EXPANSION) {
+                            node.dependedBy.forEach { nextLevel.add(it) }
+                        }
                     }
                 }
             }
-        }
-
-        // IMPLEMENTS 관계 확장: Interface의 Impl이 누락되지 않도록
-        val implementsRelations = graph.relationships.filter {
-            it.type == RelationshipType.IMPLEMENTS
-        }
-        for (rel in implementsRelations) {
-            val sourceInSet = rel.source in matchedPaths
-            val targetInSet = rel.target in matchedPaths
-            if (sourceInSet && !targetInSet && graph.files.containsKey(rel.target)) {
-                matchedPaths.add(rel.target)
-                result.add(rel.target to graph.files[rel.target]!!)
+            
+            // 인터페이스-구현체 관계는 깊이에 상관없이 현재 레벨 노드들과 연결시킵니다.
+            for (rel in implementsRelations) {
+                if (rel.source in visited && rel.target !in visited) {
+                    nextLevel.add(rel.target)
+                }
+                if (rel.target in visited && rel.source !in visited) {
+                    nextLevel.add(rel.source)
+                }
             }
-            if (targetInSet && !sourceInSet && graph.files.containsKey(rel.source)) {
-                matchedPaths.add(rel.source)
-                result.add(rel.source to graph.files[rel.source]!!)
-            }
+            
+            if (nextLevel.isEmpty()) break
+            currentLevel = nextLevel
         }
-
+        
         return result
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Step 3.5: 패키지 확장 (매칭 결과 부족 시)
-    // ═══════════════════════════════════════════════════════════════
-
-    /**
-     * 매칭 결과가 MIN_FILES 미만일 때, 매칭된 파일의 패키지 내 다른 파일을 포함합니다.
-     * 예: survey 패키지의 한 파일만 매칭되면 → 같은 패키지의 모든 파일 포함
-     */
-    private fun expandByPackage(
-        directMatches: List<Pair<String, FileNode>>,
-        graph: ProjectGraph
-    ): List<Pair<String, FileNode>> {
-        val matchedPaths = directMatches.map { it.first }.toSet()
-
-        // 매칭된 파일들의 패키지 추출
-        val packages = directMatches.mapNotNull { it.second.packageName }.toSet()
-
-        return graph.files.entries
-            .filter { (path, node) ->
-                path !in matchedPaths && node.packageName in packages
-            }
-            .map { (path, node) -> path to node }
     }
 
     // ═══════════════════════════════════════════════════════════════

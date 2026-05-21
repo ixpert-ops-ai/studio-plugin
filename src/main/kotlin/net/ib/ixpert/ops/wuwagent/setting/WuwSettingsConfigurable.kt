@@ -55,6 +55,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     private var contextWindowSpinner: JBTextField? = null
     private var testConnectionButton: JButton? = null
     private var enableLlmDebugCheckBox: javax.swing.JCheckBox? = null
+    private var frameworkTypeComboBox: ComboBox<String>? = null
 
     override fun getId(): String = "net.ib.ixpert.ops.wuwagent.setting.WuwSettingsConfigurable"
 
@@ -156,6 +157,13 @@ class WuwSettingsConfigurable : SearchableConfigurable {
                     contextWindowSpinner = textField()
                         .columns(10)
                         .component
+                }
+            }
+            group("분석기 설정 (Analyzer Settings)") {
+                row("대상 프레임워크 (Framework):") {
+                    frameworkTypeComboBox = comboBox(
+                        DefaultComboBoxModel(arrayOf("Spring Boot (기본)", "Anyframe Enterprise"))
+                    ).component
                 }
             }
             group("Debug") {
@@ -338,7 +346,8 @@ class WuwSettingsConfigurable : SearchableConfigurable {
                 temperatureSpinner?.text != state.temperature.toString() ||
                 timeoutSpinner?.text != state.timeoutSeconds.toString() ||
                 contextWindowSpinner?.text != state.contextWindow.toString() ||
-                enableLlmDebugCheckBox?.isSelected != state.enableLlmDebug
+                enableLlmDebugCheckBox?.isSelected != state.enableLlmDebug ||
+                getCurrentFrameworkType() != state.frameworkType
     }
 
     override fun apply() {
@@ -353,6 +362,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         state.timeoutSeconds = timeoutSpinner?.text?.toIntOrNull() ?: 300
         state.contextWindow = contextWindowSpinner?.text?.toIntOrNull() ?: 32768
         state.enableLlmDebug = enableLlmDebugCheckBox?.isSelected ?: false
+        state.frameworkType = getCurrentFrameworkType()
 
         com.intellij.openapi.project.ProjectManager.getInstance().openProjects.forEach { project ->
             net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(project)
@@ -381,11 +391,24 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         timeoutSpinner?.setText(state.timeoutSeconds.toString())
         contextWindowSpinner?.setText(state.contextWindow.toString())
         enableLlmDebugCheckBox?.isSelected = state.enableLlmDebug
+        frameworkTypeComboBox?.selectedItem = frameworkTypeToDisplayName(state.frameworkType)
 
         isResetting = false
 
         // 행 가시성 적용 후 Ollama면 자동 모델 조회
         updateRowVisibility()
         autoFetchModels()
+    }
+
+    private fun frameworkTypeToDisplayName(type: net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType): String = when (type) {
+        net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT -> "Spring Boot (기본)"
+        net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME -> "Anyframe Enterprise"
+    }
+
+    private fun getCurrentFrameworkType(): net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType {
+        return when (frameworkTypeComboBox?.selectedItem as? String) {
+            "Anyframe Enterprise" -> net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME
+            else -> net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT
+        }
     }
 }

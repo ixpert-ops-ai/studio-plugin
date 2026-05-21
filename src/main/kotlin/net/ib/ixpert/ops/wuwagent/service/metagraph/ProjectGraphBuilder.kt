@@ -18,6 +18,12 @@ import com.intellij.psi.PsiModifier
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.*
 import org.jetbrains.jps.model.java.JavaSourceRootType
 import java.time.Instant
+import com.intellij.openapi.roots.ModuleRootManager
+import com.intellij.openapi.vfs.LocalFileSystem
+import java.io.File
+
+import com.intellij.openapi.roots.ContentIterator
+import com.intellij.openapi.vfs.VirtualFile
 
 /**
  * 프로젝트 전체 메타 그래프 빌더 (오케스트레이터).
@@ -33,7 +39,7 @@ import java.time.Instant
  * 8. GraphStatistics 계산
  * 9. JSON 출력
  */
-class ProjectGraphBuilder(private val project: Project) {
+class ProjectGraphBuilder(private val project: Project, private val targetDirectory: VirtualFile? = null) {
 
     companion object {
         const val LOW_THRESHOLD = 0
@@ -50,6 +56,11 @@ class ProjectGraphBuilder(private val project: Project) {
     private val beanAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.SpringBeanAnalyzer()
     private val entityAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.JpaEntityAnalyzer()
     private val callRelationAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.CallRelationAnalyzer()
+    private val anyframeServiceIdAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeServiceIdAnalyzer()
+    private val anyframeDemAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeDemAnalyzer()
+    private val anyframeDependencyAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeDependencyAnalyzer()
+    private val anyframeBizCallAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeBizCallAnalyzer()
+    private val anyframeVoChainAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeVoChainAnalyzer()
 
     /**
      * 비동기로 프로젝트 그래프를 생성합니다.
@@ -110,6 +121,13 @@ class ProjectGraphBuilder(private val project: Project) {
     ): ProjectGraph {
         val startTime = System.currentTimeMillis()
 
+        // 실제 소스 루트가 있고 최상위 빈 루트가 아닌 서브 모듈들만 필터링
+        val validModules = ModuleManager.getInstance(project).modules.filter { module ->
+            val rootManager = ModuleRootManager.getInstance(module)
+            rootManager.sourceRoots.isNotEmpty() && module.name != project.name
+        }
+        val isMultiModule = validModules.isNotEmpty()
+
         // Step 2: 멀티모듈 소스 루트 탐색 → PsiClassOwner 목록 수집
         indicator?.text = "프로젝트 파일 탐색 중..."
         onProgress?.invoke("프로젝트 파일을 탐색하고 있습니다...")
@@ -129,7 +147,7 @@ class ProjectGraphBuilder(private val project: Project) {
         // Step 3: 파일별 ReadAction으로 PsiClass 분석 → FileNode 생성 및 CALLS 수집
         val nodes = mutableMapOf<String, FileNode>()
         val allCalls = mutableListOf<Relationship>()
-        val projectBasePath = project.basePath ?: ""
+        val projectBasePath = targetDirectory?.path ?: project.basePath ?: ""
 
         sourceFiles.forEachIndexed { index, psiFile ->
             indicator?.checkCanceled()
@@ -162,6 +180,17 @@ class ProjectGraphBuilder(private val project: Project) {
         val relationships = ReadAction.compute<List<Relationship>, Throwable> {
             dependencyResolver.buildRelationships(resolvedNodes)
         }.toMutableList()
+
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+        val currentFrameworkType = settings.state.frameworkType
+        if (currentFrameworkType == FrameworkType.ANYFRAME) {
+            val voRels = anyframeVoChainAnalyzer.analyze(resolvedNodes)
+            relationships.addAll(voRels)
+            for (rel in voRels) {
+                resolvedNodes[rel.source]?.dependsOn?.add(rel.target)
+                resolvedNodes[rel.target]?.dependedBy?.add(rel.source)
+            }
+        }
         
         // CALLS 관계 병합 및 노드의 dependsOn/dependedBy 업데이트
         relationships.addAll(allCalls)
@@ -235,16 +264,53 @@ class ProjectGraphBuilder(private val project: Project) {
         val elapsed = System.currentTimeMillis() - startTime
         onProgress?.invoke("메타 그래프 생성 완료 (${scoredNodes.size}개 파일, ${relationships.size}개 관계, ${elapsed}ms)")
 
-        val graph = ProjectGraph(
-            generatedAt = Instant.now().toString(),
-            projectRoot = projectBasePath,
-            files = scoredNodes,
-            relationships = relationships,
-            statistics = statistics
-        )
+        // 1. 단독 모듈 재분석 여부 판별
+        val fileIndex = ProjectFileIndex.getInstance(project)
+        val targetModule = targetDirectory?.let { fileIndex.getModuleForFile(it) }
+        val isSingleModulePartialUpdate = targetModule != null && targetModule.name != project.name && isMultiModule
 
-        // JSON 파일 저장
-        val savedPath = exporter.exportToJson(graph, project)
+        val frameworkName = if (currentFrameworkType == FrameworkType.ANYFRAME) "anyframe" else "spring-boot"
+
+        val graph = if (isSingleModulePartialUpdate) {
+            // A. 단독 모듈 분석 모드: MULTI_LEVEL_2로 생성
+            ProjectGraph(
+                graphType = GraphType.MULTI_LEVEL_2,
+                generatedAt = Instant.now().toString(),
+                projectRoot = targetDirectory.path,
+                framework = frameworkName,
+                frameworkType = currentFrameworkType,
+                files = scoredNodes,
+                relationships = relationships,
+                statistics = statistics
+            )
+        } else {
+            // B. 프로젝트 전체 분석 모드 (SINGLE 또는 MULTI_LEVEL_1)
+            val modulesList = if (isMultiModule) {
+                collectModulesInfo(scoredNodes, validModules)
+            } else {
+                null
+            }
+            ProjectGraph(
+                graphType = if (isMultiModule) GraphType.MULTI_LEVEL_1 else GraphType.SINGLE,
+                generatedAt = Instant.now().toString(),
+                projectRoot = projectBasePath,
+                framework = frameworkName,
+                frameworkType = currentFrameworkType,
+                modules = modulesList,
+                files = scoredNodes,
+                relationships = relationships,
+                statistics = statistics
+            )
+        }
+
+        // JSON 파일 저장 및 부분 업데이트 수행
+        val savedPath = if (graph.graphType == GraphType.MULTI_LEVEL_2 && targetModule != null) {
+            val savedModulePath = exporter.exportToJson(graph, project)
+            updateLevel1Metadata(targetModule, scoredNodes)
+            savedModulePath
+        } else {
+            exporter.exportToJson(graph, project)
+        }
         onProgress?.invoke("메타파일 저장 완료: $savedPath")
 
         return graph
@@ -262,10 +328,20 @@ class ProjectGraphBuilder(private val project: Project) {
         val psiManager = PsiManager.getInstance(project)
         val fileIndex = ProjectFileIndex.getInstance(project)
 
-        fileIndex.iterateContent { vf ->
+        val iterator = ContentIterator { vf ->
             if (!vf.isDirectory && (vf.extension == "java" || vf.extension == "kt")) {
-                // 소스 디렉토리 내부에 있으면서 테스트 코드가 아닌 파일만 수집
-                if (fileIndex.isInSourceContent(vf) && !fileIndex.isInTestSourceContent(vf)) {
+                val path = vf.path.lowercase()
+                val isTest = path.contains("/test/") || path.contains("/src/test/")
+                val isBuild = path.contains("/build/") || path.contains("/out/") || path.contains("/target/") || 
+                              path.contains("/.gradle/") || path.contains("/.idea/") || path.contains("/.metadata/") ||
+                              path.contains("/.git/") || path.contains("/node_modules/")
+                
+                // 1. fileIndex가 소스 코드로 인정하거나
+                // 2. targetDirectory가 명시된 경우, 빌드/테스트 경로가 아니면 강제 수집 (Source Root 매핑이 안 된 경우 대비)
+                val isSource = (fileIndex.isInSourceContent(vf) && !fileIndex.isInTestSourceContent(vf)) ||
+                               (targetDirectory != null && !isTest && !isBuild)
+                               
+                if (isSource) {
                     val psiFile = psiManager.findFile(vf) as? PsiClassOwner
                     if (psiFile != null) {
                         result.add(psiFile)
@@ -273,6 +349,14 @@ class ProjectGraphBuilder(private val project: Project) {
                 }
             }
             true
+        }
+
+        if (targetDirectory != null) {
+            com.intellij.openapi.vfs.VfsUtilCore.iterateChildrenRecursively(targetDirectory, null) { vf ->
+                iterator.processFile(vf)
+            }
+        } else {
+            fileIndex.iterateContent(iterator)
         }
 
         logger.info("Collected ${result.size} source files from project")
@@ -312,7 +396,24 @@ class ProjectGraphBuilder(private val project: Project) {
             node = node.copy(entityRelations = relations)
         }
         
-        val calls = callRelationAnalyzer.analyze(primaryClass, projectBasePath)
+        val calls = callRelationAnalyzer.analyze(primaryClass, projectBasePath).toMutableList()
+        
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+
+        if (isAnyframe) {
+            if (node.anyframeRole == AnyframeRole.SVC) {
+                val endpoints = anyframeServiceIdAnalyzer.analyze(primaryClass)
+                node = node.copy(serviceEndpoints = endpoints)
+            } else if (node.anyframeRole == AnyframeRole.DEM || node.anyframeRole == AnyframeRole.DQM) {
+                val demMethods = anyframeDemAnalyzer.analyze(primaryClass)
+                node = node.copy(demMethods = demMethods)
+            }
+            val anyframeDeps = anyframeDependencyAnalyzer.analyze(primaryClass, projectBasePath)
+            val anyframeBizCalls = anyframeBizCallAnalyzer.analyze(primaryClass, projectBasePath)
+            calls.addAll(anyframeDeps)
+            calls.addAll(anyframeBizCalls)
+        }
         
         return Pair(listOf(relativePath to node), calls)
     }
@@ -346,10 +447,111 @@ class ProjectGraphBuilder(private val project: Project) {
     private fun emptyGraph(): ProjectGraph {
         return ProjectGraph(
             generatedAt = Instant.now().toString(),
-            projectRoot = project.basePath ?: "",
+            projectRoot = targetDirectory?.path ?: project.basePath ?: "",
             files = emptyMap(),
             relationships = emptyList(),
             statistics = GraphStatistics()
         )
+    }
+
+    private fun collectModulesInfo(
+        nodes: Map<String, FileNode>,
+        validModules: List<com.intellij.openapi.module.Module>
+    ): List<ModuleInfo> {
+        val baseDir = project.basePath?.let {
+            LocalFileSystem.getInstance().findFileByPath(it)
+        } ?: return emptyList()
+
+        return validModules.map { module ->
+            val rootManager = ModuleRootManager.getInstance(module)
+            val contentRoots = rootManager.contentRoots
+            val moduleRoot = contentRoots.firstOrNull()
+
+            // 프로젝트 루트 기준 모듈의 상대 경로
+            val rootPath = moduleRoot?.let {
+                VfsUtilCore.getRelativePath(it, baseDir)
+            } ?: ""
+
+            // 메타파일 상대 경로
+            val metadataPath = if (rootPath.isEmpty()) {
+                ".meta/project-graph.json"
+            } else {
+                "$rootPath/.meta/project-graph.json"
+            }
+
+            // 해당 모듈 디렉터리 내에 포함된 파일만 매핑
+            val moduleFiles = nodes.filter { (path, _) ->
+                path.startsWith("$rootPath/") || (rootPath.isEmpty() && !path.contains("/"))
+            }
+
+            // 모듈의 public API 요약 (REST Endpoints)
+            val publicApis = moduleFiles.values.flatMap { node ->
+                node.apiEndpoints.map { "${it.httpMethod} ${it.path}" }
+            }.distinct()
+
+            ModuleInfo(
+                name = module.name,
+                rootPath = rootPath,
+                metadataPath = metadataPath,
+                dependsOnModules = emptyList(), // Phase 1a 기본값
+                lastIndexedAt = System.currentTimeMillis(),
+                fileCount = moduleFiles.size,
+                publicApis = if (publicApis.isNotEmpty()) publicApis else null
+            )
+        }
+    }
+
+    /**
+     * 특정 모듈 단독 재분석 시, 기존 전역 Level 1 메타데이터의 해당 모듈 요약 정보를 부분 업데이트(Partial Update)합니다.
+     */
+    private fun updateLevel1Metadata(
+        targetModule: com.intellij.openapi.module.Module,
+        moduleNodes: Map<String, FileNode>
+    ) {
+        try {
+            val basePath = project.basePath ?: return
+            val rootMetaFile = File(basePath, ".meta/project-graph.json")
+            if (!rootMetaFile.exists()) return
+
+            val jsonContent = rootMetaFile.readText(Charsets.UTF_8)
+            val gson = com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
+            val rootGraph = gson.fromJson(jsonContent, ProjectGraph::class.java)
+
+            if (rootGraph.graphType == GraphType.MULTI_LEVEL_1 && rootGraph.modules != null) {
+                val rootManager = ModuleRootManager.getInstance(targetModule)
+                val contentRoots = rootManager.contentRoots
+                val moduleRoot = contentRoots.firstOrNull()
+                val baseDir = LocalFileSystem.getInstance().findFileByPath(basePath) ?: return
+                val rootPath = moduleRoot?.let { VfsUtilCore.getRelativePath(it, baseDir) } ?: ""
+
+                // 해당 모듈의 public API 요약 (REST Endpoints)
+                val publicApis = moduleNodes.values.flatMap { node ->
+                    node.apiEndpoints.map { "${it.httpMethod} ${it.path}" }
+                }.distinct()
+
+                // 기존 modules 리스트에서 이 모듈 항목을 찾아 갱신
+                val updatedModules = rootGraph.modules.map { moduleInfo ->
+                    if (moduleInfo.name == targetModule.name) {
+                        moduleInfo.copy(
+                            lastIndexedAt = System.currentTimeMillis(),
+                            fileCount = moduleNodes.size,
+                            publicApis = if (publicApis.isNotEmpty()) publicApis else null
+                        )
+                    } else {
+                        moduleInfo
+                    }
+                }
+
+                // Level 1 파일 재기록
+                val updatedRootGraph = rootGraph.copy(
+                    generatedAt = Instant.now().toString(),
+                    modules = updatedModules
+                )
+                rootMetaFile.writeText(gson.toJson(updatedRootGraph), Charsets.UTF_8)
+                logger.info("Partially updated Level 1 metadata for module: ${targetModule.name}")
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to partially update Level 1 metadata: ${e.message}")
+        }
     }
 }
