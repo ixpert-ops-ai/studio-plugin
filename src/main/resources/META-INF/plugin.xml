@@ -36,6 +36,8 @@
                                  id="net.ib.ixpert.ops.wuwagent.setting.WuwSettingsConfigurable"
                                  displayName="iXpert AI Assistant"
                                  parentId="tools"/>
+                                 
+        <postStartupActivity implementation="net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeDetector"/>
     </extensions>
 
     <actions>

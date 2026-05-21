@@ -177,6 +177,33 @@ object RelevanceFilter {
         client: LLMClient,
         onProgress: ((String) -> Unit)?
     ): List<Pair<String, FileNode>> {
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+
+        if (isAnyframe) {
+            val anyframeStage1Matches = mutableSetOf<String>()
+            graph.files.forEach { (path, node) ->
+                // Check class-level localName
+                if (node.localName != null && (requirement.contains(node.localName) || node.localName.contains(requirement))) {
+                    anyframeStage1Matches.add(path)
+                }
+                
+                // Check serviceEndpoints
+                node.serviceEndpoints?.forEach { endpoint ->
+                    if (requirement.contains(endpoint.serviceId, ignoreCase = true)) {
+                        anyframeStage1Matches.add(path)
+                    }
+                    if (endpoint.localName != null && (requirement.contains(endpoint.localName) || endpoint.localName.contains(requirement))) {
+                        anyframeStage1Matches.add(path)
+                    }
+                }
+            }
+            if (anyframeStage1Matches.isNotEmpty()) {
+                onProgress?.invoke("> 🎯 [Anyframe Stage 1] @LocalName 또는 ServiceId 매칭을 통해 진입점을 식별했습니다.\n")
+                return anyframeStage1Matches.mapNotNull { path -> graph.files[path]?.let { path to it } }
+            }
+        }
+
         // [Stage 1] Deterministic Match (Regex / API Path)
         val stage1Matches = mutableSetOf<String>()
         
@@ -252,14 +279,7 @@ object RelevanceFilter {
                     else -> 0.5
                 }
                 
-                val finalWeight = if (node.layer == null) {
-                    when {
-                        node.className.endsWith("Controller") || node.className.endsWith("Service") -> 1.2
-                        node.className.endsWith("Dao") || node.className.endsWith("Repository") -> 1.0
-                        node.className.endsWith("Dto") || node.className.endsWith("Entity") || node.className.endsWith("Vo") -> 0.3
-                        else -> 0.5
-                    }
-                } else layerWeight
+                val finalWeight = layerWeight
                 
                 candidateScores[path] = matchScore * finalWeight
             }

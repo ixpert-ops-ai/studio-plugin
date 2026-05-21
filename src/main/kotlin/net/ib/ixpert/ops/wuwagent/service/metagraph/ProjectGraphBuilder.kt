@@ -56,6 +56,11 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
     private val beanAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.SpringBeanAnalyzer()
     private val entityAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.JpaEntityAnalyzer()
     private val callRelationAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.CallRelationAnalyzer()
+    private val anyframeServiceIdAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeServiceIdAnalyzer()
+    private val anyframeDemAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeDemAnalyzer()
+    private val anyframeDependencyAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeDependencyAnalyzer()
+    private val anyframeBizCallAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeBizCallAnalyzer()
+    private val anyframeVoChainAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeVoChainAnalyzer()
 
     /**
      * 비동기로 프로젝트 그래프를 생성합니다.
@@ -175,6 +180,17 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         val relationships = ReadAction.compute<List<Relationship>, Throwable> {
             dependencyResolver.buildRelationships(resolvedNodes)
         }.toMutableList()
+
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+        val currentFrameworkType = settings.state.frameworkType
+        if (currentFrameworkType == FrameworkType.ANYFRAME) {
+            val voRels = anyframeVoChainAnalyzer.analyze(resolvedNodes)
+            relationships.addAll(voRels)
+            for (rel in voRels) {
+                resolvedNodes[rel.source]?.dependsOn?.add(rel.target)
+                resolvedNodes[rel.target]?.dependedBy?.add(rel.source)
+            }
+        }
         
         // CALLS 관계 병합 및 노드의 dependsOn/dependedBy 업데이트
         relationships.addAll(allCalls)
@@ -253,12 +269,16 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         val targetModule = targetDirectory?.let { fileIndex.getModuleForFile(it) }
         val isSingleModulePartialUpdate = targetModule != null && targetModule.name != project.name && isMultiModule
 
-        val graph = if (isSingleModulePartialUpdate && targetModule != null) {
+        val frameworkName = if (currentFrameworkType == FrameworkType.ANYFRAME) "anyframe" else "spring-boot"
+
+        val graph = if (isSingleModulePartialUpdate) {
             // A. 단독 모듈 분석 모드: MULTI_LEVEL_2로 생성
             ProjectGraph(
                 graphType = GraphType.MULTI_LEVEL_2,
                 generatedAt = Instant.now().toString(),
                 projectRoot = targetDirectory.path,
+                framework = frameworkName,
+                frameworkType = currentFrameworkType,
                 files = scoredNodes,
                 relationships = relationships,
                 statistics = statistics
@@ -274,6 +294,8 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
                 graphType = if (isMultiModule) GraphType.MULTI_LEVEL_1 else GraphType.SINGLE,
                 generatedAt = Instant.now().toString(),
                 projectRoot = projectBasePath,
+                framework = frameworkName,
+                frameworkType = currentFrameworkType,
                 modules = modulesList,
                 files = scoredNodes,
                 relationships = relationships,
@@ -374,7 +396,24 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             node = node.copy(entityRelations = relations)
         }
         
-        val calls = callRelationAnalyzer.analyze(primaryClass, projectBasePath)
+        val calls = callRelationAnalyzer.analyze(primaryClass, projectBasePath).toMutableList()
+        
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+
+        if (isAnyframe) {
+            if (node.anyframeRole == AnyframeRole.SVC) {
+                val endpoints = anyframeServiceIdAnalyzer.analyze(primaryClass)
+                node = node.copy(serviceEndpoints = endpoints)
+            } else if (node.anyframeRole == AnyframeRole.DEM || node.anyframeRole == AnyframeRole.DQM) {
+                val demMethods = anyframeDemAnalyzer.analyze(primaryClass)
+                node = node.copy(demMethods = demMethods)
+            }
+            val anyframeDeps = anyframeDependencyAnalyzer.analyze(primaryClass, projectBasePath)
+            val anyframeBizCalls = anyframeBizCallAnalyzer.analyze(primaryClass, projectBasePath)
+            calls.addAll(anyframeDeps)
+            calls.addAll(anyframeBizCalls)
+        }
         
         return Pair(listOf(relativePath to node), calls)
     }

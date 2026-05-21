@@ -70,9 +70,31 @@ class SpringAnnotationResolver {
      * @param psiClass 분석 대상 PsiClass
      * @param relativePath 프로젝트 루트 기준 상대 경로
      */
+    /**
+     * PsiClass로부터 FileNode를 생성합니다.
+     * @param psiClass 분석 대상 PsiClass
+     * @param relativePath 프로젝트 루트 기준 상대 경로
+     */
     fun resolve(psiClass: PsiClass, relativePath: String): FileNode {
-        val fileType = resolveFileType(psiClass, relativePath)
-        val layer = LAYER_MAP[fileType] ?: ArchitectureLayer.COMMON
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+
+        var anyframeRole: AnyframeRole? = null
+        var fileType = resolveFileType(psiClass, relativePath)
+        var layer = LAYER_MAP[fileType] ?: ArchitectureLayer.COMMON
+        var localName: String? = null
+        var datasource: String? = null
+
+        if (isAnyframe) {
+            anyframeRole = classifyAnyframeRole(psiClass, relativePath)
+            if (anyframeRole != AnyframeRole.UNKNOWN) {
+                fileType = mapAnyframeRoleToSpringFileType(anyframeRole)
+                layer = mapAnyframeRoleToLayer(anyframeRole)
+            }
+            localName = getAnnotationStringValue(psiClass, "LocalName")
+            datasource = getAnnotationStringValue(psiClass, "datasource") ?: getAnnotationStringValue(psiClass, "dataSource")
+        }
+
         val annotations = extractAnnotationNames(psiClass)
         val injections = resolveDependencyInjections(psiClass, fileType)
 
@@ -93,8 +115,106 @@ class SpringAnnotationResolver {
             annotations = annotations,
             superClass = superClass,
             implementedInterfaces = interfaces,
-            injections = injections
+            injections = injections,
+            anyframeRole = anyframeRole,
+            localName = localName,
+            datasource = datasource
         )
+    }
+
+    private fun classifyAnyframeRole(psiClass: PsiClass, relativePath: String): AnyframeRole {
+        val className = psiClass.name ?: ""
+        val normalizedPath = relativePath.replace("\\", "/").lowercase()
+        
+        // Check annotations first
+        val stereotype = getAnnotationStringValue(psiClass, "stereotype") ?: getAnnotationStringValue(psiClass, "Stereotype")
+        if (stereotype != null) {
+            val cleanStereotype = stereotype.trim().uppercase()
+            when (cleanStereotype) {
+                "BIZ" -> return AnyframeRole.BIZ
+                "BIZ_UTIL" -> return AnyframeRole.BIZ_UTIL
+                "SVC" -> return AnyframeRole.SVC
+                "SVC_IMPL" -> return AnyframeRole.SVC_IMPL
+                "DEM" -> return AnyframeRole.DEM
+                "DQM" -> return AnyframeRole.DQM
+            }
+        }
+        
+        val daoType = getAnnotationStringValue(psiClass, "daoType") ?: getAnnotationStringValue(psiClass, "DaoType")
+        if (daoType != null) {
+            val cleanDao = daoType.trim().uppercase()
+            when (cleanDao) {
+                "DEM" -> return AnyframeRole.DEM
+                "DQM" -> return AnyframeRole.DQM
+            }
+        }
+
+        // 1. 패키지 경로 기반 분류 (가장 견고함)
+        if (normalizedPath.contains("/dem/dvo/") || normalizedPath.contains("/dqm/dvo/") || (normalizedPath.contains("/svc/svo/") && normalizedPath.contains("/dvo/"))) {
+            return AnyframeRole.DVO
+        }
+        if (normalizedPath.contains("/biz/bvo/") || normalizedPath.contains("/bvo/")) {
+            return AnyframeRole.BVO
+        }
+        if (normalizedPath.contains("/svc/svo/") || normalizedPath.contains("/svo/")) {
+            return AnyframeRole.SVO
+        }
+        if (normalizedPath.contains("/svc/impl/") || normalizedPath.contains("/svcimpl/")) {
+            return AnyframeRole.SVC_IMPL
+        }
+        
+        // 2. 클래스 접미사 기반 분류
+        return when {
+            className.endsWith("DEM") -> AnyframeRole.DEM
+            className.endsWith("NDEM") -> AnyframeRole.DEM  // 변형 (예: ACAMTBAPC001NDEM)
+            className.endsWith("DQM") -> AnyframeRole.DQM
+            className.endsWith("DVO") -> AnyframeRole.DVO
+            className.endsWith("BVO") -> AnyframeRole.BVO
+            className.endsWith("SVO") -> AnyframeRole.SVO
+            className.endsWith("SVCImpl") -> AnyframeRole.SVC_IMPL
+            className.endsWith("SVC") -> AnyframeRole.SVC
+            className.endsWith("BIZ") -> AnyframeRole.BIZ
+            else -> AnyframeRole.UNKNOWN
+        }
+    }
+
+    private fun mapAnyframeRoleToSpringFileType(role: AnyframeRole): SpringFileType = when (role) {
+        AnyframeRole.SVC -> SpringFileType.INTERFACE
+        AnyframeRole.SVC_IMPL -> SpringFileType.SERVICE
+        AnyframeRole.BIZ -> SpringFileType.SERVICE
+        AnyframeRole.BIZ_UTIL -> SpringFileType.UTIL
+        AnyframeRole.DEM -> SpringFileType.REPOSITORY
+        AnyframeRole.DQM -> SpringFileType.REPOSITORY
+        AnyframeRole.SVO -> SpringFileType.VO
+        AnyframeRole.BVO -> SpringFileType.VO
+        AnyframeRole.DVO -> SpringFileType.VO
+        AnyframeRole.UNKNOWN -> SpringFileType.UNKNOWN
+    }
+
+    private fun mapAnyframeRoleToLayer(role: AnyframeRole): ArchitectureLayer = when (role) {
+        AnyframeRole.SVC -> ArchitectureLayer.BUSINESS
+        AnyframeRole.SVC_IMPL -> ArchitectureLayer.BUSINESS
+        AnyframeRole.BIZ -> ArchitectureLayer.BUSINESS
+        AnyframeRole.BIZ_UTIL -> ArchitectureLayer.COMMON
+        AnyframeRole.DEM -> ArchitectureLayer.PERSISTENCE
+        AnyframeRole.DQM -> ArchitectureLayer.PERSISTENCE
+        AnyframeRole.SVO -> ArchitectureLayer.PRESENTATION
+        AnyframeRole.BVO -> ArchitectureLayer.BUSINESS
+        AnyframeRole.DVO -> ArchitectureLayer.PERSISTENCE
+        AnyframeRole.UNKNOWN -> ArchitectureLayer.COMMON
+    }
+
+    private fun getAnnotationStringValue(psiClass: PsiClass, annotationFqn: String): String? {
+        val ann = psiClass.annotations.firstOrNull { 
+            val name = it.qualifiedName ?: it.nameReferenceElement?.referenceName ?: ""
+            name == annotationFqn || name.endsWith(".$annotationFqn")
+        } ?: return null
+        
+        val valueExpr = ann.findAttributeValue("value") ?: ann.findAttributeValue(null)
+        return when (valueExpr) {
+            is PsiLiteralExpression -> valueExpr.value?.toString()
+            else -> valueExpr?.text?.trim('"')
+        }
     }
 
     // ── 타입 판정 ──────────────────────────────────

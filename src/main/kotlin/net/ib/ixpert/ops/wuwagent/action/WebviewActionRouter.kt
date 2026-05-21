@@ -404,6 +404,35 @@ class WebviewActionRouter(private val project: Project) {
                     val progressId = "${messageId}_progress"
 
                     com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+                        val options = arrayOf("Spring Boot (기본)", "Anyframe Enterprise")
+                        val initialValue = if (settings.state.frameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME) {
+                            "Anyframe Enterprise"
+                        } else {
+                            "Spring Boot (기본)"
+                        }
+
+                        val selectedIdx = com.intellij.openapi.ui.Messages.showChooseDialog(
+                            project,
+                            "메타그래프를 분석할 대상 프레임워크를 선택하세요.",
+                            "대상 프레임워크 선택",
+                            com.intellij.openapi.ui.Messages.getQuestionIcon(),
+                            options,
+                            initialValue
+                        )
+
+                        if (selectedIdx == -1) {
+                            bridge.sendMessage("error", "분석이 취소되었습니다.", messageId)
+                            return@invokeLater
+                        }
+
+                        val chosenType = if (selectedIdx == 1) {
+                            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME
+                        } else {
+                            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT
+                        }
+                        settings.state.frameworkType = chosenType
+
                         val descriptor = com.intellij.openapi.fileChooser.FileChooserDescriptorFactory.createSingleFolderDescriptor().apply {
                             title = "Select Project Root for MetaGraph"
                             description = "메타그래프를 생성할 최상위 디렉토리를 선택하세요."
@@ -415,7 +444,7 @@ class WebviewActionRouter(private val project: Project) {
                             return@invokeLater
                         }
                         
-                        bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다...", messageId)
+                        bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다... (대상 프레임워크: ${chosenType.displayName})", messageId)
 
                         val builder = net.ib.ixpert.ops.wuwagent.service.metagraph.ProjectGraphBuilder(project, selectedDir)
                         builder.buildGraphAsync(
@@ -432,6 +461,7 @@ class WebviewActionRouter(private val project: Project) {
                                 appendLine("## 분석 결과 요약")
                                 appendLine("| 항목 | 수량 |")
                                 appendLine("| :--- | ---: |")
+                                appendLine("| 대상 프레임워크 | ${graph.frameworkType.displayName} |")
                                 appendLine("| 전체 파일 | ${stats.totalFiles}개 |")
                                 appendLine("| Controller | ${stats.controllers}개 |")
                                 appendLine("| Service | ${stats.services}개 |")
