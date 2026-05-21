@@ -6,37 +6,45 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
  * 클래스명 및 메서드명 기반 토큰 매칭 서브 수집기.
  *
  * CamelCase 분해를 통해 클래스명과 메서드명에서 토큰을 추출한 뒤,
- * [AnalyzedQuery.englishTokens]와의 교집합 비율로 점수를 산출합니다.
+ * 질의의 한글 명사가 해당 토큰에 얼마나 매칭되는지를 명사 단위 비율로 산출합니다.
  *
  * **점수 산출 방식:**
- * - 기본 점수: `60 * (교집합 토큰 수 / 전체 후보 토큰 수)`
- * - [AnalyzedQuery.exactIdentifiers]가 className에 부분 포함되면 추가 가중치
+ * - 기본 점수: `60 * (매칭된 명사 수 / 전체 질의 명사 수)`
+ * - [AnalyzedQuery.exactIdentifiers]가 className에 부분 포함되면 추가 가중치 (+15점)
  *
- * **최소 임계값:** 교집합 토큰 2개 이상 또는 교집합 비율 >= 0.3
+ * **최소 임계값:** 점수가 20점 이상 (약 33% 매칭)
  */
 class ClassMethodTokenCollector(
     private val graph: ProjectGraph
 ) : SubCollector {
 
+    private val dictionary = DomainDictionary.load(graph)
+
     override fun search(query: AnalyzedQuery): List<ScoredCandidate> {
-        if (query.englishTokens.isEmpty()) return emptyList()
+        if (query.koreanNouns.isEmpty() && query.exactIdentifiers.isEmpty()) return emptyList()
 
         val results = mutableListOf<ScoredCandidate>()
 
         for ((path, node) in graph.files.entries) {
-            val classTokens = DomainDictionary.tokenizeCamelCase(node.className)
-            val methodTokens = node.methodNames.flatMap { DomainDictionary.tokenizeCamelCase(it) }
+            val classTokens = DomainDictionary.tokenizeCamelCase(node.className).map { it.lowercase() }
+            val methodTokens = node.methodNames.flatMap { DomainDictionary.tokenizeCamelCase(it).map { t -> t.lowercase() } }
             val allTokens = (classTokens + methodTokens).toSet()
 
-            if (allTokens.isEmpty()) continue
+            var score = 0.0
+            val matchReasons = mutableListOf<String>()
 
-            val intersection = allTokens.intersect(query.englishTokens)
-            if (intersection.isEmpty()) continue
-
-            val ratio = intersection.size.toDouble() / allTokens.size
-            if (intersection.size < 2 && ratio < 0.3) continue
-
-            var score = 60.0 * ratio
+            if (allTokens.isNotEmpty() && query.koreanNouns.isNotEmpty()) {
+                val matchedNouns = query.koreanNouns.count { noun ->
+                    val translations = dictionary.translate(noun)
+                    translations.any { trans -> tokenMatchesAny(trans, allTokens) }
+                }
+                
+                if (matchedNouns > 0) {
+                    val ratio = matchedNouns.toDouble() / query.koreanNouns.size
+                    score += 60.0 * ratio
+                    matchReasons.add("명사 단위 토큰 매칭: $matchedNouns/${query.koreanNouns.size} (비율: ${"%.2f".format(ratio)})")
+                }
+            }
 
             // exactIdentifiers가 className에 부분 포함되면 보너스
             val hasIdentifierMatch = query.exactIdentifiers.any { identifier ->
@@ -44,23 +52,28 @@ class ClassMethodTokenCollector(
             }
             if (hasIdentifierMatch) {
                 score += 15.0
-            }
-
-            val matchReasons = mutableListOf<String>()
-            matchReasons.add("클래스/메서드 토큰 매칭: ${intersection.joinToString(", ")} (비율: ${"%.2f".format(ratio)})")
-            if (hasIdentifierMatch) {
                 matchReasons.add("정확 식별자가 클래스명에 포함됨")
             }
 
-            results.add(
-                ScoredCandidate(
-                    filePath = path,
-                    score = score,
-                    matchedBy = matchReasons
+            if (score >= 20.0) {
+                results.add(
+                    ScoredCandidate(
+                        filePath = path,
+                        score = score,
+                        matchedBy = matchReasons
+                    )
                 )
-            )
+            }
         }
 
         return results
+    }
+
+    private fun tokenMatchesAny(token: String, candidates: Collection<String>): Boolean {
+        return candidates.any { candidate ->
+            token == candidate ||
+            token == candidate + "s" ||
+            token.removeSuffix("s") == candidate
+        }
     }
 }

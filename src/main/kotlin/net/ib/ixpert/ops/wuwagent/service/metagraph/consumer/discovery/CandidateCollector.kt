@@ -39,8 +39,8 @@ class CandidateCollector(
             logger.info("CandidateCollector: DemMethodCollector 활성화")
         }
         if (graph.files.values.any { it.apiEndpoints.isNotEmpty() }) {
-            add(RequestMappingCollector(graph))
-            logger.info("CandidateCollector: RequestMappingCollector 활성화")
+            add(ApiEndpointCollector(graph))
+            logger.info("CandidateCollector: ApiEndpointCollector 활성화")
         }
         if (graph.files.values.any { it.koreanComments.isNotEmpty() }) {
             add(KoreanCommentCollector(graph))
