@@ -415,7 +415,54 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             calls.addAll(anyframeBizCalls)
         }
         
+        // Adaptive File Discovery 지원: 한글 주석 + 메서드명 수집
+        val koreanComments = extractKoreanComments(primaryClass)
+        val methodNames = primaryClass.methods.map { it.name }.filter { it != primaryClass.name }
+        node = node.copy(
+            koreanComments = koreanComments,
+            methodNames = methodNames
+        )
+        
         return Pair(listOf(relativePath to node), calls)
+    }
+    // ── 한글 주석 추출 (Adaptive File Discovery) ───────
+
+    private val koreanPattern = Regex("[가-힣]{2,}")
+
+    /**
+     * PsiClass에서 한글이 포함된 주석을 추출합니다.
+     * KDoc, JavaDoc, 라인 주석(//) 및 블록 주석(/* */)을 모두 검사합니다.
+     */
+    private fun extractKoreanComments(psiClass: com.intellij.psi.PsiClass): List<String> {
+        val comments = mutableListOf<String>()
+
+        // 1. 클래스 레벨 KDoc/JavaDoc
+        psiClass.docComment?.let { doc ->
+            val text = doc.text
+            if (koreanPattern.containsMatchIn(text)) {
+                // 태그와 포맷 문자 제거 후 한글 포함 라인만 추출
+                text.lines()
+                    .map { it.replace(Regex("[/*@]"), "").trim() }
+                    .filter { it.isNotBlank() && koreanPattern.containsMatchIn(it) }
+                    .forEach { comments.add(it) }
+            }
+        }
+
+        // 2. 메서드 레벨 KDoc/JavaDoc
+        for (method in psiClass.methods) {
+            method.docComment?.let { doc ->
+                val text = doc.text
+                if (koreanPattern.containsMatchIn(text)) {
+                    text.lines()
+                        .map { it.replace(Regex("[/*@]"), "").trim() }
+                        .filter { it.isNotBlank() && koreanPattern.containsMatchIn(it) }
+                        .take(2) // 메서드당 최대 2줄
+                        .forEach { comments.add(it) }
+                }
+            }
+        }
+
+        return comments.distinct().take(10) // 클래스당 최대 10개 주석
     }
 
     // ── Step 8: 통계 계산 ────────────────────────

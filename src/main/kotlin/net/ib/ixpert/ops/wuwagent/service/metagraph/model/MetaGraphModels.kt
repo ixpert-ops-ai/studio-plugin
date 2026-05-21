@@ -50,7 +50,10 @@ data class FileNode(
     val demMethods: List<DemMethodInfo>? = null,
     val serviceEndpoints: List<ServiceEndpoint>? = null,
     val localName: String? = null,
-    val datasource: String? = null
+    val datasource: String? = null,
+    // Adaptive File Discovery 지원 필드
+    val koreanComments: List<String> = emptyList(),
+    val methodNames: List<String> = emptyList()
 )
 
 /**

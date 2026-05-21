@@ -7,6 +7,7 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ProjectSummaryFormatter
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.RepoMapFormatter
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.RelevanceFilter
+import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AdaptiveFileDiscovery
 
 data class TargetFileSpec(
     val order: Int,
@@ -49,7 +50,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             }
             onChunk?.invoke(filterMsg)
             
-            val filterResult = RelevanceFilter.filter(requirement, projectGraph, client, project) { progress ->
+            val filterResult = AdaptiveFileDiscovery.filter(requirement, projectGraph, client, project) { progress ->
                 onChunk?.invoke(progress)
             }
             // Ollama 서버의 연속 호출(키워드 추출 -> 전체 분석) 시 컨텍스트 정리 및 커넥션 안정화를 위한 대기
