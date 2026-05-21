@@ -26,7 +26,8 @@ class SettingsState : PersistentStateComponent<SettingsState.State> {
         var timeoutSeconds: Int = 300,
         var contextWindow: Int = 32768,
         var enableLlmDebug: Boolean = false,
-        var frameworkType: net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType = net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT
+        var frameworkType: net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType = net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT,
+        var isFirstRun: Boolean = true   // 최초 실행 여부 — 웰컴 다이얼로그 표시 제어
     )
 
     private var myState = State()
