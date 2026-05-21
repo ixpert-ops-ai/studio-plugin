@@ -258,13 +258,20 @@ class SpringAnnotationResolver {
         val name = psiClass.name ?: return SpringFileType.UNKNOWN
         val lowerPath = relativePath.lowercase()
 
-        // 1순위: 확실한 기본 타입 및 PSI 상속 관계
-        if (psiClass.isEnum) return SpringFileType.ENUM
-        if (psiClass.isInterface) return SpringFileType.INTERFACE
-        if (psiClass.hasModifierProperty(PsiModifier.ABSTRACT)) return SpringFileType.ABSTRACT_CLASS
-
         val superClassName = psiClass.superClass?.name ?: ""
         val interfaceNames = psiClass.interfaces.map { it.name }
+
+        // 1순위: 확실한 기본 타입 및 PSI 상속 관계
+        if (psiClass.isEnum) return SpringFileType.ENUM
+        
+        if (psiClass.isInterface) {
+            // Spring Data Repository 인터페이스 처리
+            if (name.contains("Repository")) return SpringFileType.REPOSITORY
+            if (interfaceNames.any { it?.contains("Repository") == true }) return SpringFileType.REPOSITORY
+            return SpringFileType.INTERFACE
+        }
+        
+        if (psiClass.hasModifierProperty(PsiModifier.ABSTRACT)) return SpringFileType.ABSTRACT_CLASS
 
         if (superClassName.contains("View")) return SpringFileType.VIEW
         if (superClassName.contains("Filter") || interfaceNames.any { it?.contains("Filter") == true }) return SpringFileType.FILTER

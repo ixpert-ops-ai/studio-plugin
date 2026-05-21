@@ -386,7 +386,8 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         
         // Phase 1c: 보강 분석기 연동
         if (node.fileType == SpringFileType.REST_CONTROLLER || node.fileType == SpringFileType.CONTROLLER) {
-            val endpoints = endpointAnalyzer.analyze(primaryClass)
+            val injectedFieldNames = node.injections.map { it.fieldName }.toSet()
+            val endpoints = endpointAnalyzer.analyze(primaryClass, injectedFieldNames)
             node = node.copy(apiEndpoints = endpoints)
         } else if (node.fileType == SpringFileType.CONFIG) {
             val beans = beanAnalyzer.analyze(primaryClass)
@@ -428,41 +429,35 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
     // ── 한글 주석 추출 (Adaptive File Discovery) ───────
 
     private val koreanPattern = Regex("[가-힣]{2,}")
+    private val noisePattern = Regex("^\\s*(TODO|FIXME|XXX|noinspection|Copyright|@)")
 
     /**
-     * PsiClass에서 한글이 포함된 주석을 추출합니다.
-     * KDoc, JavaDoc, 라인 주석(//) 및 블록 주석(/* */)을 모두 검사합니다.
+     * 파일 전체에서 한글이 포함된 주석을 추출합니다.
+     * KDoc, JavaDoc, 라인 주석(//) 및 블록 주석(/* */)을 모두 검사하며,
+     * TODO, FIXME 등의 노이즈 주석은 필터링하고 중복을 제거합니다.
      */
     private fun extractKoreanComments(psiClass: com.intellij.psi.PsiClass): List<String> {
-        val comments = mutableListOf<String>()
+        val comments = mutableSetOf<String>()
+        val file = psiClass.containingFile
 
-        // 1. 클래스 레벨 KDoc/JavaDoc
-        psiClass.docComment?.let { doc ->
-            val text = doc.text
-            if (koreanPattern.containsMatchIn(text)) {
-                // 태그와 포맷 문자 제거 후 한글 포함 라인만 추출
-                text.lines()
-                    .map { it.replace(Regex("[/*@]"), "").trim() }
-                    .filter { it.isNotBlank() && koreanPattern.containsMatchIn(it) }
-                    .forEach { comments.add(it) }
-            }
-        }
-
-        // 2. 메서드 레벨 KDoc/JavaDoc
-        for (method in psiClass.methods) {
-            method.docComment?.let { doc ->
-                val text = doc.text
+        file.accept(object : com.intellij.psi.PsiRecursiveElementVisitor() {
+            override fun visitComment(comment: com.intellij.psi.PsiComment) {
+                super.visitComment(comment)
+                val text = comment.text
                 if (koreanPattern.containsMatchIn(text)) {
                     text.lines()
                         .map { it.replace(Regex("[/*@]"), "").trim() }
-                        .filter { it.isNotBlank() && koreanPattern.containsMatchIn(it) }
-                        .take(2) // 메서드당 최대 2줄
+                        .filter { line -> 
+                            line.isNotBlank() && 
+                            koreanPattern.containsMatchIn(line) && 
+                            !noisePattern.containsMatchIn(line)
+                        }
                         .forEach { comments.add(it) }
                 }
             }
-        }
+        })
 
-        return comments.distinct().take(10) // 클래스당 최대 10개 주석
+        return comments.toList().take(20) // 클래스당 최대 20개 주석 (기존 설계 10개에서 확장)
     }
 
     // ── Step 8: 통계 계산 ────────────────────────
