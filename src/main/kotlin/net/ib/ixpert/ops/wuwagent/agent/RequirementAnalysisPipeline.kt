@@ -82,17 +82,19 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             targetFiles.add(TargetFileSpec(action.order ?: 0, action.path ?: "", "신규", action.reason ?: ""))
         }
         
+        val validatedTargetFiles = TargetFileValidator.validate(targetFiles, workingGraph)
+        
         val formattedOutput = buildString {
             if (!selectionResult.summary.isNullOrBlank()) {
                 appendLine("### 요구사항 요약")
                 appendLine(selectionResult.summary)
                 appendLine()
             }
-            if (targetFiles.isNotEmpty()) {
+            if (validatedTargetFiles.isNotEmpty()) {
                 appendLine("### 분석된 대상 파일")
                 appendLine("| 순서 | 파일 경로 | 유형 | 작업 내용 |")
                 appendLine("|:---:|:---|:---:|:---|")
-                targetFiles.forEach {
+                validatedTargetFiles.forEach {
                     appendLine("| ${it.order} | ${it.path} | ${it.type} | ${it.description} |")
                 }
             } else {
@@ -110,8 +112,6 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             }
         }
         onChunk?.invoke("\n" + formattedOutput + "\n")
-        
-        val validatedTargetFiles = TargetFileValidator.validate(targetFiles, workingGraph)
         
         val result = RequirementAnalysisResult(
             summary = selectionResult.summary ?: "",
