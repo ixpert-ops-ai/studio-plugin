@@ -103,6 +103,11 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                 appendLine("### 작업 시 주의사항")
                 selectionResult.warnings.forEach { appendLine("- $it") }
             }
+            if (!selectionResult.reasoning.isNullOrBlank()) {
+                appendLine()
+                appendLine("### 선정 사유")
+                appendLine(selectionResult.reasoning)
+            }
         }
         onChunk?.invoke("\n" + formattedOutput + "\n")
         
