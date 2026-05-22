@@ -85,7 +85,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         
         onChunk?.invoke("\n> 🤖 (Stage 3) 불필요한 수정 대상 파일 필터링 중...\n")
         val correctedFiles = TargetFileValidator.correctPaths(targetFiles, workingGraph)
-        val mdRoot = Paths.get(project?.basePath ?: "", ".meta/analysis")
+        val mdRoot = Paths.get(project?.basePath ?: "", "docs")
         val verifier = FileRelevanceVerifier(client, workingGraph, mdRoot)
         val verifiedFiles = verifier.verify(requirement, correctedFiles)
         val validatedTargetFiles = TargetFileValidator.sortByDependency(verifiedFiles, workingGraph)

@@ -148,8 +148,8 @@ class FileRelevanceVerifier(
     }
 
     private fun buildFileContext(path: String, graph: ProjectGraph, mdRoot: Path): String {
-        val className = extractClassName(path)
-        val mdFile = mdRoot.resolve("$className.md")
+        val fileName = extractFileName(path)
+        val mdFile = mdRoot.resolve("$fileName.md")
         
         if (mdFile.exists()) {
             return extractMdSections(mdFile, listOf(1, 3, 5))
@@ -159,8 +159,8 @@ class FileRelevanceVerifier(
         return buildGraphContext(node)
     }
 
-    private fun extractClassName(path: String): String {
-        return path.substringAfterLast("/").substringBeforeLast(".")
+    private fun extractFileName(path: String): String {
+        return path.substringAfterLast("/")
     }
 
     private fun extractMdSections(mdFile: Path, sections: List<Int>): String {
