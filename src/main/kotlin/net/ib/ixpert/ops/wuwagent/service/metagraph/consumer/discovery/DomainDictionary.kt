@@ -1,6 +1,7 @@
 package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery
 
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
+import java.io.File
 
 /**
  * 도메인 사전: 한글 → 영어 변환을 위한 내장 사전 + 그래프 학습 기반 사전.
@@ -77,6 +78,20 @@ class DomainDictionary private constructor(
             val merged = mutableMapOf<String, MutableSet<String>>()
             BUILTIN_TERMS.forEach { (k, v) -> merged.getOrPut(k) { mutableSetOf() }.addAll(v) }
             learned.forEach { (k, v) -> merged.getOrPut(k) { mutableSetOf() }.addAll(v) }
+
+            try {
+                val dictFile = File(graph.projectRoot, ".meta/dictionary.json")
+                if (dictFile.exists()) {
+                    val type = object : com.google.gson.reflect.TypeToken<Map<String, List<String>>>() {}.type
+                    val externalDict: Map<String, List<String>> = com.google.gson.Gson().fromJson(dictFile.readText(Charsets.UTF_8), type)
+                    externalDict.forEach { (k, v) ->
+                        merged.getOrPut(k) { mutableSetOf() }.addAll(v)
+                    }
+                    com.intellij.openapi.diagnostic.Logger.getInstance(DomainDictionary::class.java).info("Loaded external dictionary from ${dictFile.absolutePath} with ${externalDict.size} entries.")
+                }
+            } catch (e: Exception) {
+                com.intellij.openapi.diagnostic.Logger.getInstance(DomainDictionary::class.java).warn("Failed to load .meta/dictionary.json: ${e.message}")
+            }
 
             return DomainDictionary(merged.mapValues { it.value.toSet() })
         }
