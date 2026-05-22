@@ -3,6 +3,9 @@ package net.ib.ixpert.ops.wuwagent.agent
 import com.intellij.openapi.diagnostic.Logger
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode
+import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType
+import net.ib.ixpert.ops.wuwagent.service.metagraph.model.AnyframeRole
+import net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType
 
 object TargetFileValidator {
     private val logger = Logger.getInstance(TargetFileValidator::class.java)
@@ -75,7 +78,43 @@ object TargetFileValidator {
             logger.info("TargetFileValidator: LLM 응답 모두 정상 (교정 없음)")
         }
 
-        return correctedSpecs
+        return correctedSpecs.sortedWith(
+            compareBy<TargetFileSpec> { getSortWeight(it.path, graph) }
+                .thenBy { it.order }
+        ).mapIndexed { index, spec ->
+            spec.copy(order = index + 1)
+        }
+    }
+
+    /**
+     * 프레임워크에 따른 파일 의존성 가중치(정렬 순서)를 반환합니다.
+     * 값이 작을수록 먼저 생성/수정되어야 하는 하위 의존성(컴파일 의존성 기준)입니다.
+     */
+    private fun getSortWeight(path: String, graph: ProjectGraph): Int {
+        val node = graph.files[path]
+        val lowerPath = path.lowercase()
+
+        if (graph.frameworkType == FrameworkType.ANYFRAME) {
+            val role = node?.anyframeRole
+            return when {
+                role == AnyframeRole.DVO || lowerPath.contains("dvo") -> 1
+                role == AnyframeRole.DEM || role == AnyframeRole.DQM || lowerPath.contains("dem") || lowerPath.contains("dqm") -> 2
+                role == AnyframeRole.BVO || lowerPath.contains("bvo") -> 3
+                role == AnyframeRole.BIZ_UTIL || role == AnyframeRole.BIZ || lowerPath.contains("biz") -> 4
+                role == AnyframeRole.SVO || lowerPath.contains("svo") -> 5
+                role == AnyframeRole.SVC_IMPL || role == AnyframeRole.SVC || lowerPath.contains("svc") -> 6
+                else -> 7
+            }
+        } else {
+            val type = node?.fileType?.name
+            return when {
+                type in setOf("ENTITY", "REPOSITORY", "MAPPER", "DAO") || lowerPath.contains("entity") || lowerPath.contains("repository") || lowerPath.contains("dao") || lowerPath.contains("mapper") -> 1
+                type == "DTO" || type == "VO" || type == "EXCEPTION" || lowerPath.contains("dto") || lowerPath.contains("request") || lowerPath.contains("response") || lowerPath.contains("exception") -> 2
+                type == "SERVICE" || lowerPath.contains("service") || lowerPath.contains("impl") -> 3
+                type in setOf("CONTROLLER", "REST_CONTROLLER") || lowerPath.contains("controller") || lowerPath.contains("api") -> 4
+                else -> 5
+            }
+        }
     }
 
     private fun extractClassName(path: String): String {
