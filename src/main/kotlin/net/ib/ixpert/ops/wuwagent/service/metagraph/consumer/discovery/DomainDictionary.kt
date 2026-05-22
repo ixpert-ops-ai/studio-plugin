@@ -81,6 +81,8 @@ class DomainDictionary private constructor(
             return DomainDictionary(merged.mapValues { it.value.toSet() })
         }
 
+        private val CAMEL_CASE_REGEX = Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
         /**
          * CamelCase 또는 ALL_CAPS 문자열을 소문자 토큰으로 분해합니다.
          */
@@ -93,7 +95,7 @@ class DomainDictionary private constructor(
                     .map { it.lowercase() }
             }
             // CamelCase → 분리
-            return Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+            return CAMEL_CASE_REGEX
                 .split(identifier)
                 .filter { it.length >= 2 }
                 .map { it.lowercase() }
