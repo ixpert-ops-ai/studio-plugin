@@ -34,7 +34,7 @@ class ConsumerPipelineTest {
             isAbstract = false,
             dependsOn = mutableListOf("src/UserDaoImpl.java"),
             dependedBy = mutableListOf("src/IpsController.java"),
-            changeRisk = ChangeRisk.HIGH, // for testing HIGH RISK tag
+            riskAssessment = RiskAssessment(0, ChangeRisk.HIGH, emptyList()),
             injections = listOf(
                 DependencyInjection("com.test.UserDao", "userDao", InjectionMethod.FIELD, "com.test.UserDaoImpl")
             )

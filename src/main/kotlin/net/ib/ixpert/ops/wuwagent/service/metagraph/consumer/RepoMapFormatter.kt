@@ -13,6 +13,13 @@ object RepoMapFormatter {
 
         val sb = StringBuilder()
         
+        sb.append("## Contextual Analysis\n")
+        sb.append("### \uD83D\uDD78\uFE0F Key Architecture Flow\n")
+        sb.append(buildRelationshipSummary(graph))
+        sb.append("\n")
+
+        sb.append("## Project Structure (${graph.files.size} files)\n")
+        
         // 1. Layer 기준으로 그룹화
         val layeredFiles = graph.files.values.groupBy { it.layer }
 
@@ -109,5 +116,33 @@ object RepoMapFormatter {
         }
 
         return sb.toString().trim()
+    }
+
+    private fun buildRelationshipSummary(graph: ProjectGraph): String {
+        val summary = StringBuilder()
+        val excludedTypes = setOf(SpringFileType.UTIL, SpringFileType.DTO, SpringFileType.ENTITY, SpringFileType.VO, SpringFileType.CONFIG)
+        
+        // 핵심 관계(IMPLEMENTS, INJECTS)만 추출하여 요약
+        val coreRels = graph.relationships.filter { rel ->
+            val sourceNode = graph.files[rel.source]
+            val targetNode = graph.files[rel.target]
+            
+            // 유틸, DTO 등이 포함된 관계는 노이즈로 간주하여 제외
+            sourceNode?.fileType !in excludedTypes && targetNode?.fileType !in excludedTypes &&
+            rel.type in listOf(RelationshipType.INJECTS, RelationshipType.IMPLEMENTS)
+        }.distinctBy { "${it.source}-${it.type}-${it.target}" } // 중복 제거
+
+        // IMPLEMENTS 우선 출력 후 INJECTS 출력
+        val sortedRels = coreRels.sortedBy { if (it.type == RelationshipType.IMPLEMENTS) 0 else 1 }
+
+        if (sortedRels.isEmpty()) return "* (No core business flows identified in this subset)\n"
+
+        sortedRels.forEach { rel ->
+            val sourceName = rel.source.substringAfterLast("/").removeSuffix(".java").removeSuffix(".kt")
+            val targetName = rel.target.substringAfterLast("/").removeSuffix(".java").removeSuffix(".kt")
+            summary.appendLine("* $sourceName -> ${rel.type.name} -> $targetName")
+        }
+        
+        return summary.toString()
     }
 }

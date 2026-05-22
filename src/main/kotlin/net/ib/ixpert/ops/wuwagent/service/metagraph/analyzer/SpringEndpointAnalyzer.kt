@@ -41,14 +41,21 @@ class SpringEndpointAnalyzer {
         return endpoints
     }
 
+    private fun findAnnotation(annotations: Array<out PsiAnnotation>, fqn: String): PsiAnnotation? {
+        return annotations.firstOrNull { ann ->
+            val name = ann.qualifiedName ?: ann.nameReferenceElement?.referenceName ?: return@firstOrNull false
+            name == fqn || fqn.endsWith(".$name")
+        }
+    }
+
     private fun getClassLevelPath(psiClass: PsiClass): String {
-        val requestMapping = psiClass.getAnnotation("org.springframework.web.bind.annotation.RequestMapping")
+        val requestMapping = findAnnotation(psiClass.annotations, "org.springframework.web.bind.annotation.RequestMapping")
         return extractPathFromAnnotation(requestMapping)
     }
 
     private fun extractEndpointFromMethod(method: PsiMethod, classLevelPath: String, controllerClass: String): ApiEndpoint? {
         for ((annotationFqn, httpMethod) in MAPPING_ANNOTATIONS) {
-            val annotation = method.getAnnotation(annotationFqn)
+            val annotation = findAnnotation(method.annotations, annotationFqn)
             if (annotation != null) {
                 val methodPath = extractPathFromAnnotation(annotation)
                 val fullPath = combinePaths(classLevelPath, methodPath)
