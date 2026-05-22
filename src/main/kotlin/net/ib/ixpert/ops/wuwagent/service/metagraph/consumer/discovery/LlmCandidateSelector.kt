@@ -117,6 +117,9 @@ class LlmCandidateSelector(
         4. Order: dependencies first (Entity/Repository -> Service -> Controller -> DTO).
         5. Each file must have a one-line actionable description of WHAT to change.
         6. Do NOT include files unrelated to the requirement.
+        7. For "modify", ONLY include files directly related to the user's requirement. Do not include files just because they depend on the same Repository.
+        8. Do NOT put the same file in BOTH "modify" and "create". Adding code to an existing file is a "modify" action.
+        9. Use the EXACT path provided in the candidate list, including the module path (e.g. member-market-api/src/main/java/...).
 
         ## RESPONSE FORMAT (JSON ONLY)
         {
