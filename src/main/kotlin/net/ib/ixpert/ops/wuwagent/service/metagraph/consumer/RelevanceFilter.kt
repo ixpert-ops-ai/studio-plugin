@@ -640,6 +640,7 @@ object RelevanceFilter {
 
     data class FilterResult(
         val filteredGraph: ProjectGraph,
-        val keywords: List<String>
+        val keywords: List<String>,
+        val candidates: List<net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScoredCandidate>? = null
     )
 }

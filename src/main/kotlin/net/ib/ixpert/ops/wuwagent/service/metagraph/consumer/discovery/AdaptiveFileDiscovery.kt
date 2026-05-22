@@ -129,7 +129,7 @@ object AdaptiveFileDiscovery {
         onProgress?.invoke("> ✅ ${workingGraph.files.size}개 → **${filteredFiles.size}개** 파일로 필터링 완료\n\n")
         logger.info("AdaptiveFileDiscovery: 최종 ${filteredFiles.size}개 파일 (원본 ${workingGraph.files.size}개)")
 
-        return RelevanceFilter.FilterResult(filteredGraph, keywords)
+        return RelevanceFilter.FilterResult(filteredGraph, keywords, candidates)
     }
 
     // ═══════════════════════════════════════════════════════════════
