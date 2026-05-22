@@ -12,8 +12,17 @@ object TargetFileValidator {
 
     /**
      * LLM이 추출한 TargetFileSpec 목록을 MetaGraph와 대조하여 환각을 자동 교정합니다.
+     * 하위 호환성을 위해 유지되는 메서드로, correctPaths와 sortByDependency를 순차 호출합니다.
      */
     fun validate(specs: List<TargetFileSpec>, graph: ProjectGraph): List<TargetFileSpec> {
+        val corrected = correctPaths(specs, graph)
+        return sortByDependency(corrected, graph)
+    }
+
+    /**
+     * 경로 및 신규/수정 여부를 보정합니다. (정렬 수행 안 함)
+     */
+    fun correctPaths(specs: List<TargetFileSpec>, graph: ProjectGraph): List<TargetFileSpec> {
         if (graph.files.isEmpty()) return specs
 
         var correctionCount = 0
@@ -78,7 +87,14 @@ object TargetFileValidator {
             logger.info("TargetFileValidator: LLM 응답 모두 정상 (교정 없음)")
         }
 
-        return correctedSpecs.sortedWith(
+        return correctedSpecs
+    }
+
+    /**
+     * 보정된 목록을 프레임워크별 의존성(가중치) 기준으로 정렬하고 order를 재부여합니다.
+     */
+    fun sortByDependency(specs: List<TargetFileSpec>, graph: ProjectGraph): List<TargetFileSpec> {
+        return specs.sortedWith(
             compareBy<TargetFileSpec> { getSortWeight(it.path, graph) }
                 .thenBy { it.order }
         ).mapIndexed { index, spec ->
