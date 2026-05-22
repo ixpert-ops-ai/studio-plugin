@@ -106,9 +106,11 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         }
         onChunk?.invoke("\n" + formattedOutput + "\n")
         
+        val validatedTargetFiles = TargetFileValidator.validate(targetFiles, workingGraph)
+        
         val result = RequirementAnalysisResult(
             summary = selectionResult.summary ?: "",
-            targetFiles = targetFiles,
+            targetFiles = validatedTargetFiles,
             warnings = selectionResult.warnings?.joinToString("\n") ?: "",
             rawResponse = "JSON Response Processed by LlmCandidateSelector"
         )
