@@ -114,7 +114,7 @@ class LlmCandidateSelector(
         2. Use the EXACT file path as provided — do not alter, shorten, or guess paths.
         3. If a file not in the list is needed, mark it as "create" with full path 
            following the project's existing package conventions.
-        4. Order: dependencies first (Entity/Repository -> Service -> Controller -> DTO).
+        4. Order: dependencies first (Entity/Repository -> DTO -> Service -> Controller). Note: DTOs must be created/modified BEFORE Service and Controller because they depend on it.
         5. Each file must have a one-line actionable description of WHAT to change.
         6. Do NOT include files unrelated to the requirement.
         7. For "modify", ONLY include files directly related to the user's requirement. Do not include files just because they depend on the same Repository.

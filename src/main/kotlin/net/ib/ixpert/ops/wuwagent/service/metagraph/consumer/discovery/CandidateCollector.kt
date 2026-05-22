@@ -97,7 +97,22 @@ class CandidateCollector(
             logger.info("CandidateCollector: BFS 확장 → ${expanded.size}건 추가")
         }
 
-        val sorted = candidates.values.sortedByDescending { it.score }.take(MAX_CANDIDATES)
+        val sorted = candidates.values.map { candidate ->
+            val node = graph.files[candidate.filePath]
+            if (node != null) {
+                val typeName = node.fileType.name
+                val layerName = node.layer.name
+                
+                val shouldCap = (typeName in setOf("UTIL", "ABSTRACT_CLASS", "ENUM")) ||
+                    (typeName == "DTO" && layerName == "COMMON") ||
+                    (node.className in setOf("ApiResponse", "BaseEntity", "BusinessException"))
+
+                if (shouldCap && candidate.score > 30.0) {
+                    candidate.copy(score = 30.0, matchedBy = candidate.matchedBy + "Capped:UTIL")
+                } else candidate
+            } else candidate
+        }.sortedByDescending { it.score }.take(MAX_CANDIDATES)
+        
         logger.info("CandidateCollector: 최종 ${sorted.size}건 후보 (총 ${candidates.size}건 중)")
         return sorted
     }
