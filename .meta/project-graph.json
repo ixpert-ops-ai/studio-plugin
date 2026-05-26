@@ -1,0 +1,2438 @@
+{
+  "version": "1.0",
+  "generatedAt": "2026-05-19T08:48:45.912221400Z",
+  "projectRoot": "C:/Workspace/DEV-ASSISTANT/IDE-PLUGIN/intelliJ/ai-assistant-plugin",
+  "framework": "spring-boot",
+  "files": {
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/ui/bridge/JcefBridge.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/ui/bridge/JcefBridge.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.ui.bridge",
+      "className": "JcefBridge",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/ui/bridge/JcefMessageHandler.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/ui/bridge/JcefMessageHandler.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.ui.bridge",
+      "className": "JcefMessageHandler",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/ui/WuwToolWindowFactory.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/ui/WuwToolWindowFactory.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.ui",
+      "className": "WuwToolWindowFactory",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/ui/LlmDebugToolWindowFactory.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/ui/LlmDebugToolWindowFactory.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.ui",
+      "className": "LlmDebugToolWindowFactory",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/DocCache.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/DocCache.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "DocSummary",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/WuwAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/WuwAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "AgentContext",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "BaseAgent",
+      "fileType": "ABSTRACT_CLASS",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": true,
+      "annotations": [],
+      "implementedInterfaces": [
+        "net.ib.ixpert.ops.wuwagent.agent.WuwAgent"
+      ],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ChatAgent.kt",
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImpactAgent.kt",
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ReviewAgent.kt",
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ExplainAgent.kt",
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImproveAgent.kt",
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/DocGenerateAgent.kt",
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/UnitTestReportAgent.kt",
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/QueryValidationAgent.kt"
+      ],
+      "riskAssessment": {
+        "riskScore": 9,
+        "changeRisk": "CRITICAL",
+        "riskReasons": [
+          "기본 계층 위험도 [ABSTRACT_CLASS]: +1",
+          "8개의 파일에서 이 파일을 의존/호출함: +8"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ChatAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ChatAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "ChatAgent",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "superClass": "net.ib.ixpert.ops.wuwagent.agent.BaseAgent",
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/TaskAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/TaskAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "TaskAgent",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [
+        "net.ib.ixpert.ops.wuwagent.agent.WuwAgent"
+      ],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImpactAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImpactAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "ImpactAgent",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "superClass": "net.ib.ixpert.ops.wuwagent.agent.BaseAgent",
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ReviewAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ReviewAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "ReviewAgent",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "superClass": "net.ib.ixpert.ops.wuwagent.agent.BaseAgent",
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ExplainAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ExplainAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "ExplainAgent",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "superClass": "net.ib.ixpert.ops.wuwagent.agent.BaseAgent",
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImproveAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImproveAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "ImproveAgent",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "superClass": "net.ib.ixpert.ops.wuwagent.agent.BaseAgent",
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/TaskPipeline.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/TaskPipeline.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "TaskPipeline",
+      "fileType": "ABSTRACT_CLASS",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": true,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [ABSTRACT_CLASS]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/SettingsAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/SettingsAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "SettingsAgent",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/IntentAnalyzer.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/IntentAnalyzer.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "IntentAnalyzer",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ContractResolver.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ContractResolver.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "MethodContract",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/DocGenerateAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/DocGenerateAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "DocGenerateAgent",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "superClass": "net.ib.ixpert.ops.wuwagent.agent.BaseAgent",
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/TargetFileValidator.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/TargetFileValidator.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "TargetFileValidator",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/UnitTestReportAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/UnitTestReportAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "UnitTestReportAgent",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "superClass": "net.ib.ixpert.ops.wuwagent.agent.BaseAgent",
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/QueryValidationAgent.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/QueryValidationAgent.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "QueryValidationAgent",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "superClass": "net.ib.ixpert.ops.wuwagent.agent.BaseAgent",
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/TaskCancellationToken.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/TaskCancellationToken.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "TaskCancellationToken",
+      "fileType": "DTO",
+      "layer": "PRESENTATION",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [DTO]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImplementationPipeline.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImplementationPipeline.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "ImplementationPipeline",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/TestGenerationPipeline.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/TestGenerationPipeline.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "TestGenerationPipeline",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImplementationPipelineUtils.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImplementationPipelineUtils.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "ImplementationPipelineUtils",
+      "fileType": "UTIL",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UTIL]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/RequirementAnalysisPipeline.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/RequirementAnalysisPipeline.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.agent",
+      "className": "TargetFileSpec",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/cache/DocCache.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/cache/DocCache.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.cache",
+      "className": "DocCache",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/model/OllamaModels.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/model/OllamaModels.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.model",
+      "className": "OllamaMessage",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/ReviewAction.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/ReviewAction.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.action",
+      "className": "ReviewAction",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/ExplainAction.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/ExplainAction.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.action",
+      "className": "ExplainAction",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/ImproveAction.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/ImproveAction.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.action",
+      "className": "ImproveAction",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/MetaGraphAction.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/MetaGraphAction.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.action",
+      "className": "MetaGraphAction",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/DocGenerateAction.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/DocGenerateAction.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.action",
+      "className": "DocGenerateAction",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/WebviewActionRouter.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/WebviewActionRouter.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.action",
+      "className": "WebviewActionRouter",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/ImpactAnalysisAction.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/ImpactAnalysisAction.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.action",
+      "className": "ImpactAnalysisAction",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/UnitTestReportAction.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/UnitTestReportAction.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.action",
+      "className": "UnitTestReportAction",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/QueryValidationAction.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/QueryValidationAction.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.action",
+      "className": "QueryValidationAction",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/LLMClient.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/LLMClient.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.client",
+      "className": "LLMClient",
+      "fileType": "INTERFACE",
+      "layer": "COMMON",
+      "isInterface": true,
+      "isAbstract": true,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/OllamaClient.kt",
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/OpenAIClient.kt"
+      ],
+      "riskAssessment": {
+        "riskScore": 3,
+        "changeRisk": "MEDIUM",
+        "riskReasons": [
+          "기본 계층 위험도 [INTERFACE]: +1",
+          "2개의 파일에서 이 파일을 의존/호출함: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/OllamaClient.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/OllamaClient.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.client",
+      "className": "OllamaClient",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [
+        "Suppress"
+      ],
+      "implementedInterfaces": [
+        "net.ib.ixpert.ops.wuwagent.client.LLMClient"
+      ],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/LLMClient.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/OpenAIClient.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/OpenAIClient.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.client",
+      "className": "OpenAIClient",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [
+        "Suppress"
+      ],
+      "implementedInterfaces": [
+        "net.ib.ixpert.ops.wuwagent.client.LLMClient"
+      ],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/LLMClient.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/engine/SearchReplaceEngine.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/engine/SearchReplaceEngine.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.engine",
+      "className": "SearchReplaceEngine",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/engine/ActionBasedEditEngine.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/engine/ActionBasedEditEngine.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.engine",
+      "className": "ActionBasedEditEngine",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/prompt/PromptManager.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/prompt/PromptManager.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.prompt",
+      "className": "PromptManager",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/prompt/ImpactFormatter.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/prompt/ImpactFormatter.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.prompt",
+      "className": "ImpactFormatter",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/prompt/StructureFormatter.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/prompt/StructureFormatter.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.prompt",
+      "className": "StructureFormatter",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/model/ExtractedStructure.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/model/ExtractedStructure.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.analysis.model",
+      "className": "ExtractedStructure",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/model/ThymeleafStructure.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/model/ThymeleafStructure.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.analysis.model",
+      "className": "ThymeleafStructure",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/RegexExtractor.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/RegexExtractor.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.analysis.extractor",
+      "className": "RegexExtractor",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [
+        "net.ib.ixpert.ops.wuwagent.service.analysis.extractor.StructureExtractor"
+      ],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/StructureExtractor.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/StructureExtractor.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/StructureExtractor.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.analysis.extractor",
+      "className": "StructureExtractor",
+      "fileType": "INTERFACE",
+      "layer": "COMMON",
+      "isInterface": true,
+      "isAbstract": true,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/RegexExtractor.kt",
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/TreeSitterExtractor.kt",
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/PsiStructureExtractor.kt"
+      ],
+      "riskAssessment": {
+        "riskScore": 4,
+        "changeRisk": "MEDIUM",
+        "riskReasons": [
+          "기본 계층 위험도 [INTERFACE]: +1",
+          "3개의 파일에서 이 파일을 의존/호출함: +3"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/ThymeleafExtractor.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/ThymeleafExtractor.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.analysis.extractor",
+      "className": "ThymeleafExtractor",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/TreeSitterExtractor.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/TreeSitterExtractor.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.analysis.extractor",
+      "className": "TreeSitterExtractor",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [
+        "net.ib.ixpert.ops.wuwagent.service.analysis.extractor.StructureExtractor"
+      ],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/StructureExtractor.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/PsiStructureExtractor.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/PsiStructureExtractor.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.analysis.extractor",
+      "className": "PsiStructureExtractor",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [
+        "net.ib.ixpert.ops.wuwagent.service.analysis.extractor.StructureExtractor"
+      ],
+      "injections": [
+        {
+          "targetType": "error.NonExistentClass",
+          "fieldName": "psiFile",
+          "method": "CONSTRUCTOR"
+        },
+        {
+          "targetType": "error.NonExistentClass",
+          "fieldName": "document",
+          "method": "CONSTRUCTOR"
+        }
+      ],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [
+        "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/StructureExtractor.kt"
+      ],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/ImpactAnalyzer.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/ImpactAnalyzer.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.analysis",
+      "className": "ImpactAnalyzer",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/CodeAnalysisPipeline.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/CodeAnalysisPipeline.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.analysis",
+      "className": "CodeAnalysisPipeline",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/ImpactResultFormatter.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/ImpactResultFormatter.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.analysis",
+      "className": "ImpactResultFormatter",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/model/MetaGraphModels.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/model/MetaGraphModels.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.model",
+      "className": "ProjectGraph",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [
+        {
+          "targetType": "net.ib.ixpert.ops.wuwagent.service.metagraph.model.ModuleInfo",
+          "fieldName": "modules",
+          "method": "CONSTRUCTOR"
+        },
+        {
+          "targetType": "net.ib.ixpert.ops.wuwagent.service.metagraph.model.Relationship",
+          "fieldName": "relationships",
+          "method": "CONSTRUCTOR"
+        },
+        {
+          "targetType": "net.ib.ixpert.ops.wuwagent.service.metagraph.model.GraphStatistics",
+          "fieldName": "statistics",
+          "method": "CONSTRUCTOR"
+        }
+      ],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/analyzer/JpaEntityAnalyzer.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/analyzer/JpaEntityAnalyzer.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer",
+      "className": "JpaEntityAnalyzer",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/analyzer/SpringBeanAnalyzer.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/analyzer/SpringBeanAnalyzer.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer",
+      "className": "SpringBeanAnalyzer",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/analyzer/CallRelationAnalyzer.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/analyzer/CallRelationAnalyzer.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer",
+      "className": "CallRelationAnalyzer",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/analyzer/SpringEndpointAnalyzer.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/analyzer/SpringEndpointAnalyzer.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer",
+      "className": "SpringEndpointAnalyzer",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/GraphLoader.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/GraphLoader.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "GraphLoader",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [
+        {
+          "targetType": "error.NonExistentClass",
+          "fieldName": "project",
+          "method": "CONSTRUCTOR"
+        }
+      ],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/TestFileMapper.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/TestFileMapper.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "TestFileMapper",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [
+        {
+          "targetType": "error.NonExistentClass",
+          "fieldName": "project",
+          "method": "CONSTRUCTOR"
+        }
+      ],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/RelevanceFilter.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/RelevanceFilter.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "RelevanceFilter",
+      "fileType": "FILTER",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 3,
+        "changeRisk": "MEDIUM",
+        "riskReasons": [
+          "기본 계층 위험도 [FILTER]: +3"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/TargetExtractor.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/TargetExtractor.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "TargetExtractor",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/ContextAssembler.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/ContextAssembler.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "ContextAssembler",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [
+        {
+          "targetType": "error.NonExistentClass",
+          "fieldName": "project",
+          "method": "CONSTRUCTOR"
+        }
+      ],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/RepoMapFormatter.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/RepoMapFormatter.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "RepoMapFormatter",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/SubGraphExtractor.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/SubGraphExtractor.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "SubGraph",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [
+        {
+          "targetType": "net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode",
+          "fieldName": "targets",
+          "method": "CONSTRUCTOR"
+        },
+        {
+          "targetType": "boolean",
+          "fieldName": "isTruncated",
+          "method": "CONSTRUCTOR"
+        },
+        {
+          "targetType": "int",
+          "fieldName": "totalExtractedNodes",
+          "method": "CONSTRUCTOR"
+        }
+      ],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/SubGraphFormatter.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/SubGraphFormatter.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "SubGraphFormatter",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/MetaImpactAnalyzer.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/MetaImpactAnalyzer.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "MetaImpactAnalyzer",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/PsiMethodExtractor.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/PsiMethodExtractor.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "PsiMethodExtractor",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [
+        {
+          "targetType": "error.NonExistentClass",
+          "fieldName": "project",
+          "method": "CONSTRUCTOR"
+        }
+      ],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/PsiExtractionModels.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/PsiExtractionModels.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "MethodSignature",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/ImpactGraphFormatter.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/ImpactGraphFormatter.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "ImpactGraphFormatter",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/ProjectSummaryFormatter.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/consumer/ProjectSummaryFormatter.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph.consumer",
+      "className": "ProjectSummaryFormatter",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/MetaGraphExporter.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/MetaGraphExporter.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph",
+      "className": "MetaGraphExporter",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/DependencyResolver.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/DependencyResolver.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph",
+      "className": "DependencyResolver",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [
+        {
+          "targetType": "error.NonExistentClass",
+          "fieldName": "project",
+          "method": "CONSTRUCTOR"
+        }
+      ],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/ProjectGraphBuilder.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/ProjectGraphBuilder.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph",
+      "className": "ProjectGraphBuilder",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [
+        {
+          "targetType": "error.NonExistentClass",
+          "fieldName": "project",
+          "method": "CONSTRUCTOR"
+        }
+      ],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/SpringAnnotationResolver.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/metagraph/SpringAnnotationResolver.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.metagraph",
+      "className": "SpringAnnotationResolver",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/validation/SignatureValidator.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/validation/SignatureValidator.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service.validation",
+      "className": "SignatureValidator",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/DebugManager.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/DebugManager.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service",
+      "className": "DebugManager",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/WuwLlmService.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/WuwLlmService.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service",
+      "className": "WuwLlmService",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [
+        "Suppress"
+      ],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/EditorDiffService.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/EditorDiffService.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service",
+      "className": "EditorDiffService",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/FileSearchService.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/FileSearchService.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service",
+      "className": "FileSearchService",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/ChatHistoryService.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/ChatHistoryService.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service",
+      "className": "ChatHistoryService",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/EditorApplyService.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/EditorApplyService.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service",
+      "className": "EditorApplyService",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/TypeContextService.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/TypeContextService.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service",
+      "className": "TypeContextService",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/BuildContextService.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/BuildContextService.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service",
+      "className": "BuildContextService",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/MarkdownFileService.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/MarkdownFileService.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service",
+      "className": "MarkdownFileService",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/EditorContextService.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/EditorContextService.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.service",
+      "className": "EditorContextService",
+      "fileType": "SERVICE",
+      "layer": "BUSINESS",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 2,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [SERVICE]: +2"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/setting/SettingsState.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/setting/SettingsState.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.setting",
+      "className": "SettingsState",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/setting/WuwSettingsConfigurable.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/setting/WuwSettingsConfigurable.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent.setting",
+      "className": "WuwSettingsConfigurable",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    },
+    "src/main/kotlin/net/ib/ixpert/ops/wuwagent/IxpertIcons.kt": {
+      "path": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/IxpertIcons.kt",
+      "packageName": "net.ib.ixpert.ops.wuwagent",
+      "className": "IxpertIcons",
+      "fileType": "UNKNOWN",
+      "layer": "COMMON",
+      "isInterface": false,
+      "isAbstract": false,
+      "annotations": [],
+      "implementedInterfaces": [],
+      "injections": [],
+      "apiEndpoints": [],
+      "beanDefinitions": [],
+      "entityRelations": [],
+      "dependsOn": [],
+      "dependedBy": [],
+      "riskAssessment": {
+        "riskScore": 1,
+        "changeRisk": "LOW",
+        "riskReasons": [
+          "기본 계층 위험도 [UNKNOWN]: +1"
+        ]
+      }
+    }
+  },
+  "relationships": [
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ChatAgent.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt",
+      "type": "EXTENDS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImpactAgent.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt",
+      "type": "EXTENDS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ReviewAgent.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt",
+      "type": "EXTENDS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ExplainAgent.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt",
+      "type": "EXTENDS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ImproveAgent.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt",
+      "type": "EXTENDS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/DocGenerateAgent.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt",
+      "type": "EXTENDS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/UnitTestReportAgent.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt",
+      "type": "EXTENDS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/QueryValidationAgent.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/BaseAgent.kt",
+      "type": "EXTENDS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/OllamaClient.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/LLMClient.kt",
+      "type": "IMPLEMENTS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/OpenAIClient.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/client/LLMClient.kt",
+      "type": "IMPLEMENTS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/RegexExtractor.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/StructureExtractor.kt",
+      "type": "IMPLEMENTS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/TreeSitterExtractor.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/StructureExtractor.kt",
+      "type": "IMPLEMENTS",
+      "strength": "DIRECT"
+    },
+    {
+      "source": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/PsiStructureExtractor.kt",
+      "target": "src/main/kotlin/net/ib/ixpert/ops/wuwagent/service/analysis/extractor/StructureExtractor.kt",
+      "type": "IMPLEMENTS",
+      "strength": "DIRECT"
+    }
+  ],
+  "statistics": {
+    "totalFiles": 91,
+    "controllers": 0,
+    "services": 41,
+    "repositories": 0,
+    "entities": 0,
+    "configs": 0,
+    "dtos": 1,
+    "utils": 1,
+    "views": 0,
+    "components": 1,
+    "others": 47,
+    "totalRelationships": 13
+  }
+}

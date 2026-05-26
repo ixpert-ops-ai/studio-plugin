@@ -56,6 +56,11 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
     private val beanAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.SpringBeanAnalyzer()
     private val entityAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.JpaEntityAnalyzer()
     private val callRelationAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.CallRelationAnalyzer()
+    private val anyframeServiceIdAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeServiceIdAnalyzer()
+    private val anyframeDemAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeDemAnalyzer()
+    private val anyframeDependencyAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeDependencyAnalyzer()
+    private val anyframeBizCallAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeBizCallAnalyzer()
+    private val anyframeVoChainAnalyzer = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.AnyframeVoChainAnalyzer()
 
     /**
      * 비동기로 프로젝트 그래프를 생성합니다.
@@ -175,6 +180,17 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         val relationships = ReadAction.compute<List<Relationship>, Throwable> {
             dependencyResolver.buildRelationships(resolvedNodes)
         }.toMutableList()
+
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+        val currentFrameworkType = settings.state.frameworkType
+        if (currentFrameworkType == FrameworkType.ANYFRAME) {
+            val voRels = anyframeVoChainAnalyzer.analyze(resolvedNodes)
+            relationships.addAll(voRels)
+            for (rel in voRels) {
+                resolvedNodes[rel.source]?.dependsOn?.add(rel.target)
+                resolvedNodes[rel.target]?.dependedBy?.add(rel.source)
+            }
+        }
         
         // CALLS 관계 병합 및 노드의 dependsOn/dependedBy 업데이트
         relationships.addAll(allCalls)
@@ -253,12 +269,16 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         val targetModule = targetDirectory?.let { fileIndex.getModuleForFile(it) }
         val isSingleModulePartialUpdate = targetModule != null && targetModule.name != project.name && isMultiModule
 
-        val graph = if (isSingleModulePartialUpdate && targetModule != null) {
+        val frameworkName = if (currentFrameworkType == FrameworkType.ANYFRAME) "anyframe" else "spring-boot"
+
+        val graph = if (isSingleModulePartialUpdate) {
             // A. 단독 모듈 분석 모드: MULTI_LEVEL_2로 생성
             ProjectGraph(
                 graphType = GraphType.MULTI_LEVEL_2,
                 generatedAt = Instant.now().toString(),
                 projectRoot = targetDirectory.path,
+                framework = frameworkName,
+                frameworkType = currentFrameworkType,
                 files = scoredNodes,
                 relationships = relationships,
                 statistics = statistics
@@ -274,6 +294,8 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
                 graphType = if (isMultiModule) GraphType.MULTI_LEVEL_1 else GraphType.SINGLE,
                 generatedAt = Instant.now().toString(),
                 projectRoot = projectBasePath,
+                framework = frameworkName,
+                frameworkType = currentFrameworkType,
                 modules = modulesList,
                 files = scoredNodes,
                 relationships = relationships,
@@ -364,7 +386,8 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         
         // Phase 1c: 보강 분석기 연동
         if (node.fileType == SpringFileType.REST_CONTROLLER || node.fileType == SpringFileType.CONTROLLER) {
-            val endpoints = endpointAnalyzer.analyze(primaryClass)
+            val injectedFieldNames = node.injections.map { it.fieldName }.toSet()
+            val endpoints = endpointAnalyzer.analyze(primaryClass, injectedFieldNames)
             node = node.copy(apiEndpoints = endpoints)
         } else if (node.fileType == SpringFileType.CONFIG) {
             val beans = beanAnalyzer.analyze(primaryClass)
@@ -374,9 +397,67 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             node = node.copy(entityRelations = relations)
         }
         
-        val calls = callRelationAnalyzer.analyze(primaryClass, projectBasePath)
+        val calls = callRelationAnalyzer.analyze(primaryClass, projectBasePath).toMutableList()
+        
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+
+        if (isAnyframe) {
+            if (node.anyframeRole == AnyframeRole.SVC) {
+                val endpoints = anyframeServiceIdAnalyzer.analyze(primaryClass)
+                node = node.copy(serviceEndpoints = endpoints)
+            } else if (node.anyframeRole == AnyframeRole.DEM || node.anyframeRole == AnyframeRole.DQM) {
+                val demMethods = anyframeDemAnalyzer.analyze(primaryClass)
+                node = node.copy(demMethods = demMethods)
+            }
+            val anyframeDeps = anyframeDependencyAnalyzer.analyze(primaryClass, projectBasePath)
+            val anyframeBizCalls = anyframeBizCallAnalyzer.analyze(primaryClass, projectBasePath)
+            calls.addAll(anyframeDeps)
+            calls.addAll(anyframeBizCalls)
+        }
+        
+        // Adaptive File Discovery 지원: 한글 주석 + 메서드명 수집
+        val koreanComments = extractKoreanComments(primaryClass)
+        val methodNames = primaryClass.methods.map { it.name }.filter { it != primaryClass.name }
+        node = node.copy(
+            koreanComments = koreanComments,
+            methodNames = methodNames
+        )
         
         return Pair(listOf(relativePath to node), calls)
+    }
+    // ── 한글 주석 추출 (Adaptive File Discovery) ───────
+
+    private val koreanPattern = Regex("[가-힣]{2,}")
+    private val noisePattern = Regex("^\\s*(TODO|FIXME|XXX|noinspection|Copyright|@)")
+
+    /**
+     * 파일 전체에서 한글이 포함된 주석을 추출합니다.
+     * KDoc, JavaDoc, 라인 주석(//) 및 블록 주석(/* */)을 모두 검사하며,
+     * TODO, FIXME 등의 노이즈 주석은 필터링하고 중복을 제거합니다.
+     */
+    private fun extractKoreanComments(psiClass: com.intellij.psi.PsiClass): List<String> {
+        val comments = mutableSetOf<String>()
+        val file = psiClass.containingFile
+
+        file.accept(object : com.intellij.psi.PsiRecursiveElementVisitor() {
+            override fun visitComment(comment: com.intellij.psi.PsiComment) {
+                super.visitComment(comment)
+                val text = comment.text
+                if (koreanPattern.containsMatchIn(text)) {
+                    text.lines()
+                        .map { it.replace(Regex("[/*@]"), "").trim() }
+                        .filter { line -> 
+                            line.isNotBlank() && 
+                            koreanPattern.containsMatchIn(line) && 
+                            !noisePattern.containsMatchIn(line)
+                        }
+                        .forEach { comments.add(it) }
+                }
+            }
+        })
+
+        return comments.toList().take(20) // 클래스당 최대 20개 주석 (기존 설계 10개에서 확장)
     }
 
     // ── Step 8: 통계 계산 ────────────────────────

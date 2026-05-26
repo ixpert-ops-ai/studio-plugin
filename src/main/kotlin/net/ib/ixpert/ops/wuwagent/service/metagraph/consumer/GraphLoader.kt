@@ -78,9 +78,27 @@ class GraphLoader(private val project: Project) {
                         val mergedRelationships = mutableListOf<Relationship>()
 
 
+                    val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+                    val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+                    val actualTargetModules = if (isAnyframe && targetModules != null) {
+                        val hasZz = targetModules.any { it.lowercase() == "zz" || it.lowercase().endsWith("zz") }
+                        if (!hasZz) {
+                            val zzModule = parsedGraph.modules.firstOrNull { it.name.lowercase() == "zz" || it.name.lowercase().endsWith("zz") }
+                            if (zzModule != null) {
+                                targetModules + zzModule.name
+                            } else {
+                                targetModules + "zz"
+                            }
+                        } else {
+                            targetModules
+                        }
+                    } else {
+                        targetModules
+                    }
+
                     for (module in parsedGraph.modules) {
                         // 특정 타겟 모듈만 부분 동적 로딩하도록 필터링 적용
-                        if (targetModules != null && !targetModules.contains(module.name)) {
+                        if (actualTargetModules != null && !actualTargetModules.contains(module.name)) {
                             logger.info("Skipping module ${module.name} as it is not in the target modules list")
                             continue
                         }
