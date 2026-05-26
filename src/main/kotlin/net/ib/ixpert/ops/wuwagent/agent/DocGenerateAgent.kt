@@ -300,7 +300,43 @@ class DocGenerateAgent : BaseAgent() {
         }
 
         // 배너 추가
-        val banner = "### 🎯 분석 대상: `$fileName` (전체)\n\n"
+        val banner = buildBanner(promptVars)
         return banner + resultText
+    }
+
+    /**
+     * 분석 대상 정보를 표시하는 배너 문자열(YAML Frontmatter 포함)을 생성합니다.
+     */
+    private fun buildBanner(promptVars: Map<String, String>): String {
+        val fileName = promptVars["FILE_NAME"] ?: "Unknown"
+        val packageName = promptVars["PACKAGE_NAME"] ?: "(식별 불가)"
+        val language = promptVars["LANGUAGE"] ?: "Unknown"
+        val fileType = promptVars["FILE_TYPE"] ?: "script"
+        val dateStr = promptVars["ANALYZED_DATE"] ?: java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_DATE)
+        
+        val rawDeps = promptVars["DEPENDENCIES"]
+        val dependenciesStr = if (rawDeps.isNullOrBlank()) {
+            "[]"
+        } else {
+            "[\"$rawDeps\"]"
+        }
+
+        val yamlFrontmatter = """
+            ```yaml
+            ---
+            file: "$fileName"
+            package: "$packageName"
+            language: "$language"
+            type: "$fileType"
+            dependencies: $dependenciesStr
+            analyzed_date: "$dateStr"
+            ---
+            ```
+            
+        """.trimIndent()
+
+        val bannerTitle = "### 🎯 분석 대상: `$fileName` (전체)\n\n"
+        
+        return yamlFrontmatter + bannerTitle
     }
 }
