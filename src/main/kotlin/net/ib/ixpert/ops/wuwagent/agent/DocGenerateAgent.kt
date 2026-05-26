@@ -254,14 +254,13 @@ class DocGenerateAgent : BaseAgent() {
                 includeFaq = (command == "/ragdoc")
             ).toMutableMap()
             structureVars.apply {
-                this["ANALYSIS_MODE"] = "전체 파일"
                 this["FILE_NAME"] = fileName
                 this["LOCATION_INFO"] = "전체 파일 $fileName"
             }
         } else {
             mapOf(
                 "LANGUAGE" to languageId,
-                "ANALYSIS_MODE" to "전체 파일",
+                "ANALYSIS_MODE" to "전체 파일 (토큰 최적화: 핵심 메서드 본문만 제공, 나머지는 구조 정보로 대체)",
                 "FILE_NAME" to fileName,
                 "LOCATION_INFO" to "전체 파일 $fileName",
                 "EXTRACTION_METHOD" to "원문 코드 기반 직접 분석",

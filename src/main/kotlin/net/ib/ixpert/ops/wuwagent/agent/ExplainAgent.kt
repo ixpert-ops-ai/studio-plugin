@@ -164,7 +164,6 @@ class ExplainAgent : BaseAgent() {
 
             // 공통 메타데이터 명시적 추가 (안전성 확보)
             structureVars.apply {
-                this["ANALYSIS_MODE"] = analysisMode
                 this["FILE_NAME"] = fileName
                 this["LOCATION_INFO"] = locationInfo
             }
@@ -172,7 +171,7 @@ class ExplainAgent : BaseAgent() {
             // 구조 추출 실패: 최소 컨텍스트로 폴백
             mapOf(
                 "LANGUAGE" to language,
-                "ANALYSIS_MODE" to analysisMode,
+                "ANALYSIS_MODE" to if (isPartial) "선택 영역 분석" else "전체 파일 (토큰 최적화: 핵심 메서드 본문만 제공, 나머지는 구조 정보로 대체)",
                 "FILE_NAME" to fileName,
                 "LOCATION_INFO" to locationInfo,
                 "EXTRACTION_METHOD" to "원문 코드 기반 직접 분석",
