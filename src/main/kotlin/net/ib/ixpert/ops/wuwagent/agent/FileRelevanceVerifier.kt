@@ -31,7 +31,11 @@ class FileRelevanceVerifier(
     fun verify(userQuery: String, candidates: List<TargetFileSpec>): List<TargetFileSpec> {
         if (candidates.isEmpty()) return candidates
 
-        val fileContexts = candidates.map { spec ->
+        // CREATE(신규)는 검증 통과, MODIFY(수정)만 LLM 검증
+        val (createSpecs, modifySpecs) = candidates.partition { it.type == "신규" }
+        if (modifySpecs.isEmpty()) return candidates
+
+        val fileContexts = modifySpecs.map { spec ->
             spec to buildFileContext(spec.path, graph, mdRoot)
         }
 
@@ -47,6 +51,7 @@ class FileRelevanceVerifier(
 절대 규칙:
 - DAO/Repository는 프레임워크가 예외를 자동 전파하므로 오류 처리 요구 시 수정 불필요
 - 사용자 대면 메시지 출력 요구 시 Controller 또는 View 계층 반드시 포함
+- 새로운 서비스 클래스가 해당 기능을 전담하도록 create된 경우, 기존 서비스의 modify 필요성을 재검토하라. 기존 서비스에 위임(delegate) 코드만 추가하는 것은 OPTIONAL이다.
             """.trimIndent()
             
             // Ollama client call
@@ -61,13 +66,14 @@ class FileRelevanceVerifier(
         }
         
         val keptPaths = allResults.filter { it.verdict != "UNNECESSARY" }.map { it.path }.toSet()
+        val keptModifySpecs = modifySpecs.filter { it.path in keptPaths }
         
-        if (keptPaths.isEmpty()) {
+        if (keptModifySpecs.isEmpty()) {
             logger.warn("Stage 3: 전체 UNNECESSARY 판정 – Stage 2 결과 유지")
             return candidates
         }
         
-        return candidates.filter { it.path in keptPaths }
+        return keptModifySpecs + createSpecs
     }
 
     private fun splitIntoBatches(contexts: List<Pair<TargetFileSpec, String>>, maxChars: Int): List<List<Pair<TargetFileSpec, String>>> {
@@ -169,15 +175,40 @@ class FileRelevanceVerifier(
         val result = StringBuilder()
         
         var currentSection = 0
+        var linesInSection = 0
         for (line in lines) {
             if (line.startsWith("## ")) {
                 currentSection++
+                linesInSection = 0
             }
             if (currentSection in sections) {
-                result.appendLine(line)
+                if (currentSection == 3 && linesInSection > 20) {
+                    if (linesInSection == 21) {
+                        result.appendLine("... (이하 생략 - 메서드 다수 존재, 주로 getter/setter로 추정)")
+                    }
+                } else {
+                    result.appendLine(line)
+                }
+                linesInSection++
             }
         }
         return result.toString().trim()
+    }
+
+    private fun summarizeMethods(methods: List<String>): String {
+        if (methods.size <= 20) return "methods: ${methods.joinToString(", ")}"
+        
+        val getterSetterCount = methods.count { 
+            it.startsWith("get") || it.startsWith("set") || it.startsWith("is") 
+        }
+        val ratio = getterSetterCount.toDouble() / methods.size
+        
+        return if (ratio > 0.7) {
+            "methods: ${methods.size}개 (주로 getter/setter, 비즈니스 메서드 ${methods.size - getterSetterCount}개)"
+        } else {
+            val keyMethods = methods.filter { !it.startsWith("get") && !it.startsWith("set") && !it.startsWith("is") }
+            "methods: ${keyMethods.joinToString(", ")} 외 getter/setter ${getterSetterCount}개"
+        }
     }
 
     private fun buildGraphContext(node: FileNode): String {
@@ -185,7 +216,7 @@ class FileRelevanceVerifier(
             appendLine("- fileType: ${node.fileType}, layer: ${node.layer}")
             appendLine("- className: ${node.className}")
             node.superClass?.let { appendLine("- superClass: $it") }
-            appendLine("- methods: ${node.methodNames.joinToString(", ")}")
+            appendLine("- ${summarizeMethods(node.methodNames)}")
             appendLine("- injections: ${node.injections.joinToString(", ").ifEmpty { "없음" }}")
             appendLine("- dependedBy: ${node.dependedBy.joinToString(", ").ifEmpty { "없음" }}")
             if (node.koreanComments.isNotEmpty()) {
