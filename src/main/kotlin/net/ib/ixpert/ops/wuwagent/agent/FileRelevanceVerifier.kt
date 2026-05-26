@@ -45,13 +45,14 @@ class FileRelevanceVerifier(
         val allResults = mutableListOf<VerificationResult>()
         
         for (batch in batches) {
-            val prompt = buildBatchPrompt(userQuery, batch)
+            val prompt = buildBatchPrompt(userQuery, batch, createSpecs)
             val systemMessage = """
 당신은 코드 수정 필요성을 판단하는 아키텍처 검증자입니다.
 절대 규칙:
 - DAO/Repository는 프레임워크가 예외를 자동 전파하므로 오류 처리 요구 시 수정 불필요
 - 사용자 대면 메시지 출력 요구 시 Controller 또는 View 계층 반드시 포함
 - 새로운 서비스 클래스가 해당 기능을 전담하도록 create된 경우, 기존 서비스의 modify 필요성을 재검토하라. 기존 서비스에 위임(delegate) 코드만 추가하는 것은 OPTIONAL이다.
+- DTO의 목적이 요구사항의 핵심 도메인과 전혀 다르다면(예: 메시지 전송 DTO vs 설문 결과 CSV) 과감히 UNNECESSARY로 판정하라.
             """.trimIndent()
             
             // Ollama client call
@@ -65,8 +66,16 @@ class FileRelevanceVerifier(
             allResults.addAll(parsed)
         }
         
-        val keptPaths = allResults.filter { it.verdict != "UNNECESSARY" }.map { it.path }.toSet()
-        val keptModifySpecs = modifySpecs.filter { it.path in keptPaths }
+        val keptModifySpecs = modifySpecs.mapNotNull { spec ->
+            val res = allResults.find { it.path == spec.path }
+            if (res != null && res.verdict != "UNNECESSARY") {
+                if (res.verdict == "OPTIONAL") {
+                    spec.copy(description = "${spec.description} [⚠️ 선택적 수정: ${res.reason}]")
+                } else {
+                    spec
+                }
+            } else null
+        }
         
         if (keptModifySpecs.isEmpty()) {
             logger.warn("Stage 3: 전체 UNNECESSARY 판정 – Stage 2 결과 유지")
@@ -97,12 +106,21 @@ class FileRelevanceVerifier(
         return batches
     }
 
-    private fun buildBatchPrompt(userQuery: String, batch: List<Pair<TargetFileSpec, String>>): String {
+    private fun buildBatchPrompt(userQuery: String, batch: List<Pair<TargetFileSpec, String>>, createSpecs: List<TargetFileSpec>): String {
         return buildString {
             appendLine("## 파일 수정 필요성 검증")
             appendLine("### 요구사항")
             appendLine(userQuery)
             appendLine()
+            
+            if (createSpecs.isNotEmpty()) {
+                appendLine("### 참고: 이번 요구사항으로 새로 생성되는 전담 파일 (이 파일들이 주요 기능을 수행합니다)")
+                createSpecs.forEach { spec ->
+                    appendLine("- ${spec.path}")
+                }
+                appendLine()
+            }
+            
             appendLine("### 대상 파일 목록")
             batch.forEachIndexed { index, (spec, context) ->
                 appendLine("---")
@@ -156,12 +174,13 @@ class FileRelevanceVerifier(
     private fun buildFileContext(path: String, graph: ProjectGraph, mdRoot: Path): String {
         val fileName = extractFileName(path)
         val mdFile = mdRoot.resolve("$fileName.md")
+        val node = graph.files[path]
         
         if (mdFile.exists()) {
-            return extractMdSections(mdFile, listOf(1, 3, 5))
+            return extractMdSections(mdFile, listOf(1, 3, 5), node)
         }
         
-        val node = graph.files[path] ?: return "정보 없음"
+        if (node == null) return "정보 없음"
         return buildGraphContext(node)
     }
 
@@ -169,7 +188,7 @@ class FileRelevanceVerifier(
         return path.substringAfterLast("/")
     }
 
-    private fun extractMdSections(mdFile: Path, sections: List<Int>): String {
+    private fun extractMdSections(mdFile: Path, sections: List<Int>, node: FileNode?): String {
         val content = mdFile.readText()
         val lines = content.lines()
         val result = StringBuilder()
@@ -182,9 +201,17 @@ class FileRelevanceVerifier(
                 linesInSection = 0
             }
             if (currentSection in sections) {
-                if (currentSection == 3 && linesInSection > 20) {
-                    if (linesInSection == 21) {
-                        result.appendLine("... (이하 생략 - 메서드 다수 존재, 주로 getter/setter로 추정)")
+                if (currentSection == 3 && linesInSection > 10) {
+                    if (linesInSection == 11) {
+                        val methods = node?.methodNames ?: emptyList()
+                        val getterSetterCount = methods.count { it.startsWith("get") || it.startsWith("set") || it.startsWith("is") }
+                        val ratio = if (methods.isNotEmpty()) getterSetterCount.toDouble() / methods.size else 0.0
+                        
+                        if (ratio >= 0.7) {
+                            result.appendLine("... (이하 생략 - 메서드 다수 존재, 주로 getter/setter로 추정)")
+                        } else {
+                            result.appendLine("... (이하 생략 - 메서드 다수 존재)")
+                        }
                     }
                 } else {
                     result.appendLine(line)
