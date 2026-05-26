@@ -78,6 +78,7 @@
 ## 5. 의존성 및 연동 관계
 - 이 코드가 직접 import하거나 참조하는 외부 클래스/인터페이스/모듈을 나열하세요.
 - 표준 라이브러리(java.util, java.io 등)는 제외하고, 프로젝트 내부 또는 서드파티 의존성만 포함하세요.
+- 프레임워크 어노테이션(@Service, @Transactional, @RequiredArgsConstructor 등)은 제외하세요.
 - 각 의존성이 이 코드 내에서 어떻게 사용되는지 1문장으로 설명하세요.
 - "유형" 컬럼은 다음 중 하나로 표기하세요: Repository, Service, DTO, Controller, Util, Config, Exception, Enum, External Library, 기타 클래스/인터페이스
 - 아래 형식의 테이블로 작성하세요
