@@ -41,7 +41,7 @@ class FilePathTokenCollector(
                         filePath = path,
                         score = score,
                         matchedBy = listOf(
-                            "파일 경로 명사 매칭: $matchedNouns개 (점수: $score)"
+                            "파일 경로 명사 매칭: ${matchedNouns}개 (점수: $score)"
                         )
                     )
                 )

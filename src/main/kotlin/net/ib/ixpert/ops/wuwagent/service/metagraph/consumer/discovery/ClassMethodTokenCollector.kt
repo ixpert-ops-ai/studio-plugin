@@ -42,7 +42,7 @@ class ClassMethodTokenCollector(
                 if (matchedNouns > 0) {
                     val nounScore = minOf(matchedNouns * 30.0, 60.0)
                     score += nounScore
-                    matchReasons.add("명사 매칭: $matchedNouns개 (점수: $nounScore)")
+                    matchReasons.add("명사 매칭: ${matchedNouns}개 (점수: $nounScore)")
                 }
             }
 
