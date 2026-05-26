@@ -63,6 +63,16 @@ object StructureFormatter {
             }
         }
 
+        // 설정 주입 필드 (@Value 등)
+        val valueFields = structure.fields.filter { f -> f.annotationTexts.any { it.contains("@Value") } }
+        if (valueFields.isNotEmpty()) {
+            sb.appendLine("\n### 설정 주입 필드 (@Value)")
+            for (f in valueFields) {
+                val parent = f.parentClass?.let { "($it)" } ?: ""
+                sb.appendLine("- ${f.annotationTexts.joinToString(" ")} private ${f.type} ${f.name} $parent")
+            }
+        }
+
         return sb.toString()
     }
 
@@ -208,6 +218,8 @@ object StructureFormatter {
             """${nonCodeNotice}위 "IDE 추출 구조 정보"에 나열된 함수/메서드 목록을 그대로 사용하세요.
 목록을 새로 추출하거나 누락/추가하지 말고, 각 항목의 역할을 자연어로 설명하는 데 집중하세요.
 분류 기준: [진입점, 핵심 로직, 외부 연동, 보조]
+- 하나의 메서드가 여러 분류에 해당하면 가장 상위 분류(예: 진입점) 하나만 적용하여 중복 기재를 방지하세요.
+- 외부 의존 객체의 메서드는 섹션 5에서 다루므로 이 섹션에는 포함하지 마세요.
 - getter/setter 메서드는 개별 나열하지 말고 "getter/setter N개 (필드 N/2개에 대한 접근자)" 한 줄로 요약하세요.
 - 메서드가 20개를 초과하는 경우, 핵심 로직과 진입점만 테이블에 나열하고 나머지는 개수만 표기하세요.
 
@@ -220,6 +232,8 @@ $thymeleafNotice"""
 - 대상: function, method, 생성자/소멸자, 이벤트 핸들러, 로직이 있는 getter/setter.
 - 제외: 로직 없는 단순 필드 반환/설정자, 프레임워크 자동 생성 코드.
 - 분류 기준: [진입점, 핵심 로직, 외부 연동, 보조]
+- 하나의 메서드가 여러 분류에 해당하면 가장 상위 분류(예: 진입점) 하나만 적용하여 중복 기재를 방지하세요.
+- 외부 의존 객체의 메서드는 섹션 5에서 다루므로 이 섹션에는 포함하지 마세요.
 - getter/setter 메서드는 개별 나열하지 말고 "getter/setter N개 (필드 N/2개에 대한 접근자)" 한 줄로 요약하세요.
 - 메서드가 20개를 초과하는 경우, 핵심 로직과 진입점만 테이블에 나열하고 나머지는 개수만 표기하세요.
 
