@@ -120,13 +120,24 @@ const MermaidChart = React.memo(({ chart }: { chart: string }) => {
 // ─────────────────────────────────────────────
 //  컴포넌트: CodeBlock (에디터 스타일 코드블록)
 // ─────────────────────────────────────────────
+// rehypeHighlight 적용 후 children이 <span> 배열로 변환되므로
+// React 노드 트리를 재귀 순회해 순수 텍스트만 추출
+const extractNodeText = (node: React.ReactNode): string => {
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractNodeText).join('');
+  if (React.isValidElement(node)) return extractNodeText((node.props as any).children);
+  return '';
+};
+
 const CodeBlock = ({ children, isCollapsible = false }: { children: React.ReactNode, isCollapsible?: boolean }) => {
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
   const codeEl = Array.isArray(children) ? children[0] : children;
   const lang = /language-(\w+)/.exec((codeEl as any)?.props?.className || '')?.[1] ?? '';
-  const codeText = String((codeEl as any)?.props?.children ?? '').replace(/\n$/, '');
+  // props.children が span 배열일 수 있으므로 extractNodeText로 순수 텍스트 추출
+  const codeText = extractNodeText((codeEl as any)?.props?.children ?? '').replace(/\n$/, '');
 
   const lineCount = codeText.split('\n').length;
   // 코드가 20줄 이상일 때만 접기 적용
@@ -191,7 +202,12 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   const isError = msg.isError === true;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(msg.content).catch(() => {});
+    // Step2 말풍선(filePath 있음): 마크다운에서 코드 블록 순수 텍스트만 추출해 복사
+    // 그 외 말풍선: content 원본(마크다운) 복사
+    const textToCopy = msg.filePath
+      ? (/```[\w]*\n([\s\S]*?)\n```/.exec(msg.content)?.[1] ?? msg.content)
+      : msg.content;
+    navigator.clipboard.writeText(textToCopy).catch(() => {});
   };
 
   const handleSave = () => {
