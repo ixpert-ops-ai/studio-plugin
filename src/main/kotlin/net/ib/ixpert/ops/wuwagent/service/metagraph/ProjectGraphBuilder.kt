@@ -183,7 +183,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
 
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
         val currentFrameworkType = settings.state.frameworkType
-        if (currentFrameworkType == FrameworkType.ANYFRAME) {
+        if (currentFrameworkType == FrameworkType.ANYFRAME_AP) {
             val voRels = anyframeVoChainAnalyzer.analyze(resolvedNodes)
             relationships.addAll(voRels)
             for (rel in voRels) {
@@ -269,7 +269,57 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         val targetModule = targetDirectory?.let { fileIndex.getModuleForFile(it) }
         val isSingleModulePartialUpdate = targetModule != null && targetModule.name != project.name && isMultiModule
 
-        val frameworkName = if (currentFrameworkType == FrameworkType.ANYFRAME) "anyframe" else "spring-boot"
+        // Phase 2: 프레임워크 자동 감지 실행
+        val detectionResult = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.FrameworkDetector.detectFramework(scoredNodes)
+        
+        // Phase 4: UI와 연동하여 Override 여부 결정
+        var finalFrameworkType = detectionResult.detected
+        
+        com.intellij.openapi.application.ApplicationManager.getApplication().invokeAndWait {
+            val options = net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.values().map { it.displayName }.toTypedArray()
+            val initialSelection = detectionResult.detected.displayName
+            
+            val message = buildString {
+                if (detectionResult.detected == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.CUSTOM || detectionResult.confidence < 50) {
+                    appendLine("⚠️ 프레임워크 자동 감지 신뢰도가 낮습니다.")
+                    appendLine("감지 알고리즘이 올바른 패턴을 찾지 못했습니다. 아래 드롭다운에서 정확한 프레임워크를 직접 선택해 주세요.")
+                } else {
+                    appendLine("프로젝트 프레임워크를 자동 감지했습니다.")
+                }
+                appendLine()
+                appendLine("감지된 프레임워크: ${detectionResult.detected.displayName} (신뢰도: ${detectionResult.confidence}%)")
+                appendLine()
+                appendLine("[판단 근거]")
+                detectionResult.reasons.forEach { appendLine("- $it") }
+                if (detectionResult.alternativeCandidates.isNotEmpty()) {
+                    appendLine()
+                    appendLine("[대안 프레임워크]")
+                    detectionResult.alternativeCandidates.forEach { appendLine("- ${it.first.displayName} (${it.second}%)") }
+                }
+                appendLine()
+                appendLine("이 결과를 사용하시겠습니까? (수정하려면 아래 드롭다운에서 선택하세요)")
+            }
+
+            val selectedIdx = com.intellij.openapi.ui.Messages.showChooseDialog(
+                project,
+                message,
+                "프레임워크 자동 감지 결과",
+                com.intellij.openapi.ui.Messages.getInformationIcon(),
+                options,
+                initialSelection
+            )
+
+            if (selectedIdx != -1) {
+                finalFrameworkType = net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.values()[selectedIdx]
+                if (finalFrameworkType != detectionResult.detected) {
+                    detectionResult.userOverride = finalFrameworkType
+                }
+            }
+        }
+        
+        settings.state.frameworkType = finalFrameworkType
+
+        val frameworkName = if (finalFrameworkType == FrameworkType.ANYFRAME_AP) "anyframe" else "spring-boot"
 
         val graph = if (isSingleModulePartialUpdate) {
             // A. 단독 모듈 분석 모드: MULTI_LEVEL_2로 생성
@@ -279,6 +329,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
                 projectRoot = targetDirectory.path,
                 framework = frameworkName,
                 frameworkType = currentFrameworkType,
+                frameworkDetection = detectionResult,
                 files = scoredNodes,
                 relationships = relationships,
                 statistics = statistics
@@ -296,6 +347,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
                 projectRoot = projectBasePath,
                 framework = frameworkName,
                 frameworkType = currentFrameworkType,
+                frameworkDetection = detectionResult,
                 modules = modulesList,
                 files = scoredNodes,
                 relationships = relationships,
@@ -400,7 +452,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         val calls = callRelationAnalyzer.analyze(primaryClass, projectBasePath).toMutableList()
         
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
-        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME_AP
 
         if (isAnyframe) {
             if (node.anyframeRole == AnyframeRole.SVC) {

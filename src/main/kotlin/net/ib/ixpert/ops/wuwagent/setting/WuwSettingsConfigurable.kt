@@ -162,7 +162,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
             group("분석기 설정 (Analyzer Settings)") {
                 row("대상 프레임워크 (Framework):") {
                     frameworkTypeComboBox = comboBox(
-                        DefaultComboBoxModel(arrayOf("Spring Boot (기본)", "Anyframe Enterprise"))
+                        DefaultComboBoxModel(net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.values().map { it.displayName }.toTypedArray())
                     ).component
                 }
             }
@@ -400,15 +400,13 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         autoFetchModels()
     }
 
-    private fun frameworkTypeToDisplayName(type: net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType): String = when (type) {
-        net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT -> "Spring Boot (기본)"
-        net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME -> "Anyframe Enterprise"
+    private fun frameworkTypeToDisplayName(type: net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType): String {
+        return type.displayName
     }
 
     private fun getCurrentFrameworkType(): net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType {
-        return when (frameworkTypeComboBox?.selectedItem as? String) {
-            "Anyframe Enterprise" -> net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME
-            else -> net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT
-        }
+        val selectedDisplayName = frameworkTypeComboBox?.selectedItem as? String ?: return net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT_JPA
+        return net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.values().find { it.displayName == selectedDisplayName }
+            ?: net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT_JPA
     }
 }

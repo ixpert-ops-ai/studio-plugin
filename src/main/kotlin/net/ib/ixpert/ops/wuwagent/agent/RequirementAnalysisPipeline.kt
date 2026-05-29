@@ -42,6 +42,8 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
     private val logger = Logger.getInstance(RequirementAnalysisPipeline::class.java)
 
     fun analyze(requirement: String, projectGraph: ProjectGraph, onChunk: ((String) -> Unit)? = null): RequirementAnalysisResult {
+        val fwType = projectGraph.frameworkDetection?.userOverride ?: projectGraph.frameworkType
+        logger.info("Starting RequirementAnalysisPipeline. Resolved Framework Type: ${fwType.name}")
         // 멀티모듈 레벨 1이거나 대형 프로젝트(10+ 파일)인 경우 RelevanceFilter로 관련 파일만 추출
         val (workingGraph, keywords, candidates) = if (projectGraph.graphType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.GraphType.MULTI_LEVEL_1 || projectGraph.files.size > FILE_COUNT_THRESHOLD) {
             val filterMsg = if (projectGraph.graphType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.GraphType.MULTI_LEVEL_1) {

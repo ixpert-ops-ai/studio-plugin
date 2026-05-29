@@ -7,9 +7,9 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
  *
  * 파일 경로를 분리한 토큰이 질의의 한글 명사와 얼마나 교차하는지 명사 단위 비율로 계산합니다.
  *
- * **점수 산출 방식:** `50 * (매칭된 명사 수 / 전체 질의 명사 수)`
+ * **점수 산출 방식:** `min(매칭된 명사 수 * 25.0, 50.0)`
  *
- * **최소 임계값:** 점수 15점 이상 (약 30% 매칭)
+ * **최소 임계값:** 점수 15점 이상
  */
 class FilePathTokenCollector(
     private val graph: ProjectGraph
@@ -33,8 +33,7 @@ class FilePathTokenCollector(
             
             if (matchedNouns == 0) continue
 
-            val ratio = matchedNouns.toDouble() / query.koreanNouns.size
-            val score = 50.0 * ratio
+            val score = minOf(matchedNouns * 25.0, 50.0)
 
             if (score >= 15.0) {
                 results.add(
@@ -42,7 +41,7 @@ class FilePathTokenCollector(
                         filePath = path,
                         score = score,
                         matchedBy = listOf(
-                            "파일 경로 단위 토큰 매칭: $matchedNouns/${query.koreanNouns.size} (비율: ${"%.2f".format(ratio)})"
+                            "파일 경로 명사 매칭: ${matchedNouns}개 (점수: $score)"
                         )
                     )
                 )

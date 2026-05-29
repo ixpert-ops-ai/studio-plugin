@@ -27,6 +27,7 @@ class PsiStructureExtractor(
 
     override fun extract(code: String, languageId: String): ExtractedStructure {
         val symbols = mutableListOf<SymbolInfo>()
+        val fields = mutableListOf<FieldInfo>()
         val classes = mutableListOf<ClassInfo>()
         val imports = mutableListOf<String>()
 
@@ -38,6 +39,9 @@ class PsiStructureExtractor(
             classes.add(extractClassInfo(psiClass))
             psiClass.methods.forEach { method ->
                 symbols.add(extractMethodInfo(method, psiClass.name))
+            }
+            psiClass.fields.forEach { field ->
+                fields.add(extractFieldInfo(field, psiClass.name))
             }
         }
 
@@ -51,6 +55,7 @@ class PsiStructureExtractor(
 
         return ExtractedStructure(
             symbols = symbols,
+            fields = fields,
             imports = imports,
             classes = classes,
             rawCode = code,
@@ -83,6 +88,18 @@ class PsiStructureExtractor(
             interfaces = interfaces,
             annotations = annotations,
             line = getLineNumber(psiClass)
+        )
+    }
+
+    private fun extractFieldInfo(field: PsiField, parentClassName: String?): FieldInfo {
+        val annotationTexts = field.annotations.map { it.text }
+        return FieldInfo(
+            name = field.name,
+            type = field.type.presentableText,
+            annotationTexts = annotationTexts,
+            isStatic = field.hasModifierProperty(PsiModifier.STATIC),
+            isFinal = field.hasModifierProperty(PsiModifier.FINAL),
+            parentClass = parentClassName
         )
     }
 

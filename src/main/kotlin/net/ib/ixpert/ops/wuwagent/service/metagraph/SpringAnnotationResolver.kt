@@ -1,4 +1,4 @@
-package net.ib.ixpert.ops.wuwagent.service.metagraph
+﻿package net.ib.ixpert.ops.wuwagent.service.metagraph
 
 import com.intellij.psi.*
 import com.intellij.psi.util.PsiTreeUtil
@@ -77,7 +77,7 @@ class SpringAnnotationResolver {
      */
     fun resolve(psiClass: PsiClass, relativePath: String): FileNode {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
-        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME_AP
 
         var anyframeRole: AnyframeRole? = null
         var fileType = resolveFileType(psiClass, relativePath)

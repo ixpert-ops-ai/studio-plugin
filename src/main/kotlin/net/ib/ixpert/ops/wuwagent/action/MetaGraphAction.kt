@@ -14,30 +14,6 @@ class MetaGraphAction : AnAction("Generate Project MetaGraph", "Analyzes the pro
         val project: Project = e.project ?: return
         
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
-        val options = arrayOf("Spring Boot (기본)", "Anyframe Enterprise")
-        val initialValue = if (settings.state.frameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME) {
-            "Anyframe Enterprise"
-        } else {
-            "Spring Boot (기본)"
-        }
-
-        val selectedIdx = Messages.showChooseDialog(
-            project,
-            "메타그래프를 분석할 대상 프레임워크를 선택하세요.",
-            "대상 프레임워크 선택",
-            Messages.getQuestionIcon(),
-            options,
-            initialValue
-        )
-
-        if (selectedIdx == -1) return // Cancelled by user
-
-        val chosenType = if (selectedIdx == 1) {
-            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME
-        } else {
-            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT
-        }
-        settings.state.frameworkType = chosenType
 
         val descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor().apply {
             title = "Select Project Root for MetaGraph"

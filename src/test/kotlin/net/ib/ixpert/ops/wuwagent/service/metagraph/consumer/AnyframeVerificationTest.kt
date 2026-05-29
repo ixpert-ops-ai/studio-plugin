@@ -1,4 +1,4 @@
-package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
+﻿package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
 
 import com.intellij.psi.*
 import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase
@@ -15,12 +15,12 @@ class AnyframeVerificationTest : LightJavaCodeInsightFixtureTestCase() {
         super.setUp()
         // Ensure SettingsState is clean
         val settings = SettingsState.getInstance()
-        settings.state.frameworkType = FrameworkType.ANYFRAME
+        settings.state.frameworkType = FrameworkType.ANYFRAME_AP
     }
 
     override fun tearDown() {
         val settings = SettingsState.getInstance()
-        settings.state.frameworkType = FrameworkType.SPRING_BOOT
+        settings.state.frameworkType = FrameworkType.SPRING_BOOT_JPA
         super.tearDown()
     }
 
@@ -304,7 +304,7 @@ class AnyframeVerificationTest : LightJavaCodeInsightFixtureTestCase() {
             generatedAt = "2026-05-21",
             projectRoot = "/project",
             framework = "anyframe",
-            frameworkType = FrameworkType.ANYFRAME,
+            frameworkType = FrameworkType.ANYFRAME_AP,
             files = files,
             relationships = relationships,
             statistics = GraphStatistics(totalFiles = files.size)
