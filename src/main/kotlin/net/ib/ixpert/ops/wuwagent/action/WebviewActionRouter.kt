@@ -163,21 +163,24 @@ class WebviewActionRouter(private val project: Project) {
                         return@invokeLater
                     }
                     
-                    bridge.sendMessage("chat_start", "🚀 **Phase 2b 코드 수정 파이프라인**\n타겟 파일 소스 코드를 분석하여 수정을 시작합니다...", messageId)
+                    bridge.sendMessage("chat_start", "🚀 **Phase 2b 코드 수정 (의사코드 생성)**\n타겟 파일 소스 코드를 분석하여 수정을 시작합니다...", messageId)
                     
                     ApplicationManager.getApplication().executeOnPooledThread {
                         try {
                             val client = WuwLlmService.getClient()
-                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.ImplementationPipeline(client, project)
+                            val mdRoot = java.nio.file.Paths.get(project.basePath ?: "", ".meta")
+                            val sourceRoot = java.nio.file.Paths.get(project.basePath ?: "")
+                            val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
+                            val projectGraph = graphLoader.loadGraph() ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 `/metagraph`를 실행해주세요.")
+                            val service = net.ib.ixpert.ops.wuwagent.agent.ImplementService(client, projectGraph, mdRoot, mdRoot, sourceRoot)
                             
-                            pipeline.execute(cachedResult) { chunk ->
+                            service.implement(cachedResult.summary, cachedResult.targetFiles) { chunk ->
                                 ApplicationManager.getApplication().invokeLater {
                                     bridge.sendMessageChunk(messageId, chunk)
                                 }
                             }
                             
-                            // [Phase 2c] 실행 완료 후 컨텍스트 캐시 저장 (파이프라인 내부에서 이미 저장하지만, 완료 메시지는 여기서 처리)
-                            val extraText = "\n\n💡 수정된 파일들의 테스트 코드를 일괄 생성하려면 `/test-all`을 입력하세요."
+                            val extraText = "\n\n💡 변경 지시서를 확인하고 코드를 반영해주세요."
                             ApplicationManager.getApplication().invokeLater {
                                 bridge.sendMessageChunk(messageId, extraText)
                                 bridge.sendMessage("chat", "", messageId)
@@ -405,33 +408,6 @@ class WebviewActionRouter(private val project: Project) {
 
                     com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
                         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
-                        val options = arrayOf("Spring Boot (기본)", "Anyframe Enterprise")
-                        val initialValue = if (settings.state.frameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME) {
-                            "Anyframe Enterprise"
-                        } else {
-                            "Spring Boot (기본)"
-                        }
-
-                        val selectedIdx = com.intellij.openapi.ui.Messages.showChooseDialog(
-                            project,
-                            "메타그래프를 분석할 대상 프레임워크를 선택하세요.",
-                            "대상 프레임워크 선택",
-                            com.intellij.openapi.ui.Messages.getQuestionIcon(),
-                            options,
-                            initialValue
-                        )
-
-                        if (selectedIdx == -1) {
-                            bridge.sendMessage("error", "분석이 취소되었습니다.", messageId)
-                            return@invokeLater
-                        }
-
-                        val chosenType = if (selectedIdx == 1) {
-                            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME
-                        } else {
-                            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT
-                        }
-                        settings.state.frameworkType = chosenType
 
                         val descriptor = com.intellij.openapi.fileChooser.FileChooserDescriptorFactory.createSingleFolderDescriptor().apply {
                             title = "Select Project Root for MetaGraph"
@@ -444,7 +420,7 @@ class WebviewActionRouter(private val project: Project) {
                             return@invokeLater
                         }
                         
-                        bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다... (대상 프레임워크: ${chosenType.displayName})", messageId)
+                        bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다...", messageId)
 
                         val builder = net.ib.ixpert.ops.wuwagent.service.metagraph.ProjectGraphBuilder(project, selectedDir)
                         builder.buildGraphAsync(

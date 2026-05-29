@@ -1,4 +1,4 @@
-package net.ib.ixpert.ops.wuwagent.agent
+﻿package net.ib.ixpert.ops.wuwagent.agent
 
 import com.intellij.openapi.diagnostic.Logger
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
@@ -110,7 +110,7 @@ object TargetFileValidator {
         val node = graph.files[path]
         val lowerPath = path.lowercase()
 
-        if (graph.frameworkType == FrameworkType.ANYFRAME) {
+        if (graph.frameworkType == FrameworkType.ANYFRAME_AP) {
             val role = node?.anyframeRole
             return when {
                 role == AnyframeRole.DVO || lowerPath.contains("dvo") -> 1

@@ -104,7 +104,31 @@ class LlmCandidateSelector(
         )
     }
 
-    private fun buildSystemPrompt(): String = """
+    private fun buildSystemPrompt(): String {
+        val fwType = projectGraph.frameworkDetection?.userOverride ?: projectGraph.frameworkType
+        val frameworkSpecificRules = when (fwType) {
+            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT_JPA -> 
+                "- Use JPA Entities and JpaRepositories. Prioritize @Entity and @Repository files.\n" +
+                "- DTOs must be created/modified BEFORE Service and Controller."
+            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT_MYBATIS -> 
+                "- DAO layer uses @Mapper interfaces (no DaoImpl classes).\n" +
+                "- Adding a new query requires modifying the @Mapper interface and its XML mapper file.\n" +
+                "- Do NOT suggest JPA or JpaRepository."
+            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_MVC_MYBATIS -> 
+                "- This project uses Interface + Impl pairs (e.g., SurveyService + SurveyServiceImpl).\n" +
+                "- Adding a new feature REQUIRES modifying BOTH the Interface and its Impl.\n" +
+                "- DAO layer uses SqlSessionDaoSupport-based DaoImpl classes.\n" +
+                "- If a new query is needed, modify BOTH DaoInterface and DaoImpl.\n" +
+                "- Do NOT suggest JPA, @Entity, or JpaRepository — this project uses MyBatis."
+            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME_AP -> 
+                "- Target Anyframe Enterprise components: DEM/DQM, BIZ, SVC, Controller.\n" +
+                "- Follow LAYERED_SVO_BVO_DVO VoStrategy.\n" +
+                "- This project strictly uses Interface + Impl pairs. You MUST select BOTH the Interface and the Impl."
+            else -> 
+                "- Standard Layered Architecture (Repository -> DTO -> Service -> Controller)."
+        }
+
+        return """
         You are a senior Spring Boot architect. Your ONLY job is to select which files 
         to modify and suggest new files to create, based on a user requirement and a 
         pre-filtered candidate list.
@@ -114,7 +138,8 @@ class LlmCandidateSelector(
         2. Use the EXACT file path as provided — do not alter, shorten, or guess paths.
         3. If a file not in the list is needed, mark it as "create" with full path 
            following the project's existing package conventions.
-        4. Order: dependencies first (Entity/Repository -> DTO -> Service -> Controller). Note: DTOs must be created/modified BEFORE Service and Controller because they depend on it.
+        4. Framework Rules:
+           $frameworkSpecificRules
         5. Each file must have a one-line actionable description of WHAT to change.
         6. Do NOT include files unrelated to the requirement.
         7. For "modify", ONLY include files directly related to the user's requirement. Do not include files just because they depend on the same Repository.
@@ -130,6 +155,7 @@ class LlmCandidateSelector(
           "reasoning": "selection logic explanation"
         }
     """.trimIndent()
+    }
     
     private fun buildUserPrompt(
         userQuery: String, 

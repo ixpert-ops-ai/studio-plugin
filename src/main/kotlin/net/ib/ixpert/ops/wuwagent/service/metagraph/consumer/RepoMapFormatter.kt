@@ -1,4 +1,4 @@
-package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
+﻿package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
 
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.*
 
@@ -11,7 +11,7 @@ object RepoMapFormatter {
     fun format(graph: ProjectGraph): String {
         if (graph.files.isEmpty()) return "분석 대상 파일이 없습니다."
 
-        val isAnyframe = graph.frameworkType == FrameworkType.ANYFRAME || graph.framework == "anyframe"
+        val isAnyframe = graph.frameworkType == FrameworkType.ANYFRAME_AP || graph.framework == "anyframe"
 
         val sb = StringBuilder()
         
@@ -182,7 +182,7 @@ object RepoMapFormatter {
 
     private fun buildRelationshipSummary(graph: ProjectGraph): String {
         val summary = StringBuilder()
-        val isAnyframe = graph.frameworkType == FrameworkType.ANYFRAME || graph.framework == "anyframe"
+        val isAnyframe = graph.frameworkType == FrameworkType.ANYFRAME_AP || graph.framework == "anyframe"
 
         if (isAnyframe) {
             val coreRels = graph.relationships.filter { rel ->

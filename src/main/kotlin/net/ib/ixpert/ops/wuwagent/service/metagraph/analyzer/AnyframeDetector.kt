@@ -1,4 +1,4 @@
-package net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer
+﻿package net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
@@ -17,7 +17,7 @@ class AnyframeDetector : ProjectActivity {
         logger.info("Running Anyframe Detector...")
         // Only run if not already set to ANYFRAME to avoid spamming the user
         val settings = SettingsState.getInstance()
-        if (settings.state.frameworkType == FrameworkType.ANYFRAME) {
+        if (settings.state.frameworkType == FrameworkType.ANYFRAME_AP) {
             logger.info("Project already configured with Anyframe framework. Skipping detection.")
             return
         }
@@ -37,7 +37,7 @@ class AnyframeDetector : ProjectActivity {
                         Messages.getQuestionIcon()
                     )
                     if (result == Messages.YES) {
-                        settings.state.frameworkType = FrameworkType.ANYFRAME
+                        settings.state.frameworkType = FrameworkType.ANYFRAME_AP
                         logger.info("Framework setting changed to ANYFRAME")
                         Messages.showInfoMessage(
                             project,

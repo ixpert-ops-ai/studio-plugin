@@ -38,9 +38,26 @@ class FileRelevanceVerifier(
 
         val allResults = mutableListOf<VerificationResult>()
         
+        val fwType = graph.resolveFrameworkType()
+        val frameworkRules = when (fwType) {
+            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT_JPA -> 
+                "- 프레임워크: SPRING_BOOT_JPA\n- JPA Entity 기반이므로 JpaRepository 인터페이스 위주로 변경이 일어납니다.\n- Controller가 단순 위임(Service 호출 → 결과 반환)만 하는 구조라면, Service/DTO 변경으로 충분한 경우 Controller는 UNNECESSARY로 판정하세요."
+            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_MVC_MYBATIS -> 
+                "- 프레임워크: SPRING_MVC_MYBATIS\n- 이 프로젝트는 Service Interface + ServiceImpl 쌍을 사용합니다.\n- 새 기능 추가 시 반드시 Interface에 메서드 선언 → Impl에 구현이 필요하므로 둘 중 하나를 무시(UNNECESSARY)하면 안 됩니다.\n- DAO 계층은 Interface + DaoImpl(SqlSessionDaoSupport) 쌍을 사용합니다.\n- 새 쿼리가 필요하면 DaoInterface와 DaoImpl 모두 수정 대상이 됩니다."
+            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT_MYBATIS -> 
+                "- 프레임워크: SPRING_BOOT_MYBATIS\n- DAO 계층은 @Mapper 인터페이스를 사용합니다(DaoImpl 없음).\n- 새 쿼리가 필요하면 @Mapper 인터페이스와 XML 파일을 수정합니다."
+            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME_AP -> 
+                "- 프레임워크: ANYFRAME_AP\n- 이 프로젝트는 Anyframe 환경입니다. 인터페이스/구현체(Impl) 쌍을 작성하세요.\n- 새 기능 추가 시 반드시 Interface에 메서드 선언 → Impl에 구현이 필요하므로 둘 중 하나를 무시(UNNECESSARY)하면 안 됩니다.\n- DEM/DQM, BIZ, SVC 구조를 엄격히 준수하세요."
+            else -> 
+                "- 프레임워크: ${fwType.name}\n- 프로젝트의 기존 계층형(Layered) 아키텍처 규칙을 따르세요."
+        }
+
         val systemMessage = """
             당신은 코드 수정 필요성을 판단하는 아키텍처 검증자입니다.
             파일의 실제 목적과 요구사항을 비교하여, 수정이 필요한지 독립적으로 판단하세요.
+            
+            ## 프로젝트 아키텍처 제약
+$frameworkRules
         """.trimIndent()
 
         for (spec in modifySpecs) {
