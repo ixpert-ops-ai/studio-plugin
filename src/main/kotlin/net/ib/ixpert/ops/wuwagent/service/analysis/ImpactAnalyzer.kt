@@ -597,6 +597,9 @@ private fun collectSerializationImpact(element: PsiElement): List<PsiElement> {
         val selfOffset = element.textOffset
 
         searchHelper.processAllFilesWithWord(name, scope, { file ->
+            val excludedExtensions = setOf("md", "json", "txt", "csv", "log", "yml", "yaml", "properties")
+            if (file.extension?.lowercase() in excludedExtensions) return@processAllFilesWithWord true
+
             val document = PsiDocumentManager.getInstance(element.project).getDocument(file)
             val text = file.text
             var searchFrom = 0
