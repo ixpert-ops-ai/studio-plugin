@@ -632,7 +632,7 @@ private fun collectSerializationImpact(element: PsiElement): List<PsiElement> {
             true
         }, true)
 
-        val deduplicated = textResults.distinctBy { "${it.enclosingSignature}@${it.lineNumber}" }
+        val deduplicated = textResults.distinctBy { it.enclosingSignature }
         for ((index, hit) in deduplicated.withIndex()) {
             node.children.add(ImpactNode(
                 name = "[텍스트폴백] ${hit.enclosingSignature}",
