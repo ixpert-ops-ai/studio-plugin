@@ -181,7 +181,10 @@ enum class ArchitectureLayer(val displayName: String) {
     BUSINESS("Business"),
     PERSISTENCE("Persistence"),
     COMMON("Common"),
-    TEST("Test")
+    TEST("Test"),
+    MODEL("Model"),
+    VIEW("View"),
+    UNKNOWN("Unknown")
 }
 
 enum class InjectionMethod {
