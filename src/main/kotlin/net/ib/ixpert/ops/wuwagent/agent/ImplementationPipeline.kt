@@ -195,9 +195,6 @@ class ImplementationPipeline(
             var abortReason: String? = null // null=정상, "REPEAT", "LENGTH"
             val MAX_RESPONSE_CHARS = 15_000
 
-            // [수정] 4-backtick UI wrapping 시작
-            onChunk("````text\n")
-
             try {
                 val response = client.chat(systemPrompt, userPrompt, onChunk = { chunk ->
                     if (abortReason != null) return@chat
@@ -225,9 +222,6 @@ class ImplementationPipeline(
                     // UI로 실시간 전송 (태그 제거 없이 필터링)
                     onChunk(chunk)
                 })
-
-                // [수정] 4-backtick UI wrapping 종료
-                onChunk("\n````\n")
 
                 if (abortReason != null) {
                     val msg = when (abortReason) {
@@ -306,7 +300,6 @@ class ImplementationPipeline(
                         }
 
                         onChunk("\n> 🔄 **재생성 중...**\n\n")
-                        onChunk("````text\n")
 
                         var retryResponse = ""
                         try {
@@ -317,8 +310,6 @@ class ImplementationPipeline(
                         } catch (e: Exception) {
                             logger.warn("Contract 위반 재생성 실패: ${e.message}")
                         }
-
-                        onChunk("\n````\n")
 
                         if (retryResponse.isNotBlank()) {
                             // 재생성 결과로 교체

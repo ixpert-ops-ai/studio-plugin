@@ -9,10 +9,10 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
  * 질의의 한글 명사가 해당 토큰에 얼마나 매칭되는지를 명사 단위 비율로 산출합니다.
  *
  * **점수 산출 방식:**
- * - 기본 점수: `60 * (매칭된 명사 수 / 전체 질의 명사 수)`
+ * - 기본 점수: `min(매칭된 명사 수 * 30.0, 60.0)`
  * - [AnalyzedQuery.exactIdentifiers]가 className에 부분 포함되면 추가 가중치 (+15점)
  *
- * **최소 임계값:** 점수가 20점 이상 (약 33% 매칭)
+ * **최소 임계값:** 점수가 20점 이상
  */
 class ClassMethodTokenCollector(
     private val graph: ProjectGraph
@@ -40,9 +40,9 @@ class ClassMethodTokenCollector(
                 }
                 
                 if (matchedNouns > 0) {
-                    val ratio = matchedNouns.toDouble() / query.koreanNouns.size
-                    score += 60.0 * ratio
-                    matchReasons.add("명사 단위 토큰 매칭: $matchedNouns/${query.koreanNouns.size} (비율: ${"%.2f".format(ratio)})")
+                    val nounScore = minOf(matchedNouns * 30.0, 60.0)
+                    score += nounScore
+                    matchReasons.add("명사 매칭: ${matchedNouns}개 (점수: $nounScore)")
                 }
             }
 

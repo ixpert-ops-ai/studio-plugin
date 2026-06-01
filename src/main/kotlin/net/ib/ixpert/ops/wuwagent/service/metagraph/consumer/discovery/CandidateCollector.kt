@@ -56,7 +56,7 @@ class CandidateCollector(
      */
     fun collect(userQuery: String): List<ScoredCandidate> {
         val analyzed = queryAnalyzer.analyze(userQuery)
-        logger.info("CandidateCollector: 분석 결과 → " +
+        logger.warn("CandidateCollector: 분석 결과 → " +
             "koreanNouns=${analyzed.koreanNouns}, " +
             "englishTokens=${analyzed.englishTokens.take(10)}, " +
             "exactIdentifiers=${analyzed.exactIdentifiers}, " +
@@ -68,7 +68,7 @@ class CandidateCollector(
         collectors.forEach { collector ->
             val results = collector.search(analyzed)
             if (results.isNotEmpty()) {
-                logger.info("CandidateCollector: ${collector::class.simpleName} → ${results.size}건 매칭")
+                logger.warn("CandidateCollector: ${collector::class.simpleName} → ${results.size}건 매칭")
             }
             results.forEach { result ->
                 candidates.merge(result.filePath, result) { existing, new ->
@@ -94,7 +94,7 @@ class CandidateCollector(
                     )
                 }
             }
-            logger.info("CandidateCollector: BFS 확장 → ${expanded.size}건 추가")
+            logger.warn("CandidateCollector: BFS 확장 → ${expanded.size}건 추가")
         }
 
         val sorted = candidates.values.map { candidate ->
@@ -113,7 +113,7 @@ class CandidateCollector(
             } else candidate
         }.sortedByDescending { it.score }.take(MAX_CANDIDATES)
         
-        logger.info("CandidateCollector: 최종 ${sorted.size}건 후보 (총 ${candidates.size}건 중)")
+        logger.warn("CandidateCollector: 최종 ${sorted.size}건 후보 (총 ${candidates.size}건 중)")
         return sorted
     }
 

@@ -7,6 +7,7 @@ package net.ib.ixpert.ops.wuwagent.service.analysis.model
 data class ExtractedStructure(
     val packageName: String? = null,
     val symbols: List<SymbolInfo> = emptyList(),
+    val fields: List<FieldInfo> = emptyList(),
     val imports: List<String> = emptyList(),
     val classes: List<ClassInfo> = emptyList(),
     val thymeleafStructure: ThymeleafStructure? = null,
@@ -62,6 +63,15 @@ data class ParamInfo(
         return if (type != null) "$name: $type" else name
     }
 }
+
+data class FieldInfo(
+    val name: String,
+    val type: String,
+    val annotationTexts: List<String> = emptyList(),
+    val isStatic: Boolean = false,
+    val isFinal: Boolean = false,
+    val parentClass: String? = null
+)
 
 data class ClassInfo(
     val name: String,

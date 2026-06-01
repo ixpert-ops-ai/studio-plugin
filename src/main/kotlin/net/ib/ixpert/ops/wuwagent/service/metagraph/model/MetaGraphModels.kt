@@ -7,6 +7,17 @@ enum class GraphType {
 }
 
 /**
+ * 프레임워크 자동 감지 결과.
+ */
+data class FrameworkDetectionResult(
+    val detected: FrameworkType,
+    val confidence: Int,          // 0~100
+    val reasons: List<String>,    // 판단 근거
+    val alternativeCandidates: List<Pair<FrameworkType, Int>> = emptyList(),
+    var userOverride: FrameworkType? = null
+)
+
+/**
  * 프로젝트 전체 구조 그래프.
  * 메타파일(.meta/project-graph.json)의 최상위 구조입니다.
  */
@@ -16,12 +27,17 @@ data class ProjectGraph(
     val generatedAt: String,
     val projectRoot: String,
     val framework: String = "spring-boot",
-    val frameworkType: FrameworkType = FrameworkType.SPRING_BOOT,
+    val frameworkType: FrameworkType = FrameworkType.SPRING_BOOT_JPA,
+    val frameworkDetection: FrameworkDetectionResult? = null,
     val modules: List<ModuleInfo>? = null,
     val files: Map<String, FileNode>,
     val relationships: List<Relationship>,
     val statistics: GraphStatistics
-)
+) {
+    fun resolveFrameworkType(): FrameworkType {
+        return this.frameworkDetection?.userOverride ?: this.frameworkType
+    }
+}
 
 /**
  * 개별 파일(클래스) 노드.
