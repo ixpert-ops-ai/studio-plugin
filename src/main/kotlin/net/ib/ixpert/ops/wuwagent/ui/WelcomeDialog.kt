@@ -18,7 +18,7 @@ import javax.swing.JPanel
 /**
  * 플러그인 최초 설치 후 1회 표시되는 웰컴 다이얼로그.
  *
- * - JCEF 지원 환경: 내부 JBCefBrowser로 번들 HTML(/welcome.html) 렌더링
+ * - JCEF 지원 환경: 내부 JBCefBrowser로 번들 HTML(/index.html) 렌더링
  * - JCEF 미지원 환경: 안내 메시지 표시 + [FALLBACK_URL] 외부 브라우저로 fallback
  */
 class WelcomeDialog(project: Project) : DialogWrapper(project, true) {
@@ -28,7 +28,7 @@ class WelcomeDialog(project: Project) : DialogWrapper(project, true) {
         const val FALLBACK_URL = "https://ixpertops.cloud"
 
         /** 플러그인 jar에 번들된 웰컴 HTML 리소스 경로 */
-        private const val WELCOME_HTML_RESOURCE = "/welcome.html"
+        private const val WELCOME_HTML_RESOURCE = "/index.html"
 
         private const val DIALOG_WIDTH  = 900
         private const val DIALOG_HEIGHT = 600
@@ -56,7 +56,7 @@ class WelcomeDialog(project: Project) : DialogWrapper(project, true) {
             // jar: URL 스킴은 JCEF가 지원하지 않으므로 HTML 내용을 직접 읽어 loadHTML() 사용
             val htmlContent = htmlUrl.readText(Charsets.UTF_8)
             val browser = JBCefBrowser()
-            browser.loadHTML(htmlContent, "file:///welcome.html")
+            browser.loadHTML(htmlContent, "file:///index.html")
             logger.info("WelcomeDialog: 번들 HTML 로드 완료 ($htmlUrl)")
 
             val panel = JPanel(BorderLayout())
