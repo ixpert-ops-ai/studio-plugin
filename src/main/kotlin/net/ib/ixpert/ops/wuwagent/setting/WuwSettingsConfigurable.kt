@@ -162,7 +162,9 @@ class WuwSettingsConfigurable : SearchableConfigurable {
             group("분석기 설정 (Analyzer Settings)") {
                 row("대상 프레임워크 (Framework):") {
                     frameworkTypeComboBox = comboBox(
-                        DefaultComboBoxModel(net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.values().map { it.displayName }.toTypedArray())
+                        DefaultComboBoxModel(net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.values()
+                            .filter { !it.displayName.contains("Legacy") }
+                            .map { it.displayName }.toTypedArray())
                     ).component
                 }
             }
