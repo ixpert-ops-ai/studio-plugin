@@ -45,6 +45,10 @@ interface Message {
   currentStatus?: string;
   stepNotiStatus?: 'started' | 'completed' | 'failed';
   toolNotiText?: string;
+  clarifyData?: {
+    enhancedRequirements: string[];
+    questions: Array<{ questionText: string; defaultValue: string }>;
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -176,12 +180,136 @@ const CodeBlock = ({ children, isCollapsible = false }: { children: React.ReactN
 };
 
 // ─────────────────────────────────────────────
+//  컴포넌트: ClarifyForm (요구사항 구체화 폼)
+// ─────────────────────────────────────────────
+const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
+  const data = msg.clarifyData;
+  if (!data) return null;
+
+  const hasQuestions = data.questions && data.questions.length > 0;
+  
+  // 폼 상태: 사용자의 O/X 및 텍스트 답변
+  const [answers, setAnswers] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    if (data.questions) {
+      data.questions.forEach((q, idx) => {
+        init[(idx + 1).toString()] = q.defaultValue;
+      });
+    }
+    return init;
+  });
+  
+  const [isSubmitted, setIsSubmitted] = useState(false);
+
+  const handleSubmit = () => {
+    if (isSubmitted) return;
+    setIsSubmitted(true);
+    
+    const payload = {
+      answers,
+      removedRequirements: [],
+      additionalNotes: null
+    };
+    
+    if (window.sendToIde) {
+      window.sendToIde(JSON.stringify({
+        command: '/analyze-confirm',
+        text: JSON.stringify(payload)
+      }));
+    }
+  };
+
+  return (
+    <div className="msg-ai analysis" data-message-role="ai" data-message-id={msg.id}>
+      <div className="msg-ai-content">
+        <div className="markdown-body">
+          <h3>🤖 요구사항 자동 구체화 결과 (Stage 0)</h3>
+          
+          {data.enhancedRequirements && data.enhancedRequirements.length > 0 && (
+            <>
+              <h4>[자동 보강된 항목]</h4>
+              <ul>
+                {data.enhancedRequirements.map((req, idx) => (
+                  <li key={idx}>{req}</li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {hasQuestions ? (
+            <>
+              <h4>[추가 확인이 필요한 항목]</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
+                {data.questions.map((q, idx) => {
+                  const key = (idx + 1).toString();
+                  const isBoolean = q.defaultValue === 'Y' || q.defaultValue === 'N';
+                  return (
+                    <div key={idx} style={{ padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '6px' }}>
+                      <p style={{ margin: '0 0 8px 0', fontSize: '13px' }}>Q: {q.questionText}</p>
+                      {isBoolean ? (
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button 
+                            className={`btn-toggle ${answers[key] === 'Y' ? 'active' : ''}`}
+                            onClick={() => !isSubmitted && setAnswers(prev => ({ ...prev, [key]: 'Y' }))}
+                            style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #444', background: answers[key] === 'Y' ? '#3b82f6' : 'transparent', color: answers[key] === 'Y' ? '#fff' : '#ccc', cursor: isSubmitted ? 'default' : 'pointer' }}
+                          >
+                            예 (Y)
+                          </button>
+                          <button 
+                            className={`btn-toggle ${answers[key] === 'N' ? 'active' : ''}`}
+                            onClick={() => !isSubmitted && setAnswers(prev => ({ ...prev, [key]: 'N' }))}
+                            style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #444', background: answers[key] === 'N' ? '#ef4444' : 'transparent', color: answers[key] === 'N' ? '#fff' : '#ccc', cursor: isSubmitted ? 'default' : 'pointer' }}
+                          >
+                            아니오 (N)
+                          </button>
+                        </div>
+                      ) : (
+                        <input 
+                          type="text" 
+                          value={answers[key] || ''} 
+                          onChange={(e) => !isSubmitted && setAnswers(prev => ({ ...prev, [key]: e.target.value }))}
+                          disabled={isSubmitted}
+                          style={{ width: '100%', padding: '6px', background: 'rgba(0,0,0,0.2)', border: '1px solid #444', color: '#fff', borderRadius: '4px' }}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <p style={{ fontSize: '13px', color: '#aaa', marginTop: '10px' }}>
+              추가로 확인할 질문이 없습니다. 보강된 요구사항을 확인해 주세요.
+            </p>
+          )}
+
+          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+            <button 
+              onClick={handleSubmit} 
+              disabled={isSubmitted}
+              style={{ padding: '6px 16px', background: isSubmitted ? '#444' : '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: isSubmitted ? 'default' : 'pointer', fontWeight: 'bold' }}
+            >
+              {isSubmitted ? '제출 완료' : (hasQuestions ? '답변 제출 및 분석 시작' : '이대로 진행')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// ─────────────────────────────────────────────
 //  컴포넌트: MessageItem (역할별 분기)
 // ─────────────────────────────────────────────
 const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   // 0. Step 알림 카드
   if (msg.subType === 'step_noti') {
     return <StepNotiItem msg={msg} />;
+  }
+  
+  // 0.5 Clarify Form
+  if (msg.subType === 'analyze_clarify') {
+    return <ClarifyForm msg={msg} />;
   }
 
   // 1. Tool / Status 메시지
@@ -620,6 +748,30 @@ function App() {
       }
 
       const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
+
+      if (data.subType === 'analyze_clarify') {
+        if (messageId) {
+          // 기존에 열려있는 다른 ClarifyForm이 있다면 비활성화(제거) 처리
+          setMessages(prev => {
+            const filtered = prev.filter(m => m.subType !== 'analyze_clarify');
+            let parsedData = null;
+            try {
+              parsedData = JSON.parse(data.content);
+            } catch (e) {
+              console.error("Failed to parse analyze_clarify JSON", e);
+            }
+            return [...filtered, {
+              id: messageId,
+              role: 'ai',
+              subType: 'analyze_clarify',
+              content: '',
+              clarifyData: parsedData,
+              isLoading: false
+            }];
+          });
+        }
+        return;
+      }
 
       if (data.subType === 'tool_noti') {
         if (messageId) {
