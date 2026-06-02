@@ -23,7 +23,7 @@ class ClarifyPromptBuilder {
             2. 질문 생성 조건 (questions):
                다음 세 가지를 모두 만족할 때만 질문한다:
                a. 답변에 따라 수정 대상 파일이 달라진다 (Information Gain)
-               b. 개발자가 Y/N 또는 한 단어로 답할 수 있다 (Low User Effort)
+               b. 반드시 "예/아니오"로 명확히 대답할 수 있는 닫힌 질문(Closed question) 형태로 작성한다. (예: "~어떻게 되나요?" 대신 "~포함하시겠습니까?" 사용)
                c. 프로젝트 관행상 두 선택지가 모두 합리적이다 (Genuine Ambiguity)
             
             3. 질문 제한:
