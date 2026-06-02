@@ -41,7 +41,15 @@ class ClarifyPromptBuilder {
             {
               "enhancedRequirements": ["항목1", "항목2"],
               "questions": [
-                {"id": 1, "questionText": "질문 내용", "defaultValue": "Y"}
+                {
+                  "id": 1, 
+                  "questionText": "질문 내용", 
+                  "defaultValue": "Y",
+                  "confirmedStatement": {
+                    "Y": "Y를 선택했을 때 확정할 문장",
+                    "N": "N을 선택했을 때 확정할 문장"
+                  }
+                }
               ],
               "outOfScopeNotices": []
             }

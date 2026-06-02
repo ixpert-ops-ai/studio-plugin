@@ -53,11 +53,16 @@ class RequirementClarifier(
         
         val questions = mutableListOf<ClarifyQuestion>()
         rootNode.path("questions").forEach {
+            val confirmedStatementMap = mutableMapOf<String, String>()
+            it.path("confirmedStatement").takeIf { !it.isMissingNode }?.fields()?.forEach { entry ->
+                confirmedStatementMap[entry.key] = entry.value.asText()
+            }
             questions.add(
                 ClarifyQuestion(
                     id = it.path("id").asInt(),
                     questionText = it.path("questionText").asText(),
-                    defaultValue = it.path("defaultValue").asText()
+                    defaultValue = it.path("defaultValue").asText(),
+                    confirmedStatement = if (confirmedStatementMap.isNotEmpty()) confirmedStatementMap else null
                 )
             )
         }
@@ -81,10 +86,11 @@ class RequirementClarifier(
         // 2. 질문 답변 반영
         val answeredItems = clarifyResult.questions.mapNotNull { q ->
             val answer = userResponse.answers[q.id] ?: q.defaultValue
-            when {
-                answer.uppercase() == "Y" -> q.questionText  // 형태 변환 없이 질문 텍스트 그대로 사용
-                answer.uppercase() == "N" -> null  // 미포함
-                else -> "${q.questionText}: $answer"  // 사용자 커스텀 답변
+            val upperAnswer = answer.uppercase()
+            if (upperAnswer == "Y" || upperAnswer == "N") {
+                q.confirmedStatement?.get(upperAnswer) ?: "${q.questionText}: $upperAnswer"
+            } else {
+                "${q.questionText}: $answer"
             }
         }
         

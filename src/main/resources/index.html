@@ -347,6 +347,22 @@
     }
     .uc-list li .li-text { color: var(--text); }
     .uc-list li .li-desc { font-size: .78rem; color: var(--muted); margin-top: .1rem; }
+    .uc-link {
+      display: inline-flex; align-items: center; gap: .4rem;
+      margin-top: 1.2rem;
+      padding: .5rem 1.1rem;
+      border-radius: 7px;
+      font-size: .82rem; font-weight: 700;
+      text-decoration: none;
+      border: 1px solid;
+      transition: opacity .2s, transform .15s;
+    }
+    .uc-link:hover { opacity: .8; transform: translateY(-1px); }
+    .user-card.business  .uc-link { color: var(--orange); border-color: rgba(255,158,100,.3); background: rgba(255,158,100,.08); }
+    .user-card.querycard .uc-link { color: var(--cyan);   border-color: rgba(125,207,255,.3); background: rgba(125,207,255,.08); }
+    .user-card.devcard   .uc-link { color: var(--blue);   border-color: rgba(122,162,247,.3); background: rgba(122,162,247,.08); }
+    .user-card.querycard::before  { background: linear-gradient(90deg, var(--cyan), var(--green)); }
+    .user-card.querycard:hover    { border-color: var(--cyan); }
 
     /* ── FOOTER ── */
     footer {
@@ -375,7 +391,7 @@
       <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="28" ry="28"
             fill="#1a1b2e" stroke="#565f89" stroke-width="1.5"/>
       <text x="64" y="64" font-family="Segoe UI, sans-serif" font-weight="700" font-size="74"
-            text-anchor="middle" dominant-baseline="central">
+            text-anchor="middle" dy="0.35em">
         <tspan fill="#7aa2f7">i</tspan><tspan fill="#bb9af7">X</tspan>
       </text>
     </svg>
@@ -398,7 +414,7 @@
       <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="28" ry="28"
             fill="#1a1b2e" stroke="#565f89" stroke-width="1.5"/>
       <text x="64" y="64" font-family="Segoe UI, sans-serif" font-weight="700" font-size="74"
-            text-anchor="middle" dominant-baseline="central">
+            text-anchor="middle" dy="0.35em">
         <tspan fill="#7aa2f7">i</tspan><tspan fill="#bb9af7">X</tspan>
       </text>
     </svg>
@@ -650,21 +666,15 @@
       현업 담당자와 개발자 모두를 위한 전용 채널을 제공합니다.
     </p>
 
-    <a class="webchat-url" href="https://chat.ixpertops.cloud" target="_blank" rel="noopener">
-      <span class="url-dot"></span>
-      chat.ixpertops.cloud
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.6;margin-left:.2rem;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-    </a>
+    <div class="user-cards" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
 
-    <div class="user-cards">
-
-      <!-- 현업용 -->
+      <!-- 현업용 - 업무관련질의 -->
       <div class="user-card business">
         <div class="uc-head">
           <div class="uc-icon" style="background:rgba(255,158,100,.12);">💼</div>
           <div>
             <div class="uc-title">현업용</div>
-            <div class="uc-subtitle">Business Users · 비개발 직군</div>
+            <div class="uc-subtitle">업무 관련 질의</div>
           </div>
         </div>
         <ul class="uc-list">
@@ -675,41 +685,59 @@
               <div class="li-desc">사내 업무 프로세스, 정책, 절차 등을 자연어로 질문하고 즉시 답변을 받습니다.</div>
             </div>
           </li>
+        </ul>
+        <a class="uc-link" href="https://chat.ixpertops.cloud/?models=ism-chatbot-commerce" target="_blank" rel="noopener">
+          바로가기
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </a>
+      </div>
+
+      <!-- 현업용 - 쿼리생성 -->
+      <div class="user-card querycard">
+        <div class="uc-head">
+          <div class="uc-icon" style="background:rgba(125,207,255,.12);">🗄️</div>
+          <div>
+            <div class="uc-title">현업용</div>
+            <div class="uc-subtitle">쿼리 생성</div>
+          </div>
+        </div>
+        <ul class="uc-list">
           <li>
-            <div class="li-icon" style="background:rgba(255,158,100,.1);">🗄️</div>
+            <div class="li-icon" style="background:rgba(125,207,255,.1);">🗄️</div>
             <div>
               <div class="li-text">쿼리 생성</div>
               <div class="li-desc">SQL 지식 없이도 원하는 데이터 조회 조건을 설명하면 쿼리를 자동으로 작성해 줍니다.</div>
             </div>
           </li>
         </ul>
+        <a class="uc-link" href="https://chat.ixpertops.cloud/?models=ism-chatbot-commercequery" target="_blank" rel="noopener">
+          바로가기
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </a>
       </div>
 
-      <!-- 개발자용 -->
+      <!-- 개발자용 - 업무 및 소스참조 -->
       <div class="user-card devcard">
         <div class="uc-head">
           <div class="uc-icon" style="background:rgba(122,162,247,.12);">👨‍💻</div>
           <div>
             <div class="uc-title">개발자용</div>
-            <div class="uc-subtitle">Developer Users · 개발 직군</div>
+            <div class="uc-subtitle">업무 및 소스 참조</div>
           </div>
         </div>
         <ul class="uc-list">
           <li>
-            <div class="li-icon" style="background:rgba(122,162,247,.1);">❓</div>
-            <div>
-              <div class="li-text">업무 관련 질의</div>
-              <div class="li-desc">개발 일정, 스펙 확인, 정책 문의 등 업무 맥락의 질문에 빠르게 답변합니다.</div>
-            </div>
-          </li>
-          <li>
             <div class="li-icon" style="background:rgba(122,162,247,.1);">💻</div>
             <div>
-              <div class="li-text">소스 관련 질의</div>
-              <div class="li-desc">코드 로직 설명, 버그 원인 분석, 구현 방향 논의 등 소스 레벨 기술 질문을 처리합니다.</div>
+              <div class="li-text">업무 및 소스 참조</div>
+              <div class="li-desc">개발 일정·스펙 문의부터 코드 로직 설명, 버그 분석, 구현 방향 논의까지 처리합니다.</div>
             </div>
           </li>
         </ul>
+        <a class="uc-link" href="https://chat.ixpertops.cloud/?models=ism-chatbot-developer" target="_blank" rel="noopener">
+          바로가기
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </a>
       </div>
 
     </div>
@@ -718,7 +746,7 @@
 
 <!-- FOOTER -->
 <footer>
-  <p>Built by <span>iXpert Ops AI</span> Team &nbsp;·&nbsp; iXpert AI Assistant &nbsp;·&nbsp; IntelliJ Platform 2024.3+</p>
+  <p>Built by <span>iXpert Ops</span> Team &nbsp;·&nbsp; iXpert AI Assistant Plugin &nbsp;·&nbsp; IntelliJ Platform 2024.3+</p>
 </footer>
 
 </body>

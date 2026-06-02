@@ -100,12 +100,12 @@ class RequirementClarifierTest {
     }
 
     @Test
-    fun `finalize에서 질문 답변 N은 미포함된다`() {
+    fun `finalize에서 질문 답변에 따라 confirmedStatement가 반영된다`() {
         val clarifyResult = ClarifyResult(
             enhancedRequirements = listOf("URL 저장"),
             questions = listOf(
-                ClarifyQuestion(1, "검증 로직 추가할까요?", "Y"),
-                ClarifyQuestion(2, "목록조회 포함할까요?", "N")
+                ClarifyQuestion(1, "검증 로직 추가할까요?", "Y", mapOf("Y" to "검증 로직 추가", "N" to "검증 로직 제외")),
+                ClarifyQuestion(2, "목록조회 포함할까요?", "N", mapOf("Y" to "목록조회 포함", "N" to "목록조회 제외"))
             ),
             outOfScopeNotices = emptyList()
         )
@@ -115,7 +115,8 @@ class RequirementClarifierTest {
             additionalNotes = null
         )
         val final = clarifier.finalize(clarifyResult, userResponse, "원본")
-        assertTrue(final.fullText.contains("검증 로직 추가할까요?"))
-        assertFalse(final.fullText.contains("목록조회 포함할까요?"))
+        assertTrue(final.fullText.contains("검증 로직 추가"))
+        assertTrue(final.fullText.contains("목록조회 제외"))
+        assertFalse(final.fullText.contains("검증 로직 추가할까요?"))
     }
 }

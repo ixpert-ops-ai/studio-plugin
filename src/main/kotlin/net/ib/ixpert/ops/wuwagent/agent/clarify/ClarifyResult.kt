@@ -9,7 +9,8 @@ data class ClarifyResult(
 data class ClarifyQuestion(
     val id: Int,
     val questionText: String,
-    val defaultValue: String
+    val defaultValue: String,
+    val confirmedStatement: Map<String, String>? = null
 )
 
 data class ClarifyUserResponse(
