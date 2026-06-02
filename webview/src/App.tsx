@@ -1080,9 +1080,15 @@ function App() {
     } else if (text === '/improve' || text.startsWith('/improve ')) {
       command = '/task';
       payload = '코드를 개선해주세요.';
-    } else if (text === '/analyze' || text.startsWith('/analyze ')) {
+    } else if (text === '/analyze' || text.startsWith('/analyze ') || text.startsWith('/analyze!')) {
       command = '/analyze';
-      payload = text.startsWith('/analyze ') ? text.slice(9).trim() : '요구사항 대상 파일을 추출해주세요.';
+      if (text.startsWith('/analyze!')) {
+        payload = '!' + text.slice(9).trim();
+      } else if (text.startsWith('/analyze ')) {
+        payload = text.slice(9).trim();
+      } else {
+        payload = '요구사항 대상 파일을 추출해주세요.';
+      }
     } else if (text === '/implement' || text.startsWith('/implement ')) {
       command = '/implement';
       payload = '';
