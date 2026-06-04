@@ -1,25 +1,30 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>iXpert AI Assistant</title>
   <style>
     :root {
-      --bg:       #0d0e1a;
-      --surface:  #13141f;
-      --card:     #1a1b2e;
-      --border:   #2a2d4a;
-      --blue:     #7aa2f7;
-      --purple:   #bb9af7;
-      --cyan:     #7dcfff;
-      --green:    #9ece6a;
-      --orange:   #ff9e64;
-      --text:     #cdd6f4;
-      --muted:    #6c7086;
+      --bg: #0d0e1a;
+      --surface: #13141f;
+      --card: #1a1b2e;
+      --border: #2a2d4a;
+      --blue: #7aa2f7;
+      --purple: #bb9af7;
+      --cyan: #7dcfff;
+      --green: #9ece6a;
+      --orange: #ff9e64;
+      --text: #cdd6f4;
+      --muted: #6c7086;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
     body {
       background: var(--bg);
@@ -30,41 +35,77 @@
 
     /* ── NAV ── */
     nav {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      display: flex; align-items: center; justify-content: space-between;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       padding: 0 2.5rem;
       height: 60px;
       background: rgba(13, 14, 26, 0.85);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
     }
-    .nav-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-    .nav-logo svg { flex-shrink: 0; }
-    .nav-logo span { font-size: 1rem; font-weight: 700; color: var(--text); }
-    .nav-links { display: flex; gap: 2rem; }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+
+    .nav-logo svg {
+      flex-shrink: 0;
+    }
+
+    .nav-logo span {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 2rem;
+    }
+
     .nav-links a {
-      color: var(--muted); text-decoration: none; font-size: 0.9rem;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.9rem;
       transition: color .2s;
     }
-    .nav-links a:hover { color: var(--text); }
+
+    .nav-links a:hover {
+      color: var(--text);
+    }
 
     /* ── HERO ── */
     .hero {
       min-height: 100vh;
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
       text-align: center;
       padding: 6rem 2rem 4rem;
-      position: relative; overflow: hidden;
+      position: relative;
+      overflow: hidden;
     }
+
     .hero::before {
       content: '';
-      position: absolute; inset: 0;
+      position: absolute;
+      inset: 0;
       background:
-        radial-gradient(ellipse 60% 50% at 50% 10%, rgba(122,162,247,.12) 0%, transparent 70%),
-        radial-gradient(ellipse 40% 40% at 80% 80%, rgba(187,154,247,.08) 0%, transparent 60%);
+        radial-gradient(ellipse 60% 50% at 50% 10%, rgba(122, 162, 247, .12) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 40% at 80% 80%, rgba(187, 154, 247, .08) 0%, transparent 60%);
       pointer-events: none;
     }
+
     .badge {
       display: inline-block;
       padding: .3rem .9rem;
@@ -72,18 +113,22 @@
       border-radius: 999px;
       font-size: .75rem;
       color: var(--blue);
-      background: rgba(122,162,247,.08);
+      background: rgba(122, 162, 247, .08);
       margin-bottom: 1.5rem;
       letter-spacing: .05em;
       text-transform: uppercase;
     }
+
     .hero-icon {
       margin-bottom: 1.5rem;
     }
+
     .hero-icon svg {
-      width: 80px; height: 80px;
-      filter: drop-shadow(0 0 24px rgba(122,162,247,.4));
+      width: 80px;
+      height: 80px;
+      filter: drop-shadow(0 0 24px rgba(122, 162, 247, .4));
     }
+
     h1 {
       font-size: clamp(2.4rem, 6vw, 4rem);
       font-weight: 800;
@@ -91,30 +136,51 @@
       line-height: 1.1;
       margin-bottom: 1rem;
     }
-    h1 .ix { color: var(--blue); }
-    h1 .pert { color: var(--purple); }
+
+    h1 .ix {
+      color: var(--blue);
+    }
+
+    h1 .pert {
+      color: var(--purple);
+    }
+
     .hero-desc {
       max-width: 560px;
       font-size: 1.1rem;
       color: var(--muted);
       margin-bottom: 2.5rem;
     }
+
     .hero-cta {
-      display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center;
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
     }
+
     .btn {
-      display: inline-flex; align-items: center; gap: .5rem;
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
       padding: .7rem 1.6rem;
       border-radius: 8px;
-      font-size: .9rem; font-weight: 600;
+      font-size: .9rem;
+      font-weight: 600;
       text-decoration: none;
       transition: opacity .2s, transform .15s;
     }
-    .btn:hover { opacity: .85; transform: translateY(-1px); }
+
+    .btn:hover {
+      opacity: .85;
+      transform: translateY(-1px);
+    }
+
     .btn-primary {
       background: linear-gradient(135deg, var(--blue), var(--purple));
       color: #0d0e1a;
     }
+
     .btn-ghost {
       border: 1px solid var(--border);
       color: var(--text);
@@ -122,16 +188,32 @@
     }
 
     /* ── SECTION COMMON ── */
-    section { padding: 5rem 2rem; max-width: 1100px; margin: 0 auto; }
-    .section-label {
-      font-size: .75rem; font-weight: 700; letter-spacing: .12em;
-      text-transform: uppercase; color: var(--blue); margin-bottom: .75rem;
+    section {
+      padding: 5rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
     }
+
+    .section-label {
+      font-size: .75rem;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--blue);
+      margin-bottom: .75rem;
+    }
+
     .section-title {
       font-size: clamp(1.6rem, 3vw, 2.4rem);
-      font-weight: 700; margin-bottom: .75rem;
+      font-weight: 700;
+      margin-bottom: .75rem;
     }
-    .section-sub { color: var(--muted); max-width: 560px; margin-bottom: 3rem; }
+
+    .section-sub {
+      color: var(--muted);
+      max-width: 560px;
+      margin-bottom: 3rem;
+    }
 
     /* ── FEATURES GRID ── */
     .features-grid {
@@ -139,6 +221,7 @@
       grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
       gap: 1.2rem;
     }
+
     .feature-card {
       background: var(--card);
       border: 1px solid var(--border);
@@ -146,28 +229,65 @@
       padding: 1.6rem;
       transition: border-color .2s, transform .2s;
     }
-    .feature-card:hover { border-color: var(--blue); transform: translateY(-3px); }
-    .feature-icon {
-      width: 40px; height: 40px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.2rem; margin-bottom: 1rem;
+
+    .feature-card:hover {
+      border-color: var(--blue);
+      transform: translateY(-3px);
     }
-    .feature-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: .4rem; }
-    .feature-card p { font-size: .875rem; color: var(--muted); }
+
+    .feature-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      margin-bottom: 1rem;
+    }
+
+    .feature-card h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: .4rem;
+    }
+
+    .feature-card p {
+      font-size: .875rem;
+      color: var(--muted);
+    }
+
     .tag {
-      display: inline-block; margin-top: .75rem;
-      padding: .15rem .55rem; border-radius: 4px;
-      font-size: .7rem; font-weight: 600; letter-spacing: .04em;
+      display: inline-block;
+      margin-top: .75rem;
+      padding: .15rem .55rem;
+      border-radius: 4px;
+      font-size: .7rem;
+      font-weight: 600;
+      letter-spacing: .04em;
     }
 
     /* ── ARCHITECTURE ── */
-    .arch-section { background: var(--surface); border-radius: 0; }
-    .arch-wrap { max-width: 1100px; margin: 0 auto; padding: 5rem 2rem; }
+    .arch-section {
+      background: var(--surface);
+      border-radius: 0;
+    }
+
+    .arch-wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 5rem 2rem;
+    }
+
     .flow-diagram {
-      display: flex; align-items: center; justify-content: center;
-      gap: 0; flex-wrap: wrap;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      flex-wrap: wrap;
       margin: 2.5rem 0;
     }
+
     .flow-box {
       background: var(--card);
       border: 1px solid var(--border);
@@ -176,44 +296,77 @@
       text-align: center;
       min-width: 110px;
     }
-    .flow-box .box-icon { font-size: 1.5rem; margin-bottom: .3rem; }
-    .flow-box .box-label { font-size: .8rem; font-weight: 700; color: var(--text); }
-    .flow-box .box-sub { font-size: .7rem; color: var(--muted); margin-top: .15rem; }
+
+    .flow-box .box-icon {
+      font-size: 1.5rem;
+      margin-bottom: .3rem;
+    }
+
+    .flow-box .box-label {
+      font-size: .8rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .flow-box .box-sub {
+      font-size: .7rem;
+      color: var(--muted);
+      margin-top: .15rem;
+    }
+
     .flow-arrow {
-      color: var(--border); font-size: 1.5rem;
+      color: var(--border);
+      font-size: 1.5rem;
       padding: 0 .5rem;
     }
+
     .layer-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 1rem; margin-top: 2rem;
+      gap: 1rem;
+      margin-top: 2rem;
     }
+
     .layer-card {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 1.2rem 1.4rem;
     }
+
     .layer-card .layer-name {
-      font-size: .8rem; font-weight: 700;
-      font-family: monospace; color: var(--cyan);
+      font-size: .8rem;
+      font-weight: 700;
+      font-family: monospace;
+      color: var(--cyan);
       margin-bottom: .4rem;
     }
-    .layer-card p { font-size: .8rem; color: var(--muted); }
+
+    .layer-card p {
+      font-size: .8rem;
+      color: var(--muted);
+    }
+
     .layer-card .rule {
-      display: inline-block; margin-top: .6rem;
-      padding: .15rem .5rem; border-radius: 4px;
-      font-size: .7rem; font-weight: 700;
-      background: rgba(247,100,100,.12); color: #f87171;
-      border: 1px solid rgba(247,100,100,.2);
+      display: inline-block;
+      margin-top: .6rem;
+      padding: .15rem .5rem;
+      border-radius: 4px;
+      font-size: .7rem;
+      font-weight: 700;
+      background: rgba(247, 100, 100, .12);
+      color: #f87171;
+      border: 1px solid rgba(247, 100, 100, .2);
     }
 
     /* ── PIPELINE ── */
     .pipeline-steps {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 1rem; margin-top: 2rem;
+      gap: 1rem;
+      margin-top: 2rem;
     }
+
     .pipeline-step {
       background: var(--card);
       border: 1px solid var(--border);
@@ -221,505 +374,710 @@
       padding: 1.2rem;
       position: relative;
     }
+
     .step-num {
-      width: 26px; height: 26px; border-radius: 50%;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
       background: linear-gradient(135deg, var(--blue), var(--purple));
-      color: #0d0e1a; font-size: .75rem; font-weight: 800;
-      display: flex; align-items: center; justify-content: center;
+      color: #0d0e1a;
+      font-size: .75rem;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       margin-bottom: .75rem;
     }
-    .pipeline-step h4 { font-size: .875rem; font-weight: 700; margin-bottom: .3rem; }
-    .pipeline-step p { font-size: .78rem; color: var(--muted); }
+
+    .pipeline-step h4 {
+      font-size: .875rem;
+      font-weight: 700;
+      margin-bottom: .3rem;
+    }
+
+    .pipeline-step p {
+      font-size: .78rem;
+      color: var(--muted);
+    }
 
     /* ── TECH STACK ── */
     .stack-grid {
-      display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: .75rem;
+      margin-top: 2rem;
     }
+
     .stack-chip {
-      display: flex; align-items: center; gap: .5rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: .5rem 1rem;
-      font-size: .82rem; font-weight: 600;
+      font-size: .82rem;
+      font-weight: 600;
     }
-    .chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    .chip-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
 
     /* ── PHASE2 ── */
     .phase2-flow {
-      display: flex; flex-direction: column; gap: 1rem; margin-top: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin-top: 2rem;
     }
+
     .phase2-step {
-      display: flex; align-items: flex-start; gap: 1.2rem;
-      background: var(--card); border: 1px solid var(--border);
-      border-radius: 10px; padding: 1.2rem 1.4rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 1.2rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.2rem 1.4rem;
     }
+
     .phase2-cmd {
-      font-family: monospace; font-size: .85rem; font-weight: 700;
+      font-family: monospace;
+      font-size: .85rem;
+      font-weight: 700;
       color: var(--green);
-      background: rgba(158,206,106,.1);
-      border: 1px solid rgba(158,206,106,.25);
-      padding: .3rem .7rem; border-radius: 6px;
+      background: rgba(158, 206, 106, .1);
+      border: 1px solid rgba(158, 206, 106, .25);
+      padding: .3rem .7rem;
+      border-radius: 6px;
       white-space: nowrap;
       flex-shrink: 0;
       align-self: flex-start;
     }
-    .phase2-step h4 { font-size: .875rem; font-weight: 700; margin-bottom: .2rem; }
-    .phase2-step p { font-size: .8rem; color: var(--muted); }
+
+    .phase2-step h4 {
+      font-size: .875rem;
+      font-weight: 700;
+      margin-bottom: .2rem;
+    }
+
+    .phase2-step p {
+      font-size: .8rem;
+      color: var(--muted);
+    }
 
     /* ── WEB CHAT ── */
-    .webchat-section { background: var(--surface); border-radius: 0; }
-    .webchat-wrap { max-width: 1100px; margin: 0 auto; padding: 5rem 2rem; }
+    .webchat-section {
+      background: var(--surface);
+      border-radius: 0;
+    }
+
+    .webchat-wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 5rem 2rem;
+    }
+
     .webchat-header {
-      display: flex; align-items: center; gap: 1rem; margin-bottom: .75rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: .75rem;
     }
+
     .webchat-header .wc-badge {
-      display: inline-flex; align-items: center; gap: .4rem;
-      padding: .25rem .75rem; border-radius: 999px;
-      font-size: .72rem; font-weight: 700; letter-spacing: .06em;
-      background: rgba(125,207,255,.1); color: var(--cyan);
-      border: 1px solid rgba(125,207,255,.25);
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      padding: .25rem .75rem;
+      border-radius: 999px;
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      background: rgba(125, 207, 255, .1);
+      color: var(--cyan);
+      border: 1px solid rgba(125, 207, 255, .25);
     }
+
     .webchat-url {
-      display: inline-flex; align-items: center; gap: .5rem;
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
       margin: 1rem 0 2.5rem;
       padding: .55rem 1.1rem;
-      background: var(--card); border: 1px solid var(--border);
+      background: var(--card);
+      border: 1px solid var(--border);
       border-radius: 8px;
-      font-family: monospace; font-size: .9rem; color: var(--cyan);
+      font-family: monospace;
+      font-size: .9rem;
+      color: var(--cyan);
       text-decoration: none;
       transition: border-color .2s;
     }
-    .webchat-url:hover { border-color: var(--cyan); }
+
+    .webchat-url:hover {
+      border-color: var(--cyan);
+    }
+
     .webchat-url .url-dot {
-      width: 8px; height: 8px; border-radius: 50%;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
       background: var(--green);
       box-shadow: 0 0 6px var(--green);
       flex-shrink: 0;
       animation: pulse 2s ease-in-out infinite;
     }
+
     @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: .4; }
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: .4;
+      }
     }
+
     .user-cards {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 1.4rem;
     }
+
     .user-card {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 14px;
       padding: 1.8rem;
       transition: border-color .2s, transform .2s;
-      position: relative; overflow: hidden;
+      position: relative;
+      overflow: hidden;
     }
+
     .user-card::before {
       content: '';
-      position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
       border-radius: 14px 14px 0 0;
     }
-    .user-card.business::before { background: linear-gradient(90deg, var(--orange), var(--purple)); }
-    .user-card.devcard::before  { background: linear-gradient(90deg, var(--blue),   var(--cyan)); }
-    .user-card:hover { transform: translateY(-4px); }
-    .user-card.business:hover { border-color: var(--orange); }
-    .user-card.devcard:hover  { border-color: var(--blue); }
+
+    .user-card.business::before {
+      background: linear-gradient(90deg, var(--orange), var(--purple));
+    }
+
+    .user-card.devcard::before {
+      background: linear-gradient(90deg, var(--blue), var(--cyan));
+    }
+
+    .user-card:hover {
+      transform: translateY(-4px);
+    }
+
+    .user-card.business:hover {
+      border-color: var(--orange);
+    }
+
+    .user-card.devcard:hover {
+      border-color: var(--blue);
+    }
+
     .uc-head {
-      display: flex; align-items: center; gap: .75rem; margin-bottom: 1.2rem;
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      margin-bottom: 1.2rem;
     }
+
     .uc-icon {
-      width: 44px; height: 44px; border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.3rem; flex-shrink: 0;
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      flex-shrink: 0;
     }
-    .uc-title { font-size: 1.05rem; font-weight: 700; }
-    .uc-subtitle { font-size: .78rem; color: var(--muted); margin-top: .1rem; }
-    .uc-list { list-style: none; display: flex; flex-direction: column; gap: .65rem; }
+
+    .uc-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+    }
+
+    .uc-subtitle {
+      font-size: .78rem;
+      color: var(--muted);
+      margin-top: .1rem;
+    }
+
+    .uc-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: .65rem;
+    }
+
     .uc-list li {
-      display: flex; align-items: flex-start; gap: .75rem;
+      display: flex;
+      align-items: flex-start;
+      gap: .75rem;
       font-size: .875rem;
     }
+
     .uc-list li .li-icon {
-      width: 26px; height: 26px; border-radius: 6px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: .85rem; flex-shrink: 0; margin-top: .05rem;
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .85rem;
+      flex-shrink: 0;
+      margin-top: .05rem;
     }
-    .uc-list li .li-text { color: var(--text); }
-    .uc-list li .li-desc { font-size: .78rem; color: var(--muted); margin-top: .1rem; }
+
+    .uc-list li .li-text {
+      color: var(--text);
+    }
+
+    .uc-list li .li-desc {
+      font-size: .78rem;
+      color: var(--muted);
+      margin-top: .1rem;
+    }
 
     /* ── FOOTER ── */
     footer {
       border-top: 1px solid var(--border);
-      padding: 2rem; text-align: center;
-      color: var(--muted); font-size: .8rem;
+      padding: 2rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: .8rem;
     }
-    footer span { color: var(--blue); }
+
+    footer span {
+      color: var(--blue);
+    }
 
     /* ── DIVIDER ── */
-    .full-bleed { width: 100vw; position: relative; left: 50%; right: 50%; margin-left: -50vw; margin-right: -50vw; }
+    .full-bleed {
+      width: 100vw;
+      position: relative;
+      left: 50%;
+      right: 50%;
+      margin-left: -50vw;
+      margin-right: -50vw;
+    }
 
     @media (max-width: 640px) {
-      .nav-links { display: none; }
-      .flow-arrow { display: none; }
-      .flow-diagram { flex-direction: column; gap: .5rem; }
+      .nav-links {
+        display: none;
+      }
+
+      .flow-arrow {
+        display: none;
+      }
+
+      .flow-diagram {
+        flex-direction: column;
+        gap: .5rem;
+      }
     }
   </style>
 </head>
+
 <body>
 
-<!-- NAV -->
-<nav>
-  <a class="nav-logo" href="#">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="32" height="32">
-      <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="28" ry="28"
-            fill="#1a1b2e" stroke="#565f89" stroke-width="1.5"/>
-      <text x="64" y="64" font-family="Segoe UI, sans-serif" font-weight="700" font-size="74"
-            text-anchor="middle" dominant-baseline="central">
-        <tspan fill="#7aa2f7">i</tspan><tspan fill="#bb9af7">X</tspan>
-      </text>
-    </svg>
-    <span>iXpert AI Assistant</span>
-  </a>
-  <nav class="nav-links">
-    <a href="#features">기능</a>
-    <a href="#architecture">아키텍처</a>
-    <a href="#phase2">Phase 2</a>
-    <a href="#stack">기술 스택</a>
-    <a href="#webchat">웹 채팅</a>
+  <!-- NAV -->
+  <nav>
+    <a class="nav-logo" href="#">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="32" height="32">
+        <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="28" ry="28" fill="#1a1b2e" stroke="#565f89"
+          stroke-width="1.5" />
+        <text x="64" y="64" font-family="Segoe UI, sans-serif" font-weight="700" font-size="74" text-anchor="middle"
+          dominant-baseline="central">
+          <tspan fill="#7aa2f7">i</tspan>
+          <tspan fill="#bb9af7">X</tspan>
+        </text>
+      </svg>
+      <span>iXpert AI Assistant</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#features">기능</a>
+      <a href="#architecture">아키텍처</a>
+      <a href="#phase2">Phase 2</a>
+      <a href="#stack">기술 스택</a>
+      <a href="#webchat">웹 채팅</a>
+    </nav>
   </nav>
-</nav>
 
-<!-- HERO -->
-<div class="hero">
-  <div class="badge">IntelliJ / Android Studio Plugin</div>
-  <div class="hero-icon">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-      <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="28" ry="28"
-            fill="#1a1b2e" stroke="#565f89" stroke-width="1.5"/>
-      <text x="64" y="64" font-family="Segoe UI, sans-serif" font-weight="700" font-size="74"
-            text-anchor="middle" dominant-baseline="central">
-        <tspan fill="#7aa2f7">i</tspan><tspan fill="#bb9af7">X</tspan>
-      </text>
-    </svg>
-  </div>
-  <h1>
-    <span class="ix">iX</span><span class="pert">pert</span> AI Assistant
-  </h1>
-  <p class="hero-desc">
-    IntelliJ · Android Studio에 내장된 온프레미스 AI 코딩 어시스턴트.
-    코드 설명부터 자동 리팩토링, 요구사항 기반 코드 생성까지 —
-    LLM이 IDE 안에서 직접 동작합니다.
-  </p>
-  <div class="hero-cta">
-    <a class="btn btn-primary" href="#features">기능 살펴보기</a>
-    <a class="btn btn-ghost" href="#architecture">아키텍처 보기</a>
-  </div>
-</div>
-
-<!-- FEATURES -->
-<section id="features">
-  <p class="section-label">Features</p>
-  <h2 class="section-title">개발자를 위한 AI 기능 7종</h2>
-  <p class="section-sub">우클릭 컨텍스트 메뉴 또는 웹뷰 채팅 창으로 즉시 실행됩니다.</p>
-
-  <div class="features-grid">
-
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(122,162,247,.12);">🔍</div>
-      <h3>Explain This Code</h3>
-      <p>선택한 코드 블록의 역할, 동작 흐름, 주요 로직을 자연어로 설명합니다.</p>
-      <span class="tag" style="background:rgba(122,162,247,.1);color:var(--blue);border:1px solid rgba(122,162,247,.2);">단일 스텝</span>
+  <!-- HERO -->
+  <div class="hero">
+    <div class="badge">IntelliJ / Android Studio Plugin</div>
+    <div class="hero-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+        <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="28" ry="28" fill="#1a1b2e" stroke="#565f89"
+          stroke-width="1.5" />
+        <text x="64" y="64" font-family="Segoe UI, sans-serif" font-weight="700" font-size="74" text-anchor="middle"
+          dominant-baseline="central">
+          <tspan fill="#7aa2f7">i</tspan>
+          <tspan fill="#bb9af7">X</tspan>
+        </text>
+      </svg>
     </div>
-
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(158,206,106,.12);">✅</div>
-      <h3>Review This Code</h3>
-      <p>코드 품질·버그·보안 이슈를 리뷰하고, 개선된 코드를 SEARCH/REPLACE 형식으로 제안합니다.</p>
-      <span class="tag" style="background:rgba(158,206,106,.1);color:var(--green);border:1px solid rgba(158,206,106,.2);">2단계 파이프라인</span>
-    </div>
-
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(187,154,247,.12);">⚡</div>
-      <h3>Improve This Code</h3>
-      <p>분석 → 코드 개선 → 안정성 평가 3단계로 리팩토링을 수행합니다. 3-way diff로 변경 내용을 시각화합니다.</p>
-      <span class="tag" style="background:rgba(187,154,247,.1);color:var(--purple);border:1px solid rgba(187,154,247,.2);">3단계 파이프라인</span>
-    </div>
-
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(255,158,100,.12);">🌊</div>
-      <h3>Impact Analysis</h3>
-      <p>선택한 코드 변경이 프로젝트 전반에 미치는 영향 범위를 분석합니다.</p>
-      <span class="tag" style="background:rgba(255,158,100,.1);color:var(--orange);border:1px solid rgba(255,158,100,.2);">단일 스텝</span>
-    </div>
-
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(125,207,255,.12);">🗄️</div>
-      <h3>Query Validation</h3>
-      <p>SQL / JPQL 쿼리의 문법·논리 오류를 검증하고 개선 방향을 제안합니다.</p>
-      <span class="tag" style="background:rgba(125,207,255,.1);color:var(--cyan);border:1px solid rgba(125,207,255,.2);">단일 스텝</span>
-    </div>
-
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(122,162,247,.12);">📄</div>
-      <h3>Generate Analysis Doc</h3>
-      <p>파일 또는 디렉터리를 분석하여 Markdown 형식의 분석 문서를 자동 생성합니다.</p>
-      <span class="tag" style="background:rgba(122,162,247,.1);color:var(--blue);border:1px solid rgba(122,162,247,.2);">일괄 처리</span>
-    </div>
-
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(158,206,106,.12);">🧪</div>
-      <h3>Unit Test Report</h3>
-      <p>선택한 코드에 대한 단위 테스트 케이스와 테스트 리포트를 자동으로 생성합니다.</p>
-      <span class="tag" style="background:rgba(158,206,106,.1);color:var(--green);border:1px solid rgba(158,206,106,.2);">단일 스텝</span>
-    </div>
-
-  </div>
-</section>
-
-<!-- ARCHITECTURE -->
-<div class="full-bleed arch-section" id="architecture">
-  <div class="arch-wrap">
-    <p class="section-label">Architecture</p>
-    <h2 class="section-title">Action → Agent → Service → LLM → UI</h2>
-    <p class="section-sub">엄격한 5계층 구조로 각 계층의 책임을 분리합니다. 계층 간 의존 방향은 단방향으로 고정됩니다.</p>
-
-    <div class="flow-diagram">
-      <div class="flow-box">
-        <div class="box-icon">🖱️</div>
-        <div class="box-label">Action</div>
-        <div class="box-sub">진입점</div>
-      </div>
-      <div class="flow-arrow">→</div>
-      <div class="flow-box">
-        <div class="box-icon">🧠</div>
-        <div class="box-label">Agent</div>
-        <div class="box-sub">흐름 제어</div>
-      </div>
-      <div class="flow-arrow">→</div>
-      <div class="flow-box">
-        <div class="box-icon">🔧</div>
-        <div class="box-label">Service</div>
-        <div class="box-sub">IDE Tool</div>
-      </div>
-      <div class="flow-arrow">→</div>
-      <div class="flow-box">
-        <div class="box-icon">🤖</div>
-        <div class="box-label">LLM</div>
-        <div class="box-sub">Ollama / OpenAI</div>
-      </div>
-      <div class="flow-arrow">→</div>
-      <div class="flow-box">
-        <div class="box-icon">🖥️</div>
-        <div class="box-label">UI</div>
-        <div class="box-sub">React Webview</div>
-      </div>
-    </div>
-
-    <div class="layer-grid">
-      <div class="layer-card">
-        <div class="layer-name">action/</div>
-        <p>IDE 이벤트 수신 및 WebviewActionRouter 라우팅. 비즈니스 로직 없이 Agent를 호출하는 역할만 수행합니다.</p>
-        <span class="rule">로직 추가 금지</span>
-      </div>
-      <div class="layer-card">
-        <div class="layer-name">agent/</div>
-        <p>TaskAgent가 IntentAnalyzer → TaskPipeline → AgentStep 순서로 LLM을 호출하고 결과를 조합합니다.</p>
-        <span class="rule">직접 파일 수정 금지</span>
-      </div>
-      <div class="layer-card">
-        <div class="layer-name">service/</div>
-        <p>EditorContextService, EditorApplyService, FileSearchService 등 IDE API 래퍼. Agent의 요청을 실행합니다.</p>
-        <span class="rule">LLM 호출 금지</span>
-      </div>
-      <div class="layer-card">
-        <div class="layer-name">client/</div>
-        <p>LLMClient 인터페이스 → OllamaClient / OpenAIClient 구현. SettingsState에서 baseUrl·model·timeout을 읽습니다.</p>
-        <span class="rule">Agent 에서만 사용</span>
-      </div>
-      <div class="layer-card">
-        <div class="layer-name">prompt/</div>
-        <p>PromptManager가 resources/prompt/*.txt를 로드. 프롬프트는 코드 내 하드코딩 금지, 기능별로 파일 분리.</p>
-        <span class="rule">하드코딩 금지</span>
-      </div>
-      <div class="layer-card">
-        <div class="layer-name">ui/bridge/</div>
-        <p>JcefBridge(IDE→JS)와 JcefMessageHandler(JS→IDE)가 단방향 메시지 채널을 구성합니다. GC 방지를 위해 강한 참조 유지.</p>
-        <span class="rule">강한 참조 필수</span>
-      </div>
-    </div>
-
-    <!-- TaskPipeline 상세 -->
-    <p class="section-label" style="margin-top:3.5rem;">TaskPipeline</p>
-    <h3 class="section-title" style="font-size:1.5rem;">Improve — 3단계 파이프라인 예시</h3>
-    <div class="pipeline-steps">
-      <div class="pipeline-step">
-        <div class="step-num">1</div>
-        <h4>개선 분석</h4>
-        <p>코드 구조·문제점을 분석. <code style="color:var(--cyan);font-size:.75rem;">improve_analysis_prompt.txt</code></p>
-      </div>
-      <div class="pipeline-step">
-        <div class="step-num">2</div>
-        <h4>코드 개선</h4>
-        <p>SEARCH/REPLACE 블록으로 코드 수정 제안. 3단계 병합 전략 적용.</p>
-      </div>
-      <div class="pipeline-step">
-        <div class="step-num">3</div>
-        <h4>안정성 평가</h4>
-        <p>원본·개선 코드를 비교하여 위험도를 평가합니다. <code style="color:var(--cyan);font-size:.75rem;">isStabilityStep</code></p>
-      </div>
+    <h1>
+      <span class="ix">iX</span><span class="pert">pert</span> AI Assistant
+    </h1>
+    <p class="hero-desc">
+      IntelliJ · Android Studio에 내장된 온프레미스 AI 코딩 어시스턴트.
+      코드 설명부터 자동 리팩토링, 요구사항 기반 코드 생성까지 —
+      LLM이 IDE 안에서 직접 동작합니다.
+    </p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="#features">기능 살펴보기</a>
+      <a class="btn btn-ghost" href="#architecture">아키텍처 보기</a>
     </div>
   </div>
-</div>
 
-<!-- PHASE 2 -->
-<section id="phase2">
-  <p class="section-label">Phase 2</p>
-  <h2 class="section-title">요구사항 기반 자동 코드 생성</h2>
-  <p class="section-sub">
-    MetaGraph로 프로젝트 전체를 분석한 뒤, 자연어 요구사항만으로 대상 파일 선별부터 코드 작성, 단위 테스트까지 자동으로 수행합니다.
-  </p>
+  <!-- FEATURES -->
+  <section id="features">
+    <p class="section-label">Features</p>
+    <h2 class="section-title">개발자를 위한 AI 기능 7종</h2>
+    <p class="section-sub">우클릭 컨텍스트 메뉴 또는 웹뷰 채팅 창으로 즉시 실행됩니다.</p>
 
-  <div class="phase2-flow">
-    <div class="phase2-step">
-      <span class="phase2-cmd">/metagraph</span>
-      <div>
-        <h4>프로젝트 메타그래프 생성</h4>
-        <p>Spring 엔드포인트, JPA 엔티티, Bean을 PSI로 파싱하여 <code style="color:var(--cyan);font-size:.78rem;">project-graph.json</code>을 생성합니다. 이후 모든 LLM 호출에 관련 그래프 컨텍스트가 자동 주입됩니다.</p>
+    <div class="features-grid">
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(122,162,247,.12);">🔍</div>
+        <h3>Explain This Code</h3>
+        <p>선택한 코드 블록의 역할, 동작 흐름, 주요 로직을 자연어로 설명합니다.</p>
+        <span class="tag"
+          style="background:rgba(122,162,247,.1);color:var(--blue);border:1px solid rgba(122,162,247,.2);">단일 스텝</span>
       </div>
-    </div>
-    <div class="phase2-step">
-      <span class="phase2-cmd">/analyze</span>
-      <div>
-        <h4>요구사항 분석 (RequirementAnalysisPipeline)</h4>
-        <p>자연어 요구사항을 입력하면 메타그래프에서 수정 대상 파일 목록(TargetFileSpec)을 추출합니다. 대형 프로젝트는 RelevanceFilter로 관련 파일만 선별합니다.</p>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(158,206,106,.12);">✅</div>
+        <h3>Review This Code</h3>
+        <p>코드 품질·버그·보안 이슈를 리뷰하고, 개선된 코드를 SEARCH/REPLACE 형식으로 제안합니다.</p>
+        <span class="tag"
+          style="background:rgba(158,206,106,.1);color:var(--green);border:1px solid rgba(158,206,106,.2);">2단계
+          파이프라인</span>
       </div>
-    </div>
-    <div class="phase2-step">
-      <span class="phase2-cmd">/implement</span>
-      <div>
-        <h4>자동 코드 수정 (ImplementationPipeline)</h4>
-        <p>분석 결과를 바탕으로 Contract-First 순서(DTO/Entity → Interface → Impl → Controller)로 각 파일을 순차 수정합니다. SignatureValidator로 인터페이스 계약을 검증합니다.</p>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(187,154,247,.12);">⚡</div>
+        <h3>Improve This Code</h3>
+        <p>분석 → 코드 개선 → 안정성 평가 3단계로 리팩토링을 수행합니다. 3-way diff로 변경 내용을 시각화합니다.</p>
+        <span class="tag"
+          style="background:rgba(187,154,247,.1);color:var(--purple);border:1px solid rgba(187,154,247,.2);">3단계
+          파이프라인</span>
       </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(255,158,100,.12);">🌊</div>
+        <h3>Impact Analysis</h3>
+        <p>선택한 코드 변경이 프로젝트 전반에 미치는 영향 범위를 분석합니다.</p>
+        <span class="tag"
+          style="background:rgba(255,158,100,.1);color:var(--orange);border:1px solid rgba(255,158,100,.2);">단일
+          스텝</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(125,207,255,.12);">🗄️</div>
+        <h3>Query Validation</h3>
+        <p>SQL / JPQL 쿼리의 문법·논리 오류를 검증하고 개선 방향을 제안합니다.</p>
+        <span class="tag"
+          style="background:rgba(125,207,255,.1);color:var(--cyan);border:1px solid rgba(125,207,255,.2);">단일 스텝</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(122,162,247,.12);">📄</div>
+        <h3>Generate Analysis Doc</h3>
+        <p>파일 또는 디렉터리를 분석하여 Markdown 형식의 분석 문서를 자동 생성합니다.</p>
+        <span class="tag"
+          style="background:rgba(122,162,247,.1);color:var(--blue);border:1px solid rgba(122,162,247,.2);">일괄 처리</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(158,206,106,.12);">🧪</div>
+        <h3>Unit Test Report</h3>
+        <p>선택한 코드에 대한 단위 테스트 케이스와 테스트 리포트를 자동으로 생성합니다.</p>
+        <span class="tag"
+          style="background:rgba(158,206,106,.1);color:var(--green);border:1px solid rgba(158,206,106,.2);">단일 스텝</span>
+      </div>
+
     </div>
-    <div class="phase2-step">
-      <span class="phase2-cmd">/test-all</span>
-      <div>
-        <h4>단위 테스트 일괄 생성 (TestGenerationPipeline)</h4>
-        <p>수정된 파일 전체에 대해 단위 테스트를 자동 생성합니다. TestFileMapper가 기존 테스트 파일을 찾거나 새로 생성합니다.</p>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <div class="full-bleed arch-section" id="architecture">
+    <div class="arch-wrap">
+      <p class="section-label">Architecture</p>
+      <h2 class="section-title">Action → Agent → Service → LLM → UI</h2>
+      <p class="section-sub">엄격한 5계층 구조로 각 계층의 책임을 분리합니다. 계층 간 의존 방향은 단방향으로 고정됩니다.</p>
+
+      <div class="flow-diagram">
+        <div class="flow-box">
+          <div class="box-icon">🖱️</div>
+          <div class="box-label">Action</div>
+          <div class="box-sub">진입점</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box">
+          <div class="box-icon">🧠</div>
+          <div class="box-label">Agent</div>
+          <div class="box-sub">흐름 제어</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box">
+          <div class="box-icon">🔧</div>
+          <div class="box-label">Service</div>
+          <div class="box-sub">IDE Tool</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box">
+          <div class="box-icon">🤖</div>
+          <div class="box-label">LLM</div>
+          <div class="box-sub">Ollama / OpenAI</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-box">
+          <div class="box-icon">🖥️</div>
+          <div class="box-label">UI</div>
+          <div class="box-sub">React Webview</div>
+        </div>
+      </div>
+
+      <div class="layer-grid">
+        <div class="layer-card">
+          <div class="layer-name">action/</div>
+          <p>IDE 이벤트 수신 및 WebviewActionRouter 라우팅. 비즈니스 로직 없이 Agent를 호출하는 역할만 수행합니다.</p>
+          <span class="rule">로직 추가 금지</span>
+        </div>
+        <div class="layer-card">
+          <div class="layer-name">agent/</div>
+          <p>TaskAgent가 IntentAnalyzer → TaskPipeline → AgentStep 순서로 LLM을 호출하고 결과를 조합합니다.</p>
+          <span class="rule">직접 파일 수정 금지</span>
+        </div>
+        <div class="layer-card">
+          <div class="layer-name">service/</div>
+          <p>EditorContextService, EditorApplyService, FileSearchService 등 IDE API 래퍼. Agent의 요청을 실행합니다.</p>
+          <span class="rule">LLM 호출 금지</span>
+        </div>
+        <div class="layer-card">
+          <div class="layer-name">client/</div>
+          <p>LLMClient 인터페이스 → OllamaClient / OpenAIClient 구현. SettingsState에서 baseUrl·model·timeout을 읽습니다.</p>
+          <span class="rule">Agent 에서만 사용</span>
+        </div>
+        <div class="layer-card">
+          <div class="layer-name">prompt/</div>
+          <p>PromptManager가 resources/prompt/*.txt를 로드. 프롬프트는 코드 내 하드코딩 금지, 기능별로 파일 분리.</p>
+          <span class="rule">하드코딩 금지</span>
+        </div>
+        <div class="layer-card">
+          <div class="layer-name">ui/bridge/</div>
+          <p>JcefBridge(IDE→JS)와 JcefMessageHandler(JS→IDE)가 단방향 메시지 채널을 구성합니다. GC 방지를 위해 강한 참조 유지.</p>
+          <span class="rule">강한 참조 필수</span>
+        </div>
+      </div>
+
+      <!-- TaskPipeline 상세 -->
+      <p class="section-label" style="margin-top:3.5rem;">TaskPipeline</p>
+      <h3 class="section-title" style="font-size:1.5rem;">Improve — 3단계 파이프라인 예시</h3>
+      <div class="pipeline-steps">
+        <div class="pipeline-step">
+          <div class="step-num">1</div>
+          <h4>개선 분석</h4>
+          <p>코드 구조·문제점을 분석. <code style="color:var(--cyan);font-size:.75rem;">improve_analysis_prompt.txt</code></p>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-num">2</div>
+          <h4>코드 개선</h4>
+          <p>SEARCH/REPLACE 블록으로 코드 수정 제안. 3단계 병합 전략 적용.</p>
+        </div>
+        <div class="pipeline-step">
+          <div class="step-num">3</div>
+          <h4>안정성 평가</h4>
+          <p>원본·개선 코드를 비교하여 위험도를 평가합니다. <code style="color:var(--cyan);font-size:.75rem;">isStabilityStep</code></p>
+        </div>
       </div>
     </div>
   </div>
-</section>
 
-<!-- TECH STACK -->
-<section id="stack">
-  <p class="section-label">Tech Stack</p>
-  <h2 class="section-title">기술 스택</h2>
-  <p class="section-sub">플러그인 백엔드는 Kotlin + IntelliJ Platform, 프론트엔드는 React + Vite 단일 번들로 구성됩니다.</p>
-
-  <div class="stack-grid">
-    <div class="stack-chip"><span class="chip-dot" style="background:#7aa2f7;"></span>Kotlin</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#ff9e64;"></span>IntelliJ Platform 2024.3 (IC-243)</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#61dafb;"></span>React 18 + TypeScript</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#bb9af7;"></span>Vite + vite-plugin-singlefile</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#7dcfff;"></span>JCEF (Chromium Embedded)</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#9ece6a;"></span>Ollama (on-prem LLM)</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#9ece6a;"></span>OpenAI-compatible API</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#ff9e64;"></span>Gradle 8 + Kotlin DSL</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#7aa2f7;"></span>JVM 17</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#bb9af7;"></span>Node 20.11.1 (auto-download)</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#7dcfff;"></span>qwen3-coder:30b (기본 모델)</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#f7768e;"></span>IntelliJ PSI (MetaGraph 분석)</div>
-  </div>
-</section>
-
-<!-- WEB CHAT -->
-<div class="full-bleed webchat-section" id="webchat">
-  <div class="webchat-wrap">
-    <div class="webchat-header">
-      <p class="section-label" style="margin-bottom:0;">Web Chat</p>
-      <span class="wc-badge">
-        <svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#7dcfff"/></svg>
-        OpenWebUI
-      </span>
-    </div>
-    <h2 class="section-title">iXpert 웹 채팅 포털</h2>
+  <!-- PHASE 2 -->
+  <section id="phase2">
+    <p class="section-label">Phase 2</p>
+    <h2 class="section-title">요구사항 기반 자동 코드 생성</h2>
     <p class="section-sub">
-      IDE 없이 브라우저에서 바로 사용하는 AI 질의 도구.
-      현업 담당자와 개발자 모두를 위한 전용 채널을 제공합니다.
+      MetaGraph로 프로젝트 전체를 분석한 뒤, 자연어 요구사항만으로 대상 파일 선별부터 코드 작성, 단위 테스트까지 자동으로 수행합니다.
     </p>
 
-    <a class="webchat-url" href="https://chat.ixpertops.cloud" target="_blank" rel="noopener">
-      <span class="url-dot"></span>
-      chat.ixpertops.cloud
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.6;margin-left:.2rem;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-    </a>
-
-    <div class="user-cards">
-
-      <!-- 현업용 -->
-      <div class="user-card business">
-        <div class="uc-head">
-          <div class="uc-icon" style="background:rgba(255,158,100,.12);">💼</div>
-          <div>
-            <div class="uc-title">현업용</div>
-            <div class="uc-subtitle">Business Users · 비개발 직군</div>
-          </div>
+    <div class="phase2-flow">
+      <div class="phase2-step">
+        <span class="phase2-cmd">/metagraph</span>
+        <div>
+          <h4>프로젝트 메타그래프 생성</h4>
+          <p>Spring 엔드포인트, JPA 엔티티, Bean을 PSI로 파싱하여 <code
+              style="color:var(--cyan);font-size:.78rem;">project-graph.json</code>을 생성합니다. 이후 모든 LLM 호출에 관련 그래프 컨텍스트가
+            자동 주입됩니다.</p>
         </div>
-        <ul class="uc-list">
-          <li>
-            <div class="li-icon" style="background:rgba(255,158,100,.1);">❓</div>
-            <div>
-              <div class="li-text">업무 관련 질의</div>
-              <div class="li-desc">사내 업무 프로세스, 정책, 절차 등을 자연어로 질문하고 즉시 답변을 받습니다.</div>
-            </div>
-          </li>
-          <li>
-            <div class="li-icon" style="background:rgba(255,158,100,.1);">🗄️</div>
-            <div>
-              <div class="li-text">쿼리 생성</div>
-              <div class="li-desc">SQL 지식 없이도 원하는 데이터 조회 조건을 설명하면 쿼리를 자동으로 작성해 줍니다.</div>
-            </div>
-          </li>
-        </ul>
       </div>
-
-      <!-- 개발자용 -->
-      <div class="user-card devcard">
-        <div class="uc-head">
-          <div class="uc-icon" style="background:rgba(122,162,247,.12);">👨‍💻</div>
-          <div>
-            <div class="uc-title">개발자용</div>
-            <div class="uc-subtitle">Developer Users · 개발 직군</div>
-          </div>
+      <div class="phase2-step">
+        <span class="phase2-cmd">/analyze</span>
+        <div>
+          <h4>요구사항 분석 (RequirementAnalysisPipeline)</h4>
+          <p>자연어 요구사항을 입력하면 메타그래프에서 수정 대상 파일 목록(TargetFileSpec)을 추출합니다. 대형 프로젝트는 RelevanceFilter로 관련 파일만 선별합니다.</p>
         </div>
-        <ul class="uc-list">
-          <li>
-            <div class="li-icon" style="background:rgba(122,162,247,.1);">❓</div>
-            <div>
-              <div class="li-text">업무 관련 질의</div>
-              <div class="li-desc">개발 일정, 스펙 확인, 정책 문의 등 업무 맥락의 질문에 빠르게 답변합니다.</div>
-            </div>
-          </li>
-          <li>
-            <div class="li-icon" style="background:rgba(122,162,247,.1);">💻</div>
-            <div>
-              <div class="li-text">소스 관련 질의</div>
-              <div class="li-desc">코드 로직 설명, 버그 원인 분석, 구현 방향 논의 등 소스 레벨 기술 질문을 처리합니다.</div>
-            </div>
-          </li>
-        </ul>
       </div>
+      <div class="phase2-step">
+        <span class="phase2-cmd">/implement</span>
+        <div>
+          <h4>자동 코드 수정 (ImplementationPipeline)</h4>
+          <p>분석 결과를 바탕으로 Contract-First 순서(DTO/Entity → Interface → Impl → Controller)로 각 파일을 순차 수정합니다.
+            SignatureValidator로 인터페이스 계약을 검증합니다.</p>
+        </div>
+      </div>
+      <div class="phase2-step">
+        <span class="phase2-cmd">/test-all</span>
+        <div>
+          <h4>단위 테스트 일괄 생성 (TestGenerationPipeline)</h4>
+          <p>수정된 파일 전체에 대해 단위 테스트를 자동 생성합니다. TestFileMapper가 기존 테스트 파일을 찾거나 새로 생성합니다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
+  <!-- TECH STACK -->
+  <section id="stack">
+    <p class="section-label">Tech Stack</p>
+    <h2 class="section-title">기술 스택</h2>
+    <p class="section-sub">플러그인 백엔드는 Kotlin + IntelliJ Platform, 프론트엔드는 React + Vite 단일 번들로 구성됩니다.</p>
+
+    <div class="stack-grid">
+      <div class="stack-chip"><span class="chip-dot" style="background:#7aa2f7;"></span>Kotlin</div>
+      <div class="stack-chip"><span class="chip-dot" style="background:#ff9e64;"></span>IntelliJ Platform 2024.3
+        (IC-243)</div>
+      <div class="stack-chip"><span class="chip-dot" style="background:#61dafb;"></span>React 18 + TypeScript</div>
+      <div class="stack-chip"><span class="chip-dot" style="background:#bb9af7;"></span>Vite + vite-plugin-singlefile
+      </div>
+      <div class="stack-chip"><span class="chip-dot" style="background:#7dcfff;"></span>JCEF (Chromium Embedded)</div>
+      <div class="stack-chip"><span class="chip-dot" style="background:#9ece6a;"></span>Ollama (on-prem LLM)</div>
+      <div class="stack-chip"><span class="chip-dot" style="background:#9ece6a;"></span>OpenAI-compatible API</div>
+      <div class="stack-chip"><span class="chip-dot" style="background:#ff9e64;"></span>Gradle 8 + Kotlin DSL</div>
+      <div class="stack-chip"><span class="chip-dot" style="background:#7aa2f7;"></span>JVM 17</div>
+      <div class="stack-chip"><span class="chip-dot" style="background:#bb9af7;"></span>Node 20.11.1 (auto-download)
+      </div>
+      <div class="stack-chip"><span class="chip-dot" style="background:#7dcfff;"></span>qwen3-coder:30b (기본 모델)</div>
+      <div class="stack-chip"><span class="chip-dot" style="background:#f7768e;"></span>IntelliJ PSI (MetaGraph 분석)
+      </div>
+    </div>
+  </section>
+
+  <!-- WEB CHAT -->
+  <div class="full-bleed webchat-section" id="webchat">
+    <div class="webchat-wrap">
+      <div class="webchat-header">
+        <p class="section-label" style="margin-bottom:0;">Web Chat</p>
+        <span class="wc-badge">
+          <svg width="8" height="8" viewBox="0 0 8 8">
+            <circle cx="4" cy="4" r="4" fill="#7dcfff" />
+          </svg>
+          OpenWebUI
+        </span>
+      </div>
+      <h2 class="section-title">iXpert 웹 채팅 포털</h2>
+      <p class="section-sub">
+        IDE 없이 브라우저에서 바로 사용하는 AI 질의 도구.
+        현업 담당자와 개발자 모두를 위한 전용 채널을 제공합니다.
+      </p>
+
+      <a class="webchat-url" href="https://chat.ixpertops.cloud" target="_blank" rel="noopener">
+        <span class="url-dot"></span>
+        chat.ixpertops.cloud
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" style="opacity:.6;margin-left:.2rem;">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <polyline points="15 3 21 3 21 9" />
+          <line x1="10" y1="14" x2="21" y2="3" />
+        </svg>
+      </a>
+
+      <div class="user-cards">
+
+        <!-- 현업용 -->
+        <div class="user-card business">
+          <div class="uc-head">
+            <div class="uc-icon" style="background:rgba(255,158,100,.12);">💼</div>
+            <div>
+              <div class="uc-title">현업용</div>
+              <div class="uc-subtitle">Business Users · 비개발 직군</div>
+            </div>
+          </div>
+          <ul class="uc-list">
+            <li>
+              <div class="li-icon" style="background:rgba(255,158,100,.1);">❓</div>
+              <div>
+                <div class="li-text">업무 관련 질의</div>
+                <div class="li-desc">사내 업무 프로세스, 정책, 절차 등을 자연어로 질문하고 즉시 답변을 받습니다.</div>
+              </div>
+            </li>
+            <li>
+              <div class="li-icon" style="background:rgba(255,158,100,.1);">🗄️</div>
+              <div>
+                <div class="li-text">쿼리 생성</div>
+                <div class="li-desc">SQL 지식 없이도 원하는 데이터 조회 조건을 설명하면 쿼리를 자동으로 작성해 줍니다.</div>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <!-- 개발자용 -->
+        <div class="user-card devcard">
+          <div class="uc-head">
+            <div class="uc-icon" style="background:rgba(122,162,247,.12);">👨‍💻</div>
+            <div>
+              <div class="uc-title">개발자용</div>
+              <div class="uc-subtitle">Developer Users · 개발 직군</div>
+            </div>
+          </div>
+          <ul class="uc-list">
+            <li>
+              <div class="li-icon" style="background:rgba(122,162,247,.1);">❓</div>
+              <div>
+                <div class="li-text">업무 관련 질의</div>
+                <div class="li-desc">개발 일정, 스펙 확인, 정책 문의 등 업무 맥락의 질문에 빠르게 답변합니다.</div>
+              </div>
+            </li>
+            <li>
+              <div class="li-icon" style="background:rgba(122,162,247,.1);">💻</div>
+              <div>
+                <div class="li-text">소스 관련 질의</div>
+                <div class="li-desc">코드 로직 설명, 버그 원인 분석, 구현 방향 논의 등 소스 레벨 기술 질문을 처리합니다.</div>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+      </div>
     </div>
   </div>
-</div>
 
-<!-- FOOTER -->
-<footer>
-  <p>Built by <span>iXpert Ops AI</span> Team &nbsp;·&nbsp; iXpert AI Assistant &nbsp;·&nbsp; IntelliJ Platform 2024.3+</p>
-</footer>
+  <!-- FOOTER -->
+  <footer>
+    <p>Built by <span>iXpert Ops</span> Team &nbsp;·&nbsp; iXpert AI Assistant &nbsp;·&nbsp; IntelliJ Platform 2024.3+
+    </p>
+  </footer>
 
 </body>
+
 </html>
