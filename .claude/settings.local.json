@@ -19,7 +19,9 @@
       "Bash(unzip -p _release/iXpert_AI_Assistant-1.0.0-SNAPSHOT.zip \"iXpert_AI_Assistant/lib/iXpert_AI_Assistant-1.0.0-SNAPSHOT.jar\" > /tmp/plugin.jar 2>&1; unzip -l /tmp/plugin.jar | grep -E \"welcome|html|webview\")",
       "Read(//Users/jeongjunlee/Library/Application Support/Google/AndroidStudio2025.3.4/options/**)",
       "Read(//Users/jeongjunlee/Library/Application Support/Google/AndroidStudio2025.3.1/options/**)",
-      "Bash(sed -i '' '/<option name=\"firstRun\"/d' \"/Users/jeongjunlee/Library/Application Support/Google/AndroidStudio2025.3.4/options/WuwAgentSettings.xml\" && echo \"초기화 완료\")"
+      "Bash(sed -i '' '/<option name=\"firstRun\"/d' \"/Users/jeongjunlee/Library/Application Support/Google/AndroidStudio2025.3.4/options/WuwAgentSettings.xml\" && echo \"초기화 완료\")",
+      "Bash(npm run *)",
+      "Bash(git add *)"
     ]
   }
 }
