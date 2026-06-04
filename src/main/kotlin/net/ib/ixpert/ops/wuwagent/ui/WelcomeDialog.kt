@@ -6,7 +6,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
-import net.ib.ixpert.ops.wuwagent.setting.SettingsState
+
 import javax.swing.Action
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -18,7 +18,7 @@ import javax.swing.JPanel
 /**
  * 플러그인 최초 설치 후 1회 표시되는 웰컴 다이얼로그.
  *
- * - JCEF 지원 환경: 내부 JBCefBrowser로 번들 HTML(/index.html) 렌더링
+ * - JCEF 지원 환경: 내부 JBCefBrowser로 번들 HTML(/welcome.html) 렌더링
  * - JCEF 미지원 환경: 안내 메시지 표시 + [FALLBACK_URL] 외부 브라우저로 fallback
  */
 class WelcomeDialog(project: Project) : DialogWrapper(project, true) {
@@ -28,7 +28,7 @@ class WelcomeDialog(project: Project) : DialogWrapper(project, true) {
         const val FALLBACK_URL = "https://ixpertops.cloud"
 
         /** 플러그인 jar에 번들된 웰컴 HTML 리소스 경로 */
-        private const val WELCOME_HTML_RESOURCE = "/index.html"
+        private const val WELCOME_HTML_RESOURCE = "/welcome.html"
 
         private const val DIALOG_WIDTH  = 900
         private const val DIALOG_HEIGHT = 600
@@ -56,7 +56,7 @@ class WelcomeDialog(project: Project) : DialogWrapper(project, true) {
             // jar: URL 스킴은 JCEF가 지원하지 않으므로 HTML 내용을 직접 읽어 loadHTML() 사용
             val htmlContent = htmlUrl.readText(Charsets.UTF_8)
             val browser = JBCefBrowser()
-            browser.loadHTML(htmlContent, "file:///index.html")
+            browser.loadHTML(htmlContent, "file:///welcome.html")
             logger.info("WelcomeDialog: 번들 HTML 로드 완료 ($htmlUrl)")
 
             val panel = JPanel(BorderLayout())
@@ -85,29 +85,12 @@ class WelcomeDialog(project: Project) : DialogWrapper(project, true) {
         return panel
     }
 
-    /**
-     * 하단 버튼:
-     * - 닫기 (cancelAction): 플래그 유지 → 다음 오픈 시 재표시
-     * - 다시 보지 않기 (okAction): isFirstRun = false 저장 → 이후 미표시
-     */
-    override fun createActions(): Array<Action> = arrayOf(cancelAction, okAction)
+    /** 하단 버튼: 닫기만 표시 */
+    override fun createActions(): Array<Action> = arrayOf(cancelAction)
 
     override fun getCancelAction(): Action {
         val action = super.getCancelAction()
         action.putValue(Action.NAME, "닫기")
         return action
-    }
-
-    override fun getOKAction(): Action {
-        val action = super.getOKAction()
-        action.putValue(Action.NAME, "다시 보지 않기")
-        return action
-    }
-
-    /** "다시 보지 않기" 클릭 시 영구 숨김 플래그 저장 */
-    override fun doOKAction() {
-        SettingsState.getInstance().state.isFirstRun = false
-        logger.info("WelcomeDialog: '다시 보지 않기' 선택 → isFirstRun=false 저장")
-        super.doOKAction()
     }
 }

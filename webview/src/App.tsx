@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown, X } from 'lucide-react';
+import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown, X, Info } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -1125,6 +1125,9 @@ function App() {
       <header className="header flex justify-between items-center">
         <span className="title">{chatTitle}</span>
         <div className="flex gap-2">
+          <button className="icon-btn" onClick={() => window.sendToIde?.(JSON.stringify({ command: '/openWelcome' }))} title="플러그인 안내">
+            <Info size={14} />
+          </button>
           <button className="icon-btn" onClick={handleNewChat} title="새 채팅">
             <Plus size={14} />
           </button>
