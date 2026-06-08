@@ -1,4 +1,4 @@
-﻿package net.ib.ixpert.ops.wuwagent.agent
+package net.ib.ixpert.ops.wuwagent.agent
 
 import com.intellij.openapi.diagnostic.Logger
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
@@ -29,6 +29,37 @@ object TargetFileValidator {
         val correctionsLog = mutableListOf<String>()
 
         val correctedSpecs = specs.map { spec ->
+            // --- ResourceNode 매칭 우선 처리 ---
+            val exactResource = graph.resourceNodes.find { it.path == spec.path }
+            val possibleResources = graph.resourceNodes.filter { it.path.endsWith("/" + spec.path.substringAfterLast("/")) }
+            val targetResource = exactResource ?: if (possibleResources.size == 1) possibleResources[0] else null
+
+            if (targetResource != null) {
+                var correctedPath = spec.path
+                var correctedType = spec.type
+                var correctedDesc = spec.description
+                var hasCorrection = false
+
+                if (correctedType == "신규") {
+                    correctedType = "수정"
+                    correctedDesc += " [AI 교정: 기존 자원 파일 존재]"
+                    hasCorrection = true
+                }
+                if (correctedPath != targetResource.path) {
+                    correctedPath = targetResource.path
+                    correctedDesc += " [AI 교정: 경로 보정]"
+                    hasCorrection = true
+                }
+
+                if (hasCorrection) {
+                    correctionCount++
+                    correctionsLog.add("${spec.path}(${spec.type}) -> $correctedPath($correctedType)")
+                }
+
+                return@map spec.copy(path = correctedPath, type = correctedType, description = correctedDesc)
+            }
+            // --- ResourceNode 매칭 끝 ---
+
             val className = extractClassName(spec.path)
             val candidates = findCandidates(spec.path, className, graph)
 
@@ -38,8 +69,9 @@ object TargetFileValidator {
             var hasCorrection = false
 
             when {
-                // 1순위: 후보군이 1개이고, 경로가 다름 (경로 보정 - 검증 3)
-                candidates.size == 1 && spec.path != candidates[0].path -> {
+                // 1순위: 후보군이 1개이고, 경로가 다름. 단, 확장자가 같을 때만 오타로 간주하여 보정함 (검증 3)
+                candidates.size == 1 && spec.path != candidates[0].path && 
+                spec.path.substringAfterLast(".") == candidates[0].path.substringAfterLast(".") -> {
                     correctedPath = candidates[0].path
                     correctedDesc += " [AI 교정: 경로 보정]"
                     hasCorrection = true
@@ -87,7 +119,7 @@ object TargetFileValidator {
             logger.info("TargetFileValidator: LLM 응답 모두 정상 (교정 없음)")
         }
 
-        return correctedSpecs
+        return correctedSpecs.distinctBy { it.path }
     }
 
     /**
@@ -123,11 +155,14 @@ object TargetFileValidator {
             }
         } else {
             val type = node?.fileType?.name
+            val rNode = graph.resourceNodes.find { it.path == path }
+            
             return when {
-                type in setOf("ENTITY", "REPOSITORY", "MAPPER", "DAO") || lowerPath.contains("entity") || lowerPath.contains("repository") || lowerPath.contains("dao") || lowerPath.contains("mapper") -> 1
+                type in setOf("ENTITY", "REPOSITORY", "MAPPER", "DAO") || lowerPath.contains("entity") || lowerPath.contains("repository") || lowerPath.contains("dao") || lowerPath.contains("mapper") || rNode?.type == net.ib.ixpert.ops.wuwagent.service.metagraph.model.ResourceType.MYBATIS_MAPPER -> 1
                 type == "DTO" || type == "VO" || type == "EXCEPTION" || lowerPath.contains("dto") || lowerPath.contains("request") || lowerPath.contains("response") || lowerPath.contains("exception") -> 2
                 type == "SERVICE" || lowerPath.contains("service") || lowerPath.contains("impl") -> 3
                 type in setOf("CONTROLLER", "REST_CONTROLLER") || lowerPath.contains("controller") || lowerPath.contains("api") -> 4
+                rNode?.type == net.ib.ixpert.ops.wuwagent.service.metagraph.model.ResourceType.VIEW -> 5
                 else -> 5
             }
         }
@@ -151,7 +186,7 @@ object TargetFileValidator {
         if (exactMatch != null) return listOf(exactMatch)
 
         // 2 & 3순위용 필터링
-        val classMatches = allNodes.filter { it.className == className }
+        val classMatches = allNodes.filter { it.className.equals(className, ignoreCase = true) }
         if (classMatches.isEmpty()) return emptyList()
         if (classMatches.size == 1) return classMatches
 

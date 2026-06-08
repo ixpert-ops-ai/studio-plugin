@@ -31,6 +31,7 @@ data class ProjectGraph(
     val frameworkDetection: FrameworkDetectionResult? = null,
     val modules: List<ModuleInfo>? = null,
     val files: Map<String, FileNode>,
+    val resourceNodes: List<ResourceNode> = emptyList(),
     val relationships: List<Relationship>,
     val statistics: GraphStatistics
 ) {
@@ -69,7 +70,10 @@ data class FileNode(
     val datasource: String? = null,
     // Adaptive File Discovery 지원 필드
     val koreanComments: List<String> = emptyList(),
-    val methodNames: List<String> = emptyList()
+    val methodNames: List<String> = emptyList(),
+    // P5-B: 동적 뷰 역추적 필드
+    val isDynamicRouter: Boolean = false,
+    val dynamicViewFolders: List<String> = emptyList()
 )
 
 /**
@@ -93,6 +97,17 @@ data class Relationship(
     val detail: String? = null,
     val callType: String? = null, // STATIC or INSTANCE
     val metadata: Map<String, String>? = null
+)
+
+/**
+ * P5-B: 동적 뷰 라우팅(Front Controller) 바인딩 정보.
+ */
+data class DynamicBinding(
+    val resourcePath: String,
+    val controllerPath: String,
+    val matchedUrl: String,
+    val confidence: Double,
+    val bindingType: String = "DYNAMIC_VIEW_RESOLVE"
 )
 
 /**
@@ -121,6 +136,7 @@ data class GraphStatistics(
     val dtos: Int = 0,
     val utils: Int = 0,
     val views: Int = 0,
+    val scripts: Int = 0,
     val components: Int = 0,
     val others: Int = 0,
     val totalRelationships: Int = 0
@@ -135,7 +151,8 @@ data class ApiEndpoint(
     val handlerMethod: String,
     val params: List<String> = emptyList(),
     val returnType: String? = null,
-    val relatedServiceMethod: String = ""
+    val relatedServiceMethod: String = "",
+    val returnedViewNames: List<String> = emptyList()
 )
 
 data class BeanDefinition(

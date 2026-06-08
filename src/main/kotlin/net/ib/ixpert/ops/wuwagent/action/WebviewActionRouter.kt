@@ -106,6 +106,12 @@ class WebviewActionRouter(private val project: Project) {
                 "/analyze" -> {
                     logger.info("Router: /analyze 분기")
                     val messageId = "analyze_${System.currentTimeMillis()}"
+                    val rawInput = textBody.trim()
+                    
+                    // 스킵 모드 체크: 입력이 "!"로 시작하면 Stage 0(요구사항 구체화) 생략
+                    val isSkipMode = rawInput.startsWith("!")
+                    val initialRequirement = if (isSkipMode) rawInput.removePrefix("!").trim() else rawInput
+                    
                     bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프를 분석하여 요구사항 대상 파일을 추출하고 있습니다...", messageId)
                     
                     ApplicationManager.getApplication().executeOnPooledThread {
@@ -114,9 +120,49 @@ class WebviewActionRouter(private val project: Project) {
                             val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
                             
                             val client = WuwLlmService.getClient()
-                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
                             
-                            val result = pipeline.analyze(textBody, projectGraph) { chunk ->
+                            var finalRequirementText = initialRequirement
+                            
+                            // Stage 0: Clarify Engine 실행
+                            if (!isSkipMode) {
+                                try {
+                                    val clarifier = net.ib.ixpert.ops.wuwagent.agent.clarify.RequirementClarifier(
+                                        client,
+                                        net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyPromptBuilder()
+                                    )
+                                    val clarifyResult = clarifier.clarify(initialRequirement, projectGraph.frameworkType)
+                                    
+                                    val hasQuestions = clarifyResult.questions.isNotEmpty()
+                                    val hasEnhancements = clarifyResult.enhancedRequirements.isNotEmpty()
+                                    
+                                    if (hasQuestions || hasEnhancements) {
+                                        // UI 확인 대기가 필요한 경우
+                                        net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.saveSession(project, initialRequirement, clarifyResult)
+                                        
+                                        val jsonPayload = com.google.gson.Gson().toJson(clarifyResult)
+                                        ApplicationManager.getApplication().invokeLater {
+                                            bridge.sendMessage("analyze_clarify", jsonPayload, messageId)
+                                        }
+                                        return@executeOnPooledThread
+                                    } else {
+                                        // 질문도 없고 보강 항목도 없으면 자동 진행
+                                        val parser = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyUserResponseParser()
+                                        val defaultResponse = parser.parse("")
+                                        val finalReq = clarifier.finalize(clarifyResult, defaultResponse, initialRequirement)
+                                        finalRequirementText = finalReq.fullText
+                                        logger.info("Stage 0 Clarify 자동 완료 (보강/질문 없음): $finalRequirementText")
+                                    }
+                                } catch (e: Exception) {
+                                    logger.warn("Stage 0 실패, 원본 요구사항으로 계속 진행", e)
+                                    val fallbackMsg = "\n> ⚠️ **요구사항 구체화 중 오류 발생 (타임아웃 등). 원본 요구사항으로 바로 분석을 진행합니다.**\n\n"
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, fallbackMsg)
+                                    }
+                                }
+                            }
+                            
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
+                            val result = pipeline.analyze(initialRequirement, finalRequirementText.removePrefix(initialRequirement).trim(), projectGraph) { chunk ->
                                 ApplicationManager.getApplication().invokeLater {
                                     bridge.sendMessageChunk(messageId, chunk)
                                 }
@@ -141,6 +187,76 @@ class WebviewActionRouter(private val project: Project) {
                                     bridge.sendMessageChunk(messageId, extraText)
                                 }
                                 bridge.sendMessage("chat", "", messageId) // 스트리밍 종료 신호
+                            }
+                        } catch (e: Exception) {
+                            logger.error("RequirementAnalysisPipeline Error", e)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", "요구사항 분석 중 오류가 발생했습니다: ${e.message}", messageId)
+                            }
+                        }
+                    }
+                }
+
+                // ── 요구사항 구체화 확인 (Stage 0 -> Stage 1) ────────
+                "/analyze-confirm" -> {
+                    logger.info("Router: /analyze-confirm 분기")
+                    val messageId = "analyze_${System.currentTimeMillis()}"
+                    
+                    val session = net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.getSession(project)
+                    if (session == null) {
+                        bridge.sendMessage("error", "분석 세션이 만료되었거나 유효하지 않습니다. `/analyze`를 다시 실행해주세요.", messageId)
+                        return@invokeLater
+                    }
+                    
+                    // 파싱
+                    val jsonPayload = textBody.trim()
+                    val userResponse = try {
+                        com.google.gson.Gson().fromJson(jsonPayload, net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyUserResponse::class.java)
+                    } catch (e: Exception) {
+                        bridge.sendMessage("error", "잘못된 응답 형식입니다. 다시 제출해주세요.", messageId)
+                        return@invokeLater
+                    }
+                    
+                    val client = WuwLlmService.getClient()
+                    val clarifier = net.ib.ixpert.ops.wuwagent.agent.clarify.RequirementClarifier(
+                        client,
+                        net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyPromptBuilder()
+                    )
+                    
+                    val finalReq = clarifier.finalize(session.clarifyResult, userResponse, session.initialRequirement)
+                    net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
+                    
+                    bridge.sendMessage("analyze_start", "🔍 확정된 요구사항을 바탕으로 대상 파일을 추출하고 있습니다...", messageId)
+                    
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
+                            val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다.")
+                            
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
+                            val result = pipeline.analyze(session.initialRequirement, finalReq.fullText.removePrefix(session.initialRequirement).trim(), projectGraph) { chunk ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessageChunk(messageId, chunk)
+                                }
+                            }
+                            
+                            ApplicationManager.getApplication().invokeLater {
+                                if (result.targetFiles.isNotEmpty()) {
+                                    var extraText = ""
+                                    val hasCorrections = result.targetFiles.any { it.description.contains("[AI 교정") || it.description.contains("[경고") }
+                                    if (hasCorrections) {
+                                        extraText += "\n\n> 🤖 **TargetFileValidator 자동 교정 결과**\n"
+                                        extraText += "> LLM의 환각이 감지되어 실제 프로젝트 메타그래프 기반으로 아래와 같이 안전하게 교정되었습니다.\n\n"
+                                        extraText += "| 순서 | 파일 경로 | 유형 | 작업 내용 |\n"
+                                        extraText += "|:---:|:---|:---:|:---|\n"
+                                        result.targetFiles.forEach { file ->
+                                            extraText += "| ${file.order} | ${file.path} | **${file.type}** | ${file.description} |\n"
+                                        }
+                                    }
+                                    extraText += "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
+                                    bridge.sendMessageChunk(messageId, extraText)
+                                }
+                                bridge.sendMessage("chat", "", messageId)
                             }
                         } catch (e: Exception) {
                             logger.error("RequirementAnalysisPipeline Error", e)

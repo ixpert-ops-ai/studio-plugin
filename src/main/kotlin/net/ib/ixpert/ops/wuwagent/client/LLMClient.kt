@@ -10,5 +10,15 @@ interface LLMClient {
         onChunk: ((String) -> Unit)? = null
     ): OllamaChatResponse?
 
+    fun chatWithTools(
+        systemPrompt: String,
+        messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
+        maxTokens: Int? = null,
+        tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>? = null,
+        toolChoice: String? = "auto"
+    ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
+        return null
+    }
+
     fun fetchModels(baseUrl: String, apiKey: String): List<String>?
 }

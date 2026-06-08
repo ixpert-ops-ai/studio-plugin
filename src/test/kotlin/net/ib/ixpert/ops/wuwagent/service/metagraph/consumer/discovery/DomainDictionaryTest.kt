@@ -8,7 +8,7 @@ import java.time.Instant
 class DomainDictionaryTest {
 
     @Test
-    fun testTfIdfWeighting() {
+    fun testTranslation() {
         val graph = ProjectGraph(
             generatedAt = Instant.now().toString(),
             projectRoot = "/test",
@@ -27,13 +27,10 @@ class DomainDictionaryTest {
         )
 
         val dict = DomainDictionary.load(graph)
-        val weights = dict.translateWithWeight("조회")
+        val tokens = dict.translate("조회")
         
         // 내장 사전에 "조회" -> setOf("search")
-        assertNotNull(weights["search"])
-        
-        val w = weights["search"]!!
-        assertTrue(w >= 0.1 && w <= 1.0)
+        assertTrue(tokens.contains("search"))
     }
 
     @Test

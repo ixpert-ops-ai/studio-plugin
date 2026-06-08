@@ -36,6 +36,14 @@ class FileRelevanceVerifier(
         val (createSpecs, modifySpecs) = candidates.partition { it.type == "신규" }
         if (modifySpecs.isEmpty()) return candidates
 
+        // [과제 #2 보완] Java/Kotlin 파일만 Stage 3 검증 수행 (리소스 파일은 bypass)
+        // TODO: 향후 get_resource_summary를 Stage 3에 연동하여 리소스 파일도 내용 기반으로 검증하는 로직 추가 필요
+        val (javaModifySpecs, resourceModifySpecs) = modifySpecs.partition {
+            it.path.endsWith(".java") || it.path.endsWith(".kt")
+        }
+
+        if (javaModifySpecs.isEmpty()) return resourceModifySpecs + createSpecs
+
         val allResults = mutableListOf<VerificationResult>()
         
         val fwType = graph.resolveFrameworkType()
@@ -60,7 +68,7 @@ class FileRelevanceVerifier(
 $frameworkRules
         """.trimIndent()
 
-        for (spec in modifySpecs) {
+        for (spec in javaModifySpecs) {
             val context = buildFileContext(spec.path, graph, mdRoot)
             val prompt = buildSinglePrompt(userQuery, spec, context)
             
@@ -77,7 +85,41 @@ $frameworkRules
             }
         }
         
-        val keptModifySpecs = modifySpecs.mapNotNull { spec ->
+        // ── 후처리: Interface -> Impl 상태 동기화 (방안 B) ──
+        val requiredNodes = allResults
+            .filter { it.verdict == "REQUIRED" }
+            .mapNotNull { graph.files[it.path] }
+            
+        val requiredFqns = requiredNodes.map { 
+            if (it.packageName.isNullOrEmpty()) it.className else "${it.packageName}.${it.className}"
+        }.toSet()
+
+        for (i in allResults.indices) {
+            val res = allResults[i]
+            if (res.verdict != "REQUIRED") {
+                val node = graph.files[res.path] ?: continue
+                
+                // 1. 메타그래프 정보 기반 매칭 (implements / extends)
+                val isImplementingRequired = node.implementedInterfaces.any { ifaceFqn ->
+                    requiredFqns.contains(ifaceFqn)
+                } || (node.superClass != null && requiredFqns.contains(node.superClass))
+                
+                // 2. 이름 패턴 기반 폴백 (Fallback): Xxx -> XxxImpl
+                val isPatternMatching = requiredNodes.any { reqNode ->
+                    reqNode.isInterface && node.className == "${reqNode.className}Impl"
+                }
+                
+                if (isImplementingRequired || isPatternMatching) {
+                    logger.info("Stage 3 보정: ${node.className} 구현체를 REQUIRED로 강제 격상합니다. (인터페이스 수정 감지)")
+                    allResults[i] = res.copy(
+                        verdict = "REQUIRED",
+                        reason = "인터페이스가 수정 대상으로 판정되어, 구현체(Impl)도 필수 수정 대상으로 자동 보정됨"
+                    )
+                }
+            }
+        }
+        
+        val keptModifySpecs = javaModifySpecs.mapNotNull { spec ->
             val res = allResults.find { it.path == spec.path }
             if (res != null && res.verdict != "UNNECESSARY") {
                 if (res.verdict == "OPTIONAL") {
@@ -93,7 +135,7 @@ $frameworkRules
             return candidates
         }
         
-        return keptModifySpecs + createSpecs
+        return keptModifySpecs + resourceModifySpecs + createSpecs
     }
 
     private fun buildSinglePrompt(userQuery: String, spec: TargetFileSpec, context: String): String {

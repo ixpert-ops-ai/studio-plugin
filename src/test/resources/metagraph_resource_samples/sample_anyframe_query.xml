@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<queryService>
+    <queries>
+        <query id="AnyframeSurvey.selectList">
+            <statement>
+                SELECT *
+                FROM TB_SURVEY_ANY
+                WHERE USE_YN = 'Y'
+            </statement>
+        </query>
+        <query id="AnyframeSurvey.insertData">
+            <statement>
+                INSERT INTO TB_SURVEY_ANY (ID, TITLE) VALUES (?, ?)
+            </statement>
+        </query>
+    </queries>
+</queryService>

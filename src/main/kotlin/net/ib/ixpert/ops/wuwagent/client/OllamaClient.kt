@@ -231,6 +231,125 @@ class OllamaClient : LLMClient {
         return OllamaChatResponse(null, null, OllamaMessage("assistant", errorMsg), true)
     }
 
+    override fun chatWithTools(
+        systemPrompt: String,
+        messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
+        maxTokens: Int?,
+        tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>?,
+        toolChoice: String?
+    ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+        val serverUrl = "${settings.ollamaServerUrl.trimEnd('/')}/api/chat"
+
+        val requestMessages = mutableListOf<Map<String, Any?>>()
+        requestMessages.add(mapOf("role" to "system", "content" to systemPrompt))
+        
+        for (msg in messages) {
+            val map = mutableMapOf<String, Any?>("role" to msg.role)
+            if (msg.content != null) map["content"] = msg.content
+            if (msg.name != null) map["name"] = msg.name
+            if (msg.toolCallId != null) map["tool_call_id"] = msg.toolCallId
+            if (msg.toolCalls != null) map["tool_calls"] = msg.toolCalls
+            requestMessages.add(map)
+        }
+
+        val requestBody = mutableMapOf<String, Any?>(
+            "model" to settings.model,
+            "messages" to requestMessages,
+            "stream" to false,
+            "options" to mapOf(
+                "temperature" to settings.temperature,
+                "num_ctx" to settings.contextWindow,
+                "num_predict" to (maxTokens ?: 4096),
+                "repeat_penalty" to 1.1,
+                "repeat_last_n" to 256
+            )
+        )
+        if (!tools.isNullOrEmpty()) {
+            requestBody["tools"] = tools
+        }
+
+        val jsonPayload = gson.toJson(requestBody)
+
+        logger.info("Ollama API Call (ToolCalling): url=$serverUrl, model=${settings.model}")
+        
+        val startMs = System.currentTimeMillis()
+        val debugEntry = if (settings.enableLlmDebug) {
+            try {
+                DebugManager.getInstance().newEntry(settings.model, serverUrl, jsonPayload, messages.size + 1, false)
+            } catch (_: Exception) { null }
+        } else null
+
+        return try {
+            val responseString = HttpRequests.post(serverUrl, "application/json")
+                .tuner { connection ->
+                    if (settings.apiKey.isNotBlank()) {
+                        connection.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+                    }
+                    connection.setRequestProperty("Connection", "close")
+                    val timeoutMs = settings.timeoutSeconds * 1000
+                    connection.connectTimeout = 30_000
+                    connection.readTimeout = timeoutMs
+                }
+                .connect { request ->
+                    request.write(jsonPayload)
+                    request.readString()
+                }
+
+            logger.info("Ollama API ToolCalling Response (len=${responseString.length})")
+            
+            try {
+                if (debugEntry != null) {
+                    debugEntry.durationMs = System.currentTimeMillis() - startMs
+                    debugEntry.isSuccess = true
+                    debugEntry.responseText = responseString
+                    debugEntry.responseLength = responseString.length
+                    DebugManager.getInstance().addLog(debugEntry)
+                }
+            } catch (_: Exception) {}
+            
+            // Ollama's response format is similar but not exactly OpenAI's ChatCompletionResponse
+            // Let's parse as generic JSON and map to ChatCompletionResponse
+            val json = JsonParser.parseString(responseString).asJsonObject
+            if (json.has("error")) {
+                throw Exception("Ollama Server Error: ${json.get("error").asString}")
+            }
+            
+            val messageObj = json.getAsJsonObject("message")
+            val content = if (messageObj.has("content") && !messageObj.get("content").isJsonNull) messageObj.get("content").asString else null
+            val toolCallsArray = messageObj.getAsJsonArray("tool_calls")
+            
+            val toolCalls = if (toolCallsArray != null && toolCallsArray.size() > 0) {
+                gson.fromJson(toolCallsArray, Array<net.ib.ixpert.ops.wuwagent.model.ToolCall>::class.java).toList()
+            } else null
+            
+            val chatMessage = net.ib.ixpert.ops.wuwagent.model.ChatMessage(
+                role = "assistant",
+                content = content,
+                toolCalls = toolCalls
+            )
+            
+            net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse(
+                id = null,
+                choices = listOf(net.ib.ixpert.ops.wuwagent.model.ChatChoice(index = 0, message = chatMessage, finishReason = "stop"))
+            )
+        } catch (e: Exception) {
+            val errorMsg = e.message ?: "Unknown error"
+            logger.error("Ollama API ToolCalling Failed: $errorMsg", e)
+            
+            try {
+                if (debugEntry != null) {
+                    debugEntry.durationMs = System.currentTimeMillis() - startMs
+                    debugEntry.isSuccess = false
+                    debugEntry.errorMessage = errorMsg
+                    DebugManager.getInstance().addLog(debugEntry)
+                }
+            } catch (_: Exception) {}
+            
+            throw e
+        }
+    }
+
     override fun fetchModels(baseUrl: String, apiKey: String): List<String>? {
         val cleanUrl = baseUrl.trimEnd('/')
         if (cleanUrl.isBlank()) return null

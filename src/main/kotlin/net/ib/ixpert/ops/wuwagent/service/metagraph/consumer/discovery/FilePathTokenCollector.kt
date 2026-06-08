@@ -22,26 +22,35 @@ class FilePathTokenCollector(
 
         val results = mutableListOf<ScoredCandidate>()
 
-        for ((path, _) in graph.files.entries) {
-            val pathTokens = tokenizePath(path)
-            if (pathTokens.isEmpty()) continue
+        for ((path, node) in graph.files.entries) {
+            val classNameTokens = tokenizeCamelCase(node.className)
+            val packageTokens = tokenizePath(node.packageName ?: "")
+            
+            var matchedInClassName = 0
+            var matchedInPackage = 0
 
-            val matchedNouns = query.koreanNouns.count { noun ->
+            query.koreanNouns.forEach { noun ->
                 val translations = dictionary.translate(noun)
-                translations.any { trans -> tokenMatchesAny(trans, pathTokens) }
+                if (translations.any { trans -> tokenMatchesAny(trans, classNameTokens) }) {
+                    matchedInClassName++
+                } else if (translations.any { trans -> tokenMatchesAny(trans, packageTokens) }) {
+                    matchedInPackage++
+                }
             }
             
-            if (matchedNouns == 0) continue
+            if (matchedInClassName == 0 && matchedInPackage == 0) continue
 
-            val score = minOf(matchedNouns * 25.0, 50.0)
+            val classScore = minOf(matchedInClassName * 50.0, 100.0)
+            val packageScore = minOf(matchedInPackage * 25.0, 50.0)
+            val totalScore = minOf(classScore + packageScore, 100.0)
 
-            if (score >= 15.0) {
+            if (totalScore >= 15.0) {
                 results.add(
                     ScoredCandidate(
                         filePath = path,
-                        score = score,
+                        score = totalScore,
                         matchedBy = listOf(
-                            "파일 경로 명사 매칭: ${matchedNouns}개 (점수: $score)"
+                            "경로 명사 매칭 (클래스:$matchedInClassName, 패키지:$matchedInPackage) -> 점수: $totalScore"
                         )
                     )
                 )
@@ -70,6 +79,13 @@ class FilePathTokenCollector(
                 .filter { it.length >= 2 }
                 .map { it.lowercase() }
                 .filter { it !in COMMON_SEGMENTS }
+                .toSet()
+        }
+        
+        fun tokenizeCamelCase(str: String): Set<String> {
+            return str.split(Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|_|\\."))
+                .filter { it.length >= 2 }
+                .map { it.lowercase() }
                 .toSet()
         }
     }
