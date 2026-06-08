@@ -192,6 +192,102 @@ class OpenAIClient : LLMClient {
         }
     }
 
+    override fun chatWithTools(
+        systemPrompt: String,
+        messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
+        maxTokens: Int?,
+        tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>?,
+        toolChoice: String?
+    ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+        val baseUrl = when (settings.apiType) {
+            net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
+            else -> settings.openaiServerUrl
+        }
+        val serverUrl = "${baseUrl.trimEnd('/')}/v1/chat/completions"
+
+        val requestMessages = mutableListOf<Map<String, Any?>>()
+        requestMessages.add(mapOf("role" to "system", "content" to systemPrompt))
+        
+        for (msg in messages) {
+            val map = mutableMapOf<String, Any?>("role" to msg.role)
+            if (msg.content != null) map["content"] = msg.content
+            if (msg.name != null) map["name"] = msg.name
+            if (msg.toolCallId != null) map["tool_call_id"] = msg.toolCallId
+            if (msg.toolCalls != null) map["tool_calls"] = msg.toolCalls
+            requestMessages.add(map)
+        }
+
+        val requestBody = mutableMapOf<String, Any?>(
+            "model" to settings.model,
+            "messages" to requestMessages,
+            "stream" to false,
+            "temperature" to settings.temperature,
+            "max_tokens" to (maxTokens ?: 4096)
+        )
+        if (!tools.isNullOrEmpty()) {
+            requestBody["tools"] = tools
+            if (toolChoice != null) {
+                requestBody["tool_choice"] = toolChoice
+            }
+        }
+        
+        val jsonPayload = gson.toJson(requestBody)
+
+        logger.info("OpenAI API Call (ToolCalling): url=$serverUrl, model=${settings.model}")
+        
+        val startMs = System.currentTimeMillis()
+        val debugEntry = if (settings.enableLlmDebug) {
+            try {
+                DebugManager.getInstance().newEntry(settings.model, serverUrl, jsonPayload, messages.size + 1, false)
+            } catch (_: Exception) { null }
+        } else null
+
+        return try {
+            val responseString = HttpRequests.post(serverUrl, "application/json")
+                .tuner { connection ->
+                    if (settings.apiKey.isNotBlank()) {
+                        connection.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+                    }
+                    val timeoutMs = settings.timeoutSeconds * 1000
+                    connection.connectTimeout = 30_000
+                    connection.readTimeout = timeoutMs
+                }
+                .connect { request ->
+                    request.write(jsonPayload)
+                    request.readString()
+                }
+
+            logger.info("OpenAI API ToolCalling Response (len=${responseString.length})")
+            
+            try {
+                if (debugEntry != null) {
+                    debugEntry.durationMs = System.currentTimeMillis() - startMs
+                    debugEntry.isSuccess = true
+                    debugEntry.responseText = responseString
+                    debugEntry.responseLength = responseString.length
+                    DebugManager.getInstance().addLog(debugEntry)
+                }
+            } catch (_: Exception) {}
+            
+            gson.fromJson(responseString, net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse::class.java)
+        } catch (e: Exception) {
+            val errorMsg = e.message ?: "Unknown error"
+            logger.error("OpenAI API ToolCalling Failed: $errorMsg", e)
+            
+            try {
+                if (debugEntry != null) {
+                    debugEntry.durationMs = System.currentTimeMillis() - startMs
+                    debugEntry.isSuccess = false
+                    debugEntry.errorMessage = errorMsg
+                    DebugManager.getInstance().addLog(debugEntry)
+                }
+            } catch (_: Exception) {}
+            
+            throw e // Throw so LlmCandidateSelector can catch and fallback
+        }
+    }
+
     override fun fetchModels(baseUrl: String, apiKey: String): List<String>? {
         val cleanUrl = baseUrl.trimEnd('/')
         if (cleanUrl.isBlank()) return null

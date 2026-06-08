@@ -10,17 +10,18 @@ object FrameworkDetector {
     /**
      * 메타그래프 노드들을 분석하여 프레임워크 타입을 추론합니다.
      */
-    fun detectFramework(files: Map<String, FileNode>): FrameworkDetectionResult {
+    fun detectFramework(files: Map<String, FileNode>, resourceNodes: List<ResourceNode> = emptyList()): FrameworkDetectionResult {
         // 규칙 1: Anyframe AP
         val hasSVCImpl = files.values.any { it.className.contains("SVCImpl") }
         val hasBIZ = files.values.any { it.className.contains("BIZ") && it.layer == ArchitectureLayer.BUSINESS }
         val hasDQM_DEM = files.values.any { it.className.contains("DQM") || it.className.contains("DEM") }
+        val hasAnyframeXml = resourceNodes.any { it.type == ResourceType.MYBATIS_MAPPER && it.metadata.containsKey("anyframe_query_id") }
 
-        if (hasSVCImpl && hasBIZ && hasDQM_DEM) {
+        if ((hasSVCImpl && hasBIZ && hasDQM_DEM) || hasAnyframeXml) {
             return FrameworkDetectionResult(
                 detected = FrameworkType.ANYFRAME_AP,
-                confidence = 95,
-                reasons = listOf("SVCImpl, BIZ, DEM/DQM 패턴이 모두 발견되었습니다."),
+                confidence = if (hasAnyframeXml) 95 else 85,
+                reasons = listOf("Anyframe 패턴(SVCImpl, BIZ, DEM/DQM 또는 Anyframe XML)이 발견되었습니다."),
                 alternativeCandidates = listOf(Pair(FrameworkType.SPRING_BOOT_JPA, 5))
             )
         }
@@ -41,8 +42,9 @@ object FrameworkDetector {
         // 규칙 3: Spring Boot + MyBatis
         val mapperCount = files.values.count { it.annotations.any { ann -> ann == "Mapper" || ann == "@Mapper" } }
         val hasSqlSession = files.values.any { it.superClass?.contains("SqlSessionDaoSupport") == true || it.injections.any { inj -> inj.targetType.contains("SqlSession") } }
+        val hasMyBatisXml = resourceNodes.any { it.type == ResourceType.MYBATIS_MAPPER }
         
-        if (mapperCount > 0 && !hasSqlSession) {
+        if ((mapperCount > 0 || hasMyBatisXml) && !hasSqlSession) {
             return FrameworkDetectionResult(
                 detected = FrameworkType.SPRING_BOOT_MYBATIS,
                 confidence = 85,
@@ -63,13 +65,13 @@ object FrameworkDetector {
         }
 
         // 규칙 5: Spring MVC + MyBatis
-        if (hasSqlSession) {
+        if (hasSqlSession || hasMyBatisXml) {
             val hasInterfaceImplPairs = checkInterfaceImplPairs(files)
             if (hasInterfaceImplPairs) {
                 return FrameworkDetectionResult(
                     detected = FrameworkType.SPRING_MVC_MYBATIS,
                     confidence = 90,
-                    reasons = listOf("SqlSessionDaoSupport 상속이 발견되었으며, Service/ServiceImpl 패턴이 주를 이룹니다."),
+                    reasons = listOf("SqlSessionDaoSupport 상속 또는 MyBatis XML이 발견되었으며, Service/ServiceImpl 패턴이 주를 이룹니다."),
                     alternativeCandidates = listOf(Pair(FrameworkType.SPRING_BOOT_MYBATIS, 10))
                 )
             }

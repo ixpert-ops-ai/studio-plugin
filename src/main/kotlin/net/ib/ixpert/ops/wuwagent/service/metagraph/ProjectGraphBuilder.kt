@@ -21,6 +21,7 @@ import java.time.Instant
 import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.vfs.LocalFileSystem
 import java.io.File
+import java.nio.file.Paths
 
 import com.intellij.openapi.roots.ContentIterator
 import com.intellij.openapi.vfs.VirtualFile
@@ -199,6 +200,44 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             resolvedNodes[call.target]?.dependedBy?.add(call.source)
         }
 
+        // Phase 1 비-Java 자원 스캔 및 연결
+        indicator?.text = "비-Java 자원 스캔 중..."
+        val projectRootPath = targetDirectory?.toNioPath() ?: Paths.get(project.basePath ?: "")
+        val scanner = net.ib.ixpert.ops.wuwagent.service.metagraph.builder.ResourceScanner(projectRootPath)
+        val rawResourceNodes = scanner.scan()
+        
+        indicator?.text = "자원 연결 관계 구성 중..."
+        val linker = net.ib.ixpert.ops.wuwagent.service.metagraph.builder.ResourceLinker(resolvedNodes)
+        val linkedResourceNodes = linker.link(rawResourceNodes).toMutableList()
+
+        // Phase 5-B: 동적 뷰 라우팅(Front Controller) 감지 및 역추적
+        indicator?.text = "동적 뷰 라우팅(Front Controller) 감지 중..."
+        val dynamicResolver = net.ib.ixpert.ops.wuwagent.service.metagraph.builder.DynamicViewResolver()
+        val frontControllers = dynamicResolver.detectFrontControllers(resolvedNodes.values.toList())
+        
+        if (frontControllers.isNotEmpty()) {
+            indicator?.text = "동적 뷰 역바인딩 수행 중..."
+            val dynamicBindings = dynamicResolver.resolveViewBindings(frontControllers, linkedResourceNodes)
+            
+            // ResourceNode 갱신 및 Controller 경로 주입
+            for (i in linkedResourceNodes.indices) {
+                val resource = linkedResourceNodes[i]
+                val myBindings = dynamicBindings.filter { it.resourcePath == resource.path }
+                if (myBindings.isNotEmpty()) {
+                    val newLinkedTo = resource.linkedTo.toMutableList()
+                    myBindings.forEach { binding -> 
+                        if (!newLinkedTo.contains(binding.controllerPath)) {
+                            newLinkedTo.add(binding.controllerPath)
+                        }
+                    }
+                    linkedResourceNodes[i] = resource.copy(
+                        dynamicBindings = myBindings,
+                        linkedTo = newLinkedTo
+                    )
+                }
+            }
+        }
+
         // Phase 1c & Phase 3: RiskAssessment 계산
         val scoredNodes = resolvedNodes.mapValues { (path, node) ->
             val distinctDependsOn = node.dependsOn.distinct().toMutableList()
@@ -252,12 +291,13 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             node.copy(
                 dependsOn = distinctDependsOn,
                 dependedBy = distinctDependedBy,
-                riskAssessment = RiskAssessment(riskScore = score, changeRisk = risk, riskReasons = reasons)
+                riskAssessment = RiskAssessment(riskScore = score, changeRisk = risk, riskReasons = reasons),
+                isDynamicRouter = frontControllers.any { it.controllerPath == path }
             )
         }
 
         // Step 8: GraphStatistics 계산
-        val statistics = calculateStatistics(scoredNodes, relationships)
+        val statistics = calculateStatistics(scoredNodes, linkedResourceNodes, relationships)
 
         // Step 9: 그래프 조립
         indicator?.fraction = 1.0
@@ -270,7 +310,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         val isSingleModulePartialUpdate = targetModule != null && targetModule.name != project.name && isMultiModule
 
         // Phase 2: 프레임워크 자동 감지 실행
-        val detectionResult = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.FrameworkDetector.detectFramework(scoredNodes)
+        val detectionResult = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.FrameworkDetector.detectFramework(scoredNodes, linkedResourceNodes)
         
         // Phase 4: UI와 연동하여 Override 여부 결정
         var finalFrameworkType = detectionResult.detected
@@ -331,6 +371,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
                 frameworkType = finalFrameworkType,
                 frameworkDetection = detectionResult,
                 files = scoredNodes,
+                resourceNodes = linkedResourceNodes,
                 relationships = relationships,
                 statistics = statistics
             )
@@ -350,6 +391,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
                 frameworkDetection = detectionResult,
                 modules = modulesList,
                 files = scoredNodes,
+                resourceNodes = linkedResourceNodes,
                 relationships = relationships,
                 statistics = statistics
             )
@@ -384,9 +426,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             if (!vf.isDirectory && (vf.extension == "java" || vf.extension == "kt")) {
                 val path = vf.path.lowercase()
                 val isTest = path.contains("/test/") || path.contains("/src/test/")
-                val isBuild = path.contains("/build/") || path.contains("/out/") || path.contains("/target/") || 
-                              path.contains("/.gradle/") || path.contains("/.idea/") || path.contains("/.metadata/") ||
-                              path.contains("/.git/") || path.contains("/node_modules/")
+                val isBuild = net.ib.ixpert.ops.wuwagent.service.metagraph.builder.ScanExclusionUtil.shouldExclude(vf.name, path)
                 
                 // 1. fileIndex가 소스 코드로 인정하거나
                 // 2. targetDirectory가 명시된 경우, 빌드/테스트 경로가 아니면 강제 수집 (Source Root 매핑이 안 된 경우 대비)
@@ -514,17 +554,18 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
 
     // ── Step 8: 통계 계산 ────────────────────────
 
-    private fun calculateStatistics(nodes: Map<String, FileNode>, relationships: List<Relationship>): GraphStatistics {
+    private fun calculateStatistics(nodes: Map<String, FileNode>, resourceNodes: List<ResourceNode>, relationships: List<Relationship>): GraphStatistics {
         return GraphStatistics(
-            totalFiles = nodes.size,
+            totalFiles = nodes.size + resourceNodes.size,
             controllers = nodes.values.count { it.fileType in listOf(SpringFileType.REST_CONTROLLER, SpringFileType.CONTROLLER) },
             services = nodes.values.count { it.fileType == SpringFileType.SERVICE },
             repositories = nodes.values.count { it.fileType in listOf(SpringFileType.REPOSITORY, SpringFileType.MAPPER) },
             entities = nodes.values.count { it.fileType == SpringFileType.ENTITY },
-            configs = nodes.values.count { it.fileType == SpringFileType.CONFIG },
+            configs = nodes.values.count { it.fileType == SpringFileType.CONFIG } + resourceNodes.count { it.type == ResourceType.CONFIG },
             dtos = nodes.values.count { it.fileType in listOf(SpringFileType.DTO, SpringFileType.VO) },
             utils = nodes.values.count { it.fileType == SpringFileType.UTIL },
-            views = nodes.values.count { it.fileType == SpringFileType.VIEW },
+            views = nodes.values.count { it.fileType == SpringFileType.VIEW } + resourceNodes.count { it.type == ResourceType.VIEW },
+            scripts = resourceNodes.count { it.type == ResourceType.SCRIPT },
             components = nodes.values.count { it.fileType in listOf(SpringFileType.COMPONENT, SpringFileType.FILTER, SpringFileType.INTERCEPTOR) },
             others = nodes.values.count { it.fileType !in listOf(
                 SpringFileType.REST_CONTROLLER, SpringFileType.CONTROLLER,

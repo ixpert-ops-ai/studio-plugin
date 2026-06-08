@@ -41,7 +41,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
 
     private val logger = Logger.getInstance(RequirementAnalysisPipeline::class.java)
 
-    fun analyze(requirement: String, projectGraph: ProjectGraph, onChunk: ((String) -> Unit)? = null): RequirementAnalysisResult {
+    fun analyze(primaryReq: String, secondaryReq: String, projectGraph: ProjectGraph, onChunk: ((String) -> Unit)? = null): RequirementAnalysisResult {
         val fwType = projectGraph.frameworkDetection?.userOverride ?: projectGraph.frameworkType
         logger.info("Starting RequirementAnalysisPipeline. Resolved Framework Type: ${fwType.name}")
         // 멀티모듈 레벨 1이거나 대형 프로젝트(10+ 파일)인 경우 RelevanceFilter로 관련 파일만 추출
@@ -53,7 +53,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             }
             onChunk?.invoke(filterMsg)
             
-            val filterResult = AdaptiveFileDiscovery.filter(requirement, projectGraph, client, project) { progress ->
+            val filterResult = AdaptiveFileDiscovery.filter(primaryReq, secondaryReq, projectGraph, client, project) { progress ->
                 onChunk?.invoke(progress)
             }
             // Ollama 서버의 연속 호출(키워드 추출 -> 전체 분석) 시 컨텍스트 정리 및 커넥션 안정화를 위한 대기
@@ -72,10 +72,17 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScoredCandidate(it.path, 0.0, emptyList())
         }
 
-        val selector = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.LlmCandidateSelector(client, workingGraph)
+        // 툴콜링 스코프를 위해 30개로 필터링된 workingGraph가 아닌 전체 projectGraph 전달
+        val selector = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.LlmCandidateSelector(client, projectGraph)
         onChunk?.invoke("> 🤖 (Stage 2) LLM을 통한 정밀 분석을 시작합니다...\n")
         
-        val selectionResult = selector.select(requirement, candidatesList)
+        val fullRequirement = if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
+        val selectionResult = selector.select(
+            userQuery = fullRequirement, 
+            candidates = candidatesList, 
+            maxCandidates = 20, // [과제 #2 보완] IpsController 등이 10위 밖으로 밀리는 현상 방어용. 향후 view_binding 전파 안정화 시 15로 조정 검토
+            onChunk = onChunk
+        )
         
         val targetFiles = mutableListOf<TargetFileSpec>()
         selectionResult.modify?.forEach { action ->
@@ -86,11 +93,11 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         }
         
         onChunk?.invoke("\n> 🤖 (Stage 3) 불필요한 수정 대상 파일 필터링 중...\n")
-        val correctedFiles = TargetFileValidator.correctPaths(targetFiles, workingGraph)
+        val correctedFiles = TargetFileValidator.correctPaths(targetFiles, projectGraph)
         val mdRoot = Paths.get(project?.basePath ?: "", "docs")
-        val verifier = FileRelevanceVerifier(client, workingGraph, mdRoot)
-        val verifiedFiles = verifier.verify(requirement, correctedFiles)
-        val validatedTargetFiles = TargetFileValidator.sortByDependency(verifiedFiles, workingGraph)
+        val verifier = FileRelevanceVerifier(client, projectGraph, mdRoot)
+        val verifiedFiles = verifier.verify(fullRequirement, correctedFiles)
+        val validatedTargetFiles = TargetFileValidator.sortByDependency(verifiedFiles, projectGraph)
         
         val formattedOutput = buildString {
             if (!selectionResult.summary.isNullOrBlank()) {

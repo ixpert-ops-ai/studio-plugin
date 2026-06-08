@@ -87,6 +87,23 @@ class SpringEndpointAnalyzer {
                     }
                 }
                 
+                // ── returnedViewNames 추출 ──
+                val returnedViewNames = mutableListOf<String>()
+                if (returnType == "String") {
+                    method.body?.let { body ->
+                        val returnStmts = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(body, com.intellij.psi.PsiReturnStatement::class.java)
+                        for (stmt in returnStmts) {
+                            val retVal = stmt.returnValue
+                            if (retVal is com.intellij.psi.PsiLiteralExpression && retVal.value is String) {
+                                val viewName = (retVal.value as String).trim()
+                                if (!viewName.startsWith("redirect:") && !viewName.startsWith("forward:")) {
+                                    returnedViewNames.add(viewName)
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 return ApiEndpoint(
                     httpMethod = httpMethod,
                     path = fullPath,
@@ -94,7 +111,8 @@ class SpringEndpointAnalyzer {
                     handlerMethod = method.name,
                     params = params,
                     returnType = returnType,
-                    relatedServiceMethod = relatedServiceMethod
+                    relatedServiceMethod = relatedServiceMethod,
+                    returnedViewNames = returnedViewNames.distinct()
                 )
             }
         }

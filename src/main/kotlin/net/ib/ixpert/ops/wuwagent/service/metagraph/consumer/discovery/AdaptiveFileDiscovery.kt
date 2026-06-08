@@ -52,21 +52,24 @@ object AdaptiveFileDiscovery {
      * @return 필터링된 ProjectGraph + 추출된 키워드
      */
     fun filter(
-        requirement: String,
+        primaryReq: String,
+        secondaryReq: String,
         graph: ProjectGraph,
         client: LLMClient,
         project: Project?,
         onProgress: ((String) -> Unit)? = null
     ): RelevanceFilter.FilterResult {
 
+        val fullReq = if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
+
         // ── Stage 0: Multi-module Selection ──────────────────
-        val workingGraph = resolveWorkingGraph(requirement, graph, project, onProgress)
+        val workingGraph = resolveWorkingGraph(fullReq, graph, project, onProgress)
 
         // ── Stage 1: QueryAnalyzer → CandidateCollector ──────
         onProgress?.invoke("> 🔍 [Stage 1] 입력 분석 및 후보 파일 탐색 중...\n")
         val candidateCollector = CandidateCollector(workingGraph)
-        val candidates = candidateCollector.collect(requirement)
-        val analyzedQuery = candidateCollector.queryAnalyzer.analyze(requirement)
+        val candidates = candidateCollector.collect(primaryReq, secondaryReq)
+        val analyzedQuery = candidateCollector.queryAnalyzer.analyze(fullReq)
 
         logger.info("AdaptiveFileDiscovery: Stage 1 → ${candidates.size}건 후보")
 
@@ -86,7 +89,7 @@ object AdaptiveFileDiscovery {
             logger.info("AdaptiveFileDiscovery: Stage 1 결과 ${candidates.size}건 ≤ ${LLM_FALLBACK_THRESHOLD}, LLM fallback 실행")
             onProgress?.invoke("> ⚠️ 매칭 결과가 부족합니다. LLM 키워드 추출로 보완합니다...\n")
 
-            val llmKeywords = extractKeywordsViaLlm(requirement, client, onProgress)
+            val llmKeywords = extractKeywordsViaLlm(fullReq, client, onProgress)
             if (llmKeywords.isNotEmpty()) {
                 onProgress?.invoke("> 🔑 LLM 키워드: ${llmKeywords.joinToString(", ")}\n")
                 val llmMatches = matchByKeywords(llmKeywords, workingGraph)

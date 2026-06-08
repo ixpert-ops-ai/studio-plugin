@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="net.infobank.iss.survey.dao.SurveyDao">
+
+    <select id="selectSurveyList" parameterType="net.infobank.iss.survey.dto.SurveyDto" resultType="net.infobank.iss.survey.dto.SurveyDto">
+        SELECT *
+        FROM TB_SURVEY A, TB_USER B
+        WHERE A.USER_ID = B.USER_ID
+    </select>
+
+    <insert id="insertSurvey">
+        INSERT INTO TB_SURVEY (SURVEY_ID, TITLE)
+        VALUES (#{surveyId}, #{title})
+    </insert>
+
+</mapper>

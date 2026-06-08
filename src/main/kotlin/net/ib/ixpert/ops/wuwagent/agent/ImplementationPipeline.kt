@@ -630,6 +630,8 @@ class ImplementationPipeline(
             당신은 Spring Boot 프로젝트를 구현하는 시니어 백엔드 개발자입니다.
             주어진 요구사항과 작업 계획에 따라, 현재 타겟 파일의 코드를 작성/수정해야 합니다.
             
+            You MUST respond in Korean (한국어). All output including comments and descriptions must be in Korean.
+            
             ## 코드 작성 규칙
             1. 기존 코드의 스타일과 아키텍처를 반드시 유지하세요.
             2. 필요한 import 문을 모두 포함하여 컴파일 가능한 "전체 코드"를 반환하세요.
@@ -685,6 +687,8 @@ class ImplementationPipeline(
     private fun buildLargeFileSystemPrompt(isInterface: Boolean = false): String {
         val basePrompt = """
             당신은 Spring Boot 시니어 개발자입니다.
+            
+            You MUST respond in Korean (한국어). All output including comments and descriptions must be in Korean.
             
             아래 규칙을 반드시 준수하세요:
             1. 오직 **새로 추가할 메서드**의 완전한 코드만 반환하세요.

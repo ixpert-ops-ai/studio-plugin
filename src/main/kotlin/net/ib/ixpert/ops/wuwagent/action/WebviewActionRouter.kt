@@ -162,8 +162,7 @@ class WebviewActionRouter(private val project: Project) {
                             }
                             
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
-                            
-                            val result = pipeline.analyze(finalRequirementText, projectGraph) { chunk ->
+                            val result = pipeline.analyze(initialRequirement, finalRequirementText.removePrefix(initialRequirement).trim(), projectGraph) { chunk ->
                                 ApplicationManager.getApplication().invokeLater {
                                     bridge.sendMessageChunk(messageId, chunk)
                                 }
@@ -235,7 +234,7 @@ class WebviewActionRouter(private val project: Project) {
                             val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다.")
                             
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
-                            val result = pipeline.analyze(finalReq.fullText, projectGraph) { chunk ->
+                            val result = pipeline.analyze(session.initialRequirement, finalReq.fullText.removePrefix(session.initialRequirement).trim(), projectGraph) { chunk ->
                                 ApplicationManager.getApplication().invokeLater {
                                     bridge.sendMessageChunk(messageId, chunk)
                                 }

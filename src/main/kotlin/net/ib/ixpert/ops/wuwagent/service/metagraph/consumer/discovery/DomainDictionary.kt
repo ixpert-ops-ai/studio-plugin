@@ -21,6 +21,8 @@ class DomainDictionary private constructor(
         // 1. 정확 매칭
         val exact = entries[koreanNoun]
         if (exact != null) return exact
+        // 1글자 입력인 경우 부분 매칭을 시도하지 않고 정확 매칭 결과만 반환 (과매칭 방지)
+        if (koreanNoun.length <= 1) return exact ?: emptySet()
 
         // 2. 부분 매칭: 사전 키가 입력에 포함되거나 입력이 키에 포함
         val partial = mutableSetOf<String>()
@@ -121,62 +123,67 @@ class DomainDictionary private constructor(
          * 기존 RelevanceFilter.COMMON_TERMS를 확장한 버전입니다.
          */
         private val BUILTIN_TERMS = mapOf(
-            // CRUD 용어
-            "등록" to setOf("register"),
-            "수정" to setOf("update"),
-            "삭제" to setOf("delete"),
-            "조회" to setOf("search"),
-            "목록" to setOf("list"),
-            "상세" to setOf("detail"),
-            "추가" to setOf("add"),
-            "변경" to setOf("change"),
-            "저장" to setOf("save"),
-            "처리" to setOf("process"),
-            "검색" to setOf("search"),
-            "전송" to setOf("send"),
-            "취소" to setOf("cancel"),
-            "승인" to setOf("approve"),
-            "반려" to setOf("reject"),
+            // CRUD & Action 용어
+            "등록" to setOf("register", "write", "regist", "create", "insert", "add", "new", "save"),
+            "조회" to setOf("search", "list", "view", "detail", "read", "select", "get", "find", "lookup"),
+            "수정" to setOf("update", "edit", "modify", "change", "alter", "patch"),
+            "삭제" to setOf("delete", "remove", "del", "drop", "destroy", "erase"),
+            "목록" to setOf("list", "index", "main", "all", "catalog"),
+            "상세" to setOf("detail", "info", "view", "show", "single", "item"),
+            "설정" to setOf("config", "setting", "preference", "option", "setup"),
+            "승인" to setOf("approve", "confirm", "accept", "grant", "permit"),
+            "반려" to setOf("reject", "deny", "refuse", "decline", "return"),
+            "추가" to setOf("add", "append", "insert", "new", "create"),
+            "변경" to setOf("change", "modify", "update", "edit"),
+            "저장" to setOf("save", "store", "persist"),
+            "처리" to setOf("process", "handle", "deal", "execute"),
+            "검색" to setOf("search", "find", "query", "look"),
+            "전송" to setOf("send", "transmit", "transfer", "submit"),
+            "취소" to setOf("cancel", "abort", "revoke", "undo"),
+            
             // 인증/보안
-            "로그인" to setOf("login"),
-            "로그아웃" to setOf("logout"),
-            "인증" to setOf("auth"),
-            "권한" to setOf("permission"),
+            "로그인" to setOf("login", "signin", "auth", "authenticate", "logon"),
+            "로그아웃" to setOf("logout", "signout", "logoff"),
+            "인증" to setOf("auth", "authentication", "cert", "verify"),
+            "권한" to setOf("permission", "auth", "authorization", "role", "grant", "privilege"),
+            
             // 파일 관련
-            "다운로드" to setOf("download"),
-            "업로드" to setOf("upload"),
+            "다운로드" to setOf("download", "down"),
+            "업로드" to setOf("upload", "up"),
+            
             // 상태
-            "오류" to setOf("error"),
-            "실패" to setOf("fail"),
-            "성공" to setOf("success"),
-            "에러" to setOf("error"),
+            "오류" to setOf("error", "err", "exception", "fault"),
+            "실패" to setOf("fail", "failure", "abort"),
+            "성공" to setOf("success", "ok", "done", "complete"),
+            "에러" to setOf("error", "err", "exception", "fault"),
+            
             // 계층 용어
-            "서비스" to setOf("service"),
-            "컨트롤러" to setOf("controller"),
-            "레포지토리" to setOf("repository"),
-            "저장소" to setOf("repository"),
-            "엔티티" to setOf("entity"),
-            "설정" to setOf("config"),
-            "유틸" to setOf("util"),
+            "서비스" to setOf("service", "svc", "biz"),
+            "컨트롤러" to setOf("controller", "ctrl", "api"),
+            "레포지토리" to setOf("repository", "repo", "dao"),
+            "저장소" to setOf("repository", "repo", "dao"),
+            "엔티티" to setOf("entity", "domain", "model"),
+            "유틸" to setOf("util", "helper", "common"),
+            
             // 도메인 일반
-            "회원" to setOf("member", "user"),
-            "사용자" to setOf("user", "member"),
-            "고객" to setOf("customer"),
+            "회원" to setOf("member", "user", "account"),
+            "사용자" to setOf("user", "member", "account", "client"),
+            "고객" to setOf("customer", "client", "user"),
             "카드" to setOf("card"),
             "계좌" to setOf("account"),
-            "거래" to setOf("transaction"),
-            "결제" to setOf("payment"),
-            "주문" to setOf("order"),
-            "상품" to setOf("product"),
-            "메뉴" to setOf("menu"),
-            "코드" to setOf("code"),
-            "한도" to setOf("limit"),
-            "정보" to setOf("info"),
-            "관리" to setOf("manage"),
-            "통계" to setOf("statistics"),
-            "이력" to setOf("history"),
-            "알림" to setOf("notification"),
-            "배치" to setOf("batch")
+            "거래" to setOf("transaction", "tx", "deal", "trade"),
+            "결제" to setOf("payment", "pay", "checkout", "billing"),
+            "주문" to setOf("order", "purchase"),
+            "상품" to setOf("product", "item", "goods"),
+            "메뉴" to setOf("menu", "nav", "navigation"),
+            "코드" to setOf("code", "cd"),
+            "한도" to setOf("limit", "max", "cap"),
+            "정보" to setOf("info", "information", "data"),
+            "관리" to setOf("manage", "management", "mgr", "admin"),
+            "통계" to setOf("statistics", "stat", "stats", "chart", "report"),
+            "이력" to setOf("history", "hist", "log", "trace"),
+            "알림" to setOf("notification", "noti", "alert", "notice", "message"),
+            "배치" to setOf("batch", "job", "schedule", "cron")
         )
     }
 }

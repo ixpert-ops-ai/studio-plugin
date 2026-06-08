@@ -1,4 +1,4 @@
-﻿package net.ib.ixpert.ops.wuwagent.service.metagraph
+package net.ib.ixpert.ops.wuwagent.service.metagraph
 
 import com.intellij.psi.*
 import com.intellij.psi.util.PsiTreeUtil
@@ -102,7 +102,23 @@ class SpringAnnotationResolver {
             if (sup.qualifiedName != "java.lang.Object") sup.qualifiedName else null
         }
 
-        val interfaces = psiClass.interfaces.mapNotNull { it.qualifiedName }
+        val interfaces = psiClass.interfaces.mapNotNull { it.qualifiedName }.toMutableSet()
+        
+        // P3: Fallback for unresolved interfaces (e.g. Spring Data Repository generics)
+        val springDataInterfaces = setOf("JpaRepository", "CrudRepository", "PagingAndSortingRepository", "JpaSpecificationExecutor")
+        
+        psiClass.implementsList?.referenceElements?.forEach { ref ->
+            val refName = ref.referenceName
+            if (refName != null && springDataInterfaces.contains(refName)) {
+                interfaces.add(refName)
+            }
+        }
+        psiClass.extendsList?.referenceElements?.forEach { ref ->
+            val refName = ref.referenceName
+            if (refName != null && springDataInterfaces.contains(refName)) {
+                interfaces.add(refName)
+            }
+        }
 
         return FileNode(
             path = relativePath,
@@ -114,7 +130,7 @@ class SpringAnnotationResolver {
             isAbstract = psiClass.hasModifierProperty(PsiModifier.ABSTRACT),
             annotations = annotations,
             superClass = superClass,
-            implementedInterfaces = interfaces,
+            implementedInterfaces = interfaces.toList(),
             injections = injections,
             anyframeRole = anyframeRole,
             localName = localName,

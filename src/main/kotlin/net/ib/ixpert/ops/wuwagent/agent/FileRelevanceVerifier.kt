@@ -36,6 +36,14 @@ class FileRelevanceVerifier(
         val (createSpecs, modifySpecs) = candidates.partition { it.type == "신규" }
         if (modifySpecs.isEmpty()) return candidates
 
+        // [과제 #2 보완] Java/Kotlin 파일만 Stage 3 검증 수행 (리소스 파일은 bypass)
+        // TODO: 향후 get_resource_summary를 Stage 3에 연동하여 리소스 파일도 내용 기반으로 검증하는 로직 추가 필요
+        val (javaModifySpecs, resourceModifySpecs) = modifySpecs.partition {
+            it.path.endsWith(".java") || it.path.endsWith(".kt")
+        }
+
+        if (javaModifySpecs.isEmpty()) return resourceModifySpecs + createSpecs
+
         val allResults = mutableListOf<VerificationResult>()
         
         val fwType = graph.resolveFrameworkType()
@@ -60,7 +68,7 @@ class FileRelevanceVerifier(
 $frameworkRules
         """.trimIndent()
 
-        for (spec in modifySpecs) {
+        for (spec in javaModifySpecs) {
             val context = buildFileContext(spec.path, graph, mdRoot)
             val prompt = buildSinglePrompt(userQuery, spec, context)
             
@@ -111,7 +119,7 @@ $frameworkRules
             }
         }
         
-        val keptModifySpecs = modifySpecs.mapNotNull { spec ->
+        val keptModifySpecs = javaModifySpecs.mapNotNull { spec ->
             val res = allResults.find { it.path == spec.path }
             if (res != null && res.verdict != "UNNECESSARY") {
                 if (res.verdict == "OPTIONAL") {
@@ -127,7 +135,7 @@ $frameworkRules
             return candidates
         }
         
-        return keptModifySpecs + createSpecs
+        return keptModifySpecs + resourceModifySpecs + createSpecs
     }
 
     private fun buildSinglePrompt(userQuery: String, spec: TargetFileSpec, context: String): String {

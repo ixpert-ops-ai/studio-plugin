@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import com.intellij.openapi.diagnostic.Logger
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
+import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ToolService
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 
 /**
@@ -52,39 +53,169 @@ class LlmCandidateSelector(
     fun select(
         userQuery: String,
         candidates: List<ScoredCandidate>,
-        maxCandidates: Int = 10
+        maxCandidates: Int = 10,
+        onChunk: ((String) -> Unit)? = null
     ): SelectionResult {
         val topCandidates = candidates
             .sortedByDescending { it.score }
             .take(maxCandidates)
-        
-        return try {
-            val systemPrompt = buildSystemPrompt()
-            val userPrompt = buildUserPrompt(userQuery, topCandidates)
             
-            // 기존 LLMClient 활용. maxTokens는 2048 할당.
+        val workTools = ToolService.buildSchema()
+        val systemPrompt = buildSystemPrompt()
+        val userPrompt = buildUserPrompt(userQuery, topCandidates)
+        
+        val messages = mutableListOf(
+            net.ib.ixpert.ops.wuwagent.model.ChatMessage(role = "user", content = userPrompt)
+        )
+        
+        var turn = 0
+        var hasRetriedJson = false
+        
+        val maxTurns = 5
+        while (turn < maxTurns) {
+            try {
+                // 턴에 관계없이 auto (마지막 턴은 null). 요건이 단순하면 1턴만에 응답 가능
+                val currentToolChoice = "auto"
+                
+                // 마지막 턴에는 툴 호출을 막고 무조건 JSON 응답을 강제함
+                val isLastTurn = turn == maxTurns - 1
+                if (isLastTurn) {
+                    messages.add(
+                        net.ib.ixpert.ops.wuwagent.model.ChatMessage(
+                            role = "user",
+                            content = "탐색이 완료되었습니다. 도구를 더 사용하지 말고, 지금까지 수집한 정보를 바탕으로 최종 JSON 응답을 생성하세요."
+                        )
+                    )
+                }
+                
+                val response = llmClient.chatWithTools(
+                    systemPrompt = systemPrompt,
+                    messages = messages,
+                    maxTokens = 8192,
+                    tools = if (isLastTurn) null else workTools,
+                    toolChoice = if (isLastTurn) null else currentToolChoice
+                )
+                
+                if (response == null) {
+                    logger.warn("LLM response is null")
+                    messages.clear()
+                    return fallbackToStage1(topCandidates)
+                }
+                
+                // 씽킹 로그가 들어오면 내부 트레이스로 로깅
+                response.reasoningContent?.let { logger.info("[LLM Thinking]: $it") }
+                
+                val assistantMsg = response.choices?.firstOrNull()?.message
+                if (assistantMsg == null) {
+                    logger.warn("LLM returned empty message")
+                    messages.clear()
+                    return fallbackToStage1(topCandidates)
+                }
+                
+                messages.add(assistantMsg)
+                
+                if (!assistantMsg.toolCalls.isNullOrEmpty()) {
+                    for (toolCall in assistantMsg.toolCalls) {
+                        onChunk?.invoke("> 🛠️ **Tool Calling**: `${toolCall.function.name}` 탐색 중...\n")
+                        logger.info("LLM requested Tool Calling: ${toolCall.function.name} (args: ${toolCall.function.arguments})")
+                        
+                        val startMs = System.currentTimeMillis()
+                        val observation = ToolService.execute(toolCall.function.name, toolCall.function.arguments, projectGraph)
+                        val elapsed = System.currentTimeMillis() - startMs
+                        
+                        logger.info("[Tool Execution Turn ${turn + 1}] tool_name: ${toolCall.function.name}, elapsed: ${elapsed}ms")
+                        
+                        if (observation.startsWith("Error")) {
+                            onChunk?.invoke("> ⚠️ 툴 실행 실패: ${toolCall.function.name}\n")
+                        }
+                        
+                        messages.add(
+                            net.ib.ixpert.ops.wuwagent.model.ChatMessage(
+                                role = "tool",
+                                content = observation,
+                                toolCallId = toolCall.id,
+                                name = toolCall.function.name
+                            )
+                        )
+                    }
+                    turn++
+                } else {
+                    // 최종 결과 JSON 도출 성공 시 탈출
+                    val content = assistantMsg.content
+                    if (content.isNullOrBlank()) {
+                        logger.warn("Parsed result is empty")
+                        messages.clear()
+                        return fallbackToStage1(topCandidates)
+                    }
+                    
+                    val parsed = parseResponse(content, topCandidates)
+                    if (parsed != null && (parsed.modify.isNotEmpty() || parsed.create.isNotEmpty())) {
+                        return parsed
+                    } else {
+                        if (!hasRetriedJson) {
+                            logger.warn("Parsed result is empty or invalid, prompting LLM to retry returning JSON")
+                            onChunk?.invoke("> ⚠️ JSON 형식이 올바르지 않아 재시도합니다...\n")
+                            messages.add(
+                                net.ib.ixpert.ops.wuwagent.model.ChatMessage(
+                                    role = "user",
+                                    content = "JSON 포맷 파싱에 실패했습니다. 지정된 JSON 형식으로 최종 결과를 다시 응답해주세요."
+                                )
+                            )
+                            hasRetriedJson = true
+                            turn++
+                            continue
+                        } else {
+                            logger.warn("Parsed result is empty or invalid after retry")
+                            messages.clear()
+                            return fallbackToStage1(topCandidates)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // 1. HTTP 400 Bad Request 또는 파싱 에러(JsonSyntaxException 등) -> 폴백
+                // 2. HTTP 503, ConnectException -> 상위로 에러 전파
+                val isBadRequest = e.message?.contains("400") == true || e.message?.contains("Bad Request") == true
+                val isParseError = e is com.google.gson.JsonSyntaxException || e is com.fasterxml.jackson.core.JsonParseException
+                
+                if (isBadRequest || isParseError) {
+                    logger.warn("Tool calling not supported or parsing failed. Falling back to one-shot.", e)
+                    messages.clear()
+                    return fallbackToLegacyPrompting(topCandidates, systemPrompt, userPrompt)
+                }
+                
+                logger.error("LLM selection failed with critical error", e)
+                throw e
+            }
+        }
+        
+        // 5턴 초과 시 강제 폴백 (Context Rollback)
+        logger.warn("Tool calling loop exceeded max turns ($maxTurns). Falling back to Stage 1.")
+        messages.clear()
+        return fallbackToStage1(topCandidates)
+    }
+
+    private fun fallbackToLegacyPrompting(candidates: List<ScoredCandidate>, systemPrompt: String, userPrompt: String): SelectionResult {
+        return try {
             val response = llmClient.chat(
                 systemPrompt = systemPrompt,
                 userCode = userPrompt,
-                maxTokens = 2048
+                maxTokens = 8192
             )
             
             val content = response?.message?.content
             if (content.isNullOrBlank()) {
-                logger.warn("LLM response is empty or null")
-                fallbackToStage1(topCandidates)
+                fallbackToStage1(candidates)
             } else {
-                val parsed = parseResponse(content, topCandidates)
-                if (parsed != null && parsed.modify.isNotEmpty()) {
+                val parsed = parseResponse(content, candidates)
+                if (parsed != null && (parsed.modify.isNotEmpty() || parsed.create.isNotEmpty())) {
                     parsed
                 } else {
-                    logger.warn("Parsed result is empty or invalid")
-                    fallbackToStage1(topCandidates)
+                    fallbackToStage1(candidates)
                 }
             }
         } catch (e: Exception) {
-            logger.warn("LLM selection failed, falling back to Stage 1 results", e)
-            fallbackToStage1(topCandidates)
+            logger.warn("Legacy fallback failed", e)
+            fallbackToStage1(candidates)
         }
     }
 
@@ -133,18 +264,36 @@ class LlmCandidateSelector(
         to modify and suggest new files to create, based on a user requirement and a 
         pre-filtered candidate list.
 
+        You MUST respond in Korean (한국어). All output including summary, reasoning, and descriptions must be in Korean.
+
+        ## TOOL USAGE (CRITICAL)
+        You have access to tools (`search_files`, `get_file_summary`, `get_dependencies`).
+        - DO NOT guess file paths. If a file you need is NOT in the Candidate Files list, YOU MUST use the `search_files` or `get_dependencies` tool to find its exact path first.
+        - You can and should call tools multiple times to explore the project structure before giving your final JSON answer.
+        - Only output the final JSON once you have verified the paths and dependencies using tools.
+        - You have a maximum of 4 tool-calling opportunities. On your 5th response, you MUST provide the final JSON answer without any tool calls.
+        - If a search returns empty results, do NOT retry with similar keywords. This means the project does not have that component and you should plan to CREATE it.
+        - EXCEPTION: If the user requirement mentions UI changes (e.g. 화면, UI, 캘린더, 입력 필드, 폼, 버튼) AND no JSP/JS file has been found in your searches so far, you MUST perform `search_files(keyword=".jsp", scope="path")` exactly once before producing the final JSON.
+        - If the Candidate Files list already contains all files you need, skip tool calls and respond with the final JSON directly.
+        - When you need detailed information about a file:
+          - For .java or .kt files: use `get_file_summary`
+          - For .jsp, .js, .xml, .html, .css files: use `get_resource_summary`
+          - If `get_file_summary` returns "File not found matching", retry with `get_resource_summary`
+        - If a file is already in the Candidate Files list with sufficient metadata (methods, layer, injects), do NOT call get_file_summary for it. Only use get_file_summary for files you discovered via search_files that are NOT in the Candidate list.
+
         ## STRICT RULES
-        1. You may ONLY select files from the [Candidate Files] list for modification.
-        2. Use the EXACT file path as provided — do not alter, shorten, or guess paths.
-        3. If a file not in the list is needed, mark it as "create" with full path 
-           following the project's existing package conventions.
+        1. You may ONLY select files from the [Candidate Files] list OR files you have verified exist via tool calls.
+           - CRITICAL: If the user requests UI/Frontend changes or DB query changes, you MUST select the relevant "Linked Resources" (JSP, JS, XML) shown under the Candidate Files and add them to the "modify" list. Do NOT just mention them in warnings.
+           - CRITICAL: DO NOT put hallucinated or guessed file paths in the "modify" array. If a file does not exist in the candidate list and you cannot find it via `search_files`, you MUST put it in the "create" array.
+        2. Use the EXACT file path as provided or discovered — do not alter, shorten, or guess paths.
+        3. If a new file is needed, mark it as "create" (NOT "modify") with a full path following the project's existing package conventions.
         4. Framework Rules:
            $frameworkSpecificRules
         5. Each file must have a one-line actionable description of WHAT to change.
         6. Do NOT include files unrelated to the requirement.
         7. For "modify", ONLY include files directly related to the user's requirement. Do not include files just because they depend on the same Repository.
         8. Do NOT put the same file in BOTH "modify" and "create". Adding code to an existing file is a "modify" action.
-        9. Use the EXACT path provided in the candidate list, including the module path (e.g. member-market-api/src/main/java/...).
+        9. Use the EXACT path, including the module path (e.g. member-market-api/src/main/java/...).
 
         ## RESPONSE FORMAT (JSON ONLY)
         {
@@ -168,36 +317,59 @@ class LlmCandidateSelector(
         appendLine()
         
         candidates.forEachIndexed { index, candidate ->
-            val node = projectGraph.files[candidate.filePath] ?: return@forEachIndexed
-            val riskFlag = if (node.riskAssessment.riskScore >= 5) " ⚠️ ${node.riskAssessment.changeRisk}" else ""
-            
-            appendLine("### #${index + 1} [Score: ${candidate.score}]$riskFlag")
-            appendLine("- Path: ${node.path}")
-            appendLine("- Type: ${node.fileType} | Layer: ${node.layer}")
-            
-            if (node.methodNames.isNotEmpty()) {
-                appendLine("- Methods: ${node.methodNames.joinToString(", ")}")
-            }
-            if (node.apiEndpoints.isNotEmpty()) {
-                val endpoints = node.apiEndpoints.joinToString("; ") { ep ->
-                    "${ep.httpMethod} ${ep.path} -> ${ep.relatedServiceMethod}"
+            val node = projectGraph.files[candidate.filePath]
+            if (node != null) {
+                val riskFlag = if (node.riskAssessment.riskScore >= 5) " ⚠️ ${node.riskAssessment.changeRisk}" else ""
+                
+                appendLine("### #${index + 1} [Score: ${candidate.score}]$riskFlag")
+                appendLine("- Path: ${node.path}")
+                appendLine("- Type: ${node.fileType} | Layer: ${node.layer}")
+                
+                if (node.methodNames.isNotEmpty()) {
+                    appendLine("- Methods: ${node.methodNames.joinToString(", ")}")
                 }
-                appendLine("- Endpoints: $endpoints")
-            }
-            if (node.injections.isNotEmpty()) {
-                val injects = node.injections.joinToString(", ") { it.targetType }
-                appendLine("- Injects: $injects")
-            }
-            if (node.koreanComments.isNotEmpty()) {
-                appendLine("- Korean Comments: ${node.koreanComments.joinToString(", ")}")
-            }
-            if (node.dependedBy.isNotEmpty()) {
-                val dependedBy = node.dependedBy.map { path ->
-                    projectGraph.files[path]?.className ?: path.substringAfterLast("/")
+                if (node.apiEndpoints.isNotEmpty()) {
+                    val endpoints = node.apiEndpoints.joinToString("; ") { ep ->
+                        "${ep.httpMethod} ${ep.path} -> ${ep.relatedServiceMethod}"
+                    }
+                    appendLine("- Endpoints: $endpoints")
                 }
-                appendLine("- DependedBy: ${dependedBy.joinToString(", ")}")
+                if (node.injections.isNotEmpty()) {
+                    val injects = node.injections.joinToString(", ") { it.targetType }
+                    appendLine("- Injects: $injects")
+                }
+                
+                val linkedResources = projectGraph.resourceNodes.filter { it.linkedTo.contains(node.path) }
+                if (linkedResources.isNotEmpty()) {
+                    val resStr = linkedResources.joinToString(", ") { "${it.path} (${it.type})" }
+                    appendLine("- Linked Resources: $resStr")
+                }
+                if (node.koreanComments.isNotEmpty()) {
+                    appendLine("- Korean Comments: ${node.koreanComments.joinToString(", ")}")
+                }
+                if (node.dependedBy.isNotEmpty()) {
+                    val dependedBy = node.dependedBy.map { path ->
+                        projectGraph.files[path]?.className ?: path.substringAfterLast("/")
+                    }
+                    appendLine("- DependedBy: ${dependedBy.joinToString(", ")}")
+                }
+                appendLine()
+            } else {
+                val rNode = projectGraph.resourceNodes.find { it.path == candidate.filePath }
+                if (rNode != null) {
+                    appendLine("### #${index + 1} [Score: ${candidate.score}]")
+                    appendLine("- Path: ${rNode.path}")
+                    appendLine("- Type: ${rNode.type} | Layer: ${rNode.layer}")
+                    if (rNode.linkedTo.isNotEmpty()) {
+                        appendLine("- Linked to: ${rNode.linkedTo.joinToString(", ")}")
+                    }
+                    if (rNode.metadata.isNotEmpty()) {
+                        val metaStr = rNode.metadata.entries.joinToString("; ") { "${it.key}: ${it.value}" }
+                        appendLine("- Metadata: $metaStr")
+                    }
+                    appendLine()
+                }
             }
-            appendLine()
         }
         
         appendLine("## Architecture Context")
@@ -220,13 +392,26 @@ class LlmCandidateSelector(
             
             val validModify = parsed.modify?.filter { action ->
                 val path = action.path ?: return@filter false
+                // 후보 목록에 없더라도 프로젝트 전체 그래프에 존재하는 실제 파일이라면 허용 (LLM의 스마트 추론 인정)
                 if (path in validPaths) {
                     true
+                } else if (projectGraph.files.containsKey(path) || projectGraph.resourceNodes.any { it.path == path }) {
+                    // 2차 필터: 전체 프로젝트에 존재하면 허용하되 사용자 경고용 태그 추가
+                    true
                 } else {
-                    logger.warn("LLM returned path not in candidates: ${action.path}")
+                    logger.warn("LLM returned path not in candidates nor in project graph: ${action.path}")
                     false
                 }
-            }?.map { FileAction(it.order ?: 0, it.path!!, it.reason ?: "") } ?: emptyList()
+            }?.map { 
+                val isResource = projectGraph.resourceNodes.any { r -> r.path == it.path }
+                val existsInProject = projectGraph.files.containsKey(it.path) || isResource
+                val reason = if (it.path!! !in validPaths && existsInProject) {
+                    "[추가 탐색된 파일] " + (it.reason ?: "")
+                } else {
+                    it.reason ?: ""
+                }
+                FileAction(it.order ?: 0, it.path, reason)
+            } ?: emptyList()
             
             val createList = parsed.create?.filter { !it.path.isNullOrBlank() }
                 ?.map { FileAction(it.order ?: 0, it.path!!, it.reason ?: "") } ?: emptyList()
