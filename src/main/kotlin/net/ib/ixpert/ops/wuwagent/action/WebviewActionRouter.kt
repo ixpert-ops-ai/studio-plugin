@@ -1073,6 +1073,13 @@ class WebviewActionRouter(private val project: Project) {
                     com.intellij.openapi.options.ShowSettingsUtil.getInstance().showSettingsDialog(project, "iXpert AI Assistant")
                 }
 
+                "/openWelcome" -> {
+                    logger.info("Router: /openWelcome → WelcomeDialog 표시")
+                    ApplicationManager.getApplication().invokeLater {
+                        net.ib.ixpert.ops.wuwagent.ui.WelcomeDialog(project).show()
+                    }
+                }
+
                 // ── Alert: WebView에서 네이티브 메시지 박스 띄우기 ──────────────
                 "/alert" -> {
                     val title = payload["title"] ?: "iXpert AI Assistant"
