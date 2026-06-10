@@ -62,7 +62,28 @@ class GraphLoader(private val project: Project) {
                 
                 logger.info("Loading project graph from ${metaFile.absolutePath} (targetModules=${targetModules?.joinToString() ?: "ALL"}, level1Only=$level1Only)")
                 val jsonContent = metaFile.readText(Charsets.UTF_8)
-                val parsedGraph = gson.fromJson(jsonContent, ProjectGraph::class.java)
+                var parsedGraph = gson.fromJson(jsonContent, ProjectGraph::class.java)
+
+                // 하위 호환 마이그레이션 로직 (이전 버전의 SPRING_BOOT, ANYFRAME 그래프가 로드될 때 자동감지 재실행)
+                if (parsedGraph.frameworkType.name == "SPRING_BOOT" || parsedGraph.frameworkType.name == "ANYFRAME") {
+                    logger.info("Legacy framework type detected (${parsedGraph.frameworkType.name}). Running auto-detection for migration...")
+                    val detectionResult = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.FrameworkDetector.detectFramework(parsedGraph.files)
+                    val newType = if (parsedGraph.frameworkType.name == "ANYFRAME") FrameworkType.ANYFRAME_AP else detectionResult.detected
+                    parsedGraph = parsedGraph.copy(
+                        frameworkType = newType,
+                        frameworkDetection = detectionResult,
+                        framework = if (newType == FrameworkType.ANYFRAME_AP) "anyframe" else "spring-boot"
+                    )
+                    
+                    // 마이그레이션된 결과를 파일에 저장하여 매번 감지하지 않게 함
+                    try {
+                        val migratedJson = gson.toJson(parsedGraph)
+                        metaFile.writeText(migratedJson, Charsets.UTF_8)
+                        logger.info("Graph migration completed and saved.")
+                    } catch (e: Exception) {
+                        logger.warn("Failed to save migrated graph JSON: ${e.message}")
+                    }
+                }
 
                 val safeGraph = if (parsedGraph.graphType == GraphType.MULTI_LEVEL_1 && parsedGraph.modules != null) {
                     if (level1Only) {
@@ -79,7 +100,7 @@ class GraphLoader(private val project: Project) {
 
 
                     val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
-                    val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+                    val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME_AP
                     val actualTargetModules = if (isAnyframe && targetModules != null) {
                         val hasZz = targetModules.any { it.lowercase() == "zz" || it.lowercase().endsWith("zz") }
                         if (!hasZz) {

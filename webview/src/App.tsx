@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown, X } from 'lucide-react';
+import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown, X, Info } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -45,6 +45,10 @@ interface Message {
   currentStatus?: string;
   stepNotiStatus?: 'started' | 'completed' | 'failed';
   toolNotiText?: string;
+  clarifyData?: {
+    enhancedRequirements: string[];
+    questions: Array<{ questionText: string; defaultValue: string }>;
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -120,13 +124,24 @@ const MermaidChart = React.memo(({ chart }: { chart: string }) => {
 // ─────────────────────────────────────────────
 //  컴포넌트: CodeBlock (에디터 스타일 코드블록)
 // ─────────────────────────────────────────────
+// rehypeHighlight 적용 후 children이 <span> 배열로 변환되므로
+// React 노드 트리를 재귀 순회해 순수 텍스트만 추출
+const extractNodeText = (node: React.ReactNode): string => {
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractNodeText).join('');
+  if (React.isValidElement(node)) return extractNodeText((node.props as any).children);
+  return '';
+};
+
 const CodeBlock = ({ children, isCollapsible = false }: { children: React.ReactNode, isCollapsible?: boolean }) => {
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
   const codeEl = Array.isArray(children) ? children[0] : children;
   const lang = /language-(\w+)/.exec((codeEl as any)?.props?.className || '')?.[1] ?? '';
-  const codeText = String((codeEl as any)?.props?.children ?? '').replace(/\n$/, '');
+  // props.children が span 배열일 수 있으므로 extractNodeText로 순수 텍스트 추출
+  const codeText = extractNodeText((codeEl as any)?.props?.children ?? '').replace(/\n$/, '');
 
   const lineCount = codeText.split('\n').length;
   // 코드가 20줄 이상일 때만 접기 적용
@@ -165,12 +180,136 @@ const CodeBlock = ({ children, isCollapsible = false }: { children: React.ReactN
 };
 
 // ─────────────────────────────────────────────
+//  컴포넌트: ClarifyForm (요구사항 구체화 폼)
+// ─────────────────────────────────────────────
+const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
+  const data = msg.clarifyData;
+  if (!data) return null;
+
+  const hasQuestions = data.questions && data.questions.length > 0;
+  
+  // 폼 상태: 사용자의 O/X 및 텍스트 답변
+  const [answers, setAnswers] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    if (data.questions) {
+      data.questions.forEach((q, idx) => {
+        init[(idx + 1).toString()] = q.defaultValue;
+      });
+    }
+    return init;
+  });
+  
+  const [isSubmitted, setIsSubmitted] = useState(false);
+
+  const handleSubmit = () => {
+    if (isSubmitted) return;
+    setIsSubmitted(true);
+    
+    const payload = {
+      answers,
+      removedRequirements: [],
+      additionalNotes: null
+    };
+    
+    if (window.sendToIde) {
+      window.sendToIde(JSON.stringify({
+        command: '/analyze-confirm',
+        text: JSON.stringify(payload)
+      }));
+    }
+  };
+
+  return (
+    <div className="msg-ai analysis" data-message-role="ai" data-message-id={msg.id}>
+      <div className="msg-ai-content">
+        <div className="markdown-body">
+          <h3>🤖 요구사항 자동 구체화 결과 (Stage 0)</h3>
+          
+          {data.enhancedRequirements && data.enhancedRequirements.length > 0 && (
+            <>
+              <h4>[자동 보강된 항목]</h4>
+              <ul>
+                {data.enhancedRequirements.map((req, idx) => (
+                  <li key={idx}>{req}</li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {hasQuestions ? (
+            <>
+              <h4>[추가 확인이 필요한 항목]</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
+                {data.questions.map((q, idx) => {
+                  const key = (idx + 1).toString();
+                  const isBoolean = q.defaultValue === 'Y' || q.defaultValue === 'N';
+                  return (
+                    <div key={idx} style={{ padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '6px' }}>
+                      <p style={{ margin: '0 0 8px 0', fontSize: '13px' }}>Q: {q.questionText}</p>
+                      {isBoolean ? (
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button 
+                            className={`btn-toggle ${answers[key] === 'Y' ? 'active' : ''}`}
+                            onClick={() => !isSubmitted && setAnswers(prev => ({ ...prev, [key]: 'Y' }))}
+                            style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #444', background: answers[key] === 'Y' ? '#3b82f6' : 'transparent', color: answers[key] === 'Y' ? '#fff' : '#ccc', cursor: isSubmitted ? 'default' : 'pointer' }}
+                          >
+                            예 (Y)
+                          </button>
+                          <button 
+                            className={`btn-toggle ${answers[key] === 'N' ? 'active' : ''}`}
+                            onClick={() => !isSubmitted && setAnswers(prev => ({ ...prev, [key]: 'N' }))}
+                            style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #444', background: answers[key] === 'N' ? '#ef4444' : 'transparent', color: answers[key] === 'N' ? '#fff' : '#ccc', cursor: isSubmitted ? 'default' : 'pointer' }}
+                          >
+                            아니오 (N)
+                          </button>
+                        </div>
+                      ) : (
+                        <input 
+                          type="text" 
+                          value={answers[key] || ''} 
+                          onChange={(e) => !isSubmitted && setAnswers(prev => ({ ...prev, [key]: e.target.value }))}
+                          disabled={isSubmitted}
+                          style={{ width: '100%', padding: '6px', background: 'rgba(0,0,0,0.2)', border: '1px solid #444', color: '#fff', borderRadius: '4px' }}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <p style={{ fontSize: '13px', color: '#aaa', marginTop: '10px' }}>
+              추가로 확인할 질문이 없습니다. 보강된 요구사항을 확인해 주세요.
+            </p>
+          )}
+
+          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+            <button 
+              onClick={handleSubmit} 
+              disabled={isSubmitted}
+              style={{ padding: '6px 16px', background: isSubmitted ? '#444' : '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: isSubmitted ? 'default' : 'pointer', fontWeight: 'bold' }}
+            >
+              {isSubmitted ? '제출 완료' : (hasQuestions ? '답변 제출 및 분석 시작' : '이대로 진행')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// ─────────────────────────────────────────────
 //  컴포넌트: MessageItem (역할별 분기)
 // ─────────────────────────────────────────────
 const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   // 0. Step 알림 카드
   if (msg.subType === 'step_noti') {
     return <StepNotiItem msg={msg} />;
+  }
+  
+  // 0.5 Clarify Form
+  if (msg.subType === 'analyze_clarify') {
+    return <ClarifyForm msg={msg} />;
   }
 
   // 1. Tool / Status 메시지
@@ -191,7 +330,12 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   const isError = msg.isError === true;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(msg.content).catch(() => {});
+    // Step2 말풍선(filePath 있음): 마크다운에서 코드 블록 순수 텍스트만 추출해 복사
+    // 그 외 말풍선: content 원본(마크다운) 복사
+    const textToCopy = msg.filePath
+      ? (/```[\w]*\n([\s\S]*?)\n```/.exec(msg.content)?.[1] ?? msg.content)
+      : msg.content;
+    navigator.clipboard.writeText(textToCopy).catch(() => {});
   };
 
   const handleSave = () => {
@@ -605,6 +749,30 @@ function App() {
 
       const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
 
+      if (data.subType === 'analyze_clarify') {
+        if (messageId) {
+          // 기존에 열려있는 다른 ClarifyForm이 있다면 비활성화(제거) 처리
+          setMessages(prev => {
+            const filtered = prev.filter(m => m.subType !== 'analyze_clarify');
+            let parsedData = null;
+            try {
+              parsedData = JSON.parse(data.content);
+            } catch (e) {
+              console.error("Failed to parse analyze_clarify JSON", e);
+            }
+            return [...filtered, {
+              id: messageId,
+              role: 'ai',
+              subType: 'analyze_clarify',
+              content: '',
+              clarifyData: parsedData,
+              isLoading: false
+            }];
+          });
+        }
+        return;
+      }
+
       if (data.subType === 'tool_noti') {
         if (messageId) {
           setMessages(prev => prev.map(m =>
@@ -912,9 +1080,15 @@ function App() {
     } else if (text === '/improve' || text.startsWith('/improve ')) {
       command = '/task';
       payload = '코드를 개선해주세요.';
-    } else if (text === '/analyze' || text.startsWith('/analyze ')) {
+    } else if (text === '/analyze' || text.startsWith('/analyze ') || text.startsWith('/analyze!')) {
       command = '/analyze';
-      payload = text.startsWith('/analyze ') ? text.slice(9).trim() : '요구사항 대상 파일을 추출해주세요.';
+      if (text.startsWith('/analyze!')) {
+        payload = '!' + text.slice(9).trim();
+      } else if (text.startsWith('/analyze ')) {
+        payload = text.slice(9).trim();
+      } else {
+        payload = '요구사항 대상 파일을 추출해주세요.';
+      }
     } else if (text === '/implement' || text.startsWith('/implement ')) {
       command = '/implement';
       payload = '';
@@ -1109,6 +1283,9 @@ function App() {
       <header className="header flex justify-between items-center">
         <span className="title">{chatTitle}</span>
         <div className="flex gap-2">
+          <button className="icon-btn" onClick={() => window.sendToIde?.(JSON.stringify({ command: '/openWelcome' }))} title="플러그인 안내">
+            <Info size={14} />
+          </button>
           <button className="icon-btn" onClick={handleNewChat} title="새 채팅">
             <Plus size={14} />
           </button>

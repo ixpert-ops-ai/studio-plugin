@@ -21,6 +21,7 @@ import java.time.Instant
 import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.vfs.LocalFileSystem
 import java.io.File
+import java.nio.file.Paths
 
 import com.intellij.openapi.roots.ContentIterator
 import com.intellij.openapi.vfs.VirtualFile
@@ -151,8 +152,11 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
 
         sourceFiles.forEachIndexed { index, psiFile ->
             indicator?.checkCanceled()
+            
+            val fileName = ReadAction.compute<String, Throwable> { psiFile.name }
+            
             indicator?.fraction = index.toDouble() / totalFiles
-            indicator?.text = "분석 중: ${psiFile.name} (${index + 1}/$totalFiles)"
+            indicator?.text = "분석 중: $fileName (${index + 1}/$totalFiles)"
 
             try {
                 val (fileNodes, fileCalls) = ReadAction.compute<Pair<List<Pair<String, FileNode>>, List<Relationship>>, Throwable> {
@@ -183,7 +187,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
 
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
         val currentFrameworkType = settings.state.frameworkType
-        if (currentFrameworkType == FrameworkType.ANYFRAME) {
+        if (currentFrameworkType == FrameworkType.ANYFRAME_AP) {
             val voRels = anyframeVoChainAnalyzer.analyze(resolvedNodes)
             relationships.addAll(voRels)
             for (rel in voRels) {
@@ -197,6 +201,44 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         for (call in allCalls) {
             resolvedNodes[call.source]?.dependsOn?.add(call.target)
             resolvedNodes[call.target]?.dependedBy?.add(call.source)
+        }
+
+        // Phase 1 비-Java 자원 스캔 및 연결
+        indicator?.text = "비-Java 자원 스캔 중..."
+        val projectRootPath = targetDirectory?.toNioPath() ?: Paths.get(project.basePath ?: "")
+        val scanner = net.ib.ixpert.ops.wuwagent.service.metagraph.builder.ResourceScanner(projectRootPath)
+        val rawResourceNodes = scanner.scan()
+        
+        indicator?.text = "자원 연결 관계 구성 중..."
+        val linker = net.ib.ixpert.ops.wuwagent.service.metagraph.builder.ResourceLinker(resolvedNodes)
+        val linkedResourceNodes = linker.link(rawResourceNodes).toMutableList()
+
+        // Phase 5-B: 동적 뷰 라우팅(Front Controller) 감지 및 역추적
+        indicator?.text = "동적 뷰 라우팅(Front Controller) 감지 중..."
+        val dynamicResolver = net.ib.ixpert.ops.wuwagent.service.metagraph.builder.DynamicViewResolver()
+        val frontControllers = dynamicResolver.detectFrontControllers(resolvedNodes.values.toList())
+        
+        if (frontControllers.isNotEmpty()) {
+            indicator?.text = "동적 뷰 역바인딩 수행 중..."
+            val dynamicBindings = dynamicResolver.resolveViewBindings(frontControllers, linkedResourceNodes)
+            
+            // ResourceNode 갱신 및 Controller 경로 주입
+            for (i in linkedResourceNodes.indices) {
+                val resource = linkedResourceNodes[i]
+                val myBindings = dynamicBindings.filter { it.resourcePath == resource.path }
+                if (myBindings.isNotEmpty()) {
+                    val newLinkedTo = resource.linkedTo.toMutableList()
+                    myBindings.forEach { binding -> 
+                        if (!newLinkedTo.contains(binding.controllerPath)) {
+                            newLinkedTo.add(binding.controllerPath)
+                        }
+                    }
+                    linkedResourceNodes[i] = resource.copy(
+                        dynamicBindings = myBindings,
+                        linkedTo = newLinkedTo
+                    )
+                }
+            }
         }
 
         // Phase 1c & Phase 3: RiskAssessment 계산
@@ -252,12 +294,13 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             node.copy(
                 dependsOn = distinctDependsOn,
                 dependedBy = distinctDependedBy,
-                riskAssessment = RiskAssessment(riskScore = score, changeRisk = risk, riskReasons = reasons)
+                riskAssessment = RiskAssessment(riskScore = score, changeRisk = risk, riskReasons = reasons),
+                isDynamicRouter = frontControllers.any { it.controllerPath == path }
             )
         }
 
         // Step 8: GraphStatistics 계산
-        val statistics = calculateStatistics(scoredNodes, relationships)
+        val statistics = calculateStatistics(scoredNodes, linkedResourceNodes, relationships)
 
         // Step 9: 그래프 조립
         indicator?.fraction = 1.0
@@ -269,7 +312,57 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         val targetModule = targetDirectory?.let { fileIndex.getModuleForFile(it) }
         val isSingleModulePartialUpdate = targetModule != null && targetModule.name != project.name && isMultiModule
 
-        val frameworkName = if (currentFrameworkType == FrameworkType.ANYFRAME) "anyframe" else "spring-boot"
+        // Phase 2: 프레임워크 자동 감지 실행
+        val detectionResult = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.FrameworkDetector.detectFramework(scoredNodes, linkedResourceNodes)
+        
+        // Phase 4: UI와 연동하여 Override 여부 결정
+        var finalFrameworkType = detectionResult.detected
+        
+        com.intellij.openapi.application.ApplicationManager.getApplication().invokeAndWait {
+            val options = net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.values().map { it.displayName }.toTypedArray()
+            val initialSelection = detectionResult.detected.displayName
+            
+            val message = buildString {
+                if (detectionResult.detected == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.CUSTOM || detectionResult.confidence < 50) {
+                    appendLine("⚠️ 프레임워크 자동 감지 신뢰도가 낮습니다.")
+                    appendLine("감지 알고리즘이 올바른 패턴을 찾지 못했습니다. 아래 드롭다운에서 정확한 프레임워크를 직접 선택해 주세요.")
+                } else {
+                    appendLine("프로젝트 프레임워크를 자동 감지했습니다.")
+                }
+                appendLine()
+                appendLine("감지된 프레임워크: ${detectionResult.detected.displayName} (신뢰도: ${detectionResult.confidence}%)")
+                appendLine()
+                appendLine("[판단 근거]")
+                detectionResult.reasons.forEach { appendLine("- $it") }
+                if (detectionResult.alternativeCandidates.isNotEmpty()) {
+                    appendLine()
+                    appendLine("[대안 프레임워크]")
+                    detectionResult.alternativeCandidates.forEach { appendLine("- ${it.first.displayName} (${it.second}%)") }
+                }
+                appendLine()
+                appendLine("이 결과를 사용하시겠습니까? (수정하려면 아래 드롭다운에서 선택하세요)")
+            }
+
+            val selectedIdx = com.intellij.openapi.ui.Messages.showChooseDialog(
+                project,
+                message,
+                "프레임워크 자동 감지 결과",
+                com.intellij.openapi.ui.Messages.getInformationIcon(),
+                options,
+                initialSelection
+            )
+
+            if (selectedIdx != -1) {
+                finalFrameworkType = net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.values()[selectedIdx]
+                if (finalFrameworkType != detectionResult.detected) {
+                    detectionResult.userOverride = finalFrameworkType
+                }
+            }
+        }
+        
+        settings.state.frameworkType = finalFrameworkType
+
+        val frameworkName = if (finalFrameworkType == FrameworkType.ANYFRAME_AP) "anyframe" else "spring-boot"
 
         val graph = if (isSingleModulePartialUpdate) {
             // A. 단독 모듈 분석 모드: MULTI_LEVEL_2로 생성
@@ -278,8 +371,10 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
                 generatedAt = Instant.now().toString(),
                 projectRoot = targetDirectory.path,
                 framework = frameworkName,
-                frameworkType = currentFrameworkType,
+                frameworkType = finalFrameworkType,
+                frameworkDetection = detectionResult,
                 files = scoredNodes,
+                resourceNodes = linkedResourceNodes,
                 relationships = relationships,
                 statistics = statistics
             )
@@ -295,9 +390,11 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
                 generatedAt = Instant.now().toString(),
                 projectRoot = projectBasePath,
                 framework = frameworkName,
-                frameworkType = currentFrameworkType,
+                frameworkType = finalFrameworkType,
+                frameworkDetection = detectionResult,
                 modules = modulesList,
                 files = scoredNodes,
+                resourceNodes = linkedResourceNodes,
                 relationships = relationships,
                 statistics = statistics
             )
@@ -332,9 +429,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             if (!vf.isDirectory && (vf.extension == "java" || vf.extension == "kt")) {
                 val path = vf.path.lowercase()
                 val isTest = path.contains("/test/") || path.contains("/src/test/")
-                val isBuild = path.contains("/build/") || path.contains("/out/") || path.contains("/target/") || 
-                              path.contains("/.gradle/") || path.contains("/.idea/") || path.contains("/.metadata/") ||
-                              path.contains("/.git/") || path.contains("/node_modules/")
+                val isBuild = net.ib.ixpert.ops.wuwagent.service.metagraph.builder.ScanExclusionUtil.shouldExclude(vf.name, path)
                 
                 // 1. fileIndex가 소스 코드로 인정하거나
                 // 2. targetDirectory가 명시된 경우, 빌드/테스트 경로가 아니면 강제 수집 (Source Root 매핑이 안 된 경우 대비)
@@ -386,7 +481,8 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         
         // Phase 1c: 보강 분석기 연동
         if (node.fileType == SpringFileType.REST_CONTROLLER || node.fileType == SpringFileType.CONTROLLER) {
-            val endpoints = endpointAnalyzer.analyze(primaryClass)
+            val injectedFieldNames = node.injections.map { it.fieldName }.toSet()
+            val endpoints = endpointAnalyzer.analyze(primaryClass, injectedFieldNames)
             node = node.copy(apiEndpoints = endpoints)
         } else if (node.fileType == SpringFileType.CONFIG) {
             val beans = beanAnalyzer.analyze(primaryClass)
@@ -399,7 +495,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         val calls = callRelationAnalyzer.analyze(primaryClass, projectBasePath).toMutableList()
         
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
-        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME_AP
 
         if (isAnyframe) {
             if (node.anyframeRole == AnyframeRole.SVC) {
@@ -415,22 +511,64 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             calls.addAll(anyframeBizCalls)
         }
         
+        // Adaptive File Discovery 지원: 한글 주석 + 메서드명 수집
+        val koreanComments = extractKoreanComments(primaryClass)
+        val methodNames = primaryClass.methods.map { it.name }.filter { it != primaryClass.name }
+        node = node.copy(
+            koreanComments = koreanComments,
+            methodNames = methodNames
+        )
+        
         return Pair(listOf(relativePath to node), calls)
+    }
+    // ── 한글 주석 추출 (Adaptive File Discovery) ───────
+
+    private val koreanPattern = Regex("[가-힣]{2,}")
+    private val noisePattern = Regex("^\\s*(TODO|FIXME|XXX|noinspection|Copyright|@)")
+
+    /**
+     * 파일 전체에서 한글이 포함된 주석을 추출합니다.
+     * KDoc, JavaDoc, 라인 주석(//) 및 블록 주석(/* */)을 모두 검사하며,
+     * TODO, FIXME 등의 노이즈 주석은 필터링하고 중복을 제거합니다.
+     */
+    private fun extractKoreanComments(psiClass: com.intellij.psi.PsiClass): List<String> {
+        val comments = mutableSetOf<String>()
+        val file = psiClass.containingFile
+
+        file.accept(object : com.intellij.psi.PsiRecursiveElementVisitor() {
+            override fun visitComment(comment: com.intellij.psi.PsiComment) {
+                super.visitComment(comment)
+                val text = comment.text
+                if (koreanPattern.containsMatchIn(text)) {
+                    text.lines()
+                        .map { it.replace(Regex("[/*@]"), "").trim() }
+                        .filter { line -> 
+                            line.isNotBlank() && 
+                            koreanPattern.containsMatchIn(line) && 
+                            !noisePattern.containsMatchIn(line)
+                        }
+                        .forEach { comments.add(it) }
+                }
+            }
+        })
+
+        return comments.toList().take(20) // 클래스당 최대 20개 주석 (기존 설계 10개에서 확장)
     }
 
     // ── Step 8: 통계 계산 ────────────────────────
 
-    private fun calculateStatistics(nodes: Map<String, FileNode>, relationships: List<Relationship>): GraphStatistics {
+    private fun calculateStatistics(nodes: Map<String, FileNode>, resourceNodes: List<ResourceNode>, relationships: List<Relationship>): GraphStatistics {
         return GraphStatistics(
-            totalFiles = nodes.size,
+            totalFiles = nodes.size + resourceNodes.size,
             controllers = nodes.values.count { it.fileType in listOf(SpringFileType.REST_CONTROLLER, SpringFileType.CONTROLLER) },
             services = nodes.values.count { it.fileType == SpringFileType.SERVICE },
             repositories = nodes.values.count { it.fileType in listOf(SpringFileType.REPOSITORY, SpringFileType.MAPPER) },
             entities = nodes.values.count { it.fileType == SpringFileType.ENTITY },
-            configs = nodes.values.count { it.fileType == SpringFileType.CONFIG },
+            configs = nodes.values.count { it.fileType == SpringFileType.CONFIG } + resourceNodes.count { it.type == ResourceType.CONFIG },
             dtos = nodes.values.count { it.fileType in listOf(SpringFileType.DTO, SpringFileType.VO) },
             utils = nodes.values.count { it.fileType == SpringFileType.UTIL },
-            views = nodes.values.count { it.fileType == SpringFileType.VIEW },
+            views = nodes.values.count { it.fileType == SpringFileType.VIEW } + resourceNodes.count { it.type == ResourceType.VIEW },
+            scripts = resourceNodes.count { it.type == ResourceType.SCRIPT },
             components = nodes.values.count { it.fileType in listOf(SpringFileType.COMPONENT, SpringFileType.FILTER, SpringFileType.INTERCEPTOR) },
             others = nodes.values.count { it.fileType !in listOf(
                 SpringFileType.REST_CONTROLLER, SpringFileType.CONTROLLER,

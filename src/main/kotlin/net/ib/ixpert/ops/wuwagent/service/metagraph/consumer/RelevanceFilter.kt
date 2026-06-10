@@ -1,4 +1,4 @@
-package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
+﻿package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
@@ -178,7 +178,7 @@ object RelevanceFilter {
         onProgress: ((String) -> Unit)?
     ): List<Pair<String, FileNode>> {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
-        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME_AP
 
         if (isAnyframe) {
             val anyframeStage1Matches = mutableSetOf<String>()
@@ -640,6 +640,7 @@ object RelevanceFilter {
 
     data class FilterResult(
         val filteredGraph: ProjectGraph,
-        val keywords: List<String>
+        val keywords: List<String>,
+        val candidates: List<net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScoredCandidate>? = null
     )
 }

@@ -245,6 +245,9 @@ object SignatureValidator {
      */
     private fun normalizeType(type: String): String {
         return type
+            .replace("static ", "")
+            .replace("final ", "")
+            .replace("abstract ", "")
             .replace(" ", "")
             .replace("java.util.", "")
             .replace("java.lang.", "")

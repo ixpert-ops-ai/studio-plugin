@@ -7,6 +7,17 @@ enum class GraphType {
 }
 
 /**
+ * 프레임워크 자동 감지 결과.
+ */
+data class FrameworkDetectionResult(
+    val detected: FrameworkType,
+    val confidence: Int,          // 0~100
+    val reasons: List<String>,    // 판단 근거
+    val alternativeCandidates: List<Pair<FrameworkType, Int>> = emptyList(),
+    var userOverride: FrameworkType? = null
+)
+
+/**
  * 프로젝트 전체 구조 그래프.
  * 메타파일(.meta/project-graph.json)의 최상위 구조입니다.
  */
@@ -16,12 +27,55 @@ data class ProjectGraph(
     val generatedAt: String,
     val projectRoot: String,
     val framework: String = "spring-boot",
-    val frameworkType: FrameworkType = FrameworkType.SPRING_BOOT,
+    val frameworkType: FrameworkType = FrameworkType.SPRING_BOOT_JPA,
+    val frameworkDetection: FrameworkDetectionResult? = null,
     val modules: List<ModuleInfo>? = null,
     val files: Map<String, FileNode>,
+    val resourceNodes: List<ResourceNode> = emptyList(),
     val relationships: List<Relationship>,
     val statistics: GraphStatistics
-)
+) {
+    fun resolveFrameworkType(): FrameworkType {
+        return this.frameworkDetection?.userOverride ?: this.frameworkType
+    }
+
+    @delegate:Transient
+    val documentFrequency: Map<String, Int> by lazy {
+        val dfMap = mutableMapOf<String, Int>()
+        
+        fun tokenize(identifier: String): List<String> {
+            if (identifier.isBlank()) return emptyList()
+            if (identifier.contains('_')) {
+                return identifier.split('_').filter { it.length >= 2 }.map { it.lowercase() }
+            }
+            val regex = Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+            return regex.split(identifier).filter { it.length >= 2 }.map { it.lowercase() }
+        }
+
+        for (rNode in resourceNodes) {
+            val tokens = mutableSetOf<String>()
+            tokens.addAll(rNode.path.split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) })
+            rNode.metadata.values.forEach { value ->
+                if (value is List<*>) {
+                    value.forEach { v -> tokens.addAll(v.toString().split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) }) }
+                } else {
+                    tokens.addAll(value.toString().split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) })
+                }
+            }
+            tokens.forEach { dfMap[it] = dfMap.getOrDefault(it, 0) + 1 }
+        }
+        
+        for (fNode in files.values) {
+            val tokens = mutableSetOf<String>()
+            tokens.addAll(tokenize(fNode.className))
+            fNode.packageName?.let { tokens.addAll(it.split(".")) }
+            fNode.methodNames.forEach { tokens.addAll(tokenize(it)) }
+            tokens.forEach { dfMap[it] = dfMap.getOrDefault(it, 0) + 1 }
+        }
+        
+        dfMap
+    }
+}
 
 /**
  * 개별 파일(클래스) 노드.
@@ -50,7 +104,13 @@ data class FileNode(
     val demMethods: List<DemMethodInfo>? = null,
     val serviceEndpoints: List<ServiceEndpoint>? = null,
     val localName: String? = null,
-    val datasource: String? = null
+    val datasource: String? = null,
+    // Adaptive File Discovery 지원 필드
+    val koreanComments: List<String> = emptyList(),
+    val methodNames: List<String> = emptyList(),
+    // P5-B: 동적 뷰 역추적 필드
+    val isDynamicRouter: Boolean = false,
+    val dynamicViewFolders: List<String> = emptyList()
 )
 
 /**
@@ -74,6 +134,17 @@ data class Relationship(
     val detail: String? = null,
     val callType: String? = null, // STATIC or INSTANCE
     val metadata: Map<String, String>? = null
+)
+
+/**
+ * P5-B: 동적 뷰 라우팅(Front Controller) 바인딩 정보.
+ */
+data class DynamicBinding(
+    val resourcePath: String,
+    val controllerPath: String,
+    val matchedUrl: String,
+    val confidence: Double,
+    val bindingType: String = "DYNAMIC_VIEW_RESOLVE"
 )
 
 /**
@@ -102,6 +173,7 @@ data class GraphStatistics(
     val dtos: Int = 0,
     val utils: Int = 0,
     val views: Int = 0,
+    val scripts: Int = 0,
     val components: Int = 0,
     val others: Int = 0,
     val totalRelationships: Int = 0
@@ -116,7 +188,8 @@ data class ApiEndpoint(
     val handlerMethod: String,
     val params: List<String> = emptyList(),
     val returnType: String? = null,
-    val relatedServiceMethod: String = ""
+    val relatedServiceMethod: String = "",
+    val returnedViewNames: List<String> = emptyList()
 )
 
 data class BeanDefinition(
@@ -162,7 +235,10 @@ enum class ArchitectureLayer(val displayName: String) {
     BUSINESS("Business"),
     PERSISTENCE("Persistence"),
     COMMON("Common"),
-    TEST("Test")
+    TEST("Test"),
+    MODEL("Model"),
+    VIEW("View"),
+    UNKNOWN("Unknown")
 }
 
 enum class InjectionMethod {

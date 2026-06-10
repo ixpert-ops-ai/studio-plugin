@@ -106,6 +106,12 @@ class WebviewActionRouter(private val project: Project) {
                 "/analyze" -> {
                     logger.info("Router: /analyze 분기")
                     val messageId = "analyze_${System.currentTimeMillis()}"
+                    val rawInput = textBody.trim()
+                    
+                    // 스킵 모드 체크: 입력이 "!"로 시작하면 Stage 0(요구사항 구체화) 생략
+                    val isSkipMode = rawInput.startsWith("!")
+                    val initialRequirement = if (isSkipMode) rawInput.removePrefix("!").trim() else rawInput
+                    
                     bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프를 분석하여 요구사항 대상 파일을 추출하고 있습니다...", messageId)
                     
                     ApplicationManager.getApplication().executeOnPooledThread {
@@ -114,9 +120,49 @@ class WebviewActionRouter(private val project: Project) {
                             val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
                             
                             val client = WuwLlmService.getClient()
-                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
                             
-                            val result = pipeline.analyze(textBody, projectGraph) { chunk ->
+                            var finalRequirementText = initialRequirement
+                            
+                            // Stage 0: Clarify Engine 실행
+                            if (!isSkipMode) {
+                                try {
+                                    val clarifier = net.ib.ixpert.ops.wuwagent.agent.clarify.RequirementClarifier(
+                                        client,
+                                        net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyPromptBuilder()
+                                    )
+                                    val clarifyResult = clarifier.clarify(initialRequirement, projectGraph.frameworkType)
+                                    
+                                    val hasQuestions = clarifyResult.questions.isNotEmpty()
+                                    val hasEnhancements = clarifyResult.enhancedRequirements.isNotEmpty()
+                                    
+                                    if (hasQuestions || hasEnhancements) {
+                                        // UI 확인 대기가 필요한 경우
+                                        net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.saveSession(project, initialRequirement, clarifyResult)
+                                        
+                                        val jsonPayload = com.google.gson.Gson().toJson(clarifyResult)
+                                        ApplicationManager.getApplication().invokeLater {
+                                            bridge.sendMessage("analyze_clarify", jsonPayload, messageId)
+                                        }
+                                        return@executeOnPooledThread
+                                    } else {
+                                        // 질문도 없고 보강 항목도 없으면 자동 진행
+                                        val parser = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyUserResponseParser()
+                                        val defaultResponse = parser.parse("")
+                                        val finalReq = clarifier.finalize(clarifyResult, defaultResponse, initialRequirement)
+                                        finalRequirementText = finalReq.fullText
+                                        logger.info("Stage 0 Clarify 자동 완료 (보강/질문 없음): $finalRequirementText")
+                                    }
+                                } catch (e: Exception) {
+                                    logger.warn("Stage 0 실패, 원본 요구사항으로 계속 진행", e)
+                                    val fallbackMsg = "\n> ⚠️ **요구사항 구체화 중 오류 발생 (타임아웃 등). 원본 요구사항으로 바로 분석을 진행합니다.**\n\n"
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, fallbackMsg)
+                                    }
+                                }
+                            }
+                            
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
+                            val result = pipeline.analyze(initialRequirement, finalRequirementText.removePrefix(initialRequirement).trim(), projectGraph) { chunk ->
                                 ApplicationManager.getApplication().invokeLater {
                                     bridge.sendMessageChunk(messageId, chunk)
                                 }
@@ -151,6 +197,76 @@ class WebviewActionRouter(private val project: Project) {
                     }
                 }
 
+                // ── 요구사항 구체화 확인 (Stage 0 -> Stage 1) ────────
+                "/analyze-confirm" -> {
+                    logger.info("Router: /analyze-confirm 분기")
+                    val messageId = "analyze_${System.currentTimeMillis()}"
+                    
+                    val session = net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.getSession(project)
+                    if (session == null) {
+                        bridge.sendMessage("error", "분석 세션이 만료되었거나 유효하지 않습니다. `/analyze`를 다시 실행해주세요.", messageId)
+                        return@invokeLater
+                    }
+                    
+                    // 파싱
+                    val jsonPayload = textBody.trim()
+                    val userResponse = try {
+                        com.google.gson.Gson().fromJson(jsonPayload, net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyUserResponse::class.java)
+                    } catch (e: Exception) {
+                        bridge.sendMessage("error", "잘못된 응답 형식입니다. 다시 제출해주세요.", messageId)
+                        return@invokeLater
+                    }
+                    
+                    val client = WuwLlmService.getClient()
+                    val clarifier = net.ib.ixpert.ops.wuwagent.agent.clarify.RequirementClarifier(
+                        client,
+                        net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyPromptBuilder()
+                    )
+                    
+                    val finalReq = clarifier.finalize(session.clarifyResult, userResponse, session.initialRequirement)
+                    net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
+                    
+                    bridge.sendMessage("analyze_start", "🔍 확정된 요구사항을 바탕으로 대상 파일을 추출하고 있습니다...", messageId)
+                    
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
+                            val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다.")
+                            
+                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
+                            val result = pipeline.analyze(session.initialRequirement, finalReq.fullText.removePrefix(session.initialRequirement).trim(), projectGraph) { chunk ->
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessageChunk(messageId, chunk)
+                                }
+                            }
+                            
+                            ApplicationManager.getApplication().invokeLater {
+                                if (result.targetFiles.isNotEmpty()) {
+                                    var extraText = ""
+                                    val hasCorrections = result.targetFiles.any { it.description.contains("[AI 교정") || it.description.contains("[경고") }
+                                    if (hasCorrections) {
+                                        extraText += "\n\n> 🤖 **TargetFileValidator 자동 교정 결과**\n"
+                                        extraText += "> LLM의 환각이 감지되어 실제 프로젝트 메타그래프 기반으로 아래와 같이 안전하게 교정되었습니다.\n\n"
+                                        extraText += "| 순서 | 파일 경로 | 유형 | 작업 내용 |\n"
+                                        extraText += "|:---:|:---|:---:|:---|\n"
+                                        result.targetFiles.forEach { file ->
+                                            extraText += "| ${file.order} | ${file.path} | **${file.type}** | ${file.description} |\n"
+                                        }
+                                    }
+                                    extraText += "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
+                                    bridge.sendMessageChunk(messageId, extraText)
+                                }
+                                bridge.sendMessage("chat", "", messageId)
+                            }
+                        } catch (e: Exception) {
+                            logger.error("RequirementAnalysisPipeline Error", e)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", "요구사항 분석 중 오류가 발생했습니다: ${e.message}", messageId)
+                            }
+                        }
+                    }
+                }
+
                 // ── 자동 코드 작성 스텁 (Phase 2b) ────────
                 "/implement" -> {
                     logger.info("Router: /implement 분기")
@@ -163,21 +279,24 @@ class WebviewActionRouter(private val project: Project) {
                         return@invokeLater
                     }
                     
-                    bridge.sendMessage("chat_start", "🚀 **Phase 2b 코드 수정 파이프라인**\n타겟 파일 소스 코드를 분석하여 수정을 시작합니다...", messageId)
+                    bridge.sendMessage("chat_start", "🚀 **Phase 2b 코드 수정 (의사코드 생성)**\n타겟 파일 소스 코드를 분석하여 수정을 시작합니다...", messageId)
                     
                     ApplicationManager.getApplication().executeOnPooledThread {
                         try {
                             val client = WuwLlmService.getClient()
-                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.ImplementationPipeline(client, project)
+                            val mdRoot = java.nio.file.Paths.get(project.basePath ?: "", "docs")
+                            val sourceRoot = java.nio.file.Paths.get(project.basePath ?: "")
+                            val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
+                            val projectGraph = graphLoader.loadGraph() ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 `/metagraph`를 실행해주세요.")
+                            val service = net.ib.ixpert.ops.wuwagent.agent.ImplementService(client, projectGraph, mdRoot, mdRoot, sourceRoot)
                             
-                            pipeline.execute(cachedResult) { chunk ->
+                            service.implement(cachedResult.summary, cachedResult.targetFiles) { chunk ->
                                 ApplicationManager.getApplication().invokeLater {
                                     bridge.sendMessageChunk(messageId, chunk)
                                 }
                             }
                             
-                            // [Phase 2c] 실행 완료 후 컨텍스트 캐시 저장 (파이프라인 내부에서 이미 저장하지만, 완료 메시지는 여기서 처리)
-                            val extraText = "\n\n💡 수정된 파일들의 테스트 코드를 일괄 생성하려면 `/test-all`을 입력하세요."
+                            val extraText = "\n\n💡 변경 지시서를 확인하고 코드를 반영해주세요."
                             ApplicationManager.getApplication().invokeLater {
                                 bridge.sendMessageChunk(messageId, extraText)
                                 bridge.sendMessage("chat", "", messageId)
@@ -405,33 +524,6 @@ class WebviewActionRouter(private val project: Project) {
 
                     com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
                         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
-                        val options = arrayOf("Spring Boot (기본)", "Anyframe Enterprise")
-                        val initialValue = if (settings.state.frameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME) {
-                            "Anyframe Enterprise"
-                        } else {
-                            "Spring Boot (기본)"
-                        }
-
-                        val selectedIdx = com.intellij.openapi.ui.Messages.showChooseDialog(
-                            project,
-                            "메타그래프를 분석할 대상 프레임워크를 선택하세요.",
-                            "대상 프레임워크 선택",
-                            com.intellij.openapi.ui.Messages.getQuestionIcon(),
-                            options,
-                            initialValue
-                        )
-
-                        if (selectedIdx == -1) {
-                            bridge.sendMessage("error", "분석이 취소되었습니다.", messageId)
-                            return@invokeLater
-                        }
-
-                        val chosenType = if (selectedIdx == 1) {
-                            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME
-                        } else {
-                            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT
-                        }
-                        settings.state.frameworkType = chosenType
 
                         val descriptor = com.intellij.openapi.fileChooser.FileChooserDescriptorFactory.createSingleFolderDescriptor().apply {
                             title = "Select Project Root for MetaGraph"
@@ -444,7 +536,7 @@ class WebviewActionRouter(private val project: Project) {
                             return@invokeLater
                         }
                         
-                        bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다... (대상 프레임워크: ${chosenType.displayName})", messageId)
+                        bridge.sendMessage("explain_start", "🗺️ 프로젝트 구조를 분석하고 있습니다...", messageId)
 
                         val builder = net.ib.ixpert.ops.wuwagent.service.metagraph.ProjectGraphBuilder(project, selectedDir)
                         builder.buildGraphAsync(
@@ -979,6 +1071,13 @@ class WebviewActionRouter(private val project: Project) {
                 "/openSettings" -> {
                     logger.info("Router: /openSettings → ShowSettingsUtil 실행")
                     com.intellij.openapi.options.ShowSettingsUtil.getInstance().showSettingsDialog(project, "iXpert AI Assistant")
+                }
+
+                "/openWelcome" -> {
+                    logger.info("Router: /openWelcome → WelcomeDialog 표시")
+                    ApplicationManager.getApplication().invokeLater {
+                        net.ib.ixpert.ops.wuwagent.ui.WelcomeDialog(project).show()
+                    }
                 }
 
                 // ── Alert: WebView에서 네이티브 메시지 박스 띄우기 ──────────────

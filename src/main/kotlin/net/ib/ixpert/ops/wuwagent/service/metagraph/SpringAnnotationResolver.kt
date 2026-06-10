@@ -77,7 +77,7 @@ class SpringAnnotationResolver {
      */
     fun resolve(psiClass: PsiClass, relativePath: String): FileNode {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
-        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME
+        val isAnyframe = settings.state.frameworkType == FrameworkType.ANYFRAME_AP
 
         var anyframeRole: AnyframeRole? = null
         var fileType = resolveFileType(psiClass, relativePath)
@@ -102,7 +102,22 @@ class SpringAnnotationResolver {
             if (sup.qualifiedName != "java.lang.Object") sup.qualifiedName else null
         }
 
-        val interfaces = psiClass.interfaces.mapNotNull { it.qualifiedName }
+        val interfaces = psiClass.interfaces.mapNotNull { it.qualifiedName }.toMutableSet()
+        
+        // P3: Fallback for unresolved interfaces
+        // 필터링 책임은 매핑 단계(DependencyResolver)로 위임. 프로젝트 내 파일이 없으면 자동으로 엣지 생성이 무시됩니다.
+        psiClass.implementsList?.referenceElements?.forEach { ref ->
+            val refName = ref.referenceName
+            if (refName != null) {
+                interfaces.add(refName)
+            }
+        }
+        psiClass.extendsList?.referenceElements?.forEach { ref ->
+            val refName = ref.referenceName
+            if (refName != null) {
+                interfaces.add(refName)
+            }
+        }
 
         return FileNode(
             path = relativePath,
@@ -114,7 +129,7 @@ class SpringAnnotationResolver {
             isAbstract = psiClass.hasModifierProperty(PsiModifier.ABSTRACT),
             annotations = annotations,
             superClass = superClass,
-            implementedInterfaces = interfaces,
+            implementedInterfaces = interfaces.toList(),
             injections = injections,
             anyframeRole = anyframeRole,
             localName = localName,
@@ -258,13 +273,20 @@ class SpringAnnotationResolver {
         val name = psiClass.name ?: return SpringFileType.UNKNOWN
         val lowerPath = relativePath.lowercase()
 
-        // 1순위: 확실한 기본 타입 및 PSI 상속 관계
-        if (psiClass.isEnum) return SpringFileType.ENUM
-        if (psiClass.isInterface) return SpringFileType.INTERFACE
-        if (psiClass.hasModifierProperty(PsiModifier.ABSTRACT)) return SpringFileType.ABSTRACT_CLASS
-
         val superClassName = psiClass.superClass?.name ?: ""
         val interfaceNames = psiClass.interfaces.map { it.name }
+
+        // 1순위: 확실한 기본 타입 및 PSI 상속 관계
+        if (psiClass.isEnum) return SpringFileType.ENUM
+        
+        if (psiClass.isInterface) {
+            // Spring Data Repository 인터페이스 처리
+            if (name.contains("Repository")) return SpringFileType.REPOSITORY
+            if (interfaceNames.any { it?.contains("Repository") == true }) return SpringFileType.REPOSITORY
+            return SpringFileType.INTERFACE
+        }
+        
+        if (psiClass.hasModifierProperty(PsiModifier.ABSTRACT)) return SpringFileType.ABSTRACT_CLASS
 
         if (superClassName.contains("View")) return SpringFileType.VIEW
         if (superClassName.contains("Filter") || interfaceNames.any { it?.contains("Filter") == true }) return SpringFileType.FILTER

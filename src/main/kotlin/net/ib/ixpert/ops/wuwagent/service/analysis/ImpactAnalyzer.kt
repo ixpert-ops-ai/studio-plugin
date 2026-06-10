@@ -597,6 +597,10 @@ private fun collectSerializationImpact(element: PsiElement): List<PsiElement> {
         val selfOffset = element.textOffset
 
         searchHelper.processAllFilesWithWord(name, scope, { file ->
+            val excludedExtensions = setOf("md", "json", "txt", "csv", "log", "yml", "yaml", "properties")
+            val ext = file.name.substringAfterLast('.', "")
+            if (ext.lowercase() in excludedExtensions) return@processAllFilesWithWord true
+
             val document = PsiDocumentManager.getInstance(element.project).getDocument(file)
             val text = file.text
             var searchFrom = 0
@@ -628,7 +632,7 @@ private fun collectSerializationImpact(element: PsiElement): List<PsiElement> {
             true
         }, true)
 
-        val deduplicated = textResults.distinctBy { "${it.enclosingSignature}@${it.lineNumber}" }
+        val deduplicated = textResults.distinctBy { it.enclosingSignature }
         for ((index, hit) in deduplicated.withIndex()) {
             node.children.add(ImpactNode(
                 name = "[텍스트폴백] ${hit.enclosingSignature}",

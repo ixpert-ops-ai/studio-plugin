@@ -6,6 +6,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
+
 import javax.swing.Action
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -17,14 +18,17 @@ import javax.swing.JPanel
 /**
  * 플러그인 최초 설치 후 1회 표시되는 웰컴 다이얼로그.
  *
- * - JCEF 지원 환경: 내부 JBCefBrowser로 [WELCOME_URL] 렌더링
- * - JCEF 미지원 환경: 안내 메시지 표시 + 외부 브라우저로 fallback
+ * - JCEF 지원 환경: 내부 JBCefBrowser로 번들 HTML(/welcome.html) 렌더링
+ * - JCEF 미지원 환경: 안내 메시지 표시 + [FALLBACK_URL] 외부 브라우저로 fallback
  */
 class WelcomeDialog(project: Project) : DialogWrapper(project, true) {
 
     companion object {
-        /** 웰컴 페이지 URL — 변경이 필요하면 이 상수만 수정 */
-        const val WELCOME_URL = "https://ixpertops.cloud"
+        /** JCEF 미지원 시 외부 브라우저로 열 URL */
+        const val FALLBACK_URL = "https://ixpertops.cloud"
+
+        /** 플러그인 jar에 번들된 웰컴 HTML 리소스 경로 */
+        private const val WELCOME_HTML_RESOURCE = "/welcome.html"
 
         private const val DIALOG_WIDTH  = 900
         private const val DIALOG_HEIGHT = 600
@@ -41,14 +45,19 @@ class WelcomeDialog(project: Project) : DialogWrapper(project, true) {
     override fun createCenterPanel(): JComponent {
         if (!JBCefApp.isSupported()) {
             logger.warn("WelcomeDialog: JCEF 미지원 환경 — 외부 브라우저로 fallback")
-            BrowserUtil.browse(WELCOME_URL)
+            BrowserUtil.browse(FALLBACK_URL)
             return buildFallbackPanel()
         }
 
         return try {
+            val htmlUrl = javaClass.getResource(WELCOME_HTML_RESOURCE)
+                ?: error("번들 리소스를 찾을 수 없습니다: $WELCOME_HTML_RESOURCE")
+
+            // jar: URL 스킴은 JCEF가 지원하지 않으므로 HTML 내용을 직접 읽어 loadHTML() 사용
+            val htmlContent = htmlUrl.readText(Charsets.UTF_8)
             val browser = JBCefBrowser()
-            browser.loadURL(WELCOME_URL)
-            logger.info("WelcomeDialog: JCEF 브라우저 로드 완료 ($WELCOME_URL)")
+            browser.loadHTML(htmlContent, "file:///welcome.html")
+            logger.info("WelcomeDialog: 번들 HTML 로드 완료 ($htmlUrl)")
 
             val panel = JPanel(BorderLayout())
             panel.preferredSize = Dimension(DIALOG_WIDTH, DIALOG_HEIGHT)
@@ -68,7 +77,7 @@ class WelcomeDialog(project: Project) : DialogWrapper(project, true) {
         val label = JLabel(
             "<html><div style='text-align:center;'>" +
             "브라우저를 지원하지 않는 환경입니다.<br><br>" +
-            "외부 브라우저에서 <b>$WELCOME_URL</b> 를 확인해 주세요." +
+            "외부 브라우저에서 <b>$FALLBACK_URL</b> 를 확인해 주세요." +
             "</div></html>",
             SwingConstants.CENTER
         )
@@ -76,11 +85,11 @@ class WelcomeDialog(project: Project) : DialogWrapper(project, true) {
         return panel
     }
 
-    /** 하단 버튼: "닫기" 하나만 */
-    override fun createActions(): Array<Action> = arrayOf(okAction)
+    /** 하단 버튼: 닫기만 표시 */
+    override fun createActions(): Array<Action> = arrayOf(cancelAction)
 
-    override fun getOKAction(): Action {
-        val action = super.getOKAction()
+    override fun getCancelAction(): Action {
+        val action = super.getCancelAction()
         action.putValue(Action.NAME, "닫기")
         return action
     }

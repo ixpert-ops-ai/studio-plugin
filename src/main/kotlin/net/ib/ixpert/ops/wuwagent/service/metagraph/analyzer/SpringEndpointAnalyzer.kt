@@ -24,7 +24,7 @@ class SpringEndpointAnalyzer {
     /**
      * PsiClass 내부의 모든 엔드포인트 메서드를 분석하여 ApiEndpoint 리스트를 반환합니다.
      */
-    fun analyze(psiClass: PsiClass): List<ApiEndpoint> {
+    fun analyze(psiClass: PsiClass, injectedFieldNames: Set<String> = emptySet()): List<ApiEndpoint> {
         val endpoints = mutableListOf<ApiEndpoint>()
 
         // 1. 클래스 레벨의 RequestMapping 경로 추출
@@ -32,7 +32,7 @@ class SpringEndpointAnalyzer {
 
         // 2. 메서드 순회하며 매핑 어노테이션 확인
         for (method in psiClass.methods) {
-            val endpoint = extractEndpointFromMethod(method, classLevelPath, psiClass.name ?: "")
+            val endpoint = extractEndpointFromMethod(method, classLevelPath, psiClass.name ?: "", injectedFieldNames)
             if (endpoint != null) {
                 endpoints.add(endpoint)
             }
@@ -53,7 +53,7 @@ class SpringEndpointAnalyzer {
         return extractPathFromAnnotation(requestMapping)
     }
 
-    private fun extractEndpointFromMethod(method: PsiMethod, classLevelPath: String, controllerClass: String): ApiEndpoint? {
+    private fun extractEndpointFromMethod(method: PsiMethod, classLevelPath: String, controllerClass: String, injectedFieldNames: Set<String>): ApiEndpoint? {
         for ((annotationFqn, httpMethod) in MAPPING_ANNOTATIONS) {
             val annotation = findAnnotation(method.annotations, annotationFqn)
             if (annotation != null) {
@@ -66,13 +66,53 @@ class SpringEndpointAnalyzer {
                 // 파라미터 타입 목록 추출
                 val params = method.parameterList.parameters.map { it.type.presentableText }
                 
+                // ── relatedServiceMethod 추출 ──
+                var relatedServiceMethod = ""
+                method.body?.let { body ->
+                    val methodCalls = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(body, com.intellij.psi.PsiMethodCallExpression::class.java)
+                    for (call in methodCalls) {
+                        val refExpr = call.methodExpression
+                        val qualifierText = refExpr.qualifierExpression?.text
+                        
+                        // Qualifier가 injectedFieldNames에 포함되는지 확인 (예: productService.getProducts)
+                        // Qualifier가 "this.productService" 형태일 수 있으므로 "this." 제거 후 확인
+                        val cleanQualifier = qualifierText?.removePrefix("this.")
+                        if (cleanQualifier != null && cleanQualifier in injectedFieldNames) {
+                            val calledMethodName = refExpr.referenceName
+                            if (calledMethodName != null) {
+                                relatedServiceMethod = calledMethodName
+                                break // 첫 번째 매칭만 사용
+                            }
+                        }
+                    }
+                }
+                
+                // ── returnedViewNames 추출 ──
+                val returnedViewNames = mutableListOf<String>()
+                if (returnType == "String") {
+                    method.body?.let { body ->
+                        val returnStmts = com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(body, com.intellij.psi.PsiReturnStatement::class.java)
+                        for (stmt in returnStmts) {
+                            val retVal = stmt.returnValue
+                            if (retVal is com.intellij.psi.PsiLiteralExpression && retVal.value is String) {
+                                val viewName = (retVal.value as String).trim()
+                                if (!viewName.startsWith("redirect:") && !viewName.startsWith("forward:")) {
+                                    returnedViewNames.add(viewName)
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 return ApiEndpoint(
                     httpMethod = httpMethod,
                     path = fullPath,
                     controllerClass = controllerClass,
                     handlerMethod = method.name,
                     params = params,
-                    returnType = returnType
+                    returnType = returnType,
+                    relatedServiceMethod = relatedServiceMethod,
+                    returnedViewNames = returnedViewNames.distinct()
                 )
             }
         }
