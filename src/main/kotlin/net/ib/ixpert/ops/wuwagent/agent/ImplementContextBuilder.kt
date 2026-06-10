@@ -7,6 +7,10 @@ import kotlin.io.path.readText
 
 data class FileReference(val filePath: String, val content: String)
 
+enum class ImplementFileType {
+    JAVA_LIKE, VIEW_MARKUP, MYBATIS_XML, JAVASCRIPT, VUE_SFC, UNKNOWN
+}
+
 object ImplementContextBuilder {
 
     private val REQUIREMENT_TYPE_KEYWORDS = mapOf(
@@ -104,35 +108,54 @@ object ImplementContextBuilder {
     }
 
 
+    private fun parseTargetHints(description: String): List<String> {
+        val koreanRegex = Regex("[가-힣]+")
+        val idRegex = Regex("[a-zA-Z0-9_\\-]+")
+        val hints = mutableListOf<String>()
+        hints.addAll(koreanRegex.findAll(description).map { it.value })
+        hints.addAll(idRegex.findAll(description).map { it.value }.filter { it.length > 3 })
+        return hints.distinct()
+    }
+
+    private fun parseTargetQueryIds(description: String): List<String> {
+        val idRegex = Regex("[a-zA-Z0-9_]+")
+        return idRegex.findAll(description).map { it.value }.filter { it.length > 3 }.distinct().toList()
+    }
+
     /**
      * MODIFY(수정) 파일용 컨텍스트 구성
      * graph 노드 + MD 섹션 1(목적), 3(메서드 테이블), 5(의존성) 로딩 + 원본 소스
      */
     fun buildModifyContext(
-        path: String, 
+        spec: TargetFileSpec, 
         graph: ProjectGraph, 
         mdRoot: Path, 
         sourceRoot: Path,
         similarRefs: List<FileReference>
     ): String {
-        val md = ContextBuilderUtil.buildFileContext(path, graph, mdRoot, listOf(1, 3, 5))
-        val sourceFile = sourceRoot.resolve(path)
+        val md = ContextBuilderUtil.buildFileContext(spec.path, graph, mdRoot, listOf(1, 3, 5))
+        val sourceFile = sourceRoot.resolve(spec.path)
         val sourceContent = if (sourceFile.exists()) sourceFile.readText() else ""
+        val targetHints = parseTargetHints(spec.description)
+        val targetQueryIds = parseTargetQueryIds(spec.description)
         
-        return buildContextWithSource(md, sourceContent, graph, similarRefs)
+        return buildContextWithSource(md, sourceContent, graph, similarRefs, spec.path, targetHints, targetQueryIds)
     }
 
     /**
      * CREATE(신규) 파일용 컨텍스트 구성
      */
     fun buildCreateContext(
-        path: String,
+        spec: TargetFileSpec,
         graph: ProjectGraph,
         mdRoot: Path,
         sourceRoot: Path,
         allTargetFiles: List<TargetFileSpec>,
         similarRefs: List<FileReference>
     ): String {
+        val path = spec.path
+        val targetHints = parseTargetHints(spec.description)
+        val targetQueryIds = parseTargetQueryIds(spec.description)
         val sb = StringBuilder()
         
         // 프레임워크 힌트 추가
@@ -199,91 +222,145 @@ object ImplementContextBuilder {
         return sb.toString().trim()
     }
     
-    private fun buildContextWithSource(md: String, source: String, graph: ProjectGraph, similarRefs: List<FileReference>): String {
+    private fun loadPromptTemplate(fileType: ImplementFileType): String {
+        val fileName = when (fileType) {
+            ImplementFileType.JAVA_LIKE -> "implement_java.txt"
+            ImplementFileType.VIEW_MARKUP -> "implement_jsp.txt"
+            ImplementFileType.MYBATIS_XML -> "implement_xml.txt"
+            ImplementFileType.JAVASCRIPT -> "implement_js.txt"
+            ImplementFileType.VUE_SFC -> "implement_vue.txt"
+            ImplementFileType.UNKNOWN -> "implement_java.txt"
+        }
+        val resourceStream = this::class.java.classLoader.getResourceAsStream("prompts/$fileName")
+            ?: return ""
+        return resourceStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+    }
+
+    private fun buildContextWithSource(md: String, source: String, graph: ProjectGraph, similarRefs: List<FileReference>, filePath: String, targetHints: List<String> = emptyList(), targetQueryIds: List<String> = emptyList()): String {
+        val fileType = determineFileType(filePath, source)
+        var template = loadPromptTemplate(fileType)
+
         val sb = StringBuilder()
         
-        // 프레임워크 힌트 추가
+        // 프레임워크 힌트 조립
+        val fwSb = StringBuilder()
         val fwType = graph.resolveFrameworkType()
         when (fwType) {
             net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT_JPA -> {
-                sb.appendLine("## 프레임워크 힌트")
-                sb.appendLine("이 프로젝트는 Spring Boot + JPA 기반입니다. JPA Entity 변경 시 @Column, @Table 등 매핑 어노테이션을 잊지 마세요.")
-                sb.appendLine("- Controller가 Service의 반환값을 그대로 ResponseEntity로 감싸서 전달만 하는 경우,")
-                sb.appendLine("  Service나 DTO 변경만으로 API 응답이 바뀌므로 Controller는 [변경 없음]으로 처리하세요.")
-                sb.appendLine("- Controller에 새 엔드포인트를 추가하거나 파라미터를 변경하는 경우에만 [수정]하세요.")
-                sb.appendLine()
+                fwSb.appendLine("## 프레임워크 힌트")
+                fwSb.appendLine("이 프로젝트는 Spring Boot + JPA 기반입니다. JPA Entity 변경 시 @Column, @Table 등 매핑 어노테이션을 잊지 마세요.")
+                fwSb.appendLine("- Controller가 Service의 반환값을 그대로 ResponseEntity로 감싸서 전달만 하는 경우,")
+                fwSb.appendLine("  Service나 DTO 변경만으로 API 응답이 바뀌므로 Controller는 [변경 없음]으로 처리하세요.")
+                fwSb.appendLine("- Controller에 새 엔드포인트를 추가하거나 파라미터를 변경하는 경우에만 [수정]하세요.")
             }
             net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT_MYBATIS,
             net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_MVC_MYBATIS -> {
-                sb.appendLine("## 프레임워크 힌트")
-                sb.appendLine("이 프로젝트는 MyBatis 기반입니다. SQL과 파라미터 바인딩을 신중하게 확인하세요.")
+                fwSb.appendLine("## 프레임워크 힌트")
+                fwSb.appendLine("이 프로젝트는 MyBatis 기반입니다. SQL과 파라미터 바인딩을 신중하게 확인하세요.")
                 if (fwType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_MVC_MYBATIS) {
-                    sb.appendLine("주의: 이 프로젝트는 Service Interface + ServiceImpl 쌍을 사용합니다. 새 메서드는 반드시 Interface에 먼저 선언하고 Impl에 구현하세요.")
+                    fwSb.appendLine("주의: 이 프로젝트는 Service Interface + ServiceImpl 쌍을 사용합니다. 새 메서드는 반드시 Interface에 먼저 선언하고 Impl에 구현하세요.")
                 }
-                sb.appendLine()
             }
             net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME_AP -> {
-                sb.appendLine("## 프레임워크 힌트")
-                sb.appendLine("이 프로젝트는 Anyframe 기반입니다.")
-                sb.appendLine("주의: 이 프로젝트는 Interface + Impl 쌍을 엄격히 준수합니다. 새 메서드는 반드시 Interface에 먼저 선언하고 Impl에 구현하세요.")
-                sb.appendLine()
+                fwSb.appendLine("## 프레임워크 힌트")
+                fwSb.appendLine("이 프로젝트는 Anyframe 기반입니다.")
+                fwSb.appendLine("주의: 이 프로젝트는 Interface + Impl 쌍을 엄격히 준수합니다. 새 메서드는 반드시 Interface에 먼저 선언하고 Impl에 구현하세요.")
             }
             else -> {}
         }
-
+        
+        val mdSb = StringBuilder()
         if (md.isNotBlank()) {
-            sb.appendLine("## 분석 문서 요약")
-            sb.appendLine(md)
+            mdSb.appendLine("## 분석 문서 요약")
+            mdSb.appendLine(md)
+        }
+
+        val sourceSb = StringBuilder()
+        if (source.isNotBlank()) {
+            val trimmedSource = when (fileType) {
+                ImplementFileType.JAVA_LIKE -> ImplementTrimmer.trimJavaLike(source)
+                ImplementFileType.VIEW_MARKUP -> ImplementTrimmer.trimViewMarkup(source, targetHints)
+                ImplementFileType.MYBATIS_XML -> ImplementTrimmer.trimMybatisXml(source, targetQueryIds)
+                ImplementFileType.JAVASCRIPT -> ImplementTrimmer.trimJavaScript(source)
+                ImplementFileType.VUE_SFC -> ImplementTrimmer.trimVueSfc(source, targetHints)
+                ImplementFileType.UNKNOWN -> source
+            }
+            val langTag = when (fileType) {
+                ImplementFileType.JAVA_LIKE -> if (filePath.endsWith(".kt")) "kotlin" else "java"
+                ImplementFileType.VIEW_MARKUP -> "html"
+                ImplementFileType.MYBATIS_XML -> "xml"
+                ImplementFileType.JAVASCRIPT -> "javascript"
+                ImplementFileType.VUE_SFC -> "vue"
+                ImplementFileType.UNKNOWN -> ""
+            }
+            sourceSb.appendLine("## 원본 소스")
+            sourceSb.appendLine("```$langTag")
+            sourceSb.appendLine(trimmedSource)
+            sourceSb.appendLine("```")
+        }
+
+        val refSb = StringBuilder()
+        if (similarRefs.isNotEmpty()) {
+            refSb.appendLine("## 참조: 프로젝트 내 유사 구현 사례")
+            refSb.appendLine("아래 코드는 이 프로젝트에서 이미 구현된 유사 기능입니다.")
+            refSb.appendLine("동일한 패턴(반환 타입, 헤더 설정, 스트림 처리 방식 등)을 따라 구현하세요.\n")
+            for (ref in similarRefs) {
+                refSb.appendLine("### ${ref.filePath}")
+                val refLangTag = if (ref.filePath.endsWith(".xml")) "xml" else "java"
+                refSb.appendLine("```$refLangTag")
+                refSb.appendLine(ref.content)
+                refSb.appendLine("```\n")
+            }
+        }
+
+        // Apply template or just append
+        if (template.isNotBlank()) {
+            // Replace placeholders
+            // But we didn't add the placeholders in the prompt yet except {{COMMON_RULES}}, let's just append
+            template = template.replace("{{COMMON_RULES}}", "")
+            sb.appendLine(template)
             sb.appendLine()
         }
-        if (source.isNotBlank()) {
-            val trimmedSource = if (source.lines().size > 150) {
-                extractClassSkeleton(source)
-            } else {
-                source
-            }
-            sb.appendLine("## 원본 소스")
-            sb.appendLine("```java")
-            sb.appendLine(trimmedSource)
-            sb.appendLine("```")
-        }
-        
-        if (similarRefs.isNotEmpty()) {
-            sb.appendLine("\n## 참조: 프로젝트 내 유사 구현 사례")
-            sb.appendLine("아래 코드는 이 프로젝트에서 이미 구현된 유사 기능입니다.")
-            sb.appendLine("동일한 패턴(반환 타입, 헤더 설정, 스트림 처리 방식 등)을 따라 구현하세요.\n")
-            for (ref in similarRefs) {
-                sb.appendLine("### ${ref.filePath}")
-                sb.appendLine("```java")
-                sb.appendLine(ref.content)
-                sb.appendLine("```\n")
-            }
-        }
-        
-        return sb.toString()
+
+        if (fwSb.isNotBlank()) sb.appendLine(fwSb.toString())
+        if (mdSb.isNotBlank()) sb.appendLine(mdSb.toString())
+        if (sourceSb.isNotBlank()) sb.appendLine(sourceSb.toString())
+        if (refSb.isNotBlank()) sb.appendLine(refSb.toString())
+
+        return sb.toString().trim()
     }
     
+    @Deprecated("Use ImplementTrimmer.trimJavaLike instead")
     private fun extractClassSkeleton(source: String): String {
-        var depth = 0
-        val result = StringBuilder()
-        for (line in source.lines()) {
-            val openCount = line.count { it == '{' }
-            val closeCount = line.count { it == '}' }
-            
-            if (depth == 1 && openCount > 0) {
-                if (openCount == closeCount) {
-                    result.appendLine(line) // 한 줄짜리 메서드는 보존
-                } else {
-                    result.appendLine(line.substringBefore('{') + "{ /* 본문 생략 */ }")
-                    depth += openCount - closeCount
-                    continue
-                }
-            } else if (depth <= 1) {
-                result.appendLine(line)
+        return ImplementTrimmer.trimJavaLike(source)
+    }
+
+    fun determineFileType(filePath: String, content: String): ImplementFileType {
+        val ext = filePath.substringAfterLast('.').lowercase()
+        return when (ext) {
+            "java", "kt" -> ImplementFileType.JAVA_LIKE
+            "jsp", "html", "ftl" -> ImplementFileType.VIEW_MARKUP
+            "xml" -> {
+                if (content.contains("<mapper") || content.contains("<!DOCTYPE mapper"))
+                    ImplementFileType.MYBATIS_XML
+                else
+                    ImplementFileType.UNKNOWN
             }
-            
-            depth += openCount - closeCount
+            "js", "ts" -> ImplementFileType.JAVASCRIPT
+            "vue" -> ImplementFileType.VUE_SFC
+            else -> ImplementFileType.UNKNOWN
         }
-        return result.toString()
+    }
+
+    fun estimateTokenCount(text: String, fileType: ImplementFileType): Int {
+        val length = text.length
+        return when (fileType) {
+            ImplementFileType.JAVA_LIKE -> (length / 3.5).toInt()
+            ImplementFileType.VIEW_MARKUP -> (length / 2.0).toInt()
+            ImplementFileType.MYBATIS_XML -> (length / 2.5).toInt()
+            ImplementFileType.JAVASCRIPT -> (length / 3.0).toInt()
+            ImplementFileType.VUE_SFC -> (length / 2.5).toInt()
+            ImplementFileType.UNKNOWN -> (length / 3.5).toInt()
+        }
     }
 }

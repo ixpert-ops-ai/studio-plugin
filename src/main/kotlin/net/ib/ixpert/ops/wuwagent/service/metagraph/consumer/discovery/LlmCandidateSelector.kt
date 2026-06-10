@@ -60,9 +60,13 @@ class LlmCandidateSelector(
             .sortedByDescending { it.score }
             .take(maxCandidates)
             
+        // --- STAGE 1.5: Deterministic Call Graph Pre-expansion ---
+        val (expandedCandidates, chainMarkdown) = DeterministicChainExpander.buildCallChains(topCandidates, projectGraph)
+            
         val workTools = ToolService.buildSchema()
         val systemPrompt = buildSystemPrompt()
-        val userPrompt = buildUserPrompt(userQuery, topCandidates)
+        // expandedCandidates는 원래 maxCandidates + maxExtraCandidates 만큼 늘어났을 수 있습니다.
+        val userPrompt = buildUserPrompt(userQuery, expandedCandidates, chainMarkdown)
         
         val messages = mutableListOf(
             net.ib.ixpert.ops.wuwagent.model.ChatMessage(role = "user", content = userPrompt)
@@ -71,7 +75,7 @@ class LlmCandidateSelector(
         var turn = 0
         var hasRetriedJson = false
         
-        val maxTurns = 5
+        val maxTurns = 7
         while (turn < maxTurns) {
             try {
                 // 턴에 관계없이 auto (마지막 턴은 null). 요건이 단순하면 1턴만에 응답 가능
@@ -271,15 +275,33 @@ class LlmCandidateSelector(
         - DO NOT guess file paths. If a file you need is NOT in the Candidate Files list, YOU MUST use the `search_files` or `get_dependencies` tool to find its exact path first.
         - You can and should call tools multiple times to explore the project structure before giving your final JSON answer.
         - Only output the final JSON once you have verified the paths and dependencies using tools.
-        - You have a maximum of 4 tool-calling opportunities. On your 5th response, you MUST provide the final JSON answer without any tool calls.
+        - You have a maximum of 6 tool-calling opportunities. On your 7th response, you MUST provide the final JSON answer without any tool calls.
         - If a search returns empty results, do NOT retry with similar keywords. This means the project does not have that component and you should plan to CREATE it.
         - EXCEPTION: If the user requirement mentions UI changes (e.g. 화면, UI, 캘린더, 입력 필드, 폼, 버튼) AND no JSP/JS file has been found in your searches so far, you MUST perform `search_files(keyword=".jsp", scope="path")` exactly once before producing the final JSON.
+        - CRITICAL: When searching for MyBatis XML mapper files, you MUST use `search_files` with `scope="path"`.
         - If the Candidate Files list already contains all files you need, skip tool calls and respond with the final JSON directly.
         - When you need detailed information about a file:
           - For .java or .kt files: use `get_file_summary`
           - For .jsp, .js, .xml, .html, .css files: use `get_resource_summary`
           - If `get_file_summary` returns "File not found matching", retry with `get_resource_summary`
-        - If a file is already in the Candidate Files list with sufficient metadata (methods, layer, injects), do NOT call get_file_summary for it. Only use get_file_summary for files you discovered via search_files that are NOT in the Candidate list.
+        - STRICT BAN on redundant `get_file_summary`: If a file is already in the Candidate Files list and shows 'Metadata', 'Injects', or 'Endpoints', DO NOT call `get_file_summary` for it. Wasting tool calls on known metadata is strictly forbidden. Instead, immediately use `get_dependencies` on those files to trace the Call Chain!
+
+        ## FILE SELECTION PROCESS (Chain-of-Thought)
+        You MUST follow this 4-step reasoning process before selecting files:
+        1. Identify the Trigger: 식별된 요구사항의 성격을 파악하세요 (예: 사용자 화면 조작, 배치 작업, 외부 연동 등).
+        2. Map Trigger to Entry Point: 트리거 유형에 맞는 진입점을 찾으세요.
+           - 사용자 UI 동작이면 -> Controller 엔드포인트를 식별
+           - 스케줄/배치 작업이면 -> @Scheduled, Job 클래스를 식별
+           - 핵심: 요구사항의 트리거 유형과 Entry Point의 역할이 일치하는지 반드시 확인하세요.
+        3. Trace the Call Chain: Entry Point(Controller 또는 Job) -> Service -> DAO/Mapper 로 이어지는 실제 의존성 호출 체인을 추적하세요.
+        4. Validate Necessity: "이 파일이 없으면 요구사항 구현이 불가능한가?" 자문하여 증명된 파일만 선정하세요.
+
+        ## TOOL USAGE STRATEGY (CRITICAL)
+        - Priority 1: Controller 또는 Job에서 `get_dependencies`를 호출하여 주입된 Service를 확인하세요.
+        - Priority 2: Service에서 `get_dependencies`를 호출하여 DAO/Mapper를 확인하세요.
+        - Priority 3: `search_files`는 위 체인에서 누락된 파일을 보완할 때만 사용하세요.
+        - 원칙: 의존성 체인을 확인하지 않은 채 파일명만으로 관련성을 짐작하여 선정하지 마세요.
+        - 예외: `get_dependencies` 결과가 불완전하거나 비어있을 경우, `search_files`나 `get_file_summary`로 파일 내용을 직접 확인하여 호출 관계를 증명한 후에는 선정할 수 있습니다.
 
         ## STRICT RULES
         1. You may ONLY select files from the [Candidate Files] list OR files you have verified exist via tool calls.
@@ -297,22 +319,28 @@ class LlmCandidateSelector(
 
         ## RESPONSE FORMAT (JSON ONLY)
         {
+          "reasoning": "반드시 이 필드에 4단계 추론 절차(1. Trigger, 2. Entry Point, 3. Call Chain, 4. Necessity)의 결과를 먼저 상세히 작성하세요. 그 후 modify와 create를 채우세요.",
           "summary": "requirement summary",
           "modify": [{"order": 1, "path": "exact/path.java", "reason": "what to do"}],
           "create": [{"order": 2, "path": "new/path.java", "reason": "what this does"}],
-          "warnings": ["risk notes"],
-          "reasoning": "selection logic explanation"
+          "warnings": ["risk notes"]
         }
     """.trimIndent()
     }
     
     private fun buildUserPrompt(
         userQuery: String, 
-        candidates: List<ScoredCandidate>
+        candidates: List<ScoredCandidate>,
+        chainMarkdown: String = ""
     ): String = buildString {
         appendLine("## User Requirement")
         appendLine(userQuery)
         appendLine()
+        
+        if (chainMarkdown.isNotBlank()) {
+            appendLine(chainMarkdown)
+        }
+        
         appendLine("## Candidate Files (scored by relevance)")
         appendLine()
         

@@ -26,23 +26,36 @@ class FilePathTokenCollector(
             val classNameTokens = tokenizeCamelCase(node.className)
             val packageTokens = tokenizePath(node.packageName ?: "")
             
-            var matchedInClassName = 0
-            var matchedInPackage = 0
+            var classScore = 0.0
+            var packageScore = 0.0
+            val totalDocs = graph.files.size + graph.resourceNodes.size
+            
+            val matchedInClassList = mutableListOf<String>()
+            val matchedInPkgList = mutableListOf<String>()
 
             query.koreanNouns.forEach { noun ->
                 val translations = dictionary.translate(noun)
+                
                 if (translations.any { trans -> tokenMatchesAny(trans, classNameTokens) }) {
-                    matchedInClassName++
+                    val maxIdf = translations.maxOfOrNull { trans ->
+                        val df = graph.documentFrequency[trans.lowercase()] ?: 1
+                        Math.log(totalDocs.toDouble() / df.toDouble()).coerceAtLeast(0.1)
+                    } ?: 1.0
+                    classScore += 50.0 * maxIdf
+                    matchedInClassList.add(noun)
                 } else if (translations.any { trans -> tokenMatchesAny(trans, packageTokens) }) {
-                    matchedInPackage++
+                    val maxIdf = translations.maxOfOrNull { trans ->
+                        val df = graph.documentFrequency[trans.lowercase()] ?: 1
+                        Math.log(totalDocs.toDouble() / df.toDouble()).coerceAtLeast(0.1)
+                    } ?: 1.0
+                    packageScore += 25.0 * maxIdf
+                    matchedInPkgList.add(noun)
                 }
             }
             
-            if (matchedInClassName == 0 && matchedInPackage == 0) continue
+            if (matchedInClassList.isEmpty() && matchedInPkgList.isEmpty()) continue
 
-            val classScore = minOf(matchedInClassName * 50.0, 100.0)
-            val packageScore = minOf(matchedInPackage * 25.0, 50.0)
-            val totalScore = minOf(classScore + packageScore, 100.0)
+            val totalScore = classScore + packageScore
 
             if (totalScore >= 15.0) {
                 results.add(
@@ -50,7 +63,7 @@ class FilePathTokenCollector(
                         filePath = path,
                         score = totalScore,
                         matchedBy = listOf(
-                            "경로 명사 매칭 (클래스:$matchedInClassName, 패키지:$matchedInPackage) -> 점수: $totalScore"
+                            "경로 명사 매칭 (클래스:${matchedInClassList.joinToString(",")}, 패키지:${matchedInPkgList.joinToString(",")}) -> 점수: ${String.format("%.2f", totalScore)}"
                         )
                     )
                 )

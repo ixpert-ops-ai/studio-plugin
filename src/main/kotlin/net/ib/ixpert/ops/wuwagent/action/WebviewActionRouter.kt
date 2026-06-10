@@ -284,7 +284,7 @@ class WebviewActionRouter(private val project: Project) {
                     ApplicationManager.getApplication().executeOnPooledThread {
                         try {
                             val client = WuwLlmService.getClient()
-                            val mdRoot = java.nio.file.Paths.get(project.basePath ?: "", ".meta")
+                            val mdRoot = java.nio.file.Paths.get(project.basePath ?: "", "docs")
                             val sourceRoot = java.nio.file.Paths.get(project.basePath ?: "")
                             val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
                             val projectGraph = graphLoader.loadGraph() ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 `/metagraph`를 실행해주세요.")

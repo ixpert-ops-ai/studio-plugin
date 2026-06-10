@@ -14,7 +14,11 @@ class DomainDictionary private constructor(
     private val entries: Map<String, Set<String>>
 ) {
     /**
-     * 한글 키에 대응하는 영어 토큰 집합을 반환합니다.
+     * 사전에 등록된 모든 키(한글/복합어 등) 목록을 반환합니다.
+     */
+    val keys: Set<String> get() = entries.keys
+
+    /**
      * 정확 매칭 + 부분 매칭(한글 키가 입력에 포함되거나 입력이 키에 포함)을 모두 시도합니다.
      */
     fun translate(koreanNoun: String): Set<String> {
