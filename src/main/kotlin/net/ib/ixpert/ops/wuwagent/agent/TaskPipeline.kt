@@ -515,9 +515,17 @@ sealed class TaskPipeline {
                 else -> true
             }
 
+            // Diff에 넘기기 전 코드펜스 제거 (```kt, ```kotlin 등 첫 줄 / 마지막 ``` 줄)
+            val strippedExtractedCode = extractedCode.lines().let { lines ->
+                var result = lines
+                if (result.firstOrNull()?.trimStart()?.startsWith("```") == true) result = result.drop(1)
+                if (result.lastOrNull()?.trim() == "```") result = result.dropLast(1)
+                result.joinToString("\n")
+            }
+
             return StepResult(
                 originalCode = if (hasCodeDiff) originalCode else null,
-                modifiedCode = if (hasCodeDiff) extractedCode else null,
+                modifiedCode = if (hasCodeDiff) strippedExtractedCode else null,
                 applyScope = applyScope,
                 llmResponse = llmResponse,
                 rawLlmResponse = rawLlmResponse,

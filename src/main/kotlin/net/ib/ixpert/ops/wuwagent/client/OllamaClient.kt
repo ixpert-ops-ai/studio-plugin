@@ -36,7 +36,7 @@ class OllamaClient : LLMClient {
             options = mapOf(
                 "temperature" to settings.temperature,
                 "num_ctx" to settings.contextWindow,
-                "num_predict" to (maxTokens ?: 4096),
+                "num_predict" to (maxTokens ?: 16000),
                 "repeat_penalty" to 1.1,
                 "repeat_last_n" to 256
             )
@@ -260,7 +260,7 @@ class OllamaClient : LLMClient {
             "options" to mapOf(
                 "temperature" to settings.temperature,
                 "num_ctx" to settings.contextWindow,
-                "num_predict" to (maxTokens ?: 4096),
+                "num_predict" to (maxTokens ?: 16000),
                 "repeat_penalty" to 1.1,
                 "repeat_last_n" to 256
             )
