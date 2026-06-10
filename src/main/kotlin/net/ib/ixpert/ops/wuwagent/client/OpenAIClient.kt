@@ -54,8 +54,14 @@ class OpenAIClient : LLMClient {
         return try {
             val result = HttpRequests.post(serverUrl, "application/json")
                 .tuner { connection ->
-                    if (settings.apiKey.isNotBlank()) {
-                        connection.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+                    // OpenAI Compatible 타입이면 openaiApiKey 우선, 그 외(aipro 등)는 공용 apiKey 사용
+                    val effectiveKey = if (settings.apiType == net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OPENAI_COMPATIBLE) {
+                        settings.openaiApiKey.ifBlank { settings.apiKey }
+                    } else {
+                        settings.apiKey
+                    }
+                    if (effectiveKey.isNotBlank()) {
+                        connection.setRequestProperty("Authorization", "Bearer $effectiveKey")
                     }
                     val timeoutMs = settings.timeoutSeconds * 1000
                     connection.connectTimeout = 30_000
@@ -246,8 +252,14 @@ class OpenAIClient : LLMClient {
         return try {
             val responseString = HttpRequests.post(serverUrl, "application/json")
                 .tuner { connection ->
-                    if (settings.apiKey.isNotBlank()) {
-                        connection.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+                    // OpenAI Compatible 타입이면 openaiApiKey 우선, 그 외(aipro 등)는 공용 apiKey 사용
+                    val effectiveKey = if (settings.apiType == net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OPENAI_COMPATIBLE) {
+                        settings.openaiApiKey.ifBlank { settings.apiKey }
+                    } else {
+                        settings.apiKey
+                    }
+                    if (effectiveKey.isNotBlank()) {
+                        connection.setRequestProperty("Authorization", "Bearer $effectiveKey")
                     }
                     val timeoutMs = settings.timeoutSeconds * 1000
                     connection.connectTimeout = 30_000
