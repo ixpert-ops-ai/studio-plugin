@@ -61,8 +61,8 @@
       content: '';
       position: absolute; inset: 0;
       background:
-        radial-gradient(ellipse 60% 50% at 50% 10%, rgba(122,162,247,.12) 0%, transparent 70%),
-        radial-gradient(ellipse 40% 40% at 80% 80%, rgba(187,154,247,.08) 0%, transparent 60%);
+              radial-gradient(ellipse 60% 50% at 50% 10%, rgba(122,162,247,.12) 0%, transparent 70%),
+              radial-gradient(ellipse 40% 40% at 80% 80%, rgba(187,154,247,.08) 0%, transparent 60%);
       pointer-events: none;
     }
     .badge {
@@ -245,6 +245,67 @@
     }
     .chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
+    /* ── USAGE EXAMPLES ── */
+    .example-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      transition: border-color .2s, transform .2s;
+    }
+    .example-card:hover { transform: translateY(-3px); }
+    .example-header {
+      display: flex; align-items: center; gap: .75rem;
+      padding: 1.1rem 1.4rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .example-header .ex-icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem; flex-shrink: 0;
+    }
+    .example-header .ex-title { font-size: .95rem; font-weight: 700; }
+    .example-header .ex-tag {
+      margin-left: auto;
+      padding: .15rem .55rem; border-radius: 4px;
+      font-size: .68rem; font-weight: 600; white-space: nowrap;
+    }
+    .example-body { padding: 1.1rem 1.4rem; display: flex; flex-direction: column; gap: 1rem; }
+    .ex-trigger {
+      display: flex; align-items: center; gap: .5rem;
+      font-size: .78rem; color: var(--muted);
+    }
+    .ex-trigger code {
+      color: var(--cyan); background: rgba(125,207,255,.08);
+      border: 1px solid rgba(125,207,255,.15);
+      padding: .1rem .4rem; border-radius: 4px; font-size: .75rem;
+    }
+    .ex-block {
+      border-radius: 8px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .ex-block-label {
+      display: flex; align-items: center; gap: .4rem;
+      padding: .35rem .75rem;
+      font-size: .68rem; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+    }
+    .ex-block-label.input  { background: rgba(108,112,134,.12); color: var(--muted); }
+    .ex-block-label.output { background: rgba(158,206,106,.07); color: var(--green); }
+    .ex-block-label.warn   { background: rgba(255,158,100,.07); color: var(--orange); }
+    .ex-code {
+      padding: .75rem 1rem;
+      font-family: 'Consolas', 'Fira Code', monospace;
+      font-size: .75rem; line-height: 1.65;
+      color: var(--text);
+      white-space: pre-wrap; word-break: break-word;
+      margin: 0;
+    }
+    .ex-prose { padding: .75rem 1rem; font-size: .8rem; color: var(--text); line-height: 1.6; }
+    .ex-prose li { margin-left: 1rem; margin-bottom: .3rem; color: var(--muted); }
+    .ex-prose li strong { color: var(--text); }
+
     /* ── PHASE2 ── */
     .phase2-flow {
       display: flex; flex-direction: column; gap: 1rem; margin-top: 2rem;
@@ -399,8 +460,10 @@
   </a>
   <nav class="nav-links">
     <a href="#features">기능</a>
+    <a href="#examples">사용 예시</a>
     <a href="#architecture">아키텍처</a>
     <a href="#phase2">Phase 2</a>
+    <a href="#install">설치</a>
     <a href="#stack">기술 스택</a>
     <a href="#webchat">웹 채팅</a>
   </nav>
@@ -408,7 +471,7 @@
 
 <!-- HERO -->
 <div class="hero">
-  <div class="badge">IntelliJ / Android Studio Plugin</div>
+  <div class="badge">IntelliJ / VS Code Plugin</div>
   <div class="hero-icon">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
       <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="28" ry="28"
@@ -423,7 +486,7 @@
     <span class="ix">iX</span><span class="pert">pert</span> AI Assistant
   </h1>
   <p class="hero-desc">
-    IntelliJ · Android Studio에 내장된 온프레미스 AI 코딩 어시스턴트.
+    IntelliJ · VS Code에 내장된 온프레미스 AI 코딩 어시스턴트.
     코드 설명부터 자동 리팩토링, 요구사항 기반 코드 생성까지 —
     LLM이 IDE 안에서 직접 동작합니다.
   </p>
@@ -488,6 +551,226 @@
       <h3>Unit Test Report</h3>
       <p>선택한 코드에 대한 단위 테스트 케이스와 테스트 리포트를 자동으로 생성합니다.</p>
       <span class="tag" style="background:rgba(158,206,106,.1);color:var(--green);border:1px solid rgba(158,206,106,.2);">단일 스텝</span>
+    </div>
+
+  </div>
+</section>
+
+<!-- USAGE EXAMPLES -->
+<section id="examples">
+  <p class="section-label">Usage Examples</p>
+  <h2 class="section-title">기능별 사용 예시</h2>
+  <p class="section-sub">우클릭 메뉴 또는 채팅창에서 실행하면 이런 결과를 얻을 수 있습니다.</p>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:1.3rem;">
+
+    <!-- 1. Explain -->
+    <div class="example-card">
+      <div class="example-header">
+        <div class="ex-icon" style="background:rgba(122,162,247,.12);">🔍</div>
+        <div class="ex-title">Explain This Code</div>
+        <span class="ex-tag" style="background:rgba(122,162,247,.1);color:var(--blue);border:1px solid rgba(122,162,247,.2);">단일 스텝</span>
+      </div>
+      <div class="example-body">
+        <div class="ex-trigger">🖱️ 코드 선택 후 &nbsp;<code>우클릭 → Explain This Code</code></div>
+        <div class="ex-block">
+          <div class="ex-block-label input">📄 선택한 코드</div>
+          <pre class="ex-code">users.stream()
+  .filter(u -> u.getRole() == Role.ADMIN)
+  .sorted(Comparator.comparing(User::getName))
+  .collect(Collectors.toList());</pre>
+        </div>
+        <div class="ex-block">
+          <div class="ex-block-label output">✅ AI 설명</div>
+          <div class="ex-prose">이 코드는 사용자 목록에서 <strong>관리자(ADMIN) 역할</strong>을 가진 사용자만 필터링한 뒤, <strong>이름 기준 오름차순</strong>으로 정렬하여 새 리스트로 반환합니다. Java Stream API의 filter → sorted → collect 파이프라인을 사용하며, 원본 컬렉션을 변경하지 않습니다.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Review -->
+    <div class="example-card">
+      <div class="example-header">
+        <div class="ex-icon" style="background:rgba(158,206,106,.12);">✅</div>
+        <div class="ex-title">Review This Code</div>
+        <span class="ex-tag" style="background:rgba(158,206,106,.1);color:var(--green);border:1px solid rgba(158,206,106,.2);">2단계</span>
+      </div>
+      <div class="example-body">
+        <div class="ex-trigger">🖱️ 코드 선택 후 &nbsp;<code>우클릭 → Review This Code</code></div>
+        <div class="ex-block">
+          <div class="ex-block-label input">📄 선택한 코드</div>
+          <pre class="ex-code">public User getUser(String id) {
+    return userRepo.findById(id);
+}</pre>
+        </div>
+        <div class="ex-block">
+          <div class="ex-block-label warn">⚠️ 리뷰 결과</div>
+          <div class="ex-prose">
+            <ul>
+              <li><strong>NPE 위험:</strong> findById()가 null을 반환할 경우 호출부에서 NullPointerException 발생 가능</li>
+              <li><strong>개선 제안:</strong> Optional&lt;User&gt; 반환 타입으로 변경 권장</li>
+            </ul>
+          </div>
+          <pre class="ex-code" style="border-top:1px solid var(--border);"><<<<<<< SEARCH
+    return userRepo.findById(id);
+=======
+    return userRepo.findById(id)
+        .orElseThrow(() -> new UserNotFoundException(id));
+>>>>>>> REPLACE</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Improve -->
+    <div class="example-card">
+      <div class="example-header">
+        <div class="ex-icon" style="background:rgba(187,154,247,.12);">⚡</div>
+        <div class="ex-title">Improve This Code</div>
+        <span class="ex-tag" style="background:rgba(187,154,247,.1);color:var(--purple);border:1px solid rgba(187,154,247,.2);">3단계</span>
+      </div>
+      <div class="example-body">
+        <div class="ex-trigger">🖱️ 코드 선택 후 &nbsp;<code>우클릭 → Improve This Code</code></div>
+        <div class="ex-block">
+          <div class="ex-block-label input">📄 선택한 코드</div>
+          <pre class="ex-code">List&lt;String&gt; names = new ArrayList&lt;&gt;();
+for (User u : users) {
+    if (u.isActive()) {
+        names.add(u.getName());
+    }
+}</pre>
+        </div>
+        <div class="ex-block">
+          <div class="ex-block-label output">✅ 3단계 파이프라인 결과</div>
+          <div class="ex-prose"><strong>[Step 1]</strong> 분석: 전통적 for-loop → Stream으로 개선 가능, 가독성↑<br/><strong>[Step 2]</strong> 개선 코드 적용 (3-way diff 뷰 오픈)<br/><strong>[Step 3]</strong> 안정성 평가: 동작 동등성 확인 ✅ 위험도 낮음</div>
+          <pre class="ex-code" style="border-top:1px solid var(--border);">List&lt;String&gt; names = users.stream()
+    .filter(User::isActive)
+    .map(User::getName)
+    .collect(Collectors.toList());</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Impact Analysis -->
+    <div class="example-card">
+      <div class="example-header">
+        <div class="ex-icon" style="background:rgba(255,158,100,.12);">🌊</div>
+        <div class="ex-title">Impact Analysis</div>
+        <span class="ex-tag" style="background:rgba(255,158,100,.1);color:var(--orange);border:1px solid rgba(255,158,100,.2);">단일 스텝</span>
+      </div>
+      <div class="example-body">
+        <div class="ex-trigger">🖱️ 코드 선택 후 &nbsp;<code>우클릭 → Impact Analysis</code></div>
+        <div class="ex-block">
+          <div class="ex-block-label input">📄 변경 대상</div>
+          <pre class="ex-code">// UserService.java
+public UserDto findById(Long id) {
+    // 반환 타입을 User → UserDto 로 변경
+}</pre>
+        </div>
+        <div class="ex-block">
+          <div class="ex-block-label output">✅ 영향 범위 분석</div>
+          <div class="ex-prose">
+            <ul>
+              <li><strong>직접 호출:</strong> OrderController, PaymentService, AuthFilter (3개)</li>
+              <li><strong>간접 영향:</strong> OrderDto 매핑 로직, 테스트 코드 2건</li>
+              <li><strong>주의:</strong> REST 응답 스펙 변경 → 프론트엔드 계약 확인 필요</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. Query Validation -->
+    <div class="example-card">
+      <div class="example-header">
+        <div class="ex-icon" style="background:rgba(125,207,255,.12);">🗄️</div>
+        <div class="ex-title">Query Validation</div>
+        <span class="ex-tag" style="background:rgba(125,207,255,.1);color:var(--cyan);border:1px solid rgba(125,207,255,.2);">단일 스텝</span>
+      </div>
+      <div class="example-body">
+        <div class="ex-trigger">🖱️ 쿼리 선택 후 &nbsp;<code>우클릭 → Query Validation</code></div>
+        <div class="ex-block">
+          <div class="ex-block-label input">📄 검증할 JPQL</div>
+          <pre class="ex-code">SELECT o FROM Order o
+JOIN o.user u
+WHERE u.status = 'ACTIVE'
+AND o.createdAt > :date
+ORDER BY o.amount</pre>
+        </div>
+        <div class="ex-block">
+          <div class="ex-block-label warn">⚠️ 검증 결과</div>
+          <div class="ex-prose">
+            <ul>
+              <li><strong>문법:</strong> 이상 없음 ✅</li>
+              <li><strong>성능:</strong> createdAt 컬럼 인덱스 미설정 시 Full Scan 발생 가능</li>
+              <li><strong>개선:</strong> <code style="color:var(--cyan);">@Index(columnList="created_at")</code> 추가 권장</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Generate Analysis Doc -->
+    <div class="example-card">
+      <div class="example-header">
+        <div class="ex-icon" style="background:rgba(122,162,247,.12);">📄</div>
+        <div class="ex-title">Generate Analysis Doc</div>
+        <span class="ex-tag" style="background:rgba(122,162,247,.1);color:var(--blue);border:1px solid rgba(122,162,247,.2);">일괄 처리</span>
+      </div>
+      <div class="example-body">
+        <div class="ex-trigger">🖱️ 파일/폴더 선택 후 &nbsp;<code>우클릭 → Generate Analysis Doc</code></div>
+        <div class="ex-block">
+          <div class="ex-block-label input">📄 대상</div>
+          <pre class="ex-code">src/main/java/service/OrderService.java</pre>
+        </div>
+        <div class="ex-block">
+          <div class="ex-block-label output">✅ 생성된 Markdown 문서</div>
+          <pre class="ex-code"># OrderService 분석 문서
+
+## 개요
+주문 처리 비즈니스 로직을 담당하는 서비스 클래스
+
+## 주요 메서드
+| 메서드 | 역할 |
+|--------|------|
+| createOrder() | 신규 주문 생성 및 재고 차감 |
+| cancelOrder() | 주문 취소 및 환불 처리 |
+
+## 의존성
+UserService, InventoryService, PaymentClient</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. Unit Test Report -->
+    <div class="example-card">
+      <div class="example-header">
+        <div class="ex-icon" style="background:rgba(158,206,106,.12);">🧪</div>
+        <div class="ex-title">Unit Test Report</div>
+        <span class="ex-tag" style="background:rgba(158,206,106,.1);color:var(--green);border:1px solid rgba(158,206,106,.2);">단일 스텝</span>
+      </div>
+      <div class="example-body">
+        <div class="ex-trigger">🖱️ 코드 선택 후 &nbsp;<code>우클릭 → Unit Test Report</code></div>
+        <div class="ex-block">
+          <div class="ex-block-label input">📄 대상 메서드</div>
+          <pre class="ex-code">public int calculateDiscount(int price, String grade) {
+    if (grade.equals("VIP")) return (int)(price * 0.8);
+    if (grade.equals("GOLD")) return (int)(price * 0.9);
+    return price;
+}</pre>
+        </div>
+        <div class="ex-block">
+          <div class="ex-block-label output">✅ 자동 생성된 테스트</div>
+          <pre class="ex-code">@Test void vip_gets_20_percent_off() {
+    assertEquals(8000, svc.calculateDiscount(10000, "VIP"));
+}
+@Test void gold_gets_10_percent_off() {
+    assertEquals(9000, svc.calculateDiscount(10000, "GOLD"));
+}
+@Test void normal_pays_full_price() {
+    assertEquals(10000, svc.calculateDiscount(10000, "NORMAL"));
+}
+@Test void null_grade_throws_exception() { ... }</pre>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -625,8 +908,234 @@
         <p>수정된 파일 전체에 대해 단위 테스트를 자동 생성합니다. TestFileMapper가 기존 테스트 파일을 찾거나 새로 생성합니다.</p>
       </div>
     </div>
+
+    <!-- Phase 2 사용 예시 -->
+    <p class="section-label" style="margin-top:3.5rem;">사용 예시</p>
+    <h3 class="section-title" style="font-size:1.5rem;margin-bottom:.5rem;">채팅창에서 이렇게 사용하세요</h3>
+    <p style="color:var(--muted);font-size:.875rem;margin-bottom:2rem;">4개 명령을 순서대로 실행합니다. 각 단계 결과가 다음 단계의 입력이 됩니다.</p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:1.3rem;">
+
+      <!-- /metagraph -->
+      <div class="example-card">
+        <div class="example-header">
+          <div class="ex-icon" style="background:rgba(158,206,106,.12);">🗺️</div>
+          <div class="ex-title">/metagraph</div>
+          <span class="ex-tag" style="background:rgba(158,206,106,.1);color:var(--green);border:1px solid rgba(158,206,106,.2);">선행 필수</span>
+        </div>
+        <div class="example-body">
+          <div class="ex-trigger">💬 채팅창에 &nbsp;<code>/metagraph</code>&nbsp; 입력</div>
+          <div class="ex-block">
+            <div class="ex-block-label input">📄 실행 조건</div>
+            <div class="ex-prose">프로젝트를 처음 분석하거나 구조가 크게 바뀐 경우 실행합니다. 이후 단계에서 자동 재사용됩니다.</div>
+          </div>
+          <div class="ex-block">
+            <div class="ex-block-label output">✅ 결과</div>
+            <pre class="ex-code">✔ Spring Endpoints  : 42개 파싱 완료
+✔ JPA Entities      : 18개 파싱 완료
+✔ Spring Beans      : 67개 파싱 완료
+
+project-graph.json 저장 완료.
+이후 모든 LLM 호출에 관련 컨텍스트가
+자동으로 주입됩니다.</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- /analyze -->
+      <div class="example-card">
+        <div class="example-header">
+          <div class="ex-icon" style="background:rgba(122,162,247,.12);">🔎</div>
+          <div class="ex-title">/analyze</div>
+          <span class="ex-tag" style="background:rgba(122,162,247,.1);color:var(--blue);border:1px solid rgba(122,162,247,.2);">1단계</span>
+        </div>
+        <div class="example-body">
+          <div class="ex-trigger">💬 채팅창에 &nbsp;<code>/analyze 요구사항 입력</code></div>
+          <div class="ex-block">
+            <div class="ex-block-label input">📄 요구사항 입력 예시</div>
+            <pre class="ex-code">/analyze 회원 등급별 할인율을
+쿠폰 시스템으로 분리하고
+쿠폰 발급 API를 추가해줘</pre>
+          </div>
+          <div class="ex-block">
+            <div class="ex-block-label output">✅ 분석 결과 (TargetFileSpec)</div>
+            <pre class="ex-code">수정 대상 파일 (4개):
+  📝 UserService.java        — 할인 로직 제거
+  📝 OrderService.java       — 쿠폰 적용 로직 추가
+  🆕 CouponService.java      — 신규 생성
+  🆕 CouponController.java   — 신규 생성
+
+⚠ 주의: DiscountPolicy 인터페이스
+   계약 변경 시 기존 호출부 영향 있음</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- /implement -->
+      <div class="example-card">
+        <div class="example-header">
+          <div class="ex-icon" style="background:rgba(187,154,247,.12);">⚙️</div>
+          <div class="ex-title">/implement</div>
+          <span class="ex-tag" style="background:rgba(187,154,247,.1);color:var(--purple);border:1px solid rgba(187,154,247,.2);">2단계</span>
+        </div>
+        <div class="example-body">
+          <div class="ex-trigger">💬 채팅창에 &nbsp;<code>/implement</code>&nbsp; 입력 (/analyze 후 실행)</div>
+          <div class="ex-block">
+            <div class="ex-block-label input">📄 진행 방식</div>
+            <div class="ex-prose">분석 결과의 파일 목록을 <strong>Contract-First 순서</strong>로 자동 처리합니다. DTO/Entity → Interface → Impl → Controller</div>
+          </div>
+          <div class="ex-block">
+            <div class="ex-block-label output">✅ 순차 처리 결과</div>
+            <pre class="ex-code">[1/4] CouponDto.java       ✔ 생성
+[2/4] CouponService.java   ✔ 생성 (인터페이스)
+[3/4] CouponServiceImpl.java ✔ 생성
+[4/4] CouponController.java  ✔ 생성
+      POST /api/coupons/issue
+
+SignatureValidator: 인터페이스 계약 일치 ✅
+각 파일은 3-way diff로 검토 가능합니다.</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- /test-all -->
+      <div class="example-card">
+        <div class="example-header">
+          <div class="ex-icon" style="background:rgba(125,207,255,.12);">🧪</div>
+          <div class="ex-title">/test-all</div>
+          <span class="ex-tag" style="background:rgba(125,207,255,.1);color:var(--cyan);border:1px solid rgba(125,207,255,.2);">3단계</span>
+        </div>
+        <div class="example-body">
+          <div class="ex-trigger">💬 채팅창에 &nbsp;<code>/test-all</code>&nbsp; 입력 (/implement 후 실행)</div>
+          <div class="ex-block">
+            <div class="ex-block-label input">📄 진행 방식</div>
+            <div class="ex-prose">/implement 로 수정된 파일 전체에 대해 단위 테스트를 자동 생성합니다. 기존 테스트 파일이 있으면 추가, 없으면 새로 생성합니다.</div>
+          </div>
+          <div class="ex-block">
+            <div class="ex-block-label output">✅ 생성된 테스트</div>
+            <pre class="ex-code">CouponServiceImplTest.java (신규)
+  ✔ issueCoupon_success
+  ✔ issueCoupon_duplicate_throws
+  ✔ applyCoupon_expired_throws
+  ✔ applyCoupon_valid_returns_discount
+
+OrderServiceTest.java (기존 파일에 추가)
+  ✔ createOrder_with_coupon_applies_discount</pre>
+          </div>
+        </div>
+      </div>
+
+    </div>
   </div>
 </section>
+
+<!-- INSTALL -->
+<div class="full-bleed arch-section" id="install">
+  <div class="arch-wrap">
+    <p class="section-label">Installation</p>
+    <h2 class="section-title">설치 방법</h2>
+    <p class="section-sub">플러그인 파일을 다운로드한 뒤, 사용 중인 IDE에 맞는 방법으로 설치합니다.</p>
+
+    <!-- IDE 설치 카드 2열 -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1.5rem;margin-top:1rem;">
+
+      <!-- IntelliJ -->
+      <div class="user-card devcard" style="border-radius:12px;">
+        <div class="uc-head" style="margin-bottom:1rem;">
+          <div class="uc-icon" style="background:rgba(122,162,247,.12);font-size:1.5rem;">🧩</div>
+          <div>
+            <div class="uc-title">IntelliJ IDEA</div>
+            <div class="uc-subtitle">2024.3 이상 권장</div>
+          </div>
+        </div>
+
+        <a href="https://ib.ixpertops.cloud/downloads/iXpert_AI-Assistant-Intelli-1.0-SNAPSHOT.zip" download
+           style="display:inline-flex;align-items:center;gap:.5rem;margin-bottom:1.4rem;padding:.5rem 1rem;background:rgba(122,162,247,.1);border:1px solid rgba(122,162,247,.25);border-radius:8px;font-size:.82rem;font-weight:700;color:var(--blue);text-decoration:none;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          .zip 다운로드
+        </a>
+
+        <div style="display:flex;flex-direction:column;gap:.75rem;">
+          <div class="phase2-step" style="padding:.9rem 1rem;gap:.9rem;">
+            <span class="step-num" style="flex-shrink:0;">1</span>
+            <div><div style="font-size:.85rem;font-weight:700;margin-bottom:.2rem;">zip 파일 저장</div><div style="font-size:.78rem;color:var(--muted);">위 버튼으로 파일을 로컬에 다운로드합니다.</div></div>
+          </div>
+          <div class="phase2-step" style="padding:.9rem 1rem;gap:.9rem;">
+            <span class="step-num" style="flex-shrink:0;">2</span>
+            <div><div style="font-size:.85rem;font-weight:700;margin-bottom:.2rem;">플러그인 설치</div><div style="font-size:.78rem;color:var(--muted);"><code style="color:var(--cyan);">Settings → Plugins</code> → 우측 ⚙️ → <code style="color:var(--cyan);">Install Plugin from Disk…</code> 선택 후 zip 파일 지정</div></div>
+          </div>
+          <div class="phase2-step" style="padding:.9rem 1rem;gap:.9rem;">
+            <span class="step-num" style="flex-shrink:0;">3</span>
+            <div><div style="font-size:.85rem;font-weight:700;margin-bottom:.2rem;">IDE 재시작</div><div style="font-size:.78rem;color:var(--muted);">설치 완료 후 <code style="color:var(--cyan);">Restart IDE</code> 클릭하여 플러그인을 활성화합니다.</div></div>
+          </div>
+          <div class="phase2-step" style="padding:.9rem 1rem;gap:.9rem;">
+            <span class="step-num" style="flex-shrink:0;">4</span>
+            <div><div style="font-size:.85rem;font-weight:700;margin-bottom:.2rem;">서버 설정</div><div style="font-size:.78rem;color:var(--muted);"><code style="color:var(--cyan);">Settings → Tools → iXpert AI</code> 에서 Base URL · Model 확인. 기본값으로 즉시 사용 가능.</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VS Code -->
+      <div class="user-card devcard" style="border-radius:12px;border-color:var(--border);">
+        <div class="uc-head" style="margin-bottom:1rem;">
+          <div class="uc-icon" style="background:rgba(125,207,255,.12);font-size:1.5rem;">💻</div>
+          <div>
+            <div class="uc-title">VS Code</div>
+            <div class="uc-subtitle">1.85 이상 권장</div>
+          </div>
+        </div>
+
+        <a href="https://ib.ixpertops.cloud/downloads/iXpert_AI-Assistant-Intelli-1.0-SNAPSHOT.zip" download
+           style="display:inline-flex;align-items:center;gap:.5rem;margin-bottom:1.4rem;padding:.5rem 1rem;background:rgba(125,207,255,.1);border:1px solid rgba(125,207,255,.25);border-radius:8px;font-size:.82rem;font-weight:700;color:var(--cyan);text-decoration:none;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          .zip 다운로드
+        </a>
+
+        <div style="display:flex;flex-direction:column;gap:.75rem;">
+          <div class="phase2-step" style="padding:.9rem 1rem;gap:.9rem;">
+            <span class="step-num" style="flex-shrink:0;">1</span>
+            <div><div style="font-size:.85rem;font-weight:700;margin-bottom:.2rem;">zip 파일 저장</div><div style="font-size:.78rem;color:var(--muted);">위 버튼으로 파일을 로컬에 다운로드합니다.</div></div>
+          </div>
+          <div class="phase2-step" style="padding:.9rem 1rem;gap:.9rem;">
+            <span class="step-num" style="flex-shrink:0;">2</span>
+            <div><div style="font-size:.85rem;font-weight:700;margin-bottom:.2rem;">Extensions 패널 열기</div><div style="font-size:.78rem;color:var(--muted);"><code style="color:var(--cyan);">Ctrl+Shift+X</code> (macOS: <code style="color:var(--cyan);">⌘+Shift+X</code>) 로 Extensions 패널을 엽니다.</div></div>
+          </div>
+          <div class="phase2-step" style="padding:.9rem 1rem;gap:.9rem;">
+            <span class="step-num" style="flex-shrink:0;">3</span>
+            <div><div style="font-size:.85rem;font-weight:700;margin-bottom:.2rem;">VSIX로 설치</div><div style="font-size:.78rem;color:var(--muted);">패널 우측 상단 <code style="color:var(--cyan);">···</code> → <code style="color:var(--cyan);">Install from VSIX…</code> 선택 후 다운로드한 파일 지정</div></div>
+          </div>
+          <div class="phase2-step" style="padding:.9rem 1rem;gap:.9rem;">
+            <span class="step-num" style="flex-shrink:0;">4</span>
+            <div><div style="font-size:.85rem;font-weight:700;margin-bottom:.2rem;">서버 설정</div><div style="font-size:.78rem;color:var(--muted);"><code style="color:var(--cyan);">Command Palette (F1)</code> → <code style="color:var(--cyan);">iXpert: Open Settings</code> 에서 Base URL · Model 확인.</div></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 기본 설정값 -->
+    <p class="section-label" style="margin-top:3.5rem;">기본 설정값 (공통)</p>
+    <div class="layer-grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));">
+      <div class="layer-card">
+        <div class="layer-name">Base URL</div>
+        <p><code style="color:var(--cyan);font-size:.8rem;">http://ollama.ixpertops.cloud</code></p>
+      </div>
+      <div class="layer-card">
+        <div class="layer-name">Model</div>
+        <p><code style="color:var(--cyan);font-size:.8rem;">qwen3-coder:30b</code></p>
+      </div>
+      <div class="layer-card">
+        <div class="layer-name">Context Window</div>
+        <p><code style="color:var(--cyan);font-size:.8rem;">32768</code> — 250줄 이상 파일 처리에 필수</p>
+      </div>
+      <div class="layer-card">
+        <div class="layer-name">Timeout / Temperature</div>
+        <p><code style="color:var(--cyan);font-size:.8rem;">300s</code> &nbsp;/&nbsp; <code style="color:var(--cyan);font-size:.8rem;">0.1</code></p>
+      </div>
+    </div>
+
+  </div>
+</div>
 
 <!-- TECH STACK -->
 <section id="stack">
@@ -746,7 +1255,7 @@
 
 <!-- FOOTER -->
 <footer>
-  <p>Built by <span>iXpert Ops AI</span> Team &nbsp;·&nbsp; WuwAgent Plugin &nbsp;·&nbsp; IntelliJ Platform 2024.3+</p>
+  <p>Built by <span>iXpert Ops</span> Team &nbsp;·&nbsp; iXpert AI Assistant Plugin &nbsp;·&nbsp; IntelliJ Platform 2024.3+</p>
 </footer>
 
 </body>
