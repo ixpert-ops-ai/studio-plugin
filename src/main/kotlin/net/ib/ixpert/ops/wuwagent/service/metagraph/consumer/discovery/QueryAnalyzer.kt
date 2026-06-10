@@ -13,8 +13,6 @@ package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery
 class QueryAnalyzer(private val dictionary: DomainDictionary) {
 
     fun analyze(query: String): AnalyzedQuery {
-        val koreanNouns = extractKoreanNouns(query)
-
         // 정확한 식별자 추출: CamelCase, ALL_CAPS, 패키지 경로
         val exactIdentifiers = IDENTIFIER_PATTERN
             .findAll(query)
@@ -27,23 +25,47 @@ class QueryAnalyzer(private val dictionary: DomainDictionary) {
             .map { it.value }
             .toList()
 
-        // ServiceId/DEM클래스 패턴: 대문자+숫자 조합 6자 이상 (예: SAPCMM0204S01, ACAMTBAPC001DEM)
+        // ServiceId/DEM클래스 패턴: 대문자+숫자 조합 6자 이상
         val serviceIds = SERVICE_ID_PATTERN
             .findAll(query)
             .map { it.value }
             .filter { it !in EXCLUDED_SERVICE_IDS }
             .toList()
 
-        // 영어 토큰: 식별자를 CamelCase 분해 + 나머지 영단어
+        // 1. 사전 기반 복합어 우선 추출
+        val dictMatches = dictionary.keys
+            .filter { it.length > 1 }
+            .sortedByDescending { it.length }
+            .filter { key -> query.contains(key) }
+
+        val compoundEnglishTokens = mutableSetOf<String>()
+        val consumedMatches = mutableSetOf<String>()
+
+        dictMatches.forEach { match ->
+            if (!consumedMatches.any { it.contains(match) }) {
+                compoundEnglishTokens.addAll(dictionary.translate(match))
+                consumedMatches.add(match)
+            }
+        }
+
+        // 2. 개별 한글 명사 추출
+        val rawKoreanNouns = extractKoreanNouns(query)
+
+        // 복합어로 이미 소비된 한글 명사는 개별 번역 확장 대상에서 제외
+        val koreanNouns = rawKoreanNouns.filterNot { noun ->
+            consumedMatches.any { consumed -> consumed.contains(noun) }
+        }
+
+        // 3. 영문 토큰 및 번역 결과 합산
         val engFromIdentifiers = exactIdentifiers.flatMap { DomainDictionary.tokenizeCamelCase(it) }
         val engFromFreeText = ENGLISH_WORD_PATTERN
             .findAll(query)
             .map { it.value.lowercase() }
             .filter { it !in STOP_WORDS }
             .toList()
-        val englishTokens = (engFromIdentifiers + engFromFreeText).toMutableSet()
-
-        // 한글 → 사전 변환 결과도 englishTokens에 합산
+        
+        val englishTokens = (engFromIdentifiers + engFromFreeText + compoundEnglishTokens).toMutableSet()
+        
         val dictTranslated = koreanNouns.flatMap { dictionary.translate(it) }
         englishTokens.addAll(dictTranslated)
 
@@ -67,7 +89,15 @@ class QueryAnalyzer(private val dictionary: DomainDictionary) {
     private fun extractKoreanNouns(text: String): List<String> {
         return KOREAN_PATTERN
             .findAll(text)
-            .map { it.value.replace(PARTICLE_PATTERN, "") }
+            .map { match ->
+                val word = match.value
+                if (dictionary.translate(word).isNotEmpty()) {
+                    word
+                } else {
+                    val stripped = word.replace(PARTICLE_PATTERN, "")
+                    if (stripped.length >= 2) stripped else word
+                }
+            }
             .filter { it.length >= 2 }
             .distinct()
             .toList()
@@ -88,7 +118,7 @@ class QueryAnalyzer(private val dictionary: DomainDictionary) {
         )
 
         /** URL 패턴 */
-        private val URL_PATTERN = Regex("""/[a-zA-Z0-9/_\-{}]+""")
+        private val URL_PATTERN = Regex("""(?<=\s|^)/[a-zA-Z0-9/_\-{}]{2,}""")
 
         /** ServiceId/DEM 클래스 패턴: 대문자+숫자 조합 6자 이상 */
         private val SERVICE_ID_PATTERN = Regex("""[A-Z][A-Z0-9]{5,}""")

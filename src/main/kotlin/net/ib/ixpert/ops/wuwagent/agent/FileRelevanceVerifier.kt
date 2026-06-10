@@ -61,8 +61,8 @@ class FileRelevanceVerifier(
         }
 
         val systemMessage = """
-            당신은 코드 수정 필요성을 판단하는 아키텍처 검증자입니다.
-            파일의 실제 목적과 요구사항을 비교하여, 수정이 필요한지 독립적으로 판단하세요.
+            당신의 역할은 "불필요함이 명백히 증명된 파일을 제거하는 것(반증)"입니다.
+            각 대상 파일에 대해 요구사항과 파일의 목적이 일치하는지 판단하세요.
             
             ## 프로젝트 아키텍처 제약
 $frameworkRules
@@ -150,9 +150,9 @@ $frameworkRules
             appendLine(context)
             appendLine("---")
             appendLine("### 판정 규칙")
-            appendLine("1. 요구사항을 충족하기 위해 이 파일의 코드를 실제로 수정해야 하면 REQUIRED")
-            appendLine("2. 수정하면 좋지만 필수는 아니면 OPTIONAL")
-            appendLine("3. 이 파일을 수정할 필요가 없으면 UNNECESSARY")
+            appendLine("1. REQUIRED: 호출 체인에 포함됨이 확인되거나, Stage 2가 의존성 추적으로 선정한 파일")
+            appendLine("2. OPTIONAL: 흐름에 포함되나 수정이 선택적")
+            appendLine("3. UNNECESSARY: 파일의 호출자가 스케줄러/배치임이 명확한데 요구사항은 사용자 UI 트리거이거나, 요구사항의 트리거 유형과 파일의 역할이 \"불일치\"함이 명백히 증명된 경우에만 판정")
             appendLine()
             appendLine("반드시 아래 JSON 형식으로만 응답하세요. 다른 설명은 출력하지 마세요.")
             appendLine("""

@@ -78,10 +78,10 @@ object AdaptiveFileDiscovery {
             addAll(analyzedQuery.exactIdentifiers)
             addAll(analyzedQuery.serviceIds)
             addAll(analyzedQuery.urlPatterns)
-            addAll(analyzedQuery.englishTokens.take(10))
+            addAll(analyzedQuery.englishTokens)
         }.distinct()
 
-        onProgress?.invoke("> 📋 분석 키워드: ${keywords.take(15).joinToString(", ")}\n")
+        onProgress?.invoke("> 📋 분석 키워드: ${keywords.joinToString(", ")}\n")
         onProgress?.invoke("> 🎯 Stage 1 결과: ${candidates.size}건 후보 파일 탐색\n")
 
         // ── Stage 2: LLM Fallback (후보 부족 시) ─────────────

@@ -104,18 +104,17 @@ class SpringAnnotationResolver {
 
         val interfaces = psiClass.interfaces.mapNotNull { it.qualifiedName }.toMutableSet()
         
-        // P3: Fallback for unresolved interfaces (e.g. Spring Data Repository generics)
-        val springDataInterfaces = setOf("JpaRepository", "CrudRepository", "PagingAndSortingRepository", "JpaSpecificationExecutor")
-        
+        // P3: Fallback for unresolved interfaces
+        // 필터링 책임은 매핑 단계(DependencyResolver)로 위임. 프로젝트 내 파일이 없으면 자동으로 엣지 생성이 무시됩니다.
         psiClass.implementsList?.referenceElements?.forEach { ref ->
             val refName = ref.referenceName
-            if (refName != null && springDataInterfaces.contains(refName)) {
+            if (refName != null) {
                 interfaces.add(refName)
             }
         }
         psiClass.extendsList?.referenceElements?.forEach { ref ->
             val refName = ref.referenceName
-            if (refName != null && springDataInterfaces.contains(refName)) {
+            if (refName != null) {
                 interfaces.add(refName)
             }
         }

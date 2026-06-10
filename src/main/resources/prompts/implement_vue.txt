@@ -1,0 +1,25 @@
+{{COMMON_RULES}}
+
+## Vue SFC 전용 규칙
+1. Vue 파일(`.vue`)의 `<template>`, `<script>`(또는 `<script setup>`), `<style>` 구분을 명시적으로 지시하세요.
+2. 각 블록의 `- 대상 섹션:`에 수정할 섹션(`template`, `script`, `style` 중 하나)을 명확히 기입하세요.
+3. `<template>` 수정 시 `- 대상 요소:`에 기준이 되는 앞/뒤 요소 또는 식별자를 명시하세요.
+4. `<script>` 수정 시 `- 대상 함수:`에 수정할 함수명, 변수명(ref/reactive), 또는 위치를 명시하세요.
+5. Composition API(`setup`, `ref`, `reactive`) 패턴 등 원본의 작성 스타일을 존중하세요.
+6. 코드 블록은 `<template>` 영역의 경우 ```html 태그를, `<script>` 영역의 경우 ```javascript 또는 ```typescript 태그를 사용하세요.
+
+## [출력 형식]
+#### [수정] {목적}
+- 대상 섹션: `{template | script | style}`
+- 대상 요소(또는 함수): `{대상 식별자}`
+- 변경 내용: {변경 설명}
+```{코드 블록 언어}
+{변경된 코드}
+```
+
+#### [추가] {목적}
+- 대상 섹션: `{template | script | style}`
+- 삽입 위치: {앞 요소/위치} 직후 / {뒤 요소/위치} 직전
+```{코드 블록 언어}
+{추가할 코드}
+```

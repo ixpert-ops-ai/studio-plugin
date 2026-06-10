@@ -125,6 +125,8 @@ class CandidateCollector(
         // 3. ResourceNode 수집 (Phase 1)
         if (graph.resourceNodes.isNotEmpty()) {
             val searchTokens = analyzed.englishTokens + analyzed.koreanNouns + analyzed.exactIdentifiers
+            val totalDocs = graph.files.size + graph.resourceNodes.size
+
             graph.resourceNodes.forEach { rNode ->
                 var score = 0.0
                 val matchedBy = mutableListOf<String>()
@@ -133,10 +135,14 @@ class CandidateCollector(
                 
                 searchTokens.forEach { token ->
                     val tokenLower = token.lowercase()
+                    val df = graph.documentFrequency[tokenLower] ?: 1
+                    val idfWeight = Math.log(totalDocs.toDouble() / df.toDouble()).coerceAtLeast(0.1)
+
                     if (pathLower.contains(tokenLower)) {
                         // 프론트엔드 파일(JSP/JS 등)이 충분한 점수를 받도록 상향
-                        score += 80.0
-                        matchedBy.add("ResourcePathMatch($token)")
+                        val baseScore = 80.0
+                        score += baseScore * idfWeight
+                        matchedBy.add("ResourcePathMatch($token*${String.format("%.2f", idfWeight)})")
                     }
                     
                     val metaMatch = rNode.metadata.values.any { value -> 
@@ -147,8 +153,9 @@ class CandidateCollector(
                         }
                     }
                     if (metaMatch) {
-                        score += 60.0
-                        matchedBy.add("ResourceMetadataMatch($token)")
+                        val baseScore = 60.0
+                        score += baseScore * idfWeight
+                        matchedBy.add("ResourceMetadataMatch($token*${String.format("%.2f", idfWeight)})")
                     }
                 }
                 
@@ -176,7 +183,7 @@ class CandidateCollector(
         // BFS 확장: 상위 진입점에서 관계 기반 파일 추가 탐색
         val entryPoints = candidates.values.sortedByDescending { it.score }.take(BFS_ENTRY_POINT_COUNT)
         if (entryPoints.isNotEmpty()) {
-            val expanded = expandByRelationships(entryPoints, depth = BFS_DEPTH)
+            val expanded = expandByRelationships(entryPoints, analyzed, depth = BFS_DEPTH)
             expanded.forEach { result ->
                 candidates.merge(result.filePath, result) { existing, new ->
                     ScoredCandidate(
@@ -189,13 +196,13 @@ class CandidateCollector(
             logger.warn("CandidateCollector: BFS 확장 → ${expanded.size}건 추가")
         }
 
-        val sorted = candidates.values.map { candidate ->
+        val mappedCandidates = candidates.values.map { candidate ->
             val node = graph.files[candidate.filePath]
             if (node != null) {
                 val typeName = node.fileType.name
-                val layerName = node.layer.name
                 
-                val shouldCap = (typeName in setOf("UTIL", "ABSTRACT_CLASS", "ENUM")) ||
+                // [P5-C Fix 2] UTIL 클래스의 30점 강제 삭감(Cap) 로직 제거
+                val shouldCap = (typeName in setOf("ABSTRACT_CLASS", "ENUM")) ||
                     (node.className in setOf("ApiResponse", "BaseEntity", "BusinessException"))
 
                 if (shouldCap && candidate.score > 30.0) {
@@ -205,9 +212,24 @@ class CandidateCollector(
                     candidate.copy(score = 80.0, matchedBy = candidate.matchedBy + "Capped:DTO")
                 } else candidate
             } else candidate
-        }.sortedByDescending { it.score }.take(MAX_CANDIDATES)
+        }
+
+        val maxTotal = MAX_CANDIDATES // 40
+        val targetFilesQuota = 25
+        val targetResourcesQuota = 15
+
+        val fileCandidates = mappedCandidates.filter { graph.files.containsKey(it.filePath) }.sortedByDescending { it.score }
+        val resourceCandidates = mappedCandidates.filter { !graph.files.containsKey(it.filePath) }.sortedByDescending { it.score }
+
+        val actualFilesQuota = minOf(fileCandidates.size, targetFilesQuota + maxOf(0, targetResourcesQuota - resourceCandidates.size))
+        val actualResourcesQuota = minOf(resourceCandidates.size, targetResourcesQuota + maxOf(0, targetFilesQuota - fileCandidates.size))
+
+        val finalFiles = fileCandidates.take(actualFilesQuota)
+        val finalResources = resourceCandidates.take(actualResourcesQuota)
+
+        val sorted = (finalFiles + finalResources).sortedByDescending { it.score }
         
-        logger.warn("CandidateCollector: 최종 ${sorted.size}건 후보 (총 ${candidates.size}건 중)")
+        logger.warn("CandidateCollector: 최종 ${sorted.size}건 후보 (총 ${candidates.size}건 중, File:${finalFiles.size}, Resource:${finalResources.size})")
         return sorted
     }
 
@@ -218,6 +240,7 @@ class CandidateCollector(
      */
     private fun expandByRelationships(
         entryPoints: List<ScoredCandidate>,
+        analyzedQuery: AnalyzedQuery,
         depth: Int
     ): List<ScoredCandidate> {
         val visited = entryPoints.map { it.filePath }.toMutableSet()
@@ -248,11 +271,21 @@ class CandidateCollector(
                 // ResourceNode 역방향 의존 (FileNode -> ResourceNode)
                 val linkedResources = controllerToResources[filePath]
                 if (linkedResources != null) {
+                    val searchTokens = analyzedQuery.englishTokens + analyzedQuery.koreanNouns + analyzedQuery.exactIdentifiers
+                    
                     for (rNode in linkedResources) {
                         if (rNode.path !in visited) {
                             visited.add(rNode.path)
-                            val score = parentScore * decayFactor
-                            results.add(ScoredCandidate(rNode.path, score, listOf("BFS:depth=$d,view_binding")))
+                            var score = parentScore * decayFactor
+                            
+                            // [P5-C Fix 3] 검색 키워드와 매칭되는 ResourceNode는 점수를 대폭 상향하여 확실한 동반 진입 보장
+                            val rNodePathLower = rNode.path.lowercase()
+                            val isRelevant = searchTokens.any { token -> rNodePathLower.contains(token.lowercase()) }
+                            if (isRelevant) {
+                                score += 200.0 // 상위 40위 내 진입을 위한 강력한 가점
+                            }
+                            
+                            results.add(ScoredCandidate(rNode.path, score, listOf("BFS:depth=$d,view_binding${if(isRelevant) ",RelevantKeyword" else ""}")))
                             nextLevel.add(rNode.path to score)
                         }
                     }

@@ -50,8 +50,8 @@ object PseudoCodeParser {
 
         val headerRegex = Regex("""^#{0,6}\s*\*?\[(추가|수정|삭제|변경\s*없음|신규\s*생성)\]\*?\s*(.*)$""")
 
-        // 대상 메서드 파싱 정규식: "- 대상 메서드:", "대상메서드:", "대상 메서드 :" 등을 유연하게 매칭
-        val targetMethodRegex = Regex("""^-?\s*대상\s*메서드\s*:\s*`?(.*?)`?$""")
+        // 대상 메서드 파싱 정규식: "- 대상 메서드:", "대상 요소:", "쿼리 ID:", "대상 섹션:" 등을 유연하게 매칭
+        val targetMethodRegex = Regex("""^-?\s*(대상\s*메서드|대상\s*요소|대상\s*태그|타겟\s*쿼리|쿼리\s*ID|대상\s*함수|메서드명|대상\s*섹션)\s*:\s*`?(.*?)`?$""")
 
         for (line in lines) {
             val trimmed = line.trim()
@@ -79,7 +79,7 @@ object PseudoCodeParser {
                     // 대상 메서드 추출
                     val methodMatch = targetMethodRegex.find(trimmed)
                     if (methodMatch != null && (currentType == BlockType.MODIFY || currentType == BlockType.DELETE)) {
-                        currentTargetMethod = methodMatch.groupValues[1].trim()
+                        currentTargetMethod = methodMatch.groupValues[2].trim()
                     }
                 }
             }
@@ -94,19 +94,15 @@ object PseudoCodeParser {
             val fwType = graph.resolveFrameworkType()
             val canSkip = fwType.controllerCanSkip
 
-            if (hasAddBlock) {
-                // [추가] 블록이 있으면 [변경 없음]을 폐기
+            if (hasAddBlock || hasModifyBlock) {
+                // [추가] 또는 [수정] 블록이 있으면 [변경 없음]을 폐기
                 blocks.remove(noChangeBlock)
-                warnings.add("💡 안내: [변경 없음]과 [추가] 블록이 동시 발견되어, [추가]를 우선 처리합니다.")
-            } else if (hasModifyBlock && !canSkip) {
-                // 프레임워크가 스킵을 허용하지 않는데(Anyframe 등), 변경 없음과 수정이 공존할 때
-                blocks.remove(noChangeBlock)
-                warnings.add("💡 안내: 현재 프레임워크 설정상 [변경 없음]과 [수정]이 동시 발견되어, [수정]을 우선 처리합니다.")
+                warnings.add("💡 안내: [변경 없음]과 다른 수정 지시(추가/수정)가 동시 발견되어, 수정 지시를 우선 처리합니다.")
             } else {
-                // 기존 규칙: [수정] 블록만 있으면 [변경 없음] 우선 (controllerCanSkip == true 인 경우 등)
+                // 기존 규칙: 다른 수정 지시가 없으면 [변경 없음] 유지
                 blocks.clear()
                 blocks.add(noChangeBlock)
-                warnings.add("💡 안내: [변경 없음] 블록과 [수정] 블록이 동시에 발견되어, [변경 없음]으로 최종 처리되었습니다.")
+                warnings.add("💡 안내: 파일 내 [변경 없음] 블록이 발견되어, [변경 없음]으로 최종 처리되었습니다.")
             }
         }
 

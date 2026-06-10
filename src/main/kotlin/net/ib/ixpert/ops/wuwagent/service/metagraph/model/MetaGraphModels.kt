@@ -38,6 +38,43 @@ data class ProjectGraph(
     fun resolveFrameworkType(): FrameworkType {
         return this.frameworkDetection?.userOverride ?: this.frameworkType
     }
+
+    @delegate:Transient
+    val documentFrequency: Map<String, Int> by lazy {
+        val dfMap = mutableMapOf<String, Int>()
+        
+        fun tokenize(identifier: String): List<String> {
+            if (identifier.isBlank()) return emptyList()
+            if (identifier.contains('_')) {
+                return identifier.split('_').filter { it.length >= 2 }.map { it.lowercase() }
+            }
+            val regex = Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+            return regex.split(identifier).filter { it.length >= 2 }.map { it.lowercase() }
+        }
+
+        for (rNode in resourceNodes) {
+            val tokens = mutableSetOf<String>()
+            tokens.addAll(rNode.path.split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) })
+            rNode.metadata.values.forEach { value ->
+                if (value is List<*>) {
+                    value.forEach { v -> tokens.addAll(v.toString().split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) }) }
+                } else {
+                    tokens.addAll(value.toString().split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) })
+                }
+            }
+            tokens.forEach { dfMap[it] = dfMap.getOrDefault(it, 0) + 1 }
+        }
+        
+        for (fNode in files.values) {
+            val tokens = mutableSetOf<String>()
+            tokens.addAll(tokenize(fNode.className))
+            fNode.packageName?.let { tokens.addAll(it.split(".")) }
+            fNode.methodNames.forEach { tokens.addAll(tokenize(it)) }
+            tokens.forEach { dfMap[it] = dfMap.getOrDefault(it, 0) + 1 }
+        }
+        
+        dfMap
+    }
 }
 
 /**

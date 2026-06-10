@@ -34,15 +34,26 @@ class ClassMethodTokenCollector(
             val matchReasons = mutableListOf<String>()
 
             if (allTokens.isNotEmpty() && query.koreanNouns.isNotEmpty()) {
-                val matchedNouns = query.koreanNouns.count { noun ->
+                var totalIdf = 0.0
+                val totalDocs = graph.files.size + graph.resourceNodes.size
+                val matchedNounsList = mutableListOf<String>()
+
+                query.koreanNouns.forEach { noun ->
                     val translations = dictionary.translate(noun)
-                    translations.any { trans -> tokenMatchesAny(trans, allTokens) }
+                    if (translations.any { trans -> tokenMatchesAny(trans, allTokens) }) {
+                        val maxIdf = translations.maxOfOrNull { trans ->
+                            val df = graph.documentFrequency[trans.lowercase()] ?: 1
+                            Math.log(totalDocs.toDouble() / df.toDouble()).coerceAtLeast(0.1)
+                        } ?: 1.0
+                        totalIdf += maxIdf
+                        matchedNounsList.add(noun)
+                    }
                 }
                 
-                if (matchedNouns > 0) {
-                    val nounScore = minOf(matchedNouns * 30.0, 60.0)
+                if (matchedNounsList.isNotEmpty()) {
+                    val nounScore = totalIdf * 30.0
                     score += nounScore
-                    matchReasons.add("명사 매칭: ${matchedNouns}개 (점수: $nounScore)")
+                    matchReasons.add("명사 매칭: ${matchedNounsList.joinToString(", ")} (IDF 점수: ${String.format("%.2f", nounScore)})")
                 }
             }
 
