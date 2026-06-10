@@ -104,9 +104,9 @@ class ImplementService(
             
             // 컨텍스트 로딩
             val context = if (spec.type == "신규" || spec.type == "CREATE") {
-                ImplementContextBuilder.buildCreateContext(spec.path, graph, mdRoot, sourceRoot, sortedTargets, similarRefs)
+                ImplementContextBuilder.buildCreateContext(spec, graph, mdRoot, sourceRoot, sortedTargets, similarRefs)
             } else {
-                ImplementContextBuilder.buildModifyContext(spec.path, graph, mdRoot, sourceRoot, similarRefs)
+                ImplementContextBuilder.buildModifyContext(spec, graph, mdRoot, sourceRoot, similarRefs)
             }
 
             val sourceFile = sourceRoot.resolve(spec.path)
