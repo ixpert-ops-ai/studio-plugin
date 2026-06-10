@@ -152,8 +152,11 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
 
         sourceFiles.forEachIndexed { index, psiFile ->
             indicator?.checkCanceled()
+            
+            val fileName = ReadAction.compute<String, Throwable> { psiFile.name }
+            
             indicator?.fraction = index.toDouble() / totalFiles
-            indicator?.text = "분석 중: ${psiFile.name} (${index + 1}/$totalFiles)"
+            indicator?.text = "분석 중: $fileName (${index + 1}/$totalFiles)"
 
             try {
                 val (fileNodes, fileCalls) = ReadAction.compute<Pair<List<Pair<String, FileNode>>, List<Relationship>>, Throwable> {
