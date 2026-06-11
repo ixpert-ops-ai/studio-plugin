@@ -123,9 +123,11 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         val startTime = System.currentTimeMillis()
 
         // 실제 소스 루트가 있고 최상위 빈 루트가 아닌 서브 모듈들만 필터링
-        val validModules = ModuleManager.getInstance(project).modules.filter { module ->
-            val rootManager = ModuleRootManager.getInstance(module)
-            rootManager.sourceRoots.isNotEmpty() && module.name != project.name
+        val validModules = ReadAction.compute<List<com.intellij.openapi.module.Module>, Throwable> {
+            ModuleManager.getInstance(project).modules.filter { module ->
+                val rootManager = ModuleRootManager.getInstance(module)
+                rootManager.sourceRoots.isNotEmpty() && module.name != project.name
+            }
         }
         val isMultiModule = validModules.isNotEmpty()
 
@@ -308,8 +310,10 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         onProgress?.invoke("메타 그래프 생성 완료 (${scoredNodes.size}개 파일, ${relationships.size}개 관계, ${elapsed}ms)")
 
         // 1. 단독 모듈 재분석 여부 판별
-        val fileIndex = ProjectFileIndex.getInstance(project)
-        val targetModule = targetDirectory?.let { fileIndex.getModuleForFile(it) }
+        val targetModule = ReadAction.compute<com.intellij.openapi.module.Module?, Throwable> {
+            val fileIndex = ProjectFileIndex.getInstance(project)
+            targetDirectory?.let { fileIndex.getModuleForFile(it) }
+        }
         val isSingleModulePartialUpdate = targetModule != null && targetModule.name != project.name && isMultiModule
 
         // Phase 2: 프레임워크 자동 감지 실행
@@ -369,7 +373,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             ProjectGraph(
                 graphType = GraphType.MULTI_LEVEL_2,
                 generatedAt = Instant.now().toString(),
-                projectRoot = targetDirectory.path,
+                projectRoot = targetDirectory?.path ?: "",
                 framework = frameworkName,
                 frameworkType = finalFrameworkType,
                 frameworkDetection = detectionResult,
@@ -596,18 +600,20 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         nodes: Map<String, FileNode>,
         validModules: List<com.intellij.openapi.module.Module>
     ): List<ModuleInfo> {
-        val baseDir = project.basePath?.let {
-            LocalFileSystem.getInstance().findFileByPath(it)
+        val baseDir = ReadAction.compute<com.intellij.openapi.vfs.VirtualFile?, Throwable> {
+            project.basePath?.let {
+                LocalFileSystem.getInstance().findFileByPath(it)
+            }
         } ?: return emptyList()
 
         return validModules.map { module ->
-            val rootManager = ModuleRootManager.getInstance(module)
-            val contentRoots = rootManager.contentRoots
-            val moduleRoot = contentRoots.firstOrNull()
-
-            // 프로젝트 루트 기준 모듈의 상대 경로
-            val rootPath = moduleRoot?.let {
-                VfsUtilCore.getRelativePath(it, baseDir)
+            val rootPath = ReadAction.compute<String?, Throwable> {
+                val rootManager = ModuleRootManager.getInstance(module)
+                val contentRoots = rootManager.contentRoots
+                val moduleRoot = contentRoots.firstOrNull()
+                moduleRoot?.let {
+                    VfsUtilCore.getRelativePath(it, baseDir)
+                }
             } ?: ""
 
             // 메타파일 상대 경로
@@ -656,11 +662,15 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             val rootGraph = gson.fromJson(jsonContent, ProjectGraph::class.java)
 
             if (rootGraph.graphType == GraphType.MULTI_LEVEL_1 && rootGraph.modules != null) {
-                val rootManager = ModuleRootManager.getInstance(targetModule)
-                val contentRoots = rootManager.contentRoots
-                val moduleRoot = contentRoots.firstOrNull()
-                val baseDir = LocalFileSystem.getInstance().findFileByPath(basePath) ?: return
-                val rootPath = moduleRoot?.let { VfsUtilCore.getRelativePath(it, baseDir) } ?: ""
+                val rootPath = ReadAction.compute<String?, Throwable> {
+                    val rootManager = ModuleRootManager.getInstance(targetModule)
+                    val contentRoots = rootManager.contentRoots
+                    val moduleRoot = contentRoots.firstOrNull()
+                    val baseDir = LocalFileSystem.getInstance().findFileByPath(basePath)
+                    if (moduleRoot != null && baseDir != null) {
+                        VfsUtilCore.getRelativePath(moduleRoot, baseDir)
+                    } else null
+                } ?: ""
 
                 // 해당 모듈의 public API 요약 (REST Endpoints)
                 val publicApis = moduleNodes.values.flatMap { node ->
