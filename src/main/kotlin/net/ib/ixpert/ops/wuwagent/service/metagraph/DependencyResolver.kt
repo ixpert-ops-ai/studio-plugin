@@ -44,23 +44,25 @@ class DependencyResolver(private val project: Project) {
 
         // Step 5: resolvedImpl 채우기
         val resolvedNodes = nodes.toMutableMap()
-        for ((path, node) in resolvedNodes) {
-            val resolvedInjections = node.injections.map { injection ->
-                val impls = implementationMap[injection.targetType]
-                val resolved = when {
-                    impls == null || impls.isEmpty() -> {
-                        // 구체 클래스이거나 외부 라이브러리 → null (에러 아님)
-                        null
+        ReadAction.run<Throwable> {
+            for ((path, node) in resolvedNodes) {
+                val resolvedInjections = node.injections.map { injection ->
+                    val impls = implementationMap[injection.targetType]
+                    val resolved = when {
+                        impls == null || impls.isEmpty() -> {
+                            // 구체 클래스이거나 외부 라이브러리 → null (에러 아님)
+                            null
+                        }
+                        impls.size == 1 -> impls[0]
+                        else -> {
+                            // 여러 구현체 → Primary/Qualifier 기반 해석 (Phase 1a: 첫 번째 선택)
+                            resolvePrimaryOrFirst(impls)
+                        }
                     }
-                    impls.size == 1 -> impls[0]
-                    else -> {
-                        // 여러 구현체 → Primary/Qualifier 기반 해석 (Phase 1a: 첫 번째 선택)
-                        resolvePrimaryOrFirst(impls)
-                    }
+                    injection.copy(resolvedImpl = resolved)
                 }
-                injection.copy(resolvedImpl = resolved)
+                resolvedNodes[path] = node.copy(injections = resolvedInjections)
             }
-            resolvedNodes[path] = node.copy(injections = resolvedInjections)
         }
 
         return resolvedNodes
