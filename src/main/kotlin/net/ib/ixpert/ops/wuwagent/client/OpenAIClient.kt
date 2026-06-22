@@ -26,7 +26,13 @@ class OpenAIClient : LLMClient {
             net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
             else -> settings.openaiServerUrl
         }
-        val serverUrl = "${baseUrl.trimEnd('/')}/v1/chat/completions"
+        val serverUrl = if (baseUrl.endsWith("/chat/completions")) {
+            baseUrl
+        } else if (baseUrl.contains("/openai")) {
+            "${baseUrl.trimEnd('/')}/chat/completions"
+        } else {
+            "${baseUrl.trimEnd('/')}/v1/chat/completions"
+        }
 
         val messagesList = listOf(
             mapOf("role" to "system", "content" to systemPrompt),
@@ -197,14 +203,20 @@ class OpenAIClient : LLMClient {
         messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
         maxTokens: Int?,
         tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>?,
-        toolChoice: String?
+        toolChoice: Any?
     ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
         val baseUrl = when (settings.apiType) {
             net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
             else -> settings.openaiServerUrl
         }
-        val serverUrl = "${baseUrl.trimEnd('/')}/v1/chat/completions"
+        val serverUrl = if (baseUrl.endsWith("/chat/completions")) {
+            baseUrl
+        } else if (baseUrl.contains("/openai")) {
+            "${baseUrl.trimEnd('/')}/chat/completions"
+        } else {
+            "${baseUrl.trimEnd('/')}/v1/chat/completions"
+        }
 
         val requestMessages = mutableListOf<Map<String, Any?>>()
         requestMessages.add(mapOf("role" to "system", "content" to systemPrompt))

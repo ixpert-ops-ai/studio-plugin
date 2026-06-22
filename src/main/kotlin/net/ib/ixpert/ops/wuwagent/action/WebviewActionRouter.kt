@@ -123,6 +123,8 @@ class WebviewActionRouter(private val project: Project) {
                             
                             var finalRequirementText = initialRequirement
                             
+                            var finalEnhancedRequirements = emptyList<String>()
+                            
                             // Stage 0: Clarify Engine 실행
                             if (!isSkipMode) {
                                 try {
@@ -130,12 +132,19 @@ class WebviewActionRouter(private val project: Project) {
                                         client,
                                         net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyPromptBuilder()
                                     )
-                                    val clarifyResult = clarifier.clarify(initialRequirement, projectGraph.frameworkType)
                                     
-                                    val hasQuestions = clarifyResult.questions.isNotEmpty()
+                                    val scopeSummary = try {
+                                        net.ib.ixpert.ops.wuwagent.agent.clarify.ScopeSummaryBuilder.buildScopeSummary(projectGraph)
+                                    } catch (e: Exception) {
+                                        logger.warn("Failed to build scope summary, using empty fallback", e)
+                                        ""
+                                    }
+                                    
+                                    val clarifyResult = clarifier.clarify(initialRequirement, projectGraph.frameworkType, scopeSummary)
+                                    
                                     val hasEnhancements = clarifyResult.enhancedRequirements.isNotEmpty()
                                     
-                                    if (hasQuestions || hasEnhancements) {
+                                    if (hasEnhancements) {
                                         // UI 확인 대기가 필요한 경우
                                         net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.saveSession(project, initialRequirement, clarifyResult)
                                         
@@ -150,6 +159,7 @@ class WebviewActionRouter(private val project: Project) {
                                         val defaultResponse = parser.parse("")
                                         val finalReq = clarifier.finalize(clarifyResult, defaultResponse, initialRequirement)
                                         finalRequirementText = finalReq.fullText
+                                        finalEnhancedRequirements = clarifyResult.enhancedRequirements
                                         logger.info("Stage 0 Clarify 자동 완료 (보강/질문 없음): $finalRequirementText")
                                     }
                                 } catch (e: Exception) {
@@ -162,9 +172,16 @@ class WebviewActionRouter(private val project: Project) {
                             }
                             
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
-                            val result = pipeline.analyze(initialRequirement, finalRequirementText.removePrefix(initialRequirement).trim(), projectGraph) { chunk ->
-                                ApplicationManager.getApplication().invokeLater {
-                                    bridge.sendMessageChunk(messageId, chunk)
+                            val result = kotlinx.coroutines.runBlocking {
+                                pipeline.analyze(
+                                    initialRequirement, 
+                                    finalRequirementText.removePrefix(initialRequirement).trim(), 
+                                    projectGraph,
+                                    finalEnhancedRequirements
+                                ) { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
                                 }
                             }
                             
@@ -234,9 +251,16 @@ class WebviewActionRouter(private val project: Project) {
                             val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다.")
                             
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
-                            val result = pipeline.analyze(session.initialRequirement, finalReq.fullText.removePrefix(session.initialRequirement).trim(), projectGraph) { chunk ->
-                                ApplicationManager.getApplication().invokeLater {
-                                    bridge.sendMessageChunk(messageId, chunk)
+                            val result = kotlinx.coroutines.runBlocking {
+                                pipeline.analyze(
+                                    session.initialRequirement, 
+                                    finalReq.fullText.removePrefix(session.initialRequirement).trim(), 
+                                    projectGraph,
+                                    finalReq.confirmedItems
+                                ) { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
                                 }
                             }
                             
@@ -265,6 +289,28 @@ class WebviewActionRouter(private val project: Project) {
                             }
                         }
                     }
+                }
+
+                // ── Scope Selection Events ────────
+                "scopeSelection/submit" -> {
+                    val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
+                    val selectedPaths = (payload["selectedPaths"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+                    val result = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScopeSelectionResult(
+                        selectedPaths = selectedPaths,
+                        totalFileCount = 0, // UI already handled warning
+                        warnings = emptyList()
+                    )
+                    net.ib.ixpert.ops.wuwagent.agent.ScopeSelectionBridge.completeScopeSelection(project, result)
+                }
+
+                "scopeSelection/cancel" -> {
+                    net.ib.ixpert.ops.wuwagent.agent.ScopeSelectionBridge.cancelScopeSelection(project)
+                }
+
+                "scopeSelection/confirmSuggestions" -> {
+                    val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
+                    val acceptedPaths = (payload["acceptedPaths"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+                    net.ib.ixpert.ops.wuwagent.agent.ScopeSelectionBridge.completeDependencyConfirmation(project, acceptedPaths)
                 }
 
                 // ── 자동 코드 작성 스텁 (Phase 2b) ────────

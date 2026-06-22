@@ -38,6 +38,6 @@ class FileRelevanceVerifierTest {
         )
         
         val result = verifier.verify("테스트 요구사항", emptyList())
-        assertTrue(result.isEmpty())
+        assertTrue(result.files.isEmpty())
     }
 }

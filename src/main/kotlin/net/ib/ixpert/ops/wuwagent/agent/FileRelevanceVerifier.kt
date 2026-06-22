@@ -20,170 +20,199 @@ class FileRelevanceVerifier(
 
     data class VerificationResult(
         val path: String,
-        val verdict: String, // REQUIRED, OPTIONAL, UNNECESSARY
+        val verdict: String, // REQUIRED, UNNECESSARY
         val reason: String
     )
     
-    private data class SingleResponse(
+    private data class FileVerdict(
+        val filePath: String?,
         val verdict: String?,
         val reason: String?
     )
+    
+    private data class BatchResponse(
+        val fileVerdicts: List<FileVerdict>?,
+        val reasoning: String?
+    )
+    
+    data class VerificationOutput(
+        val files: List<TargetFileSpec>,
+        val reasoning: String
+    )
 
-    fun verify(userQuery: String, candidates: List<TargetFileSpec>): List<TargetFileSpec> {
-        if (candidates.isEmpty()) return candidates
+    fun verify(userQuery: String, candidates: List<TargetFileSpec>): VerificationOutput {
+        if (candidates.isEmpty()) return VerificationOutput(candidates, "")
 
-        // CREATE(신규)는 검증 통과, MODIFY(수정)만 LLM 검증
-        val (createSpecs, modifySpecs) = candidates.partition { it.type == "신규" }
-        if (modifySpecs.isEmpty()) return candidates
-
-        // [과제 #2 보완] Java/Kotlin 파일만 Stage 3 검증 수행 (리소스 파일은 bypass)
-        // TODO: 향후 get_resource_summary를 Stage 3에 연동하여 리소스 파일도 내용 기반으로 검증하는 로직 추가 필요
-        val (javaModifySpecs, resourceModifySpecs) = modifySpecs.partition {
-            it.path.endsWith(".java") || it.path.endsWith(".kt")
-        }
-
-        if (javaModifySpecs.isEmpty()) return resourceModifySpecs + createSpecs
-
-        val allResults = mutableListOf<VerificationResult>()
-        
-        val fwType = graph.resolveFrameworkType()
-        val frameworkRules = when (fwType) {
-            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT_JPA -> 
-                "- 프레임워크: SPRING_BOOT_JPA\n- JPA Entity 기반이므로 JpaRepository 인터페이스 위주로 변경이 일어납니다.\n- Controller가 단순 위임(Service 호출 → 결과 반환)만 하는 구조라면, Service/DTO 변경으로 충분한 경우 Controller는 UNNECESSARY로 판정하세요."
-            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_MVC_MYBATIS -> 
-                "- 프레임워크: SPRING_MVC_MYBATIS\n- 이 프로젝트는 Service Interface + ServiceImpl 쌍을 사용합니다.\n- 새 기능 추가 시 반드시 Interface에 메서드 선언 → Impl에 구현이 필요하므로 둘 중 하나를 무시(UNNECESSARY)하면 안 됩니다.\n- DAO 계층은 Interface + DaoImpl(SqlSessionDaoSupport) 쌍을 사용합니다.\n- 새 쿼리가 필요하면 DaoInterface와 DaoImpl 모두 수정 대상이 됩니다."
-            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.SPRING_BOOT_MYBATIS -> 
-                "- 프레임워크: SPRING_BOOT_MYBATIS\n- DAO 계층은 @Mapper 인터페이스를 사용합니다(DaoImpl 없음).\n- 새 쿼리가 필요하면 @Mapper 인터페이스와 XML 파일을 수정합니다."
-            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME_AP -> 
-                "- 프레임워크: ANYFRAME_AP\n- 이 프로젝트는 Anyframe 환경입니다. 인터페이스/구현체(Impl) 쌍을 작성하세요.\n- 새 기능 추가 시 반드시 Interface에 메서드 선언 → Impl에 구현이 필요하므로 둘 중 하나를 무시(UNNECESSARY)하면 안 됩니다.\n- DEM/DQM, BIZ, SVC 구조를 엄격히 준수하세요."
-            else -> 
-                "- 프레임워크: ${fwType.name}\n- 프로젝트의 기존 계층형(Layered) 아키텍처 규칙을 따르세요."
-        }
+        // 신규 파일도 검증 대상에 포함
+        val targetModifySpecs = candidates
 
         val systemMessage = """
-            당신의 역할은 "불필요함이 명백히 증명된 파일을 제거하는 것(반증)"입니다.
-            각 대상 파일에 대해 요구사항과 파일의 목적이 일치하는지 판단하세요.
-            
-            ## 프로젝트 아키텍처 제약
-$frameworkRules
+            당신은 코드 변경 범위 검증자입니다.
+            아래 요구사항을 구현하기 위해 수정이 필요한 파일 목록을 검증합니다.
+            반드시 제공된 `submit_verification` 도구를 호출하여 결과를 제출하세요.
+
+            ## 역할
+            - 후보 파일 목록에서 "수정하지 않아도 요구사항 구현에 아무런 영향이 없는 파일"만 제거하세요.
+            - 파일 간의 의존 관계를 반드시 고려하세요.
+              예: Service에서 새로운 데이터를 저장해야 한다면, 해당 데이터를 담는 Entity도 수정이 필요합니다.
+
+            ## 판정 원칙
+            - 새로운 필드, 상태값, 메서드를 추가해야 요구사항을 구현할 수 있다면, 현재 해당 코드가 없더라도 수정 대상입니다.
+            - 제거할 확실한 근거가 없으면 유지하세요.
+            - 요구사항의 데이터 흐름(입력 → 처리 → 저장)을 추적하여 판단하세요.
+            - reason은 반드시 해당 파일에서 구체적으로 어떤 수정이 필요한지를 포함해야 합니다. 빈 문자열이나 '수정이 필요합니다' 같은 동어반복은 허용되지 않습니다.
+            - 중요: JSON 응답 생성 시, reason이나 reasoning 필드 값 내부에 실제 줄바꿈 문자(\n)를 사용하지 마세요. 줄바꿈 대신 띄어쓰기나 마침표를 사용하세요.
+
+            ## 신규 파일 판정 원칙
+            - (신규 제안) 정보가 있는 파일은 "새로 만들 필요가 있는가?"를 판단합니다.
+            - 다음 중 하나라도 해당하면 UNNECESSARY로 판정하세요:
+              · 요구사항이 단일 기능 추가/수정이고, 기존 파일 1~2개 수정으로 구현 가능한 경우
+              · 기존 REQUIRED 파일의 수정으로 동일한 목적을 달성할 수 있는 경우
+              · 요구사항의 복잡도 대비 과설계인 경우 (단순 기능에 별도 계층 분리 등)
+              · 기존 패키지에 동일 역할의 클래스/파일이 이미 존재하는 경우
+            - 신규 파일이 REQUIRED가 되려면, 기존 파일에 해당 책임을 추가했을 때 단일 책임 원칙이 명백히 위반되는 경우여야 합니다.
         """.trimIndent()
 
-        for (spec in javaModifySpecs) {
-            val context = buildFileContext(spec.path, graph, mdRoot)
-            val prompt = buildSinglePrompt(userQuery, spec, context)
-            
-            // Ollama client call
-            val response = llmClient.chat(
-                systemPrompt = systemMessage,
-                userCode = prompt
+        val tool = net.ib.ixpert.ops.wuwagent.model.ToolDefinition(
+            type = "function",
+            function = net.ib.ixpert.ops.wuwagent.model.FunctionDefinition(
+                name = "submit_verification",
+                description = "파일 목록 검증 결과를 제출합니다.",
+                parameters = net.ib.ixpert.ops.wuwagent.model.FunctionParameters(
+                    type = "object",
+                    properties = mapOf(
+                        "fileVerdicts" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                            type = "array",
+                            description = "각 후보 파일에 대한 판정 결과 목록",
+                            items = net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                                type = "object",
+                                properties = mapOf(
+                                    "filePath" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                                        type = "string",
+                                        description = "후보 파일의 전체 경로"
+                                    ),
+                                    "verdict" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                                        type = "string",
+                                        description = "판정 결과 (REQUIRED 또는 UNNECESSARY)",
+                                        enum = listOf("REQUIRED", "UNNECESSARY")
+                                    ),
+                                    "reason" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                                        type = "string",
+                                        description = "판정 사유 (REQUIRED인 경우 구체적인 수정 내용)"
+                                    )
+                                ),
+                                required = listOf("filePath", "verdict", "reason")
+                            )
+                        ),
+                        "reasoning" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                            type = "string",
+                            description = "전체 판정 근거 종합 요약 (반드시 1), 2), 3)과 같이 번호를 매겨서 항목별로 작성할 것)"
+                        )
+                    ),
+                    required = listOf("fileVerdicts", "reasoning")
+                )
             )
-            
-            val responseText = response?.message?.content ?: continue
-            val parsed = parseSingleResponse(spec.path, responseText)
-            if (parsed != null) {
-                allResults.add(parsed)
-            }
-        }
-        
-        // ── 후처리: Interface -> Impl 상태 동기화 (방안 B) ──
-        val requiredNodes = allResults
-            .filter { it.verdict == "REQUIRED" }
-            .mapNotNull { graph.files[it.path] }
-            
-        val requiredFqns = requiredNodes.map { 
-            if (it.packageName.isNullOrEmpty()) it.className else "${it.packageName}.${it.className}"
-        }.toSet()
+        )
 
-        for (i in allResults.indices) {
-            val res = allResults[i]
-            if (res.verdict != "REQUIRED") {
-                val node = graph.files[res.path] ?: continue
-                
-                // 1. 메타그래프 정보 기반 매칭 (implements / extends)
-                val isImplementingRequired = node.implementedInterfaces.any { ifaceFqn ->
-                    requiredFqns.contains(ifaceFqn)
-                } || (node.superClass != null && requiredFqns.contains(node.superClass))
-                
-                // 2. 이름 패턴 기반 폴백 (Fallback): Xxx -> XxxImpl
-                val isPatternMatching = requiredNodes.any { reqNode ->
-                    reqNode.isInterface && node.className == "${reqNode.className}Impl"
-                }
-                
-                if (isImplementingRequired || isPatternMatching) {
-                    logger.info("Stage 3 보정: ${node.className} 구현체를 REQUIRED로 강제 격상합니다. (인터페이스 수정 감지)")
-                    allResults[i] = res.copy(
-                        verdict = "REQUIRED",
-                        reason = "인터페이스가 수정 대상으로 판정되어, 구현체(Impl)도 필수 수정 대상으로 자동 보정됨"
-                    )
-                }
-            }
-        }
-        
-        val keptModifySpecs = javaModifySpecs.mapNotNull { spec ->
-            val res = allResults.find { it.path == spec.path }
-            if (res != null && res.verdict != "UNNECESSARY") {
-                if (res.verdict == "OPTIONAL") {
-                    spec.copy(description = "${spec.description} [⚠️ 선택적 수정: ${res.reason}]")
-                } else {
-                    spec
-                }
-            } else null
-        }
-        
-        if (keptModifySpecs.isEmpty()) {
-            logger.warn("Stage 3: 전체 UNNECESSARY 판정 – Stage 2 결과 유지")
-            return candidates
-        }
-        
-        return keptModifySpecs + resourceModifySpecs + createSpecs
-    }
+        val MAX_BATCH_SIZE = 30
+        val topFiles = targetModifySpecs.take(MAX_BATCH_SIZE)
+        val autoKept = targetModifySpecs.drop(MAX_BATCH_SIZE)
 
-    private fun buildSinglePrompt(userQuery: String, spec: TargetFileSpec, context: String): String {
-        return buildString {
-            appendLine("## 파일 수정 필요성 검증")
-            appendLine("### 요구사항")
-            appendLine(userQuery)
-            appendLine()
-            appendLine("### 대상 파일")
-            appendLine("경로: ${spec.path}")
-            appendLine("파일 분석 정보:")
-            appendLine(context)
-            appendLine("---")
-            appendLine("### 판정 규칙")
-            appendLine("1. REQUIRED: 호출 체인에 포함됨이 확인되거나, Stage 2가 의존성 추적으로 선정한 파일")
-            appendLine("2. OPTIONAL: 흐름에 포함되나 수정이 선택적")
-            appendLine("3. UNNECESSARY: 파일의 호출자가 스케줄러/배치임이 명확한데 요구사항은 사용자 UI 트리거이거나, 요구사항의 트리거 유형과 파일의 역할이 \"불일치\"함이 명백히 증명된 경우에만 판정")
-            appendLine()
-            appendLine("반드시 아래 JSON 형식으로만 응답하세요. 다른 설명은 출력하지 마세요.")
-            appendLine("""
-{
-  "verdict": "REQUIRED | OPTIONAL | UNNECESSARY",
-  "reason": "독립적 판단 근거 한 줄"
-}
-            """.trimIndent())
-        }
-    }
-
-    private fun parseSingleResponse(path: String, response: String): VerificationResult? {
-        val jsonText = extractJson(response)
-        return try {
-            val res = gson.fromJson(jsonText, SingleResponse::class.java)
-            if (res?.verdict != null) {
-                VerificationResult(path, res.verdict, res.reason ?: "")
-            } else null
-        } catch (e: JsonSyntaxException) {
-            logger.error("Failed to parse single response: $jsonText", e)
+        val prompt = buildBatchPrompt(userQuery, topFiles, graph, mdRoot)
+        val messages = listOf(net.ib.ixpert.ops.wuwagent.model.ChatMessage(role = "user", content = prompt))
+        
+        val response = try {
+            llmClient.chatWithTools(
+                systemPrompt = systemMessage,
+                messages = messages,
+                maxTokens = 4000,
+                tools = listOf(tool),
+                toolChoice = mapOf("type" to "function", "function" to mapOf("name" to "submit_verification"))
+            )
+        } catch (e: Exception) {
+            logger.error("Failed to call LLM: ${e.message}")
             null
         }
+        
+        val verifiedTopFiles = mutableListOf<TargetFileSpec>()
+        val toolCall = response?.toolCalls?.firstOrNull { it.function.name == "submit_verification" }
+        var finalReasoning = ""
+        
+        if (toolCall != null) {
+            try {
+                val argsStr = toolCall.function.arguments
+                    .replace(Regex("^```(?:json)?\\s*"), "")
+                    .replace(Regex("\\s*```$"), "")
+                    .trim()
+                val res = gson.fromJson(argsStr, BatchResponse::class.java)
+                val rawVerdicts = res.fileVerdicts ?: emptyList()
+                
+                // 후처리 로직: reason이 비어있거나 너무 짧으면 UNNECESSARY로 강등
+                val verdicts = rawVerdicts.map { verdict ->
+                    val reasonLen = verdict.reason?.trim()?.length ?: 0
+                    if (verdict.verdict == "REQUIRED" && reasonLen < 10) {
+                        verdict.copy(verdict = "UNNECESSARY", reason = "판정 근거 미제시로 제외")
+                    } else {
+                        verdict
+                    }
+                }
+                
+                finalReasoning = res.reasoning ?: ""
+                
+                topFiles.forEachIndexed { index, spec ->
+                    val specFileName = spec.path.substringAfterLast("/")
+                    val verdictObj = verdicts.find { it.filePath == spec.path }
+                        ?: verdicts.find { it.filePath != null && spec.path.endsWith(it.filePath.substringAfterLast("/")) }
+                        ?: verdicts.find { it.filePath != null && specFileName.startsWith(it.filePath.substringAfterLast("/")) }
+                    
+                    // 만약 LLM이 결과를 아예 안 주면 REQUIRED로 폴백, 일부 파일만 줬다면 누락된 파일은 UNNECESSARY로 간주
+                    val rawVerdict = if (verdicts.isEmpty()) "REQUIRED" else (verdictObj?.verdict ?: "UNNECESSARY")
+                    val normalizedVerdict = rawVerdict.replace("*", "").trim().uppercase()
+                    
+                    if (normalizedVerdict != "UNNECESSARY") {
+                        val reason = verdictObj?.reason ?: "Stage 3 검증 통과 (명시적 사유 없음)"
+                        verifiedTopFiles.add(spec.copy(description = reason))
+                    }
+                }
+            } catch (e: Exception) {
+                logger.error("Failed to parse tool arguments: ${toolCall.function.arguments}", e)
+                verifiedTopFiles.addAll(topFiles)
+            }
+        } else {
+            logger.warn("No valid tool call found, keeping all files as fallback.")
+            verifiedTopFiles.addAll(topFiles)
+        }
+        
+        if (verifiedTopFiles.isEmpty()) {
+            logger.warn("Stage 3: 전체 UNNECESSARY 판정 – 안전장치로 상위 3개 유지")
+            verifiedTopFiles.addAll(topFiles.take(3))
+        }
+        
+        return VerificationOutput(verifiedTopFiles + autoKept, finalReasoning)
     }
 
-    private fun extractJson(text: String): String {
-        val start = text.indexOf("{")
-        val end = text.lastIndexOf("}")
-        return if (start != -1 && end != -1 && end >= start) {
-            text.substring(start, end + 1)
-        } else {
-            text
+    private fun buildBatchPrompt(userQuery: String, specs: List<TargetFileSpec>, graph: ProjectGraph, mdRoot: Path): String {
+        return buildString {
+            appendLine("## 요구사항")
+            appendLine(userQuery)
+            appendLine()
+            appendLine("## 후보 파일 목록")
+            specs.forEach { spec ->
+                appendLine("- ${spec.path}")
+                appendLine("--- 정보 ---")
+                if (spec.type == "CREATE" || spec.type == "신규") {
+                    appendLine("- (신규 제안)")
+                    appendLine(spec.description)
+                } else {
+                    val context = buildFileContext(spec.path, graph, mdRoot)
+                    appendLine(context)
+                }
+                appendLine("-------------")
+            }
+            appendLine()
+            appendLine("## 지시사항")
+            appendLine("위 후보 파일 목록 각각에 대해 판정 결과(REQUIRED 또는 UNNECESSARY)와 사유를 반환하세요.")
+            appendLine("전체 판정 근거 요약(reasoning)을 작성할 때는 가독성을 위해 반드시 '1) ...', '2) ...' 와 같이 번호를 매겨서 작성하세요.")
         }
     }
 

@@ -12,9 +12,9 @@ class RequirementClarifier(
     private val logger = LoggerFactory.getLogger(RequirementClarifier::class.java)
     private val objectMapper = ObjectMapper()
 
-    fun clarify(userRequirement: String, fwType: FrameworkType): ClarifyResult {
-        val systemPrompt = promptBuilder.buildSystemPrompt(fwType)
-        val userPrompt = promptBuilder.buildUserPrompt(userRequirement)
+    fun clarify(userRequirement: String, fwType: FrameworkType, scopeSummary: String = ""): ClarifyResult {
+        val systemPrompt = promptBuilder.buildSystemPrompt()
+        val userPrompt = promptBuilder.buildUserPrompt(userRequirement, fwType, scopeSummary)
         
         var rawResponse = ""
         try {
@@ -30,10 +30,9 @@ class RequirementClarifier(
                 return parseResponse(rawResponse)
             } catch (retryEx: Exception) {
                 logger.error("Stage 0 fallback failed", retryEx)
-                // Fallback: 빈 질문 반환, 원본을 확정 항목에 포함
+                // Fallback: 빈 원본을 확정 항목에 포함
                 return ClarifyResult(
                     enhancedRequirements = listOf(userRequirement),
-                    questions = emptyList(),
                     outOfScopeNotices = emptyList()
                 )
             }
@@ -51,26 +50,10 @@ class RequirementClarifier(
         val enhancedReqs = mutableListOf<String>()
         rootNode.path("enhancedRequirements").forEach { enhancedReqs.add(it.asText()) }
         
-        val questions = mutableListOf<ClarifyQuestion>()
-        rootNode.path("questions").forEach {
-            val confirmedStatementMap = mutableMapOf<String, String>()
-            it.path("confirmedStatement").takeIf { !it.isMissingNode }?.fields()?.forEach { entry ->
-                confirmedStatementMap[entry.key] = entry.value.asText()
-            }
-            questions.add(
-                ClarifyQuestion(
-                    id = it.path("id").asInt(),
-                    questionText = it.path("questionText").asText(),
-                    defaultValue = it.path("defaultValue").asText(),
-                    confirmedStatement = if (confirmedStatementMap.isNotEmpty()) confirmedStatementMap else null
-                )
-            )
-        }
-        
         val outOfScopeNotices = mutableListOf<String>()
         rootNode.path("outOfScopeNotices").forEach { outOfScopeNotices.add(it.asText()) }
         
-        return ClarifyResult(enhancedReqs, questions, outOfScopeNotices)
+        return ClarifyResult(enhancedReqs, outOfScopeNotices)
     }
 
     fun finalize(
@@ -79,36 +62,20 @@ class RequirementClarifier(
         originalInput: String
     ): FinalRequirement {
         
-        // 1. 사용자가 제거한 항목 필터링
-        val confirmedItems = clarifyResult.enhancedRequirements
-            .filterNot { it in userResponse.removedRequirements }
+        // 1. 사용자가 확정한 요구사항 (UI에서 수정/추가/삭제된 최종본)
+        val confirmedItems = userResponse.requirements
         
-        // 2. 질문 답변 반영
-        val answeredItems = clarifyResult.questions.mapNotNull { q ->
-            val answer = userResponse.answers[q.id] ?: q.defaultValue
-            val upperAnswer = answer.uppercase()
-            if (upperAnswer == "Y" || upperAnswer == "N") {
-                q.confirmedStatement?.get(upperAnswer) ?: "${q.questionText}: $upperAnswer"
-            } else {
-                "${q.questionText}: $answer"
-            }
-        }
-        
-        // 3. 추가 노트 반영
-        val additions = userResponse.additionalNotes?.let { listOf(it) } ?: emptyList()
-        
-        // 4. 최종 텍스트 조립
-        val allItems = confirmedItems + answeredItems + additions
-        val fullText = if (allItems.isNotEmpty()) {
-            allItems.joinToString(". ") + "."
+        // 2. 최종 텍스트 조립
+        val fullText = if (confirmedItems.isNotEmpty()) {
+            confirmedItems.joinToString(". ") + "."
         } else {
             originalInput
         }
         
         return FinalRequirement(
             originalInput = originalInput,
-            confirmedItems = confirmedItems + answeredItems,
-            skippedItems = userResponse.removedRequirements,
+            confirmedItems = confirmedItems,
+            skippedItems = emptyList(),
             fullText = fullText
         )
     }
