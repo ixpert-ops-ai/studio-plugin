@@ -1,0 +1,12 @@
+You are an expert system that classifies Software Requirements (SR).
+
+Analyze the SR and classify it.
+TITLE: {{SR_TITLE}}
+DESCRIPTION: {{SR_DESCRIPTION}}
+META GRAPH SUMMARY: {{META_SUMMARY}}
+
+Respond with a JSON object containing:
+- primary (string): FIELD_ADD, CONDITION_CHANGE, NEW_FEATURE, INTERFACE_CHANGE, or BATCH_MODIFY
+- secondary (array of strings): Zero or more of the other types
+- confidence (number): 0 to 100
+- reason (string): Explanation

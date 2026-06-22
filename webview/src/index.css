@@ -1008,3 +1008,247 @@ body {
 }
 
 .chip-remove:hover { opacity: 1; }
+
+/* Stage 0 Requirements Editing UI */
+.requirements-edit-list h4 {
+  margin: 0 0 10px 0;
+  color: #C9D1D9;
+}
+
+.req-list li {
+  transition: background-color 0.2s ease;
+}
+
+.req-list li:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.req-edit-mode textarea {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.req-edit-mode textarea:focus {
+  outline: none;
+  border-color: #3b82f6 !important;
+}
+
+.req-add-section textarea {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.markdown-body th {
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.markdown-body tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 16px 0;
+}
+
+.markdown-body strong {
+  color: #E9ECEF; /* Bold: 가장 밝은 글자도 #E9ECEF로 제한 */
+  font-weight: 700;
+}
+
+.markdown-body a {
+  color: var(--text-blue);
+  text-decoration: none;
+}
+
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+.test-actions {
+  gap: 6px;
+}
+
+.btn-copy-code {
+  color: #e8c87a !important;
+  border-color: rgba(232, 200, 122, 0.3) !important;
+}
+
+.btn-copy-code:hover {
+  background: rgba(232, 200, 122, 0.12) !important;
+}
+
+/* ─── Slash Command 팝업 스타일 ─── */
+.command-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: 300px;
+  background-color: rgba(40, 42, 45, 0.85); /* 짙은 반투명 그레이 */
+  border: 1px solid rgba(255, 255, 255, 0.1); /* 얇은 라이트 그레이 반투명 선 */
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); /* 드롭 섀도 */
+  backdrop-filter: blur(8px); /* Glassmorphism */
+  margin-bottom: 8px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+
+.popup-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.popup-section:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.popup-section-title {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af; /* 뮤트된 그레이 */
+  background: transparent;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.popup-item {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #e0e0e0;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent; /* 인디케이터 자리 확보 */
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.popup-item:hover {
+  background: rgba(255, 255, 255, 0.05); /* 메인보다 살짝 밝은 얇은 배경 */
+}
+
+.popup-item.selected {
+  background: rgba(255, 255, 255, 0.02);
+  border-left-color: #3b82f6; /* 포인트 블루 컬러 선 */
+}
+
+.popup-item-command {
+  font-weight: 600;
+  color: #f8fafc; /* 밝은 화이트/그레이 */
+  min-width: 70px;
+}
+
+.popup-item-desc {
+  color: #9ca3af; /* 뮤트된 그레이 */
+  font-size: 12px;
+}
+
+.popup-loading {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.popup-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ─── 파일 선택 칩 ─── */
+.selected-files-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: rgba(75, 110, 175, 0.25);
+  border: 1px solid rgba(75, 110, 175, 0.5);
+  border-radius: 12px;
+  font-size: 11px;
+  color: #a9c1f5;
+  white-space: nowrap;
+}
+
+.chip-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.7;
+  padding: 0;
+  line-height: 1;
+  font-size: 13px;
+  margin-left: 2px;
+}
+
+.chip-remove:hover { opacity: 1; }
+
+/* Stage 0 Requirements Editing UI */
+.requirements-edit-list h4 {
+  margin: 0 0 10px 0;
+  color: #C9D1D9;
+}
+
+.req-list li {
+  transition: background-color 0.2s ease;
+}
+
+.req-list li:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.req-edit-mode textarea {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.req-edit-mode textarea:focus {
+  outline: none;
+  border-color: #3b82f6 !important;
+}
+
+.req-add-section textarea {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.req-add-section textarea:focus {
+  outline: none;
+  border-color: #10b981 !important;
+}
+
+.req-btn-icon {
+  opacity: 0.6;
+  transition: opacity 0.2s ease, background-color 0.2s ease;
+}
+
+.req-list li:hover .req-btn-icon {
+  opacity: 1;
+}
+
+.req-btn-icon:hover {
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}

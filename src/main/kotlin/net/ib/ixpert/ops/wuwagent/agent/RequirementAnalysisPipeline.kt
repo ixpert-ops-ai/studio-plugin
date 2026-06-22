@@ -4,10 +4,8 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
-import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ProjectSummaryFormatter
-import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.RepoMapFormatter
-import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.RelevanceFilter
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AdaptiveFileDiscovery
+import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ChangeIntent
 import java.nio.file.Paths
 
 data class TargetFileSpec(
@@ -21,118 +19,173 @@ data class RequirementAnalysisResult(
     val summary: String,
     val targetFiles: List<TargetFileSpec>,
     val warnings: String,
-    val rawResponse: String
+    val rawResponse: String,
+    val suggestedNewFiles: List<net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.NewFileProposal> = emptyList()
 )
 
-/**
- * [Phase 2a] 자연어 요구사항을 분석하여 수정/신규 대상 파일 목록을 추출하는 파이프라인.
- */
 class RequirementAnalysisPipeline(private val project: Project?, private val client: LLMClient) {
     constructor(client: LLMClient) : this(null, client)
 
     companion object {
         var lastResult: RequirementAnalysisResult? = null
-
-        /**
-         * 이 파일 수 이하이면 필터링 없이 전체 전달 (소규모 프로젝트는 필터링 불필요).
-         */
-        private const val FILE_COUNT_THRESHOLD = 10
     }
 
     private val logger = Logger.getInstance(RequirementAnalysisPipeline::class.java)
 
-    fun analyze(primaryReq: String, secondaryReq: String, projectGraph: ProjectGraph, onChunk: ((String) -> Unit)? = null): RequirementAnalysisResult {
+    suspend fun analyze(
+        primaryReq: String, 
+        secondaryReq: String, 
+        projectGraph: ProjectGraph, 
+        enhancedRequirements: List<String> = emptyList(),
+        onChunk: ((String) -> Unit)? = null
+    ): RequirementAnalysisResult {
         val fwType = projectGraph.frameworkDetection?.userOverride ?: projectGraph.frameworkType
         logger.info("Starting RequirementAnalysisPipeline. Resolved Framework Type: ${fwType.name}")
-        // 멀티모듈 레벨 1이거나 대형 프로젝트(10+ 파일)인 경우 RelevanceFilter로 관련 파일만 추출
-        val (workingGraph, keywords, candidates) = if (projectGraph.graphType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.GraphType.MULTI_LEVEL_1 || projectGraph.files.size > FILE_COUNT_THRESHOLD) {
-            val filterMsg = if (projectGraph.graphType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.GraphType.MULTI_LEVEL_1) {
-                "> 📊 멀티 모듈 요약 그래프가 감지되었습니다. 요구사항과 관련 있는 모듈 및 파일만 필터링합니다.\n\n"
-            } else {
-                "> 📊 프로젝트 규모: **${projectGraph.files.size}개 파일** — 관련 파일만 필터링합니다.\n\n"
-            }
-            onChunk?.invoke(filterMsg)
-            
-            val filterResult = AdaptiveFileDiscovery.filter(primaryReq, secondaryReq, projectGraph, client, project) { progress ->
-                onChunk?.invoke(progress)
-            }
-            // Ollama 서버의 연속 호출(키워드 추출 -> 전체 분석) 시 컨텍스트 정리 및 커넥션 안정화를 위한 대기
-            // OpenAI, AIPro 등 클라우드 API는 비동기 병렬 처리가 원활하므로 딜레이 제외
-            val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
-            if (settings.apiType == net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OLLAMA) {
-                Thread.sleep(2000)
-            }
-            Triple(filterResult.filteredGraph, filterResult.keywords, filterResult.candidates)
-        } else {
-            onChunk?.invoke("> 📊 프로젝트 규모: **${projectGraph.files.size}개 파일** — 전체 분석합니다.\n\n")
-            Triple(projectGraph, emptyList<String>(), null)
-        }
-
-        val candidatesList = candidates ?: workingGraph.files.values.map { 
-            net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScoredCandidate(it.path, 0.0, emptyList())
-        }
-
-        // 툴콜링 스코프를 위해 30개로 필터링된 workingGraph가 아닌 전체 projectGraph 전달
-        val selector = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.LlmCandidateSelector(client, projectGraph)
-        onChunk?.invoke("> 🤖 (Stage 2) LLM을 통한 정밀 분석을 시작합니다...\n")
         
-        val fullRequirement = if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
-        val selectionResult = selector.select(
-            userQuery = fullRequirement, 
-            candidates = candidatesList, 
-            maxCandidates = 20, // [과제 #2 보완] IpsController 등이 10위 밖으로 밀리는 현상 방어용. 향후 view_binding 전파 안정화 시 15로 조정 검토
-            onChunk = onChunk
-        )
+        // --- Stage 0.5: Scope Selection ---
+        val threshold = 50 // Configuration threshold
+        val workingMetaGraph: net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraphQueryable = if (projectGraph.totalFileCount > threshold) {
+            onChunk?.invoke("> 📦 **프로젝트 규모가 큽니다 (${projectGraph.totalFileCount}개 파일). 관련 패키지 선택을 요청합니다.**\n")
+            val scopeConfig = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScopeConfig()
+            val tree = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScopeSelector.buildDirectoryTree(projectGraph, scopeConfig)
+            
+            // UI 이벤트 대기 (비동기)
+            val scopeResult = net.ib.ixpert.ops.wuwagent.agent.ScopeSelectionBridge.requestScopeSelection(project, tree, scopeConfig, onChunk)
+            
+            if (scopeResult != null && scopeResult.selectedPaths.isNotEmpty()) {
+                val subGraph = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScopeSelector.buildSubMetaGraph(projectGraph, scopeResult.selectedPaths)
+                onChunk?.invoke("> ✅ **선택 범위 반영 완료:** ${subGraph.totalFileCount}개 파일로 대상을 축소했습니다.\n")
+                
+                // 외부 의존성 제안
+                val suggestions = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DependencySuggester.suggestExternalDependencies(
+                    subGraph, projectGraph, net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.SuggestionConfig()
+                )
+                
+                if (suggestions.isNotEmpty()) {
+                    // 프론트엔드에 의존성 선택 UI(showDependency)가 아직 없으므로, 제안된 의존성을 자동으로 포함합니다.
+                    val autoAcceptedPaths = suggestions.map { it.packagePath }
+                    val expandedPaths = scopeResult.selectedPaths + autoAcceptedPaths
+                    val finalGraph = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScopeSelector.buildSubMetaGraph(projectGraph, expandedPaths)
+                    onChunk?.invoke("> ✅ **외부 의존성 자동 포함 완료:** ${finalGraph.totalFileCount}개 파일로 범위가 확장되었습니다.\n")
+                    finalGraph
+                } else {
+                    subGraph
+                }
+            } else {
+                onChunk?.invoke("> ⚠️ **선택이 취소되었거나 타임아웃 되었습니다. 전체 프로젝트를 대상으로 진행합니다.**\n")
+                projectGraph
+            }
+        } else {
+            projectGraph
+        }
+        // -----------------------------------
+
+        try {
+            val basePath = project?.basePath
+            if (basePath != null && workingMetaGraph is net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.SubMetaGraph) {
+                val dumpFile = java.io.File(basePath, ".meta/sub-graph.json")
+                dumpFile.parentFile.mkdirs()
+                val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
+                dumpFile.writeText(gson.toJson(workingMetaGraph), Charsets.UTF_8)
+                logger.info("SubGraph dumped to ${dumpFile.absolutePath}")
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to dump sub-graph", e)
+        }
+
+        val discoveryResult = AdaptiveFileDiscovery.filter(primaryReq, secondaryReq, workingMetaGraph, client, project, enhancedRequirements) { progress ->
+            onChunk?.invoke("> $progress\n")
+        }
         
         val targetFiles = mutableListOf<TargetFileSpec>()
-        selectionResult.modify?.forEach { action ->
-            targetFiles.add(TargetFileSpec(action.order ?: 0, action.path ?: "", "수정", action.reason ?: ""))
-        }
-        selectionResult.create?.forEach { action ->
-            targetFiles.add(TargetFileSpec(action.order ?: 0, action.path ?: "", "신규", action.reason ?: ""))
-        }
         
-        onChunk?.invoke("\n> 🤖 (Stage 3) 불필요한 수정 대상 파일 필터링 중...\n")
+        discoveryResult.relevantFiles.forEachIndexed { index, file ->
+            targetFiles.add(TargetFileSpec(
+                order = index + 1, 
+                path = file.path, 
+                type = "MODIFY", 
+                description = "Score: ${file.score}, Via: ${file.discoveryReason}"
+            ))
+        }
+
+        discoveryResult.suggestedNewFiles.forEachIndexed { index, file ->
+            targetFiles.add(TargetFileSpec(
+                order = targetFiles.size + 1,
+                path = file.suggestedPath,
+                type = "CREATE",
+                description = "- suggestedFileType: ${file.suggestedFileType}\n- reason: ${file.reason}\n- referencePattern: ${file.referencePattern}"
+            ))
+        }
+        onChunk?.invoke("\n> **(Stage 2) Trimming** - 불필요한 파일 경로 보정 및 필터링...\n")
         val correctedFiles = TargetFileValidator.correctPaths(targetFiles, projectGraph)
         val mdRoot = Paths.get(project?.basePath ?: "", "docs")
+        
+        onChunk?.invoke("\n> **(Stage 3) LLM Verification** - 최종 연관성 검증...\n")
         val verifier = FileRelevanceVerifier(client, projectGraph, mdRoot)
-        val verifiedFiles = verifier.verify(fullRequirement, correctedFiles)
+        val fullRequirement = if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
+        val verificationOutput = verifier.verify(fullRequirement, correctedFiles)
+        val verifiedFiles = verificationOutput.files
         val validatedTargetFiles = TargetFileValidator.sortByDependency(verifiedFiles, projectGraph)
         
         val formattedOutput = buildString {
-            if (!selectionResult.summary.isNullOrBlank()) {
-                appendLine("### 요구사항 요약")
-                appendLine(selectionResult.summary)
-                appendLine()
+            appendLine("### 요구사항 분석 요약")
+            
+            // Stage 3(Batch)에서 판정한 전체 요약 근거가 있다면 우선적으로 보여줌
+            if (verificationOutput.reasoning.isNotBlank()) {
+                appendLine(verificationOutput.reasoning.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n"))
+            } else {
+                val formattedReasoning = discoveryResult.metadata.reasoning.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n")
+                if (formattedReasoning.isNotBlank()) {
+                    appendLine(formattedReasoning)
+                }
             }
+            appendLine()
+            val koreanIntent = when(discoveryResult.metadata.changeIntent.name) {
+                "MODIFY" -> "수정"
+                "CREATE" -> "신규"
+                "DELETE" -> "삭제"
+                else -> discoveryResult.metadata.changeIntent.name
+            }
+            appendLine("**(작업유형: $koreanIntent) 관련된 초기 핵심 파일(Seed) 식별:** ${discoveryResult.metadata.seedClasses.joinToString()}")
+            appendLine()
+            
             if (validatedTargetFiles.isNotEmpty()) {
-                appendLine("### 분석된 대상 파일")
-                appendLine("| 순서 | 파일 경로 | 유형 | 작업 내용 |")
+                appendLine("### 🎯 분석된 대상 파일 목록")
+                appendLine("| 순번 | 파일 경로 | 작업유형 | 수정 사유 |")
                 appendLine("|:---:|:---|:---:|:---|")
                 validatedTargetFiles.forEach {
-                    appendLine("| ${it.order} | ${it.path} | ${it.type} | ${it.description} |")
+                    val koreanType = when(it.type) {
+                        "MODIFY" -> "수정"
+                        "CREATE" -> "신규"
+                        "DELETE" -> "삭제"
+                        else -> it.type
+                    }
+                    val descForTable = it.description.replace("\n", "<br>")
+                    appendLine("| ${it.order} | ${it.path} | $koreanType | $descForTable |")
                 }
             } else {
-                appendLine("⚠️ 관련된 대상 파일을 찾지 못했습니다.")
+                appendLine("⚠️ **경고**: 관련된 대상 파일을 찾지 못했습니다.")
             }
-            if (!selectionResult.warnings.isNullOrEmpty()) {
-                appendLine()
-                appendLine("### 작업 시 주의사항")
-                selectionResult.warnings.forEach { appendLine("- $it") }
-            }
-            if (!selectionResult.reasoning.isNullOrBlank()) {
-                appendLine()
-                appendLine("### 선정 사유")
-                appendLine(selectionResult.reasoning)
-            }
+            appendLine()
+            appendLine("### 📊 탐색 메타데이터")
+            appendLine("- **선정된 초기 파일(Seed)**: ${discoveryResult.metadata.seedClasses.joinToString()}")
+            appendLine("- **파일 필터링 결과**: 총 ${discoveryResult.metadata.totalCandidates}개 대상 중 ${validatedTargetFiles.size}개 최종 선정")
         }
         onChunk?.invoke("\n" + formattedOutput + "\n")
         
+        val rawReasoning = if (verificationOutput.reasoning.isNotBlank()) {
+            verificationOutput.reasoning
+        } else {
+            discoveryResult.metadata.reasoning.ifBlank { "그래프 탐색 완료" }
+        }
+        val finalReasoning = rawReasoning.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n")
+
         val result = RequirementAnalysisResult(
-            summary = selectionResult.summary ?: "",
+            summary = finalReasoning,
             targetFiles = validatedTargetFiles,
-            warnings = selectionResult.warnings?.joinToString("\n") ?: "",
-            rawResponse = "JSON Response Processed by LlmCandidateSelector"
+            warnings = discoveryResult.metadata.reasoning,
+            rawResponse = "그래프 탐색 결과 처리 완료",
+            suggestedNewFiles = discoveryResult.suggestedNewFiles
         )
         
         lastResult = result
@@ -140,87 +193,13 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
     }
 
     fun parseResponse(rawResponse: String, projectGraph: ProjectGraph? = null): RequirementAnalysisResult {
-        val lines = rawResponse.lines()
-        
-        var summary = ""
         val targetFiles = mutableListOf<TargetFileSpec>()
-        var warnings = ""
-        
-        var currentSection = ""
-        
-        for (line in lines) {
-            val trimmed = line.trim()
-            
-            if (trimmed.contains("요구사항 요약")) {
-                currentSection = "SUMMARY"
-                continue
-            } else if (trimmed.contains("수정 대상 파일")) {
-                currentSection = "TABLE"
-                continue
-            } else if (trimmed.contains("작업 시 주의사항")) {
-                currentSection = "WARNINGS"
-                continue
-            }
-            
-            when (currentSection) {
-                "SUMMARY" -> {
-                    if (trimmed.isNotBlank() && !trimmed.startsWith("###")) {
-                        summary += "$trimmed\n"
-                    }
-                }
-                "TABLE" -> {
-                    // 테이블 파싱 (다양한 포맷 허용)
-                    if (trimmed.startsWith("|") && !trimmed.contains("|:---:|")) {
-                        val parts = trimmed.split("|").map { it.trim() }
-                        // 맨 앞과 맨 뒤의 파이프 때문에 인덱스 1부터 시작
-                        if (parts.size >= 5 && parts[1].toIntOrNull() != null) {
-                            val order = parts[1].toInt()
-                            val path = parts[2]
-                            val type = parts[3]
-                            val desc = parts[4]
-                            targetFiles.add(TargetFileSpec(order, path, type, desc))
-                        }
-                    } else if (trimmed.contains("\t")) {
-                        // 탭 구분자 (웹뷰에서 복사한 텍스트 또는 탭 포맷)
-                        val parts = trimmed.split("\t").map { it.trim() }
-                        if (parts.size >= 4 && parts[0].toIntOrNull() != null) {
-                            targetFiles.add(TargetFileSpec(parts[0].toInt(), parts[1], parts[2], parts[3]))
-                        }
-                    } else if (!trimmed.startsWith("|") && trimmed.isNotBlank()) {
-                        // 공백이나 숫자 리스트 포맷 (예: "1 src/main/... 수정 내용")
-                        val firstToken = trimmed.substringBefore(" ").replace(".", "")
-                        if (firstToken.toIntOrNull() != null) {
-                            val order = firstToken.toInt()
-                            val remainder = trimmed.substringAfter(" ").trim()
-                            val path = remainder.substringBefore(" ").trim()
-                            val rest = remainder.substringAfter(" ").trim()
-                            val type = rest.substringBefore(" ").trim()
-                            val desc = rest.substringAfter(" ").trim()
-                            if (path.contains("/")) {
-                                targetFiles.add(TargetFileSpec(order, path, type, desc))
-                            }
-                        }
-                    }
-                }
-                "WARNINGS" -> {
-                    if (trimmed.isNotBlank() && !trimmed.startsWith("###")) {
-                        warnings += "$trimmed\n"
-                    }
-                }
-            }
-        }
-
-        val validatedTargetFiles = if (projectGraph != null) {
-            TargetFileValidator.validate(targetFiles, projectGraph)
-        } else {
-            targetFiles
-        }
-
         return RequirementAnalysisResult(
-            summary = summary.trim(),
-            targetFiles = validatedTargetFiles,
-            warnings = warnings.trim(),
-            rawResponse = rawResponse
+            summary = "",
+            targetFiles = targetFiles,
+            warnings = "",
+            rawResponse = rawResponse,
+            suggestedNewFiles = emptyList()
         )
     }
 }

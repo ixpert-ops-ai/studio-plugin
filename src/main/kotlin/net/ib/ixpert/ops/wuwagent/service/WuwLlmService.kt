@@ -69,7 +69,14 @@ object WuwLlmService {
                             "messages" to listOf(mapOf("role" to "user", "content" to "hi")),
                             "max_tokens" to 1
                         ))
-                        HttpRequests.post("$cleanUrl/v1/chat/completions", "application/json").tuner {
+                        val testUrl = if (cleanUrl.endsWith("/chat/completions")) {
+                            cleanUrl
+                        } else if (cleanUrl.contains("/openai")) {
+                            "${cleanUrl.trimEnd('/')}/chat/completions"
+                        } else {
+                            "${cleanUrl.trimEnd('/')}/v1/chat/completions"
+                        }
+                        HttpRequests.post(testUrl, "application/json").tuner {
                             if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
                             it.connectTimeout = 5000
                             it.readTimeout = 10000
@@ -91,13 +98,29 @@ object WuwLlmService {
 
             } catch (e: Exception) {
                 logger.warn("Connection test failed", e)
+                val isRateLimit = e.message?.contains("429") == true
                 ApplicationManager.getApplication().invokeLater({
-                    if (parent != null) {
-                        Messages.showErrorDialog(parent, "연결 실패: ${e.message}", "Test Connection")
+                    if (isRateLimit) {
+                        val msg = "서버 연결에 성공했으나, Rate Limit(429) 초과로 응답이 제한되었습니다."
+                        if (parent != null) {
+                            Messages.showWarningDialog(parent, msg, "Test Connection")
+                        } else {
+                            Messages.showWarningDialog(msg, "Test Connection")
+                        }
+                        onComplete?.invoke(true)
                     } else {
-                        Messages.showErrorDialog("연결 실패: ${e.message}", "Test Connection")
+                        val errorMessage = when {
+                            e.message?.contains("401") == true -> "인증 실패 (401): API Key를 확인해주세요."
+                            e.message?.contains("404") == true || e is java.io.FileNotFoundException -> "경로 또는 모델을 찾을 수 없음 (404): Base URL이나 입력한 모델명이 정확한지 확인해주세요."
+                            else -> e.message ?: "알 수 없는 오류"
+                        }
+                        if (parent != null) {
+                            Messages.showErrorDialog(parent, "연결 실패: $errorMessage", "Test Connection")
+                        } else {
+                            Messages.showErrorDialog("연결 실패: $errorMessage", "Test Connection")
+                        }
+                        onComplete?.invoke(false)
                     }
-                    onComplete?.invoke(false)
                 }, ModalityState.any())
             }
         }
@@ -152,11 +175,17 @@ object WuwLlmService {
                 }, ModalityState.any())
             } catch (e: Exception) {
                 logger.warn("Fetch models failed", e)
+                val errorMessage = when {
+                    e.message?.contains("401") == true -> "인증 실패 (401): API Key를 확인해주세요."
+                    e.message?.contains("429") == true -> "요청 한도 초과 (429): Rate Limit을 초과했습니다."
+                    e.message?.contains("404") == true || e is java.io.FileNotFoundException -> "경로를 찾을 수 없음 (404): 이 서버는 모델 목록 조회를 지원하지 않거나 Base URL이 잘못되었습니다."
+                    else -> e.message ?: "알 수 없는 오류"
+                }
                 ApplicationManager.getApplication().invokeLater({
                     if (parent != null) {
-                        Messages.showErrorDialog(parent, "모델 조회 실패: ${e.message}", "Fetch Models")
+                        Messages.showErrorDialog(parent, "모델 조회 실패: $errorMessage", "Fetch Models")
                     } else {
-                        Messages.showErrorDialog("모델 조회 실패: ${e.message}", "Fetch Models")
+                        Messages.showErrorDialog("모델 조회 실패: $errorMessage", "Fetch Models")
                     }
                     onComplete?.invoke(false)
                 }, ModalityState.any())
