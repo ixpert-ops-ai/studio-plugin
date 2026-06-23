@@ -187,7 +187,10 @@ class FileRelevanceVerifier(
                 }
             } catch (e: Exception) {
                 logger.error("Failed to parse LLM response: $argsStr", e)
-                verifiedTopFiles.addAll(topFiles)
+                // 파싱 완전 실패 시 (Fail-Open): 
+                // 기존 파일(MODIFY)은 보수적으로 살려두되, 
+                // 검증되지 않은 신규 제안 파일(CREATE)은 위험(오염) 소지가 크므로 철저히 버립니다.
+                verifiedTopFiles.addAll(topFiles.filter { it.type != "CREATE" && it.type != "신규" })
             }
         } else {
             logger.warn("No valid tool call found, keeping all files as fallback.")
@@ -195,8 +198,8 @@ class FileRelevanceVerifier(
         }
         
         if (verifiedTopFiles.isEmpty()) {
-            logger.warn("Stage 3: 전체 UNNECESSARY 판정 – 안전장치로 상위 3개 유지")
-            verifiedTopFiles.addAll(topFiles.take(3))
+            logger.warn("Stage 3: 전체 UNNECESSARY 판정 – 안전장치로 상위 3개 유지 (기존 파일 한정)")
+            verifiedTopFiles.addAll(topFiles.filter { it.type != "CREATE" && it.type != "신규" }.take(3))
         }
         
         return VerificationOutput(verifiedTopFiles + autoKept, finalReasoning)
