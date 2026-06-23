@@ -136,15 +136,26 @@ class FileRelevanceVerifier(
         
         val verifiedTopFiles = mutableListOf<TargetFileSpec>()
         val toolCall = response?.toolCalls?.firstOrNull { it.function.name == "submit_verification" }
+        var argsStr = toolCall?.function?.arguments
         var finalReasoning = ""
         
-        if (toolCall != null) {
+        if (argsStr == null) {
+            val content = response?.content ?: ""
+            val match = Regex("```(?:json)?\\s*(\\{.*\\})\\s*```", RegexOption.DOT_MATCHES_ALL).find(content)
+            if (match != null) {
+                argsStr = match.groupValues[1]
+            } else if (content.trim().startsWith("{")) {
+                argsStr = content
+            }
+        }
+        
+        if (argsStr != null) {
             try {
-                val argsStr = toolCall.function.arguments
+                val cleanedStr = argsStr
                     .replace(Regex("^```(?:json)?\\s*"), "")
                     .replace(Regex("\\s*```$"), "")
                     .trim()
-                val res = gson.fromJson(argsStr, BatchResponse::class.java)
+                val res = gson.fromJson(cleanedStr, BatchResponse::class.java)
                 val rawVerdicts = res.fileVerdicts ?: emptyList()
                 
                 // 후처리 로직: reason이 비어있거나 너무 짧으면 UNNECESSARY로 강등
@@ -175,7 +186,7 @@ class FileRelevanceVerifier(
                     }
                 }
             } catch (e: Exception) {
-                logger.error("Failed to parse tool arguments: ${toolCall.function.arguments}", e)
+                logger.error("Failed to parse LLM response: $argsStr", e)
                 verifiedTopFiles.addAll(topFiles)
             }
         } else {
