@@ -115,9 +115,9 @@ class ImplementService(
             val userPrompt = buildUserPrompt(userRequirement, spec, context, sortedTargets, previousSignatures)
 
             // [디버그 로그 1] LLM 호출 전 previousSignatures 확인
-            onProgress?.invoke("\n🔍 [디버그: ${spec.path}] 주입될 previousSignatures 개수: ${previousSignatures.size}")
+            logger.debug("[디버그: ${spec.path}] 주입될 previousSignatures 개수: ${previousSignatures.size}")
             if (previousSignatures.isNotEmpty()) {
-                onProgress?.invoke("🔍 [디버그 내용]:\n${previousSignatures.joinToString("\n")}\n")
+                logger.debug("[디버그 내용]: ${previousSignatures.joinToString(", ")}")
             }
 
             // LLM 호출
@@ -178,8 +178,7 @@ class ImplementService(
                     val isContained = normalizedBlock.isNotBlank() && normalize(sourceContent).contains(normalizedBlock)
                     
                     // [디버그 로그 2] isUnchangedReOutput 판정 결과 확인
-                    onProgress?.invoke("🔍 [디버그: 재출력 감지] block title: ${block.title}")
-                    onProgress?.invoke("🔍   - 원본 포함 여부(contains): $isContained")
+                    logger.debug("[디버그: 재출력 감지] block title: ${block.title}, 원본 포함 여부(contains): $isContained")
                     
                     if (isContained) {
                         hasReOutput = true
@@ -211,7 +210,7 @@ class ImplementService(
                         val modifyMethodNames = modifySignatures.map { extractMethodName(it) }.filter { it.isNotBlank() }
                         if (modifyMethodNames.any { addMethodNames.contains(it) }) {
                             hasMixedReOutput = true
-                            onProgress?.invoke("🔍 [디버그: 혼합 블록 감지] [수정] 블록에 이미 [추가]된 메서드명 포함됨. block title: ${block.title}")
+                            logger.debug("[디버그: 혼합 블록 감지] [수정] 블록에 이미 [추가]된 메서드명 포함됨. block title: ${block.title}")
                             return@filter false
                         }
                     }
