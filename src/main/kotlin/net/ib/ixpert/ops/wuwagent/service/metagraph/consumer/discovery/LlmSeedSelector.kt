@@ -16,8 +16,20 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             .distinct()
             .joinToString("\n")
 
+        val frameworkName = graph.frameworkDisplayName
+        val additionalContext = if (graph.resolvedFrameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME_AP) {
+            """
+            - Anyframe Enterprise 프레임워크 특징:
+              - BIZ: 핵심 업무 로직 (보통 *BIZ 클래스)
+              - SVC: 서비스 인터페이스(*SVC) 및 구현체(*SVCImpl)
+              - DATA_ACCESS: DB 접근 객체 (보통 *DEM 또는 *DQM)
+              - VO: Value Object (BVO, SVO, DVO 등으로 계층화됨)
+              - BIZ_UTIL: 공통 로직 (보통 *Util)
+            """.trimIndent()
+        } else ""
+
         val systemPrompt = """
-            당신은 Spring Boot + Vue.js 프로젝트의 코드 변경 분석가입니다.
+            당신은 $frameworkName 프로젝트의 코드 변경 분석가입니다.
             아래 SR(요구사항)을 읽고, 변경이 시작되어야 할 핵심 진입점(Seed) 클래스를 선정하세요.
             반드시 제공된 `submit_seeds` 도구를 호출하여 결과를 제출하세요.
             
@@ -29,6 +41,7 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             - `frontendRelevant`가 true이면, 관련될 가능성이 높은 Vue/React 파일명 키워드를 `frontendFileHints`에 포함하세요. SR 텍스트의 화면명을 영문 파일명으로 변환하세요. (예: '마이페이지' → 'MyPage', '장바구니' → 'Cart')
             - `reasoning`은 전체 요구사항의 요약과 함께, 각 대상 파일별 선정 사유를 반드시 "1. [파일명] - [사유]", "2. [파일명] - [사유]" 형식으로 번호를 매겨 상세히 작성하세요.
             - 중요: JSON 응답 생성 시, reasoning 필드 값 내부에 실제 줄바꿈 문자(\n)를 사용하지 마세요. 줄바꿈 대신 띄어쓰기나 마침표를 사용하세요.
+            $additionalContext
         """.trimIndent()
 
         val userPrompt = """

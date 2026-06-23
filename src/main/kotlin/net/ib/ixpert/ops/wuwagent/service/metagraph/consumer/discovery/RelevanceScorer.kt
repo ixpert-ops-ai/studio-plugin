@@ -66,7 +66,18 @@ class RelevanceScorer(
                     commentMatchScore = 10
                 }
 
-                val totalScore = hopScore + nameMatchScore + methodMatchScore + layerAlignScore + commentMatchScore
+                // TypeBonusScore
+                val typeBonusScore = when (fileNode.fileType) {
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.BIZ -> 3
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.SERVICE,
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.DATA_ACCESS -> 2
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.SERVICE_INTERFACE,
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.VO -> 1
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.BIZ_UTIL -> -1
+                    else -> 0
+                }
+
+                val totalScore = hopScore + nameMatchScore + methodMatchScore + layerAlignScore + commentMatchScore + typeBonusScore
 
                 if (totalScore >= minScore) {
                     scoredFiles.add(

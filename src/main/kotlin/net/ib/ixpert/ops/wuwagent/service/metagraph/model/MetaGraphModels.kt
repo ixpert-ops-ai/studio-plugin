@@ -21,6 +21,8 @@ interface ProjectGraphQueryable {
     val projectRoot: String?
     val files: Map<String, FileNode>
     val resourceNodes: List<ResourceNode>
+    val frameworkDisplayName: String
+    val resolvedFrameworkType: FrameworkType
     
     val totalFileCount: Int
         get() = files.size
@@ -46,6 +48,11 @@ data class ProjectGraph(
     val relationships: List<Relationship>,
     val statistics: GraphStatistics
 ) : ProjectGraphQueryable {
+    override val frameworkDisplayName: String
+        get() = resolveFrameworkType().displayName
+    override val resolvedFrameworkType: FrameworkType
+        get() = resolveFrameworkType()
+
     fun resolveFrameworkType(): FrameworkType {
         return this.frameworkDetection?.userOverride ?: this.frameworkType
     }

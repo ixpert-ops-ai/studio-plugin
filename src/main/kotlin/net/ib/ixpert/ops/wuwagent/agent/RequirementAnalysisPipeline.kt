@@ -62,9 +62,15 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                 )
                 
                 if (suggestions.isNotEmpty()) {
-                    // 프론트엔드에 의존성 선택 UI(showDependency)가 아직 없으므로, 제안된 의존성을 자동으로 포함합니다.
-                    val autoAcceptedPaths = suggestions.map { it.packagePath }
-                    val expandedPaths = scopeResult.selectedPaths + autoAcceptedPaths
+                    // 프론트엔드에 의존성 선택 UI(showDependency)가 아직 없으므로 자동 포함하되,
+                    // 패키지 전체(packagePath)가 아니라 "실제로 참조된 파일"만 포함하여 범위 폭발을 방지한다.
+                    val autoAcceptedFiles = suggestions
+                        .filter { !it.isUtility }                 // 유틸 패키지 제외
+                        .flatMap { it.referencedFiles }           // 패키지 통째 → 참조된 파일만
+                        .distinct()
+                        .take(50)                                 // 자동 포함 안전 캡 (UI 부재 임시방편)
+
+                    val expandedPaths = scopeResult.selectedPaths + autoAcceptedFiles
                     val finalGraph = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScopeSelector.buildSubMetaGraph(projectGraph, expandedPaths)
                     onChunk?.invoke("> ✅ **외부 의존성 자동 포함 완료:** ${finalGraph.totalFileCount}개 파일로 범위가 확장되었습니다.\n")
                     finalGraph

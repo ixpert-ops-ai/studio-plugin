@@ -5,6 +5,7 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 data class DependencySuggestion(
     val packagePath: String,
     val fileCount: Int,
+    val referencedFiles: List<String>,
     val referenceCount: Int,
     val referenceTypes: Set<String>,
     val isUtility: Boolean,
@@ -17,7 +18,8 @@ data class SuggestionConfig(
     val includeUtilities: Boolean = false,
     val utilityPatterns: List<String> = listOf(
         "common/util", "common/config", "shared/util",
-        "core/util", "infra/config", "global/"
+        "core/util", "infra/config", "global/",
+        "bizUtil", "/util", "constant"
     )
 )
 
@@ -34,6 +36,7 @@ object DependencySuggester {
             DependencySuggestion(
                 packagePath = pkg,
                 fileCount = countFilesInPackage(fullMetaGraph, pkg),
+                referencedFiles = deps.map { it.targetFile.path }.distinct(),
                 referenceCount = deps.sumOf { it.count },
                 referenceTypes = deps.flatMap { it.relationTypes }.toSet(),
                 isUtility = isUtilityPackage(pkg, config.utilityPatterns),
