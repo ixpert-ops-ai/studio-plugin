@@ -90,7 +90,8 @@ class ImplementService(
 
         val previousSignatures = mutableListOf<String>()
         val addedFields = mutableMapOf<String, String>() // name -> type
-        val signatureRegex = Regex("""(public|private|protected)?\s*[\w<>,\[\]?\s]+\s+\w+\([^)]*\)""")
+        // 멀티라인 파라미터 및 어노테이션(@Param 등) 내의 괄호를 지원하는 강력한 시그니처 정규식
+        val signatureRegex = Regex("""(?:(?:public|private|protected)\s+)?(?:@[A-Za-z0-9_]+(?:\s*\([\s\S]*?\))?\s*)*(?:[A-Za-z0-9_<>,\[\]?]+\s+)+[A-Za-z0-9_]+\s*\([\s\S]*?\)\s*(?=\{|;|throws)""")
         
         val entityModifiedFields = mutableSetOf<String>()
         val allRepoMethods = graph.files.values
@@ -309,8 +310,9 @@ class ImplementService(
             var hasHistory = false
             for (block in validBlocks) {
                 val sigs = signatureRegex.findAll(block.content)
-                    .map { it.value.trim() }
+                    .map { it.value.replace(Regex("""\s+"""), " ").trim() } // 멀티라인 시그니처를 한 줄로 정규화
                     .filter { !it.matches(Regex(".*\\b(get|set|is)[A-Z].*")) }
+                    .filter { !it.contains("return ") && !it.contains("new ") && !it.contains("if (") && !it.contains("else ") && !it.contains("for (") && !it.contains("while (") }
                     .toList()
                 if (sigs.isNotEmpty()) {
                     fileHistory.appendLine("  - 주요 시그니처: ${sigs.joinToString(", ")}")
