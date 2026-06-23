@@ -18,7 +18,7 @@ data class ScopeSelectionResult(
 
 data class ScopeConfig(
     val minFilesPerNode: Int = 2,
-    val maxDepth: Int = 6,
+    val maxDepth: Int = 10,
     val maxSelections: Int = 15,
     val maxFiles: Int = 500,
     val warningThreshold: Int = 300
@@ -176,7 +176,9 @@ object ScopeSelector {
             resourceNodes = selectedResourceNodes,
             internalEdges = internalEdges,
             externalDependencies = externalDependencies,
-            sourceSelections = selectedPaths
+            sourceSelections = selectedPaths,
+            frameworkDisplayName = fullMetaGraph.frameworkDisplayName,
+            resolvedFrameworkType = fullMetaGraph.resolvedFrameworkType
         )
     }
 }
