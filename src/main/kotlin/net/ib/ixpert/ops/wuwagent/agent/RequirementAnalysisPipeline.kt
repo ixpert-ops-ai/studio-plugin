@@ -140,6 +140,8 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             if (verificationOutput.reasoning.isNotBlank()) {
                 appendLine(verificationOutput.reasoning.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n"))
             } else {
+                appendLine("> ⚠️ **검증 단계 파싱 실패**: LLM 응답 포맷 오류로 인해 Stage 1/2 후보 결과를 모두 유지합니다. 결과를 직접 확인하세요.")
+                appendLine()
                 val formattedReasoning = discoveryResult.metadata.reasoning.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n")
                 if (formattedReasoning.isNotBlank()) {
                     appendLine(formattedReasoning)
