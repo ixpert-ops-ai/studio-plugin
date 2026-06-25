@@ -178,36 +178,27 @@ object PseudoCodeParser {
             val block = iterator.next()
             var shouldRemove = false
             
-            // Case 1: [추가] 블록인데 "위치:" 에 대상 파일이 아닌 다른 파일명(역할)이 명시된 경우
-            val locationLine = block.content.lines().find { it.trim().startsWith("- 위치:") || it.trim().startsWith("- 삽입 위치:") }
-            if (locationLine != null) {
-                // Service 파일 내에서 Response, DTO 등을 언급하는 것은 정상이므로 엄격한 클래스(Repository, Controller)만 감지
-                val strictRoles = listOf("Repository", "Controller")
-                    .filter { !fileNameWithoutExt.contains(it, ignoreCase = true) }
-                if (strictRoles.any { locationLine.contains(it, ignoreCase = true) } && !locationLine.contains(fileNameWithoutExt, ignoreCase = true)) {
-                    shouldRemove = true
+            // 규칙 1: 메타 텍스트 검사 대신 실제 코드 내 외래 타입 선언 검사
+            val isJavaOrKotlin = filePath.endsWith(".java") || filePath.endsWith(".kt")
+            if (isJavaOrKotlin) {
+                // 마크다운 코드 블록 내부만 추출
+                var codeBody = block.content
+                val matcher = Regex("```[a-zA-Z]*\n([\\s\\S]*?)```").find(block.content)
+                if (matcher != null) {
+                    codeBody = matcher.groupValues[1]
                 }
-            }
-            
-            // Case 2: 블록 제목이 "XXX 인터페이스에 메서드 추가" 형태인데 XXX가 현재 파일이 아닌 경우
-            if (block.title.matches(Regex(".*\\b(Interface|인터페이스).*에.*추가.*"))) {
-                if (!fileNameWithoutExt.contains("Interface") && !fileNameWithoutExt.contains("Repository") && !fileNameWithoutExt.contains("Mapper")) {
-                    shouldRemove = true
-                }
-            }
-            // Case 3: 블록 제목이 "[다른 클래스]에 ... 추가" 
-            val match = Regex("(Repository|Controller|Service)").find(block.title)
-            if (match != null && !fileNameWithoutExt.contains(match.value, ignoreCase = true)) {
-                // 하지만 제목에 현재 클래스명이 같이 명시되어 있다면 정상 (예: ProductResponse 생성)
-                if (!block.title.contains(fileNameWithoutExt, ignoreCase = true)) {
-                    shouldRemove = true
-                }
-            }
+                
+                val foreignDeclaration = Regex(
+                    """\b(?:public\s+|private\s+|protected\s+)?(?:abstract\s+)?(?:class|interface|enum|@interface)\s+(\w+)"""
+                ).findAll(codeBody)
+                    .map { it.groupValues[1] }
+                    .any { declaredName ->
+                        !declaredName.equals(fileNameWithoutExt, ignoreCase = true)
+                    }
 
-            if (shouldRemove) {
-                iterator.remove()
-                warnings.add("⚠️ 경고: 대상 파일($fileNameWithoutExt)이 아닌 다른 파일의 코드를 출력한 것으로 판단되어 해당 블록('${block.title}')을 자동 제거했습니다. (규칙 1 위반)")
-                continue
+                if (foreignDeclaration) {
+                    warnings.add("⚠️ 경고: 대상 파일($fileNameWithoutExt) 외의 타입 선언이 감지되어 다른 파일의 코드일 가능성이 있습니다. 블록('${block.title}')의 내용을 검토해주세요. (규칙 1 위반 의심)")
+                }
             }
             
             var currentBlockContent = block.content
