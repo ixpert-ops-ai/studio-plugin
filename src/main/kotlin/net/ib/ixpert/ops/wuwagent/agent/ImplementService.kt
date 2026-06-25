@@ -261,6 +261,14 @@ class ImplementService(
                 var modifiedAny = false
                 val mutableBlocks = parsedResult.blocks.toMutableList()
                 val repoCallRegex = Regex("""\b\w+Repository\.([a-zA-Z0-9_]+)\s*\(""")
+                val previousSigMethods = previousSignatures.flatMap { sig ->
+                    Regex("""[\w>\]]\s+([a-zA-Z_]\w*)\s*\(""").findAll(sig).map { it.groupValues[1] }
+                }.toSet()
+                logger.debug("추출된 previousSignatures 메서드 화이트리스트: $previousSigMethods")
+                
+                val defaultMethods = setOf("save", "saveAll", "findById", "existsById", "findAll", "findAllById", "count", "deleteById", "delete", "deleteAll")
+                val knownMethods = allRepoMethods + defaultMethods + previousSigMethods
+
                 for (i in mutableBlocks.indices) {
                     var content = mutableBlocks[i].content
                     val newLines = content.lines().map { line ->
@@ -270,9 +278,7 @@ class ImplementService(
                             var lineModified = false
                             for (match in matches) {
                                 val methodName = match.groupValues[1]
-                                // spring data jpa 기본 메서드 예외 처리
-                                val defaultMethods = setOf("save", "saveAll", "findById", "existsById", "findAll", "findAllById", "count", "deleteById", "delete", "deleteAll")
-                                if (!allRepoMethods.contains(methodName) && !defaultMethods.contains(methodName)) {
+                                if (!knownMethods.contains(methodName)) {
                                     lineModified = true
                                     break
                                 }
