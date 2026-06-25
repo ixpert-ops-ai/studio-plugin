@@ -140,6 +140,8 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             if (verificationOutput.reasoning.isNotBlank()) {
                 appendLine(verificationOutput.reasoning.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n"))
             } else {
+                appendLine("> ⚠️ **검증 단계 파싱 실패**: LLM 응답 포맷 오류로 인해 Stage 1/2 후보 결과를 모두 유지합니다. 결과를 직접 확인하세요.")
+                appendLine()
                 val formattedReasoning = discoveryResult.metadata.reasoning.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n")
                 if (formattedReasoning.isNotBlank()) {
                     appendLine(formattedReasoning)
@@ -175,7 +177,8 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             appendLine()
             appendLine("### 📊 탐색 메타데이터")
             appendLine("- **선정된 초기 파일(Seed)**: ${discoveryResult.metadata.seedClasses.joinToString()}")
-            appendLine("- **파일 필터링 결과**: 총 ${discoveryResult.metadata.totalCandidates}개 대상 중 ${validatedTargetFiles.size}개 최종 선정")
+            val totalCandidates = discoveryResult.metadata.totalCandidates + discoveryResult.suggestedNewFiles.size
+            appendLine("- **파일 필터링 결과**: 총 ${totalCandidates}개 대상(신규 제안 ${discoveryResult.suggestedNewFiles.size}개 포함) 중 ${validatedTargetFiles.size}개 최종 선정")
         }
         onChunk?.invoke("\n" + formattedOutput + "\n")
         
@@ -185,13 +188,17 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             discoveryResult.metadata.reasoning.ifBlank { "그래프 탐색 완료" }
         }
         val finalReasoning = rawReasoning.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n")
+        
+        // Verifier에서 UNNECESSARY로 판정되어 제거된 신규 파일은 suggestedNewFiles에서도 제외
+        val verifiedNewPaths = validatedTargetFiles.filter { it.type == "CREATE" || it.type == "신규" }.map { it.path }
+        val verifiedSuggestedNewFiles = discoveryResult.suggestedNewFiles.filter { it.suggestedPath in verifiedNewPaths }
 
         val result = RequirementAnalysisResult(
             summary = finalReasoning,
             targetFiles = validatedTargetFiles,
             warnings = discoveryResult.metadata.reasoning,
             rawResponse = "그래프 탐색 결과 처리 완료",
-            suggestedNewFiles = discoveryResult.suggestedNewFiles
+            suggestedNewFiles = verifiedSuggestedNewFiles
         )
         
         lastResult = result

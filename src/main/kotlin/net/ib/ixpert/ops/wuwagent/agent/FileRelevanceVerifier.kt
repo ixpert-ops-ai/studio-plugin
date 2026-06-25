@@ -136,15 +136,26 @@ class FileRelevanceVerifier(
         
         val verifiedTopFiles = mutableListOf<TargetFileSpec>()
         val toolCall = response?.toolCalls?.firstOrNull { it.function.name == "submit_verification" }
+        var argsStr = toolCall?.function?.arguments
         var finalReasoning = ""
         
-        if (toolCall != null) {
+        if (argsStr == null) {
+            val content = response?.content ?: ""
+            val match = Regex("```(?:json)?\\s*(\\{.*\\})\\s*```", RegexOption.DOT_MATCHES_ALL).find(content)
+            if (match != null) {
+                argsStr = match.groupValues[1]
+            } else if (content.trim().startsWith("{")) {
+                argsStr = content
+            }
+        }
+        
+        if (argsStr != null) {
             try {
-                val argsStr = toolCall.function.arguments
+                val cleanedStr = argsStr
                     .replace(Regex("^```(?:json)?\\s*"), "")
                     .replace(Regex("\\s*```$"), "")
                     .trim()
-                val res = gson.fromJson(argsStr, BatchResponse::class.java)
+                val res = gson.fromJson(cleanedStr, BatchResponse::class.java)
                 val rawVerdicts = res.fileVerdicts ?: emptyList()
                 
                 // 후처리 로직: reason이 비어있거나 너무 짧으면 UNNECESSARY로 강등
@@ -175,8 +186,11 @@ class FileRelevanceVerifier(
                     }
                 }
             } catch (e: Exception) {
-                logger.error("Failed to parse tool arguments: ${toolCall.function.arguments}", e)
-                verifiedTopFiles.addAll(topFiles)
+                logger.error("Failed to parse LLM response: $argsStr", e)
+                // 파싱 완전 실패 시 (Fail-Open): 
+                // 기존 파일(MODIFY)은 보수적으로 살려두되, 
+                // 검증되지 않은 신규 제안 파일(CREATE)은 위험(오염) 소지가 크므로 철저히 버립니다.
+                verifiedTopFiles.addAll(topFiles.filter { it.type != "CREATE" && it.type != "신규" })
             }
         } else {
             logger.warn("No valid tool call found, keeping all files as fallback.")
@@ -184,8 +198,8 @@ class FileRelevanceVerifier(
         }
         
         if (verifiedTopFiles.isEmpty()) {
-            logger.warn("Stage 3: 전체 UNNECESSARY 판정 – 안전장치로 상위 3개 유지")
-            verifiedTopFiles.addAll(topFiles.take(3))
+            logger.warn("Stage 3: 전체 UNNECESSARY 판정 – 안전장치로 상위 3개 유지 (기존 파일 한정)")
+            verifiedTopFiles.addAll(topFiles.filter { it.type != "CREATE" && it.type != "신규" }.take(3))
         }
         
         return VerificationOutput(verifiedTopFiles + autoKept, finalReasoning)
