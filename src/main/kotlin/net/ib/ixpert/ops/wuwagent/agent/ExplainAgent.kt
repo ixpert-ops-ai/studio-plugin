@@ -123,7 +123,7 @@ class ExplainAgent : BaseAgent() {
 
         callLlmStreamAsync(
             context.project,
-            "WuwAgent: Explaining Code",
+            "iXpert AI Assistant: Explaining Code",
             systemPrompt,
             userPrompt,
             onSuccess = { _ -> onSuccess(finalContentWithBanner) },
