@@ -392,17 +392,23 @@ class ImplementService(
     }
 
     private fun sortTargetsByLayer(targets: List<TargetFileSpec>): List<TargetFileSpec> {
-        // 간단한 휴리스틱 정렬
-        return targets.sortedBy { spec ->
-            val path = spec.path.lowercase()
-            when {
-                path.contains("entity") || path.contains("domain") -> 1
-                path.contains("dto") || path.contains("vo") || path.contains("response") || path.contains("request") -> 2
-                path.contains("repository") || path.contains("mapper") || path.contains("dao") -> 3
-                path.contains("service") -> 4
-                path.contains("controller") -> 5
-                else -> 6
+        // 간단한 휴리스틱 정렬 (계층별 -> Interface 우선)
+        return targets.sortedWith(
+            compareBy<TargetFileSpec> { spec ->
+                val path = spec.path.lowercase()
+                when {
+                    path.contains("entity") || path.contains("domain") -> 1
+                    path.contains("dto") || path.contains("vo") || path.contains("response") || path.contains("request") -> 2
+                    path.contains("repository") || path.contains("mapper") || path.contains("dao") -> 3
+                    path.contains("service") -> 4
+                    path.contains("controller") -> 5
+                    else -> 6
+                }
+            }.thenBy { spec ->
+                // 같은 계층 내: Interface(0)를 Impl(1)보다 먼저
+                val name = spec.path.replace("\\", "/").substringAfterLast('/').lowercase()
+                if (name.endsWith("impl.java") || name.endsWith("impl.kt")) 1 else 0
             }
-        }
+        )
     }
 }
