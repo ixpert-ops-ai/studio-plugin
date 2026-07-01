@@ -1,0 +1,7 @@
+[
+  {
+    "debtReason": "ISM_16_XML",
+    "missingTargetKind": "MYBATIS_XML",
+    "anchorPathPattern": ".*sc/chn/aps/ism/.*DAO.*"
+  }
+]

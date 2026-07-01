@@ -241,7 +241,7 @@ class ImplementationPipeline(
 
                 // 인터페이스 파일인 경우 환각 메서드 필터링, DTO 파일인 경우 스니펫 병합
                 var processedResponse = if (isInterface) {
-                    val filtered = runReadAction { filterInterfaceHallucination(finalResponseText, target, sortedTargets, contextChain) }
+                    val filtered = runReadAction { filterInterfaceHallucination(finalResponseText, target, sortedTargets, contextChain, graph) }
                     if (filtered != finalResponseText) {
                         logger.info("인터페이스 환각 필터링 적용: ${target.path}")
                         // 필터링된 결과를 사용자에게 다시 표시 (원본 스트리밍 응답이 이미 출력되었으므로 추가 안내)
@@ -266,6 +266,24 @@ class ImplementationPipeline(
 
                 generatedSnippets[target.path] = processedResponse // Phase 2c 단위 테스트 생성을 위해 응답 캐시 저장
 
+                // 동적 addsNewMethod 판정 (로깅 전용)
+                try {
+                    val fileNode = graph?.files?.get(target.path) ?: graph?.files?.values?.find { it.path == target.path }
+                    if (fileNode != null) {
+                        val originalDirectMethodNames = fileNode.methods.filter { !it.isInherited }.map { it.name }.toSet()
+                        val generatedMethodsPattern = Regex("""\b(\w+)\s*\([^)]*\)\s*(?:throws\s+[^;{]+)?\s*[;{]""")
+                        val codeBlockPattern = Regex("""```(?:java|kotlin)?\s*\n([\s\S]*?)```""")
+                        val codeBlockMatch = codeBlockPattern.find(processedResponse)
+                        val codeToAnalyze = codeBlockMatch?.groupValues?.get(1) ?: processedResponse
+                        
+                        val generatedMethodNames = generatedMethodsPattern.findAll(codeToAnalyze).map { it.groupValues[1] }.toSet()
+                        val dynamicallyAddsNewMethod = generatedMethodNames.any { it !in originalDirectMethodNames }
+                        
+                        logger.info("[GUARD-SHADOW] ${target.path} 동적 addsNewMethod 판정: $dynamicallyAddsNewMethod (생성: $generatedMethodNames, 직접선언: $originalDirectMethodNames)")
+                    }
+                } catch (e: Exception) {
+                    logger.warn("동적 addsNewMethod 판정 중 오류 발생: ${e.message}")
+                }
                 if (isLargeFile) {
                     snippetFileResults.add(target.path)
                 } else {
@@ -741,21 +759,15 @@ class ImplementationPipeline(
         responseText: String,
         targetFile: TargetFileSpec,
         allTargetFiles: List<TargetFileSpec>,
-        contextChain: List<String>
+        contextChain: List<String>,
+        graph: net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph?
     ): String {
         logger.warn("=== filterInterfaceHallucination 호출됨: ${targetFile.path} ===")
         logger.warn("=== 응답 길이: ${responseText.length}자 ===")
 
-        val absolutePath = "${project.basePath}/${targetFile.path}".replace("//", "/")
-        val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath) ?: return responseText
-        val originalSource = String(virtualFile.contentsToByteArray(), Charsets.UTF_8)
-
-        // 원본에서 메서드명 추출 (간단한 패턴: 반환타입 메서드명( )
-        val methodNamePattern = Regex("""\b(\w+)\s*\([^)]*\)\s*(?:throws\s+[^;{]+)?\s*[;{]""")
-        val originalMethods = methodNamePattern.findAll(originalSource)
-            .map { it.groupValues[1] }
-            .filter { it !in listOf("if", "for", "while", "switch", "catch", "synchronized") }
-            .toSet()
+        // 원본에서 메서드 추출 (메타그래프의 PSI 기반 시그니처 활용)
+        val fileNode = graph?.files?.values?.find { it.path == targetFile.path }
+        val originalMethods = fileNode?.methods?.map { it.name }?.toSet() ?: emptySet()
 
         logger.info("원본 메서드명: $originalMethods (${targetFile.path})")
 
@@ -764,6 +776,7 @@ class ImplementationPipeline(
         val codeBlock = codeBlockPattern.find(responseText)?.groupValues?.get(1) ?: responseText
 
         // 응답 코드에서 메서드명 추출
+        val methodNamePattern = Regex("""\b(\w+)\s*\([^)]*\)\s*(?:throws\s+[^;{]+)?\s*[;{]""")
         val responseMethods = methodNamePattern.findAll(codeBlock)
             .map { it.groupValues[1] }
             .filter { it !in listOf("if", "for", "while", "switch", "catch", "synchronized") }
