@@ -5,6 +5,7 @@ import net.ib.ixpert.ops.wuwagent.agent.completeness.model.ShadowLog
 import net.ib.ixpert.ops.wuwagent.agent.completeness.model.ViolationDetail
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
 import java.io.File
@@ -98,12 +99,43 @@ class ShadowLogRoundtripTest {
             StandardOpenOption.APPEND
         )
 
+        // 4-b. Write 1 Ghost line (WOULD_BLOCK but empty violations) using gson to ensure valid JSON syntax
+        val ghostLog = ShadowLog(
+            timestamp = "2026-06-30T10:03:00Z",
+            srKey = "SR-GHOST",
+            runId = "RUN-1",
+            rulesetVersion = "1.0",
+            guardMode = "SHADOW",
+            frameworkType = "ANYFRAME",
+            verdict = "WOULD_BLOCK",
+            requiredFiles = listOf("D.java"),
+            violations = emptyList() // The ghost anomaly!
+        )
+        Files.write(
+            logFile.toPath(),
+            ("\n" + com.google.gson.Gson().toJson(ghostLog) + "\n").toByteArray(StandardCharsets.UTF_8),
+            StandardOpenOption.APPEND
+        )
+
+        // 4-c. Write 1 Null-Ghost line (WOULD_BLOCK but violations field is completely omitted)
+        // This tests that Gson injects null into the non-nullable list, and our isNullOrEmpty() catches it without NPE
+        val nullGhostJson = """{"timestamp":"2026-06-30T10:04:00Z","srKey":"SR-NULL-GHOST","runId":"RUN-1","rulesetVersion":"1.0","guardMode":"SHADOW","frameworkType":"ANYFRAME","verdict":"WOULD_BLOCK","requiredFiles":["D.java"]}"""
+        Files.write(
+            logFile.toPath(),
+            ("\n" + nullGhostJson + "\n").toByteArray(StandardCharsets.UTF_8),
+            StandardOpenOption.APPEND
+        )
+
         // 5. Parse the log file
         val result = ShadowLogParser.parse(testProjectRoot)
 
         // 6. Assertions
         assertEquals("Should parse 3 valid logs", 3, result.logs.size)
         assertEquals("Should skip 2 broken logs", 2, result.skippedCount)
+        assertEquals("Should detect 2 ghost line anomalies (empty list and null injection)", 2, result.dataQualityAnomalyCount)
+        // Ensure ghost lines are NOT in valid logs
+        assertFalse("Ghost line should not be in valid logs", result.logs.any { it.srKey == "SR-GHOST" })
+        assertFalse("Null-Ghost line should not be in valid logs", result.logs.any { it.srKey == "SR-NULL-GHOST" })
 
         // Verify fields of the valid logs survived roundtrip
         val parsedLog1 = result.logs[0]

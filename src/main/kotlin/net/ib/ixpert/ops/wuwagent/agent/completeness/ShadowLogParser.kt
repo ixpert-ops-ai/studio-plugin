@@ -9,7 +9,8 @@ import java.nio.file.Files
 
 data class ShadowLogParseResult(
     val logs: List<ShadowLog>,
-    val skippedCount: Int
+    val skippedCount: Int,
+    val dataQualityAnomalyCount: Int
 )
 
 object ShadowLogParser {
@@ -24,11 +25,12 @@ object ShadowLogParser {
         val logFile = File(File(projectRoot, ".wuwagent"), "shadow_logs.jsonl")
         
         if (!logFile.exists()) {
-            return ShadowLogParseResult(emptyList(), 0)
+            return ShadowLogParseResult(emptyList(), 0, 0)
         }
 
         val logs = mutableListOf<ShadowLog>()
         var skippedCount = 0
+        var anomalyCount = 0
 
         try {
             val lines = Files.readAllLines(logFile.toPath(), Charsets.UTF_8)
@@ -38,7 +40,14 @@ object ShadowLogParser {
                 try {
                     val log = gson.fromJson(line, ShadowLog::class.java)
                     if (log != null) {
-                        logs.add(log)
+                        // Ghost Line Defense (Using isNullOrEmpty because Gson reflection can inject null into non-nullable List)
+                        if (log.verdict == "WOULD_BLOCK" && log.violations.isNullOrEmpty()) {
+                            val preview = if (line.length > 100) line.take(100) + "..." else line
+                            logger.warn("[GUARD-SHADOW] Skipped ghost line (WOULD_BLOCK but no violations): \$preview")
+                            anomalyCount++
+                        } else {
+                            logs.add(log)
+                        }
                     } else {
                         skippedCount++
                     }
@@ -56,6 +65,6 @@ object ShadowLogParser {
             logger.error("[GUARD-SHADOW] Failed to read shadow_logs.jsonl", e)
         }
 
-        return ShadowLogParseResult(logs, skippedCount)
+        return ShadowLogParseResult(logs, skippedCount, anomalyCount)
     }
 }
