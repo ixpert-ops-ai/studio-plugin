@@ -5,7 +5,7 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.*
 object SurveyGraphFixture {
     val surveyDao = fileNode("src/main/java/net/infobank/iss/survey/dao/SurveyDao.java", "SurveyDao", SpringFileType.INTERFACE, isInterface = true, implementedInterfaces = emptyList())
     val surveyDaoImpl = fileNode("src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java", "SurveyDaoImpl", SpringFileType.REPOSITORY, isInterface = false, implementedInterfaces = listOf("SurveyDao", "SqlSessionDaoSupport"))
-    val surveyService = fileNode("src/main/java/net/infobank/iss/survey/service/SurveyService.java", "SurveyService", SpringFileType.SERVICE, isInterface = true, implementedInterfaces = emptyList())
+    val surveyService = fileNode("src/main/java/net/infobank/iss/survey/service/SurveyService.java", "SurveyService", SpringFileType.INTERFACE, isInterface = true, implementedInterfaces = emptyList())
     val surveyServiceImpl = fileNode("src/main/java/net/infobank/iss/survey/service/SurveyServiceImpl.java", "SurveyServiceImpl", SpringFileType.SERVICE, isInterface = false, implementedInterfaces = listOf("SurveyService"))
     val ipsController = fileNode("src/main/java/net/infobank/iss/controller/IpsController.java", "IpsController", SpringFileType.CONTROLLER, isInterface = false, implementedInterfaces = emptyList())
 
@@ -20,11 +20,14 @@ object SurveyGraphFixture {
     val fakeDao = fileNode("src/main/java/net/infobank/iss/util/dao/FakeDao.java", "FakeDao", SpringFileType.INTERFACE, isInterface = true, implementedInterfaces = emptyList())
     val fakeDaoImpl = fileNode("src/main/java/net/infobank/iss/util/dao/FakeDaoImpl.java", "FakeDaoImpl", SpringFileType.INTERFACE, isInterface = false, implementedInterfaces = listOf("FakeDao")) // no SqlSessionDaoSupport
 
+    val fakeService = fileNode("src/main/java/net/infobank/iss/util/service/FakeService.java", "FakeService", SpringFileType.INTERFACE, isInterface = true, implementedInterfaces = emptyList())
+    val fakeServiceImpl = fileNode("src/main/java/net/infobank/iss/util/service/FakeServiceImpl.java", "FakeServiceImpl", SpringFileType.INTERFACE, isInterface = false, implementedInterfaces = listOf("FakeService")) // Not a SpringFileType.SERVICE
+
     fun graph() = ProjectGraph(
         frameworkType = FrameworkType.SPRING_MVC_MYBATIS,
         generatedAt = "2026-06-29T00:00:00Z",
         projectRoot = "C:/fake/path",
-        files = listOf(surveyDao, surveyDaoImpl, surveyService, surveyServiceImpl, ipsController, ismMapper, fakeDao, fakeDaoImpl)
+        files = listOf(surveyDao, surveyDaoImpl, surveyService, surveyServiceImpl, ipsController, ismMapper, fakeDao, fakeDaoImpl, fakeService, fakeServiceImpl)
                   .associateBy { it.path },
         resourceNodes = listOf(surveyXml, surveyListJsp, surveyListJs),
         relationships = emptyList(),

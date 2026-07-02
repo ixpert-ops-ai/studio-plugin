@@ -10,6 +10,24 @@ object FileKindClassifier {
     fun classify(path: String, ctx: GraphMatchContext): FileKind? {
         ctx.getFileNode(path)?.let { return classifyJava(it, ctx) }
         ctx.getResourceNode(path)?.let { return classifyResource(it) }
+        return guessFromPath(path)
+    }
+
+    private fun guessFromPath(path: String): FileKind? {
+        val name = path.substringAfterLast("/")
+        if (name.endsWith("Controller.java")) return FileKind.CONTROLLER
+        if (name.endsWith("ServiceImpl.java")) return FileKind.SERVICE_IMPL
+        if (name.endsWith("Service.java")) return FileKind.SERVICE_INTERFACE
+        if (name.endsWith("DaoImpl.java") || name.endsWith("RepositoryImpl.java")) return FileKind.DAO_IMPL
+        if (name.endsWith("Dao.java") || name.endsWith("Repository.java")) return FileKind.DAO_INTERFACE
+        
+        // For XML, only assume MYBATIS_XML if it resides in typical mapper directories
+        if (name.endsWith(".xml") && (path.contains("/sql/") || path.contains("/mapper/"))) {
+            return FileKind.MYBATIS_XML
+        }
+        
+        if (name.endsWith(".jsp")) return FileKind.JSP_VIEW
+        if (name.endsWith(".js")) return FileKind.JS_SCRIPT
         return null
     }
 
@@ -57,8 +75,16 @@ object FileKindClassifier {
                 }
             val isLegacyDaoImpl = !node.isInterface && node.implementedInterfaces.contains("SqlSessionDaoSupport")
             
+            // Fallback for Service interfaces missed by the graph extractor (because they lack @Service)
+            val isServiceInterface = node.isInterface && node.className.endsWith("Service") &&
+                ctx.allNodes().any { impl -> 
+                    impl.fileType == SpringFileType.SERVICE && 
+                    impl.implementedInterfaces.contains(node.className)
+                }
+            
             if (isLegacyDaoInterface) FileKind.DAO_INTERFACE
             else if (isLegacyDaoImpl) FileKind.DAO_IMPL
+            else if (isServiceInterface) FileKind.SERVICE_INTERFACE
             else null
         }
     }

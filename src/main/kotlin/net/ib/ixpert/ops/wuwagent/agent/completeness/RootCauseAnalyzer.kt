@@ -19,6 +19,8 @@ object RootCauseAnalyzer {
     }
 
     private fun analyzeSameNamespaceXml(finding: CompanionFinding, ctx: GraphMatchContext): RootCause {
+        if (finding.result.existsInGraph) return RootCause.NO_EDGE
+
         val fqcn = ctx.fqcnOf(finding.anchorPath) ?: return RootCause.NOT_IN_GRAPH
         val baseName = ctx.baseName(finding.anchorPath).replace("DAO", "").replace("Mapper", "")
         
