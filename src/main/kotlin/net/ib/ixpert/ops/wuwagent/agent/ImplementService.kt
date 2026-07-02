@@ -90,7 +90,8 @@ class ImplementService(
 
         val previousSignatures = mutableListOf<String>()
         val addedFields = mutableMapOf<String, String>() // name -> type
-        val signatureRegex = Regex("""(public|private|protected)?\s*[\w<>,\[\]?\s]+\s+\w+\([^)]*\)""")
+        // 멀티라인 파라미터 및 어노테이션(@Param 등) 내의 괄호를 지원하는 강력한 시그니처 정규식
+        val signatureRegex = Regex("""(?:(?:public|private|protected)\s+)?(?:@[A-Za-z0-9_]+(?:\s*\([\s\S]*?\))?\s*)*(?:[A-Za-z0-9_<>,\[\]?]+\s+)+[A-Za-z0-9_]+\s*\([\s\S]*?\)\s*(?=\{|;|throws)""")
         
         val entityModifiedFields = mutableSetOf<String>()
         val allRepoMethods = graph.files.values
@@ -115,9 +116,9 @@ class ImplementService(
             val userPrompt = buildUserPrompt(userRequirement, spec, context, sortedTargets, previousSignatures)
 
             // [디버그 로그 1] LLM 호출 전 previousSignatures 확인
-            onProgress?.invoke("\n🔍 [디버그: ${spec.path}] 주입될 previousSignatures 개수: ${previousSignatures.size}")
+            logger.debug("[디버그: ${spec.path}] 주입될 previousSignatures 개수: ${previousSignatures.size}")
             if (previousSignatures.isNotEmpty()) {
-                onProgress?.invoke("🔍 [디버그 내용]:\n${previousSignatures.joinToString("\n")}\n")
+                logger.debug("[디버그 내용]: ${previousSignatures.joinToString(", ")}")
             }
 
             // LLM 호출
@@ -178,8 +179,7 @@ class ImplementService(
                     val isContained = normalizedBlock.isNotBlank() && normalize(sourceContent).contains(normalizedBlock)
                     
                     // [디버그 로그 2] isUnchangedReOutput 판정 결과 확인
-                    onProgress?.invoke("🔍 [디버그: 재출력 감지] block title: ${block.title}")
-                    onProgress?.invoke("🔍   - 원본 포함 여부(contains): $isContained")
+                    logger.debug("[디버그: 재출력 감지] block title: ${block.title}, 원본 포함 여부(contains): $isContained")
                     
                     if (isContained) {
                         hasReOutput = true
@@ -211,7 +211,7 @@ class ImplementService(
                         val modifyMethodNames = modifySignatures.map { extractMethodName(it) }.filter { it.isNotBlank() }
                         if (modifyMethodNames.any { addMethodNames.contains(it) }) {
                             hasMixedReOutput = true
-                            onProgress?.invoke("🔍 [디버그: 혼합 블록 감지] [수정] 블록에 이미 [추가]된 메서드명 포함됨. block title: ${block.title}")
+                            logger.debug("[디버그: 혼합 블록 감지] [수정] 블록에 이미 [추가]된 메서드명 포함됨. block title: ${block.title}")
                             return@filter false
                         }
                     }
@@ -261,6 +261,14 @@ class ImplementService(
                 var modifiedAny = false
                 val mutableBlocks = parsedResult.blocks.toMutableList()
                 val repoCallRegex = Regex("""\b\w+Repository\.([a-zA-Z0-9_]+)\s*\(""")
+                val previousSigMethods = previousSignatures.flatMap { sig ->
+                    Regex("""[\w>\]]\s+([a-zA-Z_]\w*)\s*\(""").findAll(sig).map { it.groupValues[1] }
+                }.toSet()
+                logger.debug("추출된 previousSignatures 메서드 화이트리스트: $previousSigMethods")
+                
+                val defaultMethods = setOf("save", "saveAll", "findById", "existsById", "findAll", "findAllById", "count", "deleteById", "delete", "deleteAll")
+                val knownMethods = allRepoMethods + defaultMethods + previousSigMethods
+
                 for (i in mutableBlocks.indices) {
                     var content = mutableBlocks[i].content
                     val newLines = content.lines().map { line ->
@@ -270,9 +278,7 @@ class ImplementService(
                             var lineModified = false
                             for (match in matches) {
                                 val methodName = match.groupValues[1]
-                                // spring data jpa 기본 메서드 예외 처리
-                                val defaultMethods = setOf("save", "saveAll", "findById", "existsById", "findAll", "findAllById", "count", "deleteById", "delete", "deleteAll")
-                                if (!allRepoMethods.contains(methodName) && !defaultMethods.contains(methodName)) {
+                                if (!knownMethods.contains(methodName)) {
                                     lineModified = true
                                     break
                                 }
@@ -310,8 +316,9 @@ class ImplementService(
             var hasHistory = false
             for (block in validBlocks) {
                 val sigs = signatureRegex.findAll(block.content)
-                    .map { it.value.trim() }
+                    .map { it.value.replace(Regex("""\s+"""), " ").trim() } // 멀티라인 시그니처를 한 줄로 정규화
                     .filter { !it.matches(Regex(".*\\b(get|set|is)[A-Z].*")) }
+                    .filter { !it.contains("return ") && !it.contains("new ") && !it.contains("if (") && !it.contains("else ") && !it.contains("for (") && !it.contains("while (") }
                     .toList()
                 if (sigs.isNotEmpty()) {
                     fileHistory.appendLine("  - 주요 시그니처: ${sigs.joinToString(", ")}")

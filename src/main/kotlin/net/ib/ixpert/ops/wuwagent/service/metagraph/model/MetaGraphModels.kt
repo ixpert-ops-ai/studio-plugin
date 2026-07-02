@@ -17,6 +17,19 @@ data class FrameworkDetectionResult(
     var userOverride: FrameworkType? = null
 )
 
+interface ProjectGraphQueryable {
+    val projectRoot: String?
+    val files: Map<String, FileNode>
+    val resourceNodes: List<ResourceNode>
+    val frameworkDisplayName: String
+    val resolvedFrameworkType: FrameworkType
+    
+    val totalFileCount: Int
+        get() = files.size
+        
+    fun getAllClassNames(): List<String> = files.values.map { it.className }
+}
+
 /**
  * 프로젝트 전체 구조 그래프.
  * 메타파일(.meta/project-graph.json)의 최상위 구조입니다.
@@ -25,56 +38,67 @@ data class ProjectGraph(
     val version: String = "1.0",
     val graphType: GraphType = GraphType.SINGLE,
     val generatedAt: String,
-    val projectRoot: String,
+    override val projectRoot: String,
     val framework: String = "spring-boot",
     val frameworkType: FrameworkType = FrameworkType.SPRING_BOOT_JPA,
     val frameworkDetection: FrameworkDetectionResult? = null,
     val modules: List<ModuleInfo>? = null,
-    val files: Map<String, FileNode>,
-    val resourceNodes: List<ResourceNode> = emptyList(),
+    override val files: Map<String, FileNode>,
+    override val resourceNodes: List<ResourceNode> = emptyList(),
     val relationships: List<Relationship>,
     val statistics: GraphStatistics
-) {
+) : ProjectGraphQueryable {
+    override val frameworkDisplayName: String
+        get() = resolveFrameworkType().displayName
+    override val resolvedFrameworkType: FrameworkType
+        get() = resolveFrameworkType()
+
     fun resolveFrameworkType(): FrameworkType {
         return this.frameworkDetection?.userOverride ?: this.frameworkType
     }
 
-    @delegate:Transient
-    val documentFrequency: Map<String, Int> by lazy {
-        val dfMap = mutableMapOf<String, Int>()
-        
-        fun tokenize(identifier: String): List<String> {
-            if (identifier.isBlank()) return emptyList()
-            if (identifier.contains('_')) {
-                return identifier.split('_').filter { it.length >= 2 }.map { it.lowercase() }
-            }
-            val regex = Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
-            return regex.split(identifier).filter { it.length >= 2 }.map { it.lowercase() }
-        }
+    @Transient
+    private var _documentFrequency: Map<String, Int>? = null
 
-        for (rNode in resourceNodes) {
-            val tokens = mutableSetOf<String>()
-            tokens.addAll(rNode.path.split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) })
-            rNode.metadata.values.forEach { value ->
-                if (value is List<*>) {
-                    value.forEach { v -> tokens.addAll(v.toString().split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) }) }
-                } else {
-                    tokens.addAll(value.toString().split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) })
+    val documentFrequency: Map<String, Int>
+        get() {
+            if (_documentFrequency != null) return _documentFrequency!!
+
+            val dfMap = mutableMapOf<String, Int>()
+            
+            fun tokenize(identifier: String): List<String> {
+                if (identifier.isBlank()) return emptyList()
+                if (identifier.contains('_')) {
+                    return identifier.split('_').filter { it.length >= 2 }.map { it.lowercase() }
                 }
+                val regex = Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+                return regex.split(identifier).filter { it.length >= 2 }.map { it.lowercase() }
             }
-            tokens.forEach { dfMap[it] = dfMap.getOrDefault(it, 0) + 1 }
+
+            for (rNode in resourceNodes) {
+                val tokens = mutableSetOf<String>()
+                tokens.addAll(rNode.path.split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) })
+                rNode.metadata.values.forEach { value ->
+                    if (value is List<*>) {
+                        value.forEach { v -> tokens.addAll(v.toString().split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) }) }
+                    } else {
+                        tokens.addAll(value.toString().split(Regex("[^a-zA-Z0-9]+")).flatMap { tokenize(it) })
+                    }
+                }
+                tokens.forEach { dfMap[it] = dfMap.getOrDefault(it, 0) + 1 }
+            }
+            
+            for (fNode in files.values) {
+                val tokens = mutableSetOf<String>()
+                tokens.addAll(tokenize(fNode.className))
+                fNode.packageName?.let { tokens.addAll(it.split(".")) }
+                fNode.methodNames.forEach { tokens.addAll(tokenize(it)) }
+                tokens.forEach { dfMap[it] = dfMap.getOrDefault(it, 0) + 1 }
+            }
+            
+            _documentFrequency = dfMap
+            return dfMap
         }
-        
-        for (fNode in files.values) {
-            val tokens = mutableSetOf<String>()
-            tokens.addAll(tokenize(fNode.className))
-            fNode.packageName?.let { tokens.addAll(it.split(".")) }
-            fNode.methodNames.forEach { tokens.addAll(tokenize(it)) }
-            tokens.forEach { dfMap[it] = dfMap.getOrDefault(it, 0) + 1 }
-        }
-        
-        dfMap
-    }
 }
 
 /**
@@ -227,7 +251,13 @@ enum class SpringFileType(val displayName: String) {
     UTIL("Util"),
     VIEW("View"),
     TEST("Test"),
-    UNKNOWN("Unknown")
+    UNKNOWN("Unknown"),
+    
+    // Anyframe 지원 추가
+    BIZ("Business"),
+    SERVICE_INTERFACE("ServiceInterface"),
+    DATA_ACCESS("DataAccess"),
+    BIZ_UTIL("BizUtil")
 }
 
 enum class ArchitectureLayer(val displayName: String) {
@@ -238,7 +268,11 @@ enum class ArchitectureLayer(val displayName: String) {
     TEST("Test"),
     MODEL("Model"),
     VIEW("View"),
-    UNKNOWN("Unknown")
+    UNKNOWN("Unknown"),
+    
+    // 추가 레이어
+    DATA("Data"),
+    SERVICE("Service")
 }
 
 enum class InjectionMethod {

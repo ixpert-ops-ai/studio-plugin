@@ -111,5 +111,6 @@ class PatternExtractor(private val frameworkType: FrameworkType) {
         ArchitectureLayer.MODEL -> 4
         ArchitectureLayer.TEST -> 5
         ArchitectureLayer.UNKNOWN -> 6
+        else -> 7
     }
 }

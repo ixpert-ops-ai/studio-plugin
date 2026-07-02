@@ -78,7 +78,8 @@ class WebviewActionRouter(private val project: Project) {
                     // 🛎 즉시 자리 만들기 (로딩 표시 유도)
                     bridge.sendMessage("explain_start", "🔍 코드 구조를 분석하고 있습니다...", messageId)
 
-                    val context = AgentContext(project, editor, textBody, command = "/explain")
+                    val context = AgentContext(project, editor, textBody, command = "/explain",
+                        attachedFilesJson = payload["files"] ?: "")
                     ExplainAgent().execute(
                         context, 
                         onSuccess = { res ->
@@ -123,6 +124,8 @@ class WebviewActionRouter(private val project: Project) {
                             
                             var finalRequirementText = initialRequirement
                             
+                            var finalEnhancedRequirements = emptyList<String>()
+                            
                             // Stage 0: Clarify Engine 실행
                             if (!isSkipMode) {
                                 try {
@@ -130,12 +133,19 @@ class WebviewActionRouter(private val project: Project) {
                                         client,
                                         net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyPromptBuilder()
                                     )
-                                    val clarifyResult = clarifier.clarify(initialRequirement, projectGraph.frameworkType)
                                     
-                                    val hasQuestions = clarifyResult.questions.isNotEmpty()
+                                    val scopeSummary = try {
+                                        net.ib.ixpert.ops.wuwagent.agent.clarify.ScopeSummaryBuilder.buildScopeSummary(projectGraph)
+                                    } catch (e: Exception) {
+                                        logger.warn("Failed to build scope summary, using empty fallback", e)
+                                        ""
+                                    }
+                                    
+                                    val clarifyResult = clarifier.clarify(initialRequirement, projectGraph.frameworkType, scopeSummary)
+                                    
                                     val hasEnhancements = clarifyResult.enhancedRequirements.isNotEmpty()
                                     
-                                    if (hasQuestions || hasEnhancements) {
+                                    if (hasEnhancements) {
                                         // UI 확인 대기가 필요한 경우
                                         net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.saveSession(project, initialRequirement, clarifyResult)
                                         
@@ -150,6 +160,7 @@ class WebviewActionRouter(private val project: Project) {
                                         val defaultResponse = parser.parse("")
                                         val finalReq = clarifier.finalize(clarifyResult, defaultResponse, initialRequirement)
                                         finalRequirementText = finalReq.fullText
+                                        finalEnhancedRequirements = clarifyResult.enhancedRequirements
                                         logger.info("Stage 0 Clarify 자동 완료 (보강/질문 없음): $finalRequirementText")
                                     }
                                 } catch (e: Exception) {
@@ -162,9 +173,16 @@ class WebviewActionRouter(private val project: Project) {
                             }
                             
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
-                            val result = pipeline.analyze(initialRequirement, finalRequirementText.removePrefix(initialRequirement).trim(), projectGraph) { chunk ->
-                                ApplicationManager.getApplication().invokeLater {
-                                    bridge.sendMessageChunk(messageId, chunk)
+                            val result = kotlinx.coroutines.runBlocking {
+                                pipeline.analyze(
+                                    initialRequirement, 
+                                    finalRequirementText.removePrefix(initialRequirement).trim(), 
+                                    projectGraph,
+                                    finalEnhancedRequirements
+                                ) { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
                                 }
                             }
                             
@@ -234,9 +252,16 @@ class WebviewActionRouter(private val project: Project) {
                             val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다.")
                             
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
-                            val result = pipeline.analyze(session.initialRequirement, finalReq.fullText.removePrefix(session.initialRequirement).trim(), projectGraph) { chunk ->
-                                ApplicationManager.getApplication().invokeLater {
-                                    bridge.sendMessageChunk(messageId, chunk)
+                            val result = kotlinx.coroutines.runBlocking {
+                                pipeline.analyze(
+                                    session.initialRequirement, 
+                                    finalReq.fullText.removePrefix(session.initialRequirement).trim(), 
+                                    projectGraph,
+                                    finalReq.confirmedItems
+                                ) { chunk ->
+                                    ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk)
+                                    }
                                 }
                             }
                             
@@ -265,6 +290,28 @@ class WebviewActionRouter(private val project: Project) {
                             }
                         }
                     }
+                }
+
+                // ── Scope Selection Events ────────
+                "scopeSelection/submit" -> {
+                    val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
+                    val selectedPaths = (payload["selectedPaths"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+                    val result = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScopeSelectionResult(
+                        selectedPaths = selectedPaths,
+                        totalFileCount = 0, // UI already handled warning
+                        warnings = emptyList()
+                    )
+                    net.ib.ixpert.ops.wuwagent.agent.ScopeSelectionBridge.completeScopeSelection(project, result)
+                }
+
+                "scopeSelection/cancel" -> {
+                    net.ib.ixpert.ops.wuwagent.agent.ScopeSelectionBridge.cancelScopeSelection(project)
+                }
+
+                "scopeSelection/confirmSuggestions" -> {
+                    val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
+                    val acceptedPaths = (payload["acceptedPaths"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+                    net.ib.ixpert.ops.wuwagent.agent.ScopeSelectionBridge.completeDependencyConfirmation(project, acceptedPaths)
                 }
 
                 // ── 자동 코드 작성 스텁 (Phase 2b) ────────
@@ -628,14 +675,60 @@ class WebviewActionRouter(private val project: Project) {
                 // ── TaskAgent (오케스트레이터) ────────────────
                 "/task" -> {
                     logger.info("Router: /task 분기 → TaskAgent 시작")
-                    if (editor == null) {
-                        bridge.sendMessage("error", "활성화된 에디터가 없어 작업을 실행할 수 없습니다.")
-                        return@invokeLater
-                    }
                     val messageId = "task_${System.currentTimeMillis()}"
                     val fileContext = buildAttachedFileContext(payload["files"] ?: "")
                     val enhancedText = if (fileContext.isNotBlank()) "$textBody\n\n$fileContext" else textBody
-                    val context = AgentContext(project, editor, enhancedText, command = "/task")
+
+                    // editor == null: Chat 폴백만 허용 (코드 처리 파이프라인은 에러 안내)
+                    if (editor == null) {
+                        val hasCtx = (payload["files"]?.isNotBlank() == true)
+                        val nullEditorPipeline = IntentAnalyzer.analyze(enhancedText, WuwLlmService.getClient(), hasEditorContext = hasCtx)
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage("task_start", "", messageId)
+                        }
+                        val nullCtx = AgentContext(project, null, enhancedText, command = "/task",
+                            attachedFilesJson = payload["files"] ?: "")
+                        when (nullEditorPipeline) {
+                            TaskPipeline.Chat -> {
+                                ChatAgent().execute(nullCtx,
+                                    onSuccess = { res -> ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("chat", res, messageId) } },
+                                    onChunk = { chunk -> ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk) } },
+                                    onError = { err -> ApplicationManager.getApplication().invokeLater {
+                                        if (err != "__cancelled__") bridge.sendMessage("error", err, messageId) } }
+                                )
+                            }
+                            TaskPipeline.ExplainTask -> {
+                                // @파일 첨부 있으면 editor 없이도 ExplainAgent 실행 가능
+                                ExplainAgent().execute(nullCtx,
+                                    onSuccess = { res -> ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessage("explain", res, messageId) } },
+                                    onChunk = { chunk -> ApplicationManager.getApplication().invokeLater {
+                                        bridge.sendMessageChunk(messageId, chunk) } },
+                                    onError = { err -> ApplicationManager.getApplication().invokeLater {
+                                        if (err != "__cancelled__") bridge.sendMessage("error", err, messageId) } }
+                                )
+                            }
+                            else -> {
+                                // Improve, Review 등: @파일만으로는 에디터 diff 기능 동작 불가 → 안내
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage(
+                                        subType = "task_step",
+                                        content = "활성화된 에디터가 없어 작업을 실행할 수 없습니다. 파일을 열거나 @파일을 선택해주세요.",
+                                        messageId = messageId,
+                                        meta = mapOf("applyable" to "false", "isSuccess" to "true")
+                                    )
+                                    bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                }
+                            }
+                        }
+                        return@invokeLater
+                    }
+
+                    // 이하: editor != null 보장
+                    val context = AgentContext(project, editor, enhancedText, command = "/task",
+                        attachedFilesJson = payload["files"] ?: "")
 
                     // @ 첨부 파일이 있으면 첫 번째 파일 경로, 없으면 에디터 파일 경로 (Improve Diff 버튼용)
                     val firstAttachedFilePath: String = run {
@@ -769,26 +862,34 @@ class WebviewActionRouter(private val project: Project) {
 
                     // IntentAnalyzer 키워드 매핑 (LLM 호출 없이 즉시 반환)
                     val client = WuwLlmService.getClient()
-                    when (IntentAnalyzer.analyze(enhancedText, client)) {
+                    val hasEditorContext = editor.document.text.isNotBlank() || (payload["files"]?.isNotBlank() == true)
+                    val detectedPipeline = IntentAnalyzer.analyze(enhancedText, client, hasEditorContext = hasEditorContext)
+                    when (detectedPipeline) {
 
                         TaskPipeline.ExplainTask -> {
-                            ExplainAgent().execute(context,
-                                onSuccess = { res ->
-                                    ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("explain", res, messageId)
+                            val hasFiles = (payload["files"] ?: "").isNotBlank()
+                            val hasContent = editor.document.text.isNotBlank()
+                            if (!hasFiles && !hasContent) {
+                                bridge.sendMessage("explain", "설명할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요.", messageId)
+                            } else {
+                                ExplainAgent().execute(context,
+                                    onSuccess = { res ->
+                                        ApplicationManager.getApplication().invokeLater {
+                                            bridge.sendMessage("explain", res, messageId)
+                                        }
+                                    },
+                                    onChunk = { chunk ->
+                                        ApplicationManager.getApplication().invokeLater {
+                                            bridge.sendMessageChunk(messageId, chunk)
+                                        }
+                                    },
+                                    onError = { errorMsg ->
+                                        ApplicationManager.getApplication().invokeLater {
+                                            if (errorMsg != "__cancelled__") bridge.sendMessage("error", errorMsg, messageId)
+                                        }
                                     }
-                                },
-                                onChunk = { chunk ->
-                                    ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessageChunk(messageId, chunk)
-                                    }
-                                },
-                                onError = { errorMsg ->
-                                    ApplicationManager.getApplication().invokeLater {
-                                        if (errorMsg != "__cancelled__") bridge.sendMessage("error", errorMsg, messageId)
-                                    }
-                                }
-                            )
+                                )
+                            }
                         }
 
                         TaskPipeline.Impact -> {
@@ -875,22 +976,53 @@ class WebviewActionRouter(private val project: Project) {
                             )
                         }
 
-                        else -> {
-                            val agent = TaskAgent(messageId, onStep, onStepStart)
-                            agent.execute(
-                                context,
-                                onSuccess = { _ ->
-                                    ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("task_success", "완료되었습니다.", messageId)
-                                    }
-                                },
-                                onChunk = null,
-                                onError = { errorMsg ->
-                                    ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("error", errorMsg, messageId)
-                                    }
-                                }
+                        TaskPipeline.Chat -> {
+                            // Chat 폴백: TaskAgent 재분석 없이 ChatAgent 직접 호출
+                            ChatAgent().execute(context,
+                                onSuccess = { res -> ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("chat", res, messageId) } },
+                                onChunk = { chunk -> ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessageChunk(messageId, chunk) } },
+                                onError = { errorMsg -> ApplicationManager.getApplication().invokeLater {
+                                    if (errorMsg != "__cancelled__") bridge.sendMessage("error", errorMsg, messageId) } }
                             )
+                        }
+
+                        else -> {
+                            // 4순위: Improve / Review 파이프라인인데 코드 컨텍스트가 없으면 안내 메시지로 즉시 종료
+                            val needsCode = detectedPipeline == TaskPipeline.Improve ||
+                                            detectedPipeline == TaskPipeline.Review
+                            val hasFiles   = (payload["files"] ?: "").isNotBlank()
+                            val hasContent = editor.document.text.isNotBlank()
+                            if (needsCode && !hasFiles && !hasContent) {
+                                val noCodeMsg = if (detectedPipeline == TaskPipeline.Improve)
+                                    "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
+                                else
+                                    "리뷰할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
+                                bridge.sendMessage(
+                                    subType  = "task_step",
+                                    content  = noCodeMsg,
+                                    messageId = messageId,
+                                    meta     = mapOf("applyable" to "false", "isSuccess" to "true")
+                                )
+                                bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                            } else {
+                                val agent = TaskAgent(messageId, onStep, onStepStart)
+                                agent.execute(
+                                    context,
+                                    onSuccess = { _ ->
+                                        ApplicationManager.getApplication().invokeLater {
+                                            bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+                                        }
+                                    },
+                                    onChunk = null,
+                                    onError = { errorMsg ->
+                                        ApplicationManager.getApplication().invokeLater {
+                                            bridge.sendMessage("error", errorMsg, messageId)
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                 }

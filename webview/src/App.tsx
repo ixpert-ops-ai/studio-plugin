@@ -6,6 +6,7 @@ import rehypeHighlight from 'rehype-highlight';
 import mermaid from 'mermaid';
 import 'highlight.js/styles/github-dark.css';
 import './index.css';
+import { ScopeSelectionTree } from './ScopeSelectionTree';
 
 // Mermaid 글로벌 초기 설정
 mermaid.initialize({
@@ -186,29 +187,61 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
   const data = msg.clarifyData;
   if (!data) return null;
 
-  const hasQuestions = data.questions && data.questions.length > 0;
-  
-  // 폼 상태: 사용자의 O/X 및 텍스트 답변
-  const [answers, setAnswers] = useState<Record<string, string>>(() => {
-    const init: Record<string, string> = {};
-    if (data.questions) {
-      data.questions.forEach((q, idx) => {
-        init[(idx + 1).toString()] = q.defaultValue;
-      });
-    }
-    return init;
-  });
-  
+  const [requirements, setRequirements] = useState<string[]>(data.enhancedRequirements || []);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+  const [newValue, setNewValue] = useState('');
+
   const [isSubmitted, setIsSubmitted] = useState(false);
+  
+  const handleEditStart = (idx: number, text: string) => {
+    if (isSubmitted) return;
+    setEditingIndex(idx);
+    setEditValue(text);
+  };
+
+  const handleEditSave = (idx: number) => {
+    if (!editValue.trim()) return;
+    const newReqs = [...requirements];
+    newReqs[idx] = editValue.trim();
+    setRequirements(newReqs);
+    setEditingIndex(null);
+  };
+
+  const handleDelete = (idx: number) => {
+    if (isSubmitted) return;
+    if (requirements.length <= 1) {
+      alert("최소 1개의 요구사항이 필요합니다.");
+      return;
+    }
+    setRequirements(requirements.filter((_, i) => i !== idx));
+  };
+
+  const handleAddSave = () => {
+    if (!newValue.trim()) {
+      setIsAdding(false);
+      return;
+    }
+    if (requirements.length >= 10) {
+      alert("최대 10개까지 추가 가능합니다.");
+      return;
+    }
+    setRequirements([...requirements, newValue.trim()]);
+    setNewValue('');
+    setIsAdding(false);
+  };
 
   const handleSubmit = () => {
     if (isSubmitted) return;
+    if (requirements.length === 0) {
+      alert("최소 1개의 요구사항이 필요합니다.");
+      return;
+    }
     setIsSubmitted(true);
     
     const payload = {
-      answers,
-      removedRequirements: [],
-      additionalNotes: null
+      requirements
     };
     
     if (window.sendToIde) {
@@ -225,71 +258,79 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
         <div className="markdown-body">
           <h3>🤖 요구사항 자동 구체화 결과 (Stage 0)</h3>
           
-          {data.enhancedRequirements && data.enhancedRequirements.length > 0 && (
-            <>
-              <h4>[자동 보강된 항목]</h4>
-              <ul>
-                {data.enhancedRequirements.map((req, idx) => (
-                  <li key={idx}>{req}</li>
+          <div className="requirements-edit-list">
+            <h4>[보강된 요구사항]</h4>
+            {requirements.length > 0 ? (
+              <ul className="req-list" style={{ listStyle: 'none', padding: 0, margin: '10px 0' }}>
+                {requirements.map((req, idx) => (
+                  <li key={idx} style={{ padding: '8px', marginBottom: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', borderLeft: '3px solid #3b82f6', display: 'flex', flexDirection: 'column' }}>
+                    {editingIndex === idx ? (
+                      <div className="req-edit-mode" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <textarea 
+                          value={editValue} 
+                          onChange={e => setEditValue(e.target.value)}
+                          style={{ width: '100%', minHeight: '60px', padding: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid #555', color: '#fff', borderRadius: '4px', resize: 'vertical' }}
+                        />
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                          <button onClick={() => setEditingIndex(null)} className="req-btn-icon" style={{ padding: '4px 8px', fontSize: '12px', background: '#444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>취소</button>
+                          <button onClick={() => handleEditSave(idx)} className="req-btn-icon" style={{ padding: '4px 8px', fontSize: '12px', background: '#3b82f6', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>저장</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="req-view-mode" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <span style={{ fontSize: '13px', lineHeight: '1.4', flex: 1 }}>{idx + 1}. {req}</span>
+                        {!isSubmitted && (
+                          <div style={{ display: 'flex', gap: '4px', marginLeft: '12px' }}>
+                            <button onClick={() => handleEditStart(idx, req)} className="req-btn-icon" title="수정" style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', padding: '4px', borderRadius: '4px' }}>✎</button>
+                            <button onClick={() => handleDelete(idx)} className="req-btn-icon" title="삭제" style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '4px', borderRadius: '4px' }}>🗑</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </li>
                 ))}
               </ul>
-            </>
-          )}
+            ) : (
+              <p style={{ fontSize: '13px', color: '#ef4444' }}>최소 1개의 요구사항이 필요합니다.</p>
+            )}
 
-          {hasQuestions ? (
-            <>
-              <h4>[추가 확인이 필요한 항목]</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
-                {data.questions.map((q, idx) => {
-                  const key = (idx + 1).toString();
-                  const isBoolean = q.defaultValue === 'Y' || q.defaultValue === 'N';
-                  return (
-                    <div key={idx} style={{ padding: '10px', background: 'rgba(255,255,255,0.05)', borderRadius: '6px' }}>
-                      <p style={{ margin: '0 0 8px 0', fontSize: '13px' }}>Q: {q.questionText}</p>
-                      {isBoolean ? (
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button 
-                            className={`btn-toggle ${answers[key] === 'Y' ? 'active' : ''}`}
-                            onClick={() => !isSubmitted && setAnswers(prev => ({ ...prev, [key]: 'Y' }))}
-                            style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #444', background: answers[key] === 'Y' ? '#3b82f6' : 'transparent', color: answers[key] === 'Y' ? '#fff' : '#ccc', cursor: isSubmitted ? 'default' : 'pointer' }}
-                          >
-                            예 (Y)
-                          </button>
-                          <button 
-                            className={`btn-toggle ${answers[key] === 'N' ? 'active' : ''}`}
-                            onClick={() => !isSubmitted && setAnswers(prev => ({ ...prev, [key]: 'N' }))}
-                            style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #444', background: answers[key] === 'N' ? '#ef4444' : 'transparent', color: answers[key] === 'N' ? '#fff' : '#ccc', cursor: isSubmitted ? 'default' : 'pointer' }}
-                          >
-                            아니오 (N)
-                          </button>
-                        </div>
-                      ) : (
-                        <input 
-                          type="text" 
-                          value={answers[key] || ''} 
-                          onChange={(e) => !isSubmitted && setAnswers(prev => ({ ...prev, [key]: e.target.value }))}
-                          disabled={isSubmitted}
-                          style={{ width: '100%', padding: '6px', background: 'rgba(0,0,0,0.2)', border: '1px solid #444', color: '#fff', borderRadius: '4px' }}
-                        />
-                      )}
+            {!isSubmitted && (
+              <div className="req-add-section" style={{ marginTop: '12px', marginBottom: '24px' }}>
+                {isAdding ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px', background: 'rgba(255,255,255,0.02)', borderRadius: '4px', border: '1px dashed #555' }}>
+                    <textarea 
+                      placeholder="새 요구사항 입력..."
+                      value={newValue}
+                      onChange={e => setNewValue(e.target.value)}
+                      style={{ width: '100%', minHeight: '60px', padding: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid #555', color: '#fff', borderRadius: '4px', resize: 'vertical' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button onClick={() => setIsAdding(false)} style={{ padding: '4px 8px', fontSize: '12px', background: '#444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>취소</button>
+                      <button onClick={handleAddSave} style={{ padding: '4px 8px', fontSize: '12px', background: '#10b981', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>추가</button>
                     </div>
-                  );
-                })}
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => setIsAdding(true)}
+                    disabled={requirements.length >= 10}
+                    style={{ width: '100%', padding: '8px', background: 'rgba(255,255,255,0.05)', border: '1px dashed #555', color: '#aaa', borderRadius: '4px', cursor: requirements.length >= 10 ? 'not-allowed' : 'pointer', fontSize: '13px' }}
+                  >
+                    + 항목 추가
+                  </button>
+                )}
               </div>
-            </>
-          ) : (
-            <p style={{ fontSize: '13px', color: '#aaa', marginTop: '10px' }}>
-              추가로 확인할 질문이 없습니다. 보강된 요구사항을 확인해 주세요.
-            </p>
-          )}
+            )}
+          </div>
+
+
 
           <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
             <button 
               onClick={handleSubmit} 
-              disabled={isSubmitted}
-              style={{ padding: '6px 16px', background: isSubmitted ? '#444' : '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: isSubmitted ? 'default' : 'pointer', fontWeight: 'bold' }}
+              disabled={isSubmitted || requirements.length === 0}
+              style={{ padding: '6px 16px', background: (isSubmitted || requirements.length === 0) ? '#444' : '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: (isSubmitted || requirements.length === 0) ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
             >
-              {isSubmitted ? '제출 완료' : (hasQuestions ? '답변 제출 및 분석 시작' : '이대로 진행')}
+              {isSubmitted ? '제출 완료' : '확인하고 다음 단계로 →'}
             </button>
           </div>
         </div>
@@ -310,6 +351,30 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   // 0.5 Clarify Form
   if (msg.subType === 'analyze_clarify') {
     return <ClarifyForm msg={msg} />;
+  }
+
+  // 0.6 Scope Selection
+  if (msg.subType === 'scopeSelection/showTree') {
+    return (
+      <ScopeSelectionTree
+        payload={msg.content}
+        onCancel={() => {
+          if (window.sendToIde) {
+            window.sendToIde(JSON.stringify({ command: 'scopeSelection/cancel' }));
+          }
+          window.postMessage({ type: 'ai_message', subType: 'scopeSelection/hideTree', id: 'system' }, '*');
+        }}
+        onSubmit={(selectedPaths) => {
+          if (window.sendToIde) {
+            window.sendToIde(JSON.stringify({
+              command: 'scopeSelection/submit',
+              text: JSON.stringify({ selectedPaths })
+            }));
+          }
+          window.postMessage({ type: 'ai_message', subType: 'scopeSelection/hideTree', id: 'system' }, '*');
+        }}
+      />
+    );
   }
 
   // 1. Tool / Status 메시지
@@ -770,6 +835,27 @@ function App() {
             }];
           });
         }
+        return;
+      }
+
+      if (data.subType === 'scopeSelection/showTree') {
+        if (messageId) {
+          setMessages(prev => {
+            const filtered = prev.filter(m => m.subType !== 'scopeSelection/showTree');
+            return [...filtered, {
+              id: messageId,
+              role: 'ai',
+              subType: 'scopeSelection/showTree',
+              content: data.content,
+              isLoading: false
+            }];
+          });
+        }
+        return;
+      }
+
+      if (data.subType === 'scopeSelection/hideTree') {
+        setMessages(prev => prev.filter(m => m.subType !== 'scopeSelection/showTree'));
         return;
       }
 

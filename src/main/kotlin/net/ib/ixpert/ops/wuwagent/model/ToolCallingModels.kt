@@ -46,7 +46,10 @@ data class FunctionParameters(
 data class PropertyDefinition(
     val type: String,
     val description: String? = null,
-    val enum: List<String>? = null
+    val enum: List<String>? = null,
+    val items: PropertyDefinition? = null,
+    val properties: Map<String, PropertyDefinition>? = null,
+    val required: List<String>? = null
 )
 
 // 3. Tool Call Models

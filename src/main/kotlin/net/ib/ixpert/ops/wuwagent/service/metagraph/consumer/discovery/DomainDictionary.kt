@@ -1,6 +1,6 @@
 package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery
 
-import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
+import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraphQueryable
 import java.io.File
 
 /**
@@ -47,7 +47,7 @@ class DomainDictionary private constructor(
          * ProjectGraph로부터 도메인 사전을 생성합니다.
          * 내장 사전 + 그래프의 한글 메타데이터에서 학습한 항목을 합산합니다.
          */
-        fun load(graph: ProjectGraph): DomainDictionary {
+        fun load(graph: ProjectGraphQueryable): DomainDictionary {
             val learned = mutableMapOf<String, MutableSet<String>>()
 
             graph.files.values.forEach { node ->
@@ -85,18 +85,20 @@ class DomainDictionary private constructor(
             BUILTIN_TERMS.forEach { (k, v) -> merged.getOrPut(k) { mutableSetOf() }.addAll(v) }
             learned.forEach { (k, v) -> merged.getOrPut(k) { mutableSetOf() }.addAll(v) }
 
-            try {
-                val dictFile = File(graph.projectRoot, ".meta/dictionary.json")
-                if (dictFile.exists()) {
-                    val type = object : com.google.gson.reflect.TypeToken<Map<String, List<String>>>() {}.type
-                    val externalDict: Map<String, List<String>> = com.google.gson.Gson().fromJson(dictFile.readText(Charsets.UTF_8), type)
-                    externalDict.forEach { (k, v) ->
-                        merged.getOrPut(k) { mutableSetOf() }.addAll(v)
+            if (graph.projectRoot != null) {
+                try {
+                    val dictFile = File(graph.projectRoot!!, ".meta/dictionary.json")
+                    if (dictFile.exists()) {
+                        val type = object : com.google.gson.reflect.TypeToken<Map<String, List<String>>>() {}.type
+                        val externalDict: Map<String, List<String>> = com.google.gson.Gson().fromJson(dictFile.readText(Charsets.UTF_8), type)
+                        externalDict.forEach { (k, v) ->
+                            merged.getOrPut(k) { mutableSetOf() }.addAll(v)
+                        }
+                        com.intellij.openapi.diagnostic.Logger.getInstance(DomainDictionary::class.java).info("Loaded external dictionary from ${dictFile.absolutePath} with ${externalDict.size} entries.")
                     }
-                    com.intellij.openapi.diagnostic.Logger.getInstance(DomainDictionary::class.java).info("Loaded external dictionary from ${dictFile.absolutePath} with ${externalDict.size} entries.")
+                } catch (e: Exception) {
+                    com.intellij.openapi.diagnostic.Logger.getInstance(DomainDictionary::class.java).warn("Failed to load .meta/dictionary.json: ${e.message}")
                 }
-            } catch (e: Exception) {
-                com.intellij.openapi.diagnostic.Logger.getInstance(DomainDictionary::class.java).warn("Failed to load .meta/dictionary.json: ${e.message}")
             }
 
             return DomainDictionary(merged.mapValues { it.value.toSet() })
@@ -184,6 +186,13 @@ class DomainDictionary private constructor(
             "한도" to setOf("limit", "max", "cap"),
             "정보" to setOf("info", "information", "data"),
             "관리" to setOf("manage", "management", "mgr", "admin"),
+            
+            // 화면/UI 용어
+            "마이페이지" to setOf("mypage", "profile"),
+            "대시보드" to setOf("dashboard", "dash", "main"),
+            "홈" to setOf("home", "index"),
+            "채팅" to setOf("chat", "message", "room"),
+            "화면" to setOf("view", "page", "screen"),
             "통계" to setOf("statistics", "stat", "stats", "chart", "report"),
             "이력" to setOf("history", "hist", "log", "trace"),
             "알림" to setOf("notification", "noti", "alert", "notice", "message"),
