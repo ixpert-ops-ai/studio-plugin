@@ -35,7 +35,10 @@ sealed class TaskPipeline {
          *  예: [IMPROVE_TARGETS] 블록이 포함된 Step1 전체 응답 → Step2 parseImproveTargets에서 사용 */
         val rawLlmResponse: String = llmResponse,
         val extractedCode: String,
-        val isSuccess: Boolean = true
+        val isSuccess: Boolean = true,
+        /** 이 Step에 실제 입력된 원본 코드 (isApplyable 여부와 무관하게 항상 보존).
+         *  isStabilityStep(Step3)에서 @ 파일 vs 에디터 컨텍스트를 정확히 비교하기 위해 사용. */
+        val inputCode: String = ""
     )
 
     /**
@@ -232,10 +235,13 @@ sealed class TaskPipeline {
         ): StepResult {
             // ─ 안정성 평가 Step (isStabilityStep=true) ─────────────────────────
             if (isStabilityStep) {
-                onToolNoti?.invoke("컨텍스트 확인 중: 에디터 파일")
-                val originalCode = if (context.editor != null)
-                    EditorContextService.extractCodeWithScope(context.editor, context.project).code
-                else ""
+                // 원본 코드: Step1이 실제 사용한 소스(@ 파일 or 에디터)를 inputCode에서 우선 참조
+                // → @ 파일 첨부 케이스에서 에디터 내용이 혼입되지 않도록 배타적으로 적용
+                val originalCode = allPreviousResults.getOrNull(0)?.inputCode?.takeIf { it.isNotBlank() }
+                    ?: if (context.editor != null)
+                        EditorContextService.extractCodeWithScope(context.editor, context.project).code
+                    else ""
+                onToolNoti?.invoke("컨텍스트 확인 중: ${if (allPreviousResults.getOrNull(0)?.inputCode?.isNotBlank() == true) "이전 Step 코드" else "에디터 파일"}")
 
                 val improvedCode = allPreviousResults.getOrNull(1)
                     ?.extractedCode?.takeIf { it.isNotBlank() }
@@ -271,7 +277,8 @@ sealed class TaskPipeline {
                     llmResponse   = llmResponse,
                     rawLlmResponse = rawLlmResponse,
                     extractedCode = "",
-                    isSuccess     = !isError
+                    isSuccess     = !isError,
+                    inputCode     = ""
                 )
             }
 
@@ -336,6 +343,17 @@ sealed class TaskPipeline {
                     applyScope   = if (extraction.isSelection) "선택 영역" else "전체 파일"
                     onToolNoti?.invoke("컨텍스트 확인 중: ${if (extraction.isSelection) "드래그 선택" else "에디터 파일"}")
                     onToolNoti?.invoke("코드 ${originalCode.lines().size}줄 확인")
+                } else if (chatFallbackMessage != null) {
+                    // 4순위: 에디터가 열려있지만 내용이 없는 경우
+                    return StepResult(
+                        originalCode  = null,
+                        modifiedCode  = null,
+                        applyScope    = "",
+                        llmResponse   = chatFallbackMessage,
+                        extractedCode = "",
+                        isSuccess     = false,
+                        inputCode     = ""
+                    )
                 }
                 userMessage = if (isImproveStep && originalCode.isNotBlank()) {
                     buildString {
@@ -372,7 +390,8 @@ sealed class TaskPipeline {
                         applyScope    = "",
                         llmResponse   = chatFallbackMessage,
                         extractedCode = "",
-                        isSuccess     = false
+                        isSuccess     = false,
+                        inputCode     = ""
                     )
                 }
                 // chatFallbackMessage 미설정 시 기존 폴백: 파일명 패턴 검색 → 전체 텍스트 검색
@@ -416,7 +435,8 @@ sealed class TaskPipeline {
                             applyScope    = "",
                             llmResponse   = "[오류] 프로젝트에서 '$potentialFileName' 파일을 찾을 수 없습니다. 정확한 파일명을 입력해 주세요.",
                             extractedCode = "",
-                            isSuccess     = false
+                            isSuccess     = false,
+                            inputCode     = ""
                         )
                     }
                 } else {
@@ -444,7 +464,8 @@ sealed class TaskPipeline {
                     applyScope = "",
                     llmResponse = "[알림] 처리할 코드나 입력이 없습니다.",
                     extractedCode = "",
-                    isSuccess = false
+                    isSuccess = false,
+                    inputCode = ""
                 )
             }
 
@@ -530,7 +551,8 @@ sealed class TaskPipeline {
                 llmResponse = llmResponse,
                 rawLlmResponse = rawLlmResponse,
                 extractedCode = extractedCode,
-                isSuccess = isActuallySuccess
+                isSuccess = isActuallySuccess,
+                inputCode = originalCode      // Step3(isStabilityStep)에서 올바른 코드 소스를 참조하기 위해 항상 보존
             )
         }
     }

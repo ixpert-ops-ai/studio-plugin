@@ -33,6 +33,21 @@ class ImproveAction : AnAction() {
         val improveRequest = "/improve 선택된 코드를 분석하고 최선의 방법으로 개선해주세요."
         val context = AgentContext(project, editor, improveRequest)
 
+        // 4순위: 에디터에 코드가 없는 경우 안내 메시지 후 종료
+        if (!hasSelection && editor.document.text.isBlank()) {
+            ApplicationManager.getApplication().invokeLater {
+                bridge.sendMessage("task_start", "", messageId)
+                bridge.sendMessage(
+                    subType   = "task_step",
+                    content   = "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요.",
+                    messageId = messageId,
+                    meta      = mapOf("applyable" to "false", "isSuccess" to "true")
+                )
+                bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+            }
+            return
+        }
+
         // 선택 영역 없이 전체 파일이 1500줄 이상인 경우 사전 안내 말풍선 출력
         if (!hasSelection && editor.document.lineCount >= 1500) {
             val warnMsgId = "${messageId}_warn"

@@ -50,7 +50,7 @@ class TaskAgent(
 
                 if (TaskCancellationToken.isCancelled.get()) { onSuccess("__cancelled__"); return }
 
-                val pipeline = IntentAnalyzer.analyze(context.payloadText, client)
+                val pipeline = IntentAnalyzer.analyze(context.payloadText, client, hasEditorContext = context.editor != null)
                 logger.info("TaskAgent: Pipeline 결정 → ${pipeline::class.simpleName}")
 
                 // ── Step 1~N: Pipeline 순차 실행 ──────────────
