@@ -71,7 +71,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
             group("API 설정") {
                 row("API Type:") {
                     apiTypeComboBox = comboBox(
-                        DefaultComboBoxModel(arrayOf("Ollama", "OpenAI Compatible", "aipro"))
+                        DefaultComboBoxModel(arrayOf("OpenAI Compatible", "aipro", "Ollama"))
                     ).component
                     apiTypeComboBox?.addActionListener {
                         if (!isResetting) onApiTypeChanged()
