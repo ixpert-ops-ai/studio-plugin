@@ -133,6 +133,41 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         val verifiedFiles = verificationOutput.files
         val validatedTargetFiles = TargetFileValidator.sortByDependency(verifiedFiles, projectGraph)
         
+        // --- SHADOW LOGGER INTEGRATION ---
+        try {
+            val guard = net.ib.ixpert.ops.wuwagent.agent.completeness.CompletenessGuardIntegration(net.ib.ixpert.ops.wuwagent.agent.completeness.GuardMode.SHADOW)
+            
+            // Heuristic SrFacts derivation from validatedTargetFiles
+            val hasCreate = validatedTargetFiles.any { it.type == "CREATE" }
+            val hasService = validatedTargetFiles.any { it.path.contains("Service") }
+            val hasDataLayer = validatedTargetFiles.any { it.path.contains("Dao") || it.path.contains("Repository") || it.path.endsWith("xml") }
+            val hasUi = validatedTargetFiles.any { it.path.endsWith(".jsp") || it.path.endsWith(".html") || it.path.endsWith(".js") }
+
+            val srFacts = net.ib.ixpert.ops.wuwagent.agent.completeness.model.SrFacts(
+                hasUserAction = hasUi, // Conservative: assume UI means user action
+                touchesUi = hasUi,
+                hasBusinessLogic = hasService,
+                readsOrWritesData = hasDataLayer,
+                addsNewMethod = hasCreate // Conservative: only demand companions if we actually create new files
+            )
+            
+            val srKeyHex = String.format("SR-%08x", primaryReq.hashCode())
+            guard.evaluateAfterVerifier(
+                frameworkType = fwType,
+                requiredFiles = validatedTargetFiles.map { it.path }.toSet(),
+                srFacts = srFacts,
+                ctx = net.ib.ixpert.ops.wuwagent.agent.completeness.ProjectGraphAdapter(projectGraph),
+                projectRoot = project?.basePath ?: projectGraph.projectRoot,
+                runId = java.util.UUID.randomUUID().toString(),
+                srKey = srKeyHex,
+                srFactsSource = "heuristic-from-pipeline-output"
+            )
+            logger.info("CompletenessGuardIntegration invoked for \$srKeyHex in SHADOW mode (addsNewMethod=\$hasCreate).")
+        } catch (e: Exception) {
+            logger.warn("Failed to execute CompletenessGuardIntegration", e)
+        }
+        // ---------------------------------
+
         val formattedOutput = buildString {
             appendLine("### 요구사항 분석 요약")
             
