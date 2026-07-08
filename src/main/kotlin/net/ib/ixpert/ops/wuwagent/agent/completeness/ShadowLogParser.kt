@@ -40,14 +40,33 @@ object ShadowLogParser {
                 try {
                     val log = gson.fromJson(line, ShadowLog::class.java)
                     if (log != null) {
-                        // Ghost Line Defense (Using isNullOrEmpty because Gson reflection can inject null into non-nullable List)
-                        if (log.verdict == "WOULD_BLOCK" && log.violations.isNullOrEmpty()) {
-                            val preview = if (line.length > 100) line.take(100) + "..." else line
-                            logger.warn("[GUARD-SHADOW] Skipped ghost line (WOULD_BLOCK but no violations): \$preview")
-                            anomalyCount++
-                        } else {
-                            logs.add(log)
+                        // Data Quality Anomaly Defense
+                        var currentAnomaly = log.dataQualityAnomaly
+                        
+                        // Fallback detection for legacy logs without dataQualityAnomaly
+                        if (currentAnomaly == null) {
+                            if (log.verdict == "WOULD_BLOCK" && log.violations.isNullOrEmpty()) {
+                                currentAnomaly = "GHOST_VERDICT_BLOCK_WITHOUT_VIOLATIONS"
+                            } else if (log.verdict == "PASS" && !log.violations.isNullOrEmpty()) {
+                                currentAnomaly = "INCONSISTENT_PASS_WITH_VIOLATIONS"
+                            }
                         }
+                        
+                        val finalLog = if (currentAnomaly != null && log.dataQualityAnomaly == null) {
+                            val safeViolations = log.violations ?: emptyList()
+                            val safeSrFactsSource = log.srFactsSource ?: "heuristic"
+                            log.copy(dataQualityAnomaly = currentAnomaly, violations = safeViolations, srFactsSource = safeSrFactsSource)
+                        } else {
+                            val safeViolations = log.violations ?: emptyList()
+                            val safeSrFactsSource = log.srFactsSource ?: "heuristic"
+                            if (log.violations == null || log.srFactsSource == null) log.copy(violations = safeViolations, srFactsSource = safeSrFactsSource) else log
+                        }
+
+                        if (finalLog.dataQualityAnomaly != null) {
+                            anomalyCount++
+                        }
+                        
+                        logs.add(finalLog)
                     } else {
                         skippedCount++
                     }
@@ -63,6 +82,10 @@ object ShadowLogParser {
             }
         } catch (e: Exception) {
             logger.error("[GUARD-SHADOW] Failed to read shadow_logs.jsonl", e)
+        }
+        
+        if (skippedCount > 0) {
+            logger.warn("[GUARD-SHADOW] Skipped $skippedCount malformed lines due to physical corruption or parse errors.")
         }
 
         return ShadowLogParseResult(logs, skippedCount, anomalyCount)

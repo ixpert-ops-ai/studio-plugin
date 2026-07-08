@@ -92,14 +92,14 @@ class ShadowLogRoundtripTest {
         )
         ShadowLogger.log(testProjectRoot, log3)
 
-        // 4. Write 1 incomplete/truncated line manually (simulating IDE crash without newline)
+        // 4. Write 1 incomplete/truncated line manually (simulating IDE crash)
         Files.write(
             logFile.toPath(),
-            "{\"srKey\":\"SR-TRUNCATED\"".toByteArray(StandardCharsets.UTF_8),
+            "{\"srKey\":\"SR-TRUNCATED\"\n".toByteArray(StandardCharsets.UTF_8),
             StandardOpenOption.APPEND
         )
 
-        // 4-b. Write 1 Ghost line (WOULD_BLOCK but empty violations) using gson to ensure valid JSON syntax
+        // 4-b. Write 1 Ghost line (WOULD_BLOCK but empty violations) using ShadowLogger
         val ghostLog = ShadowLog(
             timestamp = "2026-06-30T10:03:00Z",
             srKey = "SR-GHOST",
@@ -111,15 +111,25 @@ class ShadowLogRoundtripTest {
             requiredFiles = listOf("D.java"),
             violations = emptyList() // The ghost anomaly!
         )
-        Files.write(
-            logFile.toPath(),
-            ("\n" + com.google.gson.Gson().toJson(ghostLog) + "\n").toByteArray(StandardCharsets.UTF_8),
-            StandardOpenOption.APPEND
-        )
+        ShadowLogger.log(testProjectRoot, ghostLog)
 
-        // 4-c. Write 1 Null-Ghost line (WOULD_BLOCK but violations field is completely omitted)
-        // This tests that Gson injects null into the non-nullable list, and our isNullOrEmpty() catches it without NPE
-        val nullGhostJson = """{"timestamp":"2026-06-30T10:04:00Z","srKey":"SR-NULL-GHOST","runId":"RUN-1","rulesetVersion":"1.0","guardMode":"SHADOW","frameworkType":"ANYFRAME","verdict":"WOULD_BLOCK","requiredFiles":["D.java"]}"""
+        // 4-c. Write 1 PASS but violations not empty using ShadowLogger
+        val inconsistentPassLog = ShadowLog(
+            timestamp = "2026-06-30T10:04:00Z",
+            srKey = "SR-INCONSISTENT-PASS",
+            runId = "RUN-1",
+            rulesetVersion = "1.0",
+            guardMode = "SHADOW",
+            frameworkType = "ANYFRAME",
+            verdict = "PASS",
+            requiredFiles = listOf("D.java"),
+            violations = listOf(ViolationDetail("RoleMissing", "A", null, null, false, null))
+        )
+        ShadowLogger.log(testProjectRoot, inconsistentPassLog)
+        
+        // 4-d. Write 1 Null-Ghost line (WOULD_BLOCK but violations field is completely omitted) manually
+        // This tests that Gson injects null into the non-nullable list, and our parser handles it
+        val nullGhostJson = """{"timestamp":"2026-06-30T10:05:00Z","srKey":"SR-NULL-GHOST","runId":"RUN-1","rulesetVersion":"1.0","guardMode":"SHADOW","frameworkType":"ANYFRAME","verdict":"WOULD_BLOCK","requiredFiles":["D.java"]}"""
         Files.write(
             logFile.toPath(),
             ("\n" + nullGhostJson + "\n").toByteArray(StandardCharsets.UTF_8),
@@ -130,25 +140,29 @@ class ShadowLogRoundtripTest {
         val result = ShadowLogParser.parse(testProjectRoot)
 
         // 6. Assertions
-        assertEquals("Should parse 3 valid logs", 3, result.logs.size)
+        assertEquals("Should parse 6 valid JSON logs (including anomalies)", 6, result.logs.size)
         assertEquals("Should skip 2 broken logs", 2, result.skippedCount)
-        assertEquals("Should detect 2 ghost line anomalies (empty list and null injection)", 2, result.dataQualityAnomalyCount)
-        // Ensure ghost lines are NOT in valid logs
-        assertFalse("Ghost line should not be in valid logs", result.logs.any { it.srKey == "SR-GHOST" })
-        assertFalse("Null-Ghost line should not be in valid logs", result.logs.any { it.srKey == "SR-NULL-GHOST" })
+        assertEquals("Should detect 3 anomalies", 3, result.dataQualityAnomalyCount)
+        
+        // Ensure ghost anomalies are properly marked
+        val parsedGhost = result.logs.find { it.srKey == "SR-GHOST" }
+        assertEquals("GHOST_VERDICT_BLOCK_WITHOUT_VIOLATIONS", parsedGhost?.dataQualityAnomaly)
+        
+        val parsedInconsistent = result.logs.find { it.srKey == "SR-INCONSISTENT-PASS" }
+        assertEquals("INCONSISTENT_PASS_WITH_VIOLATIONS", parsedInconsistent?.dataQualityAnomaly)
 
         // Verify fields of the valid logs survived roundtrip
-        val parsedLog1 = result.logs[0]
+        val parsedLog1 = result.logs.find { it.srKey == "SR-001" }!!
         assertEquals("SR-001", parsedLog1.srKey)
         assertEquals(RootCause.NOT_IN_GRAPH, parsedLog1.violations[0].rootCause)
         assertEquals(false, parsedLog1.violations[0].isKnownDebt)
 
-        val parsedLog2 = result.logs[1]
+        val parsedLog2 = result.logs.find { it.srKey == "SR-002" }!!
         assertEquals("SR-002", parsedLog2.srKey)
         assertEquals("MYBATIS_XML", parsedLog2.violations[0].missingTargetKind)
         assertEquals(true, parsedLog2.violations[0].isKnownDebt)
         
-        val parsedLog3 = result.logs[2]
+        val parsedLog3 = result.logs.find { it.srKey == "SR-003" }!!
         assertEquals("SR-003", parsedLog3.srKey)
         assertEquals(RootCause.NO_EDGE, parsedLog3.violations[0].rootCause)
     }

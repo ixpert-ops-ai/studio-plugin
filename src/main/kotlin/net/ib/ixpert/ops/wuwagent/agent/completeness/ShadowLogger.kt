@@ -12,6 +12,16 @@ object ShadowLogger {
     private val logger = Logger.getInstance(ShadowLogger::class.java)
     private val gson = Gson()
 
+    private fun detectAnomaly(verdict: String, violations: List<Any>): String? {
+        return when {
+            verdict == "WOULD_BLOCK" && violations.isEmpty() ->
+                "GHOST_VERDICT_BLOCK_WITHOUT_VIOLATIONS"
+            verdict == "PASS" && violations.isNotEmpty() ->
+                "INCONSISTENT_PASS_WITH_VIOLATIONS"
+            else -> null
+        }
+    }
+
     @Synchronized
     fun log(projectRoot: String?, shadowLog: ShadowLog) {
         if (projectRoot == null) {
@@ -25,8 +35,14 @@ object ShadowLogger {
                 dir.mkdirs()
             }
             
+            val anomaly = detectAnomaly(shadowLog.verdict, shadowLog.violations)
+            val finalLog = shadowLog.copy(dataQualityAnomaly = anomaly)
+            if (anomaly != null) {
+                logger.warn("Shadow data anomaly detected: $anomaly (srKey=${finalLog.srKey}, runId=${finalLog.runId})")
+            }
+            
             val logFile = File(dir, "shadow_logs.jsonl")
-            val jsonLine = gson.toJson(shadowLog)
+            val jsonLine = gson.toJson(finalLog)
             
             Files.write(
                 logFile.toPath(),
