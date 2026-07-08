@@ -21,13 +21,36 @@ data class AggregationReport(
     val unknownViolationItems: List<UnknownBlockItem>
 )
 
+data class DedupKey(val srKey: String, val requiredFilesKey: String)
+
 object ShadowLogAggregator {
 
+    private fun deduplicate(logs: List<net.ib.ixpert.ops.wuwagent.agent.completeness.model.ShadowLog>): List<net.ib.ixpert.ops.wuwagent.agent.completeness.model.ShadowLog> {
+        // 1. dataQualityAnomaly != null 제외
+        // 2. requiredFiles에 survey_admin/ 또는 member-market/ 포함 시 제외
+        val validLogs = logs.filter { log ->
+            log.dataQualityAnomaly == null &&
+            !log.requiredFiles.any { it.contains("survey_admin/") || it.contains("member-market/") }
+        }
+
+        // 3. DedupKey 기준으로 그룹핑
+        val groupedLogs = validLogs.groupBy {
+            val key = it.requiredFiles.sorted().joinToString("\u0000")
+            DedupKey(it.srKey, key)
+        }
+
+        // 4. 각 그룹 내에서 timestamp 최신 데이터만 선택 (Last-Wins)
+        return groupedLogs.values.mapNotNull { group ->
+            group.maxByOrNull { it.timestamp }
+        }
+    }
+
     fun aggregate(parseResult: ShadowLogParseResult): AggregationReport {
-        val logs = parseResult.logs
+        val dedupedLogs = deduplicate(parseResult.logs)
         
-        // Group by srKey to enforce "1 SR = 1 Event" deduplication policy (ii)
-        val groupedLogs = logs.groupBy { it.srKey }
+        // After deduplication, each DedupKey has exactly 1 event (Last-Wins)
+        // Group by srKey to calculate metrics. Each srKey might have multiple events (if they had different requiredFiles)
+        val groupedLogs = dedupedLogs.groupBy { it.srKey }
         val totalEvaluatedEvents = groupedLogs.size
         
         var totalBlockedEvents = 0
@@ -39,7 +62,6 @@ object ShadowLogAggregator {
         val unknownViolationItems = mutableListOf<UnknownBlockItem>()
 
         for ((srKey, srLogs) in groupedLogs) {
-            // Deduplication Policy (ii): If at least one log in the group has WOULD_BLOCK, the SR is blocked
             val isBlocked = srLogs.any { it.verdict == "WOULD_BLOCK" }
             if (isBlocked) {
                 totalBlockedEvents++
@@ -47,7 +69,6 @@ object ShadowLogAggregator {
                 var hasUnknown = false
                 var hasViolations = false
                 
-                // Collect violations across all WOULD_BLOCK logs in this SR
                 for (log in srLogs.filter { it.verdict == "WOULD_BLOCK" }) {
                     if (log.violations.isNotEmpty()) {
                         hasViolations = true
@@ -74,7 +95,6 @@ object ShadowLogAggregator {
                 if (hasUnknown) {
                     unknownBlockEvents++
                 } else if (hasViolations) {
-                    // If there are violations but none are unknown, it's fully known debt
                     fullyKnownBlockEvents++
                 }
             }
