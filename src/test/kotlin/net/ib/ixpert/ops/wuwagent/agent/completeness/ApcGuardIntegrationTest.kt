@@ -172,8 +172,8 @@ class ApcGuardIntegrationTest {
         println("DVO missing (if MANDATORY): $dvoViolations")
         println("BVO missing (if strictly matched by prefix): $bvoViolations / ${bizNodes.size}")
         
-        // Assert that DVO violations are VERY low (ideally 0) for the whole graph
-        // This proves DVO can safely be MANDATORY
-        assertTrue("DVO violations should be extremely low", dvoViolations <= 5) 
+        // Assert that DVO violations are EXACTLY 0 for the whole graph
+        // This proves DVO can safely be MANDATORY and our FP rule fix works
+        assertTrue("DVO violations should be exactly 0 after rule correction", dvoViolations == 0) 
     }
 }
