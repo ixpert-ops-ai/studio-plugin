@@ -24,7 +24,7 @@ object AnyframeApRuleset {
                     CompanionRule(FileKind.SVO, PairingStrength.MANDATORY,
                                   MatchStrategy.DomainPrefixVO("SVO"), CompanionTrigger.ON_NEW_METHOD),
                     // If SVCImpl calls BIZ, BIZ must be accompanied by BVO.
-                    CompanionRule(FileKind.BVO, PairingStrength.MANDATORY,
+                    CompanionRule(FileKind.BVO, PairingStrength.RECOMMENDED,
                                   MatchStrategy.CallChainDelegatingMatch(FileKind.BIZ, MatchStrategy.DomainPrefixVO("BVO")), CompanionTrigger.ON_NEW_METHOD)
                 ),
                 preferModifyExisting = true
