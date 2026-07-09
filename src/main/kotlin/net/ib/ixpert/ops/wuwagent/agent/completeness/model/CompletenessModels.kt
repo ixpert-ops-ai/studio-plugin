@@ -293,9 +293,10 @@ data class CompletenessReport(
     val degradedStrategies: List<DegradeNote>,
     val roleFindings: List<RoleFinding>,
     val companionFindings: List<CompanionFinding>,
-    val unclassifiedFiles: List<String>
+    val unclassifiedFiles: List<String>,
+    val acceptedDebts: List<CompanionFinding> = emptyList()
 ) {
     val roleViolations get() = roleFindings.filter { it.violated }
-    val companionViolations get() = companionFindings.filter { it.pairing == PairingStrength.MANDATORY && !it.satisfied }
+    val companionViolations get() = companionFindings.filter { it.pairing == PairingStrength.MANDATORY && !it.satisfied && !acceptedDebts.contains(it) }
     val isBlocked get() = roleViolations.isNotEmpty() || companionViolations.isNotEmpty()
 }

@@ -64,11 +64,16 @@ class GraphLoader(private val project: Project) {
                 val jsonContent = metaFile.readText(Charsets.UTF_8)
                 var parsedGraph = gson.fromJson(jsonContent, ProjectGraph::class.java)
 
-                // 하위 호환 마이그레이션 로직 (이전 버전의 SPRING_BOOT, ANYFRAME 그래프가 로드될 때 자동감지 재실행)
-                if (parsedGraph.frameworkType.name == "SPRING_BOOT" || parsedGraph.frameworkType.name == "ANYFRAME") {
-                    logger.info("Legacy framework type detected (${parsedGraph.frameworkType.name}). Running auto-detection for migration...")
+                // 하위 호환 마이그레이션 로직 및 Alias 처리
+                if (parsedGraph.frameworkType.name == "SPRING_BOOT" || parsedGraph.frameworkType.name == "ANYFRAME" || parsedGraph.frameworkType.name == "ANYFRAME_JAP") {
+                    if (parsedGraph.frameworkType.name == "ANYFRAME_JAP") {
+                        // TODO: 추출기 쪽에 ANYFRAME_JAP가 출력되는 원인 백로그 생성 필요
+                        logger.warn("Undefined framework type 'ANYFRAME_JAP' detected. Aliasing to 'ANYFRAME_AP'. Please check the extractor.")
+                    } else {
+                        logger.info("Legacy framework type detected (${parsedGraph.frameworkType.name}). Running auto-detection for migration...")
+                    }
                     val detectionResult = net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer.FrameworkDetector.detectFramework(parsedGraph.files)
-                    val newType = if (parsedGraph.frameworkType.name == "ANYFRAME") FrameworkType.ANYFRAME_AP else detectionResult.detected
+                    val newType = if (parsedGraph.frameworkType.name == "ANYFRAME" || parsedGraph.frameworkType.name == "ANYFRAME_JAP") FrameworkType.ANYFRAME_AP else detectionResult.detected
                     parsedGraph = parsedGraph.copy(
                         frameworkType = newType,
                         frameworkDetection = detectionResult,
@@ -147,7 +152,10 @@ class GraphLoader(private val project: Project) {
                                     dependedBy = node.dependedBy ?: mutableListOf(),
                                     injections = node.injections ?: emptyList(),
                                     implementedInterfaces = node.implementedInterfaces ?: emptyList(),
-                                    annotations = node.annotations ?: emptyList()
+                                    annotations = node.annotations ?: emptyList(),
+                                    methods = node.methods ?: emptyList(),
+                                    koreanComments = node.koreanComments ?: emptyList(),
+                                    dynamicViewFolders = node.dynamicViewFolders ?: emptyList()
                                 )
                                 mergedFiles[normalizedPath] = safeNode
                             }
@@ -202,7 +210,10 @@ class GraphLoader(private val project: Project) {
                             dependedBy = (node.dependedBy ?: mutableListOf()).map { if (it.startsWith(relativeRoot)) it else "$relativeRoot/$it" }.toMutableList(),
                             injections = node.injections ?: emptyList(),
                             implementedInterfaces = node.implementedInterfaces ?: emptyList(),
-                            annotations = node.annotations ?: emptyList()
+                            annotations = node.annotations ?: emptyList(),
+                            methods = node.methods ?: emptyList(),
+                            koreanComments = node.koreanComments ?: emptyList(),
+                            dynamicViewFolders = node.dynamicViewFolders ?: emptyList()
                         )
                         normalizedFiles[normalizedPath] = safeNode
                     }
@@ -224,7 +235,10 @@ class GraphLoader(private val project: Project) {
                             dependedBy = node.dependedBy ?: mutableListOf(),
                             injections = node.injections ?: emptyList(),
                             implementedInterfaces = node.implementedInterfaces ?: emptyList(),
-                            annotations = node.annotations ?: emptyList()
+                            annotations = node.annotations ?: emptyList(),
+                            methods = node.methods ?: emptyList(),
+                            koreanComments = node.koreanComments ?: emptyList(),
+                            dynamicViewFolders = node.dynamicViewFolders ?: emptyList()
                         )
                     }
                     parsedGraph.copy(files = safeFiles)

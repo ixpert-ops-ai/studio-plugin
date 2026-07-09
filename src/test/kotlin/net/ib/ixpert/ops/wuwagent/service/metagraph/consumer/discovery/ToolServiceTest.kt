@@ -18,7 +18,7 @@ class ToolServiceTest {
                     packageName = "net.infobank.iss.survey.dto",
                     fileType = SpringFileType.DTO,
                     layer = ArchitectureLayer.PRESENTATION,
-                    methodNames = listOf("getExpireDate"),
+                    methods = listOf(net.ib.ixpert.ops.wuwagent.service.metagraph.model.MethodSignature("getExpireDate", "void", emptyList())),
                     apiEndpoints = emptyList(),
                     dependsOn = mutableListOf(),
                     dependedBy = mutableListOf(),

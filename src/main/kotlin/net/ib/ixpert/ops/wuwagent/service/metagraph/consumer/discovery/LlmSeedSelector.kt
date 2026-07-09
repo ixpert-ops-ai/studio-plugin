@@ -11,10 +11,16 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
 
     override fun selectSeeds(srText: String, graph: ProjectGraphQueryable): SeedSelectionResult {
         // 클래스와 패키지 정보를 함께 제공하여 LLM이 도메인을 유추하기 쉽게 함
-        val candidates = graph.files.values
+        val backendCandidates = graph.files.values
             .map { "${it.className} (${it.packageName})" }
             .distinct()
-            .joinToString("\n")
+        
+        val frontendCandidates = graph.resourceNodes
+            .filter { it.path.endsWith(".jsp") || it.path.endsWith(".html") || it.path.endsWith(".js") || it.path.endsWith(".vue") || it.path.endsWith(".tsx") }
+            .map { "${it.path.substringAfterLast('/')} (${it.path.substringBeforeLast('/', "")})" }
+            .distinct()
+
+        val candidates = (backendCandidates + frontendCandidates).joinToString("\n")
 
         val frameworkName = graph.frameworkDisplayName
         val additionalContext = if (graph.resolvedFrameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME_AP) {

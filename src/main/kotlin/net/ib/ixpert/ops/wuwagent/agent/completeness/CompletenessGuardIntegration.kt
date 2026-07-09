@@ -22,11 +22,13 @@ class CompletenessGuardIntegration(
         ctx: GraphMatchContext,
         projectRoot: String? = null,
         runId: String = java.util.UUID.randomUUID().toString(),
-        srKey: String = "unknown"
+        srKey: String = "unknown",
+        srFactsSource: String = "heuristic"
     ): GuardDecision {
         val dynamicMode = if (System.getProperty("wuwagent.guard.enforcing") == "true") GuardMode.ENFORCING else this.mode
         
-        val report = CompletenessEngine(ctx).evaluate(frameworkType, requiredFiles, srFacts)
+        val debtRegistry = JsonKnownDebtRegistry.loadFromClasspath("ixpert/known_debts.json", "ixpert/heuristic_suppressions.json")
+        val report = CompletenessEngine(ctx, debtRegistry).evaluate(frameworkType, requiredFiles, srFacts)
         val outcome = CompletenessGuard.check(report)
 
         logGuardResult(frameworkType, requiredFiles, report, outcome)
@@ -62,6 +64,18 @@ class CompletenessGuardIntegration(
         }
         
         val violations = companionDetails + roleDetails
+        
+        val acceptedDebtDetails = report.acceptedDebts.map { finding ->
+            ViolationDetail(
+                type = "CompanionMissing",
+                anchorFile = finding.anchorPath,
+                missingTargetKind = finding.companionKind.name,
+                rootCause = RootCauseAnalyzer.analyze(finding, ctx),
+                isKnownDebt = true,
+                debtReason = "REGISTERED_KNOWN_DEBT",
+                resolvedCategory = ResolvedCategory.UNRESOLVED
+            )
+        }
 
         val shadowLog = ShadowLog(
             timestamp = java.time.Instant.now().toString(),
@@ -72,7 +86,9 @@ class CompletenessGuardIntegration(
             frameworkType = frameworkType.name,
             verdict = verdictStr,
             requiredFiles = requiredFiles.toList(),
-            violations = violations
+            violations = violations,
+            acceptedDebts = acceptedDebtDetails,
+            srFactsSource = srFactsSource
         )
 
         ShadowLogger.log(projectRoot, shadowLog)

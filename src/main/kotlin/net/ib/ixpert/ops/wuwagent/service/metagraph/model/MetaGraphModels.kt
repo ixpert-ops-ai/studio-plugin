@@ -25,7 +25,7 @@ interface ProjectGraphQueryable {
     val resolvedFrameworkType: FrameworkType
     
     val totalFileCount: Int
-        get() = files.size
+        get() = files.size + resourceNodes.size
         
     fun getAllClassNames(): List<String> = files.values.map { it.className }
 }
@@ -101,6 +101,13 @@ data class ProjectGraph(
         }
 }
 
+data class MethodSignature(
+    val name: String,
+    val returnType: String,
+    val parameters: List<String>,
+    val isInherited: Boolean = false
+)
+
 /**
  * 개별 파일(클래스) 노드.
  */
@@ -131,11 +138,16 @@ data class FileNode(
     val datasource: String? = null,
     // Adaptive File Discovery 지원 필드
     val koreanComments: List<String> = emptyList(),
-    val methodNames: List<String> = emptyList(),
+    // TODO: [Backlog] Gson이 Kotlin 기본값을 우회하는 직렬화 문제 - 게터 null-safe는 임시 방어.
+    // 근본 해결을 위해 역직렬화 설정(기본값 존중 어댑터/@JvmField 또는 kotlinx.serialization) 검토 필요
+    val methods: List<MethodSignature> = emptyList(),
     // P5-B: 동적 뷰 역추적 필드
     val isDynamicRouter: Boolean = false,
     val dynamicViewFolders: List<String> = emptyList()
-)
+) {
+    val methodNames: List<String>
+        get() = (methods ?: emptyList()).map { it.name }
+}
 
 /**
  * DI 주입 정보.

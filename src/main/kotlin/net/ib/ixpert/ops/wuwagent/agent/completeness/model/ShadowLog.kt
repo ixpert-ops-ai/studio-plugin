@@ -31,6 +31,7 @@ data class ShadowLog(
     val verdict: String,        // PASS, WARN, WOULD_BLOCK
     val requiredFiles: List<String>,
     val violations: List<ViolationDetail>,
+    val acceptedDebts: List<ViolationDetail> = emptyList(),
     val srFactsSource: String = "heuristic", // Identifies how SrFacts was derived
     val dataQualityAnomaly: String? = null
 )

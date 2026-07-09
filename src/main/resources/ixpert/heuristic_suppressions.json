@@ -1,0 +1,14 @@
+[
+  {
+    "anchorFilePath": "src/main/java/sc/chn/aps/apc/mg/mg02/biz/APCMGSpacdInqrBIZ.java",
+    "missingCompanionKind": "DVO",
+    "reason": "HEURISTIC_LIMITATION",
+    "evidence": "N suffix matching limitation. ACAMTBAPC001NDEM is called, and ACAMTBAPC001DVO exists but matching fails."
+  },
+  {
+    "anchorFilePath": "src/main/java/sc/chn/aps/apc/mm/mm02/biz/APCMMSpacdInqrBIZ.java",
+    "missingCompanionKind": "DVO",
+    "reason": "HEURISTIC_LIMITATION",
+    "evidence": "N suffix matching limitation. ACAMTBAPC001NDEM is called, and ACAMTBAPC001DVO exists but matching fails."
+  }
+]

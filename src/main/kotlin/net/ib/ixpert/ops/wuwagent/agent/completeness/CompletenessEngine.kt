@@ -12,7 +12,10 @@ object RoleNecessityDeriver {
     ).filter { it.required }
 }
 
-class CompletenessEngine(private val ctx: GraphMatchContext) {
+class CompletenessEngine(
+    private val ctx: GraphMatchContext,
+    private val debtRegistry: KnownDebtRegistry = JsonKnownDebtRegistry.empty()
+) {
 
     fun evaluate(
         frameworkType: FrameworkType,
@@ -37,6 +40,8 @@ class CompletenessEngine(private val ctx: GraphMatchContext) {
 
         // 2. Companion File Check
         val companionFindings = mutableListOf<CompanionFinding>()
+        val acceptedDebts = mutableListOf<CompanionFinding>()
+        
         for (rr in ruleset.roleRealizations) {
             val projectAnchors = ctx.allFiles().filter { kindOf(it) == rr.anchorKind }
             val allAnchors = (projectAnchors + requiredFiles.filter { kindOf(it) == rr.anchorKind }).distinct()
@@ -67,12 +72,17 @@ class CompletenessEngine(private val ctx: GraphMatchContext) {
                                 }
                             }
                         
-                        companionFindings += CompanionFinding(
+                        val finding = CompanionFinding(
                             role = rr.role, anchorPath = anchor,
                             companionKind = c.kind, pairing = c.pairing,
                             trigger = c.trigger, result = res,
                             existsInRequiredSet = inRequired
                         )
+                        companionFindings += finding
+                        
+                        if (debtRegistry.isSuppressed(finding)) {
+                            acceptedDebts += finding
+                        }
                     }
                 }
             }
@@ -82,7 +92,7 @@ class CompletenessEngine(private val ctx: GraphMatchContext) {
 
         return CompletenessReport(
             frameworkType, resolution.degraded,
-            roleFindings, companionFindings, unclassified
+            roleFindings, companionFindings, unclassified, acceptedDebts
         )
     }
 

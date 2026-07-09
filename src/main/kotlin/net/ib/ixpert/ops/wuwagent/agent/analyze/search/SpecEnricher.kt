@@ -88,7 +88,7 @@ class SpecEnricher(private val frameworkType: FrameworkType) {
 
     private fun getFrameworkBaseRules(): String {
         return when (frameworkType) {
-            FrameworkType.ANYFRAME_AP -> """
+            FrameworkType.ANYFRAME_AP, FrameworkType.ANYFRAME_JAP -> """
                 - Anyframe Enterprise 규칙 적용
                 - Value Object 분리: SVO(서비스), BVO(비즈니스), DVO(데이터)
                 - Service 인터페이스 + SVCImpl 구현체 분리 필수
