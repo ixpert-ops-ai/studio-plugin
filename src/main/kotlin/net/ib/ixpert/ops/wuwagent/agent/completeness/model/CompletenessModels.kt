@@ -145,23 +145,14 @@ sealed class MatchStrategy(val requires: Set<GraphCapability>) {
             // e.g., ACAMTBAPC001DEM -> ACAMTBAPC001, APCMMPsnzInfSVC -> APCMMPsnzInf
             // We assume the prefix is everything before the known suffix like DEM, DQM, SVC, BIZ
             val prefix = base.replace(Regex("(DEM|DQM|SVCImpl|SVC|BIZ)$"), "")
-            var target = "$prefix$targetSuffix"
+            val target = "$prefix$targetSuffix"
             // Search all files for this exact basename
-            var hit = ctx.allFiles().firstOrNull { ctx.baseName(it).equals(target, true) }
-            
-            // Fallback for special cases where DEM has 'N' suffix but DVO doesn't (e.g. ACAMTBAPC001NDEM -> ACAMTBAPC001DVO)
-            if (hit == null && prefix.endsWith("N", ignoreCase = true)) {
-                val fallbackTarget = "${prefix.dropLast(1)}$targetSuffix"
-                hit = ctx.allFiles().firstOrNull { ctx.baseName(it).equals(fallbackTarget, true) }
-                if (hit != null) {
-                    target = fallbackTarget
-                }
-            }
+            val hit = ctx.allFiles().firstOrNull { ctx.baseName(it).equals(target, true) }
 
             return if (hit != null)
-                MatchResult(hit, existsInGraph = true, MatchMode.PRECISION, 1.0, "휴리스틱 이름 매칭 ($target)")
+                MatchResult(hit, existsInGraph = true, MatchMode.PRECISION, 1.0, "도메인 프리픽스 매칭 ($target)")
             else
-                MatchResult(null, existsInGraph = false, MatchMode.PRECISION, 1.0, "$target 미발견 (쌍 필요)")
+                MatchResult(null, existsInGraph = false, MatchMode.PRECISION, 1.0, "$target 미발견 (생성 필요)")
         }
     }
 
