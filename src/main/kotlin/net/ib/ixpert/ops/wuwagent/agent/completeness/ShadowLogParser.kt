@@ -54,12 +54,14 @@ object ShadowLogParser {
                         
                         val finalLog = if (currentAnomaly != null && log.dataQualityAnomaly == null) {
                             val safeViolations = log.violations ?: emptyList()
+                            val safeAcceptedDebts = log.acceptedDebts ?: emptyList()
                             val safeSrFactsSource = log.srFactsSource ?: "heuristic"
-                            log.copy(dataQualityAnomaly = currentAnomaly, violations = safeViolations, srFactsSource = safeSrFactsSource)
+                            log.copy(dataQualityAnomaly = currentAnomaly, violations = safeViolations, acceptedDebts = safeAcceptedDebts, srFactsSource = safeSrFactsSource)
                         } else {
                             val safeViolations = log.violations ?: emptyList()
+                            val safeAcceptedDebts = log.acceptedDebts ?: emptyList()
                             val safeSrFactsSource = log.srFactsSource ?: "heuristic"
-                            if (log.violations == null || log.srFactsSource == null) log.copy(violations = safeViolations, srFactsSource = safeSrFactsSource) else log
+                            if (log.violations == null || log.acceptedDebts == null || log.srFactsSource == null) log.copy(violations = safeViolations, acceptedDebts = safeAcceptedDebts, srFactsSource = safeSrFactsSource) else log
                         }
 
                         if (finalLog.dataQualityAnomaly != null) {

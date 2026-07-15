@@ -18,7 +18,7 @@ data class ScopeSelectionResult(
 
 data class ScopeConfig(
     val minFilesPerNode: Int = 2,
-    val maxDepth: Int = 10,
+    val maxDepth: Int = 15,
     val maxSelections: Int = 15,
     val maxFiles: Int = 500,
     val warningThreshold: Int = 300

@@ -30,7 +30,7 @@ class ShadowLogRealDataTest {
         var validLogsBeforeDedup = 0
         
         for (log in result.logs) {
-            val isExcluded = log.requiredFiles.any { it.contains("survey_admin/") || it.contains("member-market/") }
+            val isExcluded = log.requiredFiles.any { it.contains("survey_admin/") }
             if (isExcluded) {
                 excludedCount++
             } else if (log.dataQualityAnomaly == null) {
@@ -38,7 +38,7 @@ class ShadowLogRealDataTest {
             }
         }
         
-        println("Excluded Project Logs (survey_admin / member-market): $excludedCount")
+        println("Excluded Project Logs (survey_admin): $excludedCount")
         println("Valid Logs before dedup (anomaly & excluded removed): $validLogsBeforeDedup")
         println("==========================================")
     }

@@ -12,11 +12,12 @@ object ShadowLogger {
     private val logger = Logger.getInstance(ShadowLogger::class.java)
     private val gson = Gson()
 
-    private fun detectAnomaly(verdict: String, violations: List<Any>): String? {
+    private fun detectAnomaly(verdict: String, violations: List<net.ib.ixpert.ops.wuwagent.agent.completeness.model.ViolationDetail>?): String? {
+        val hasViolations = violations != null && violations.isNotEmpty()
         return when {
-            verdict == "WOULD_BLOCK" && violations.isEmpty() ->
+            verdict == "WOULD_BLOCK" && !hasViolations ->
                 "GHOST_VERDICT_BLOCK_WITHOUT_VIOLATIONS"
-            verdict == "PASS" && violations.isNotEmpty() ->
+            verdict == "PASS" && hasViolations ->
                 "INCONSISTENT_PASS_WITH_VIOLATIONS"
             else -> null
         }

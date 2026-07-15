@@ -50,18 +50,32 @@ class JsonKnownDebtRegistry(
     override fun getAllRecords(): List<SuppressionRecord> = records
 
     companion object {
+        // Caching for concurrency and I/O optimization
+        private val classPathCache = java.util.concurrent.ConcurrentHashMap<String, JsonKnownDebtRegistry>()
+        internal var classpathReadCount = java.util.concurrent.atomic.AtomicInteger(0)
+
         fun loadFromClasspath(vararg paths: String): JsonKnownDebtRegistry {
-            val gson = Gson()
-            val allRecords = mutableListOf<SuppressionRecord>()
-            for (path in paths) {
-                val url = this::class.java.classLoader.getResource(path)
-                if (url != null) {
-                    val listType = object : TypeToken<List<SuppressionRecord>>() {}.type
-                    val records: List<SuppressionRecord> = gson.fromJson(InputStreamReader(url.openStream()), listType)
-                    allRecords.addAll(records)
+            val cacheKey = paths.joinToString(",")
+            return classPathCache.computeIfAbsent(cacheKey) {
+                classpathReadCount.incrementAndGet()
+                val gson = Gson()
+                val allRecords = mutableListOf<SuppressionRecord>()
+                for (path in paths) {
+                    val url = this::class.java.classLoader.getResource(path)
+                    if (url != null) {
+                        val listType = object : TypeToken<List<SuppressionRecord>>() {}.type
+                        val records: List<SuppressionRecord> = gson.fromJson(InputStreamReader(url.openStream()), listType)
+                        allRecords.addAll(records)
+                    }
                 }
+                JsonKnownDebtRegistry(allRecords)
             }
-            return JsonKnownDebtRegistry(allRecords)
+        }
+        
+        // For tests that want to force a fresh load
+        internal fun clearCache() {
+            classPathCache.clear()
+            classpathReadCount.set(0)
         }
         
         fun loadFromFiles(vararg files: File): JsonKnownDebtRegistry {

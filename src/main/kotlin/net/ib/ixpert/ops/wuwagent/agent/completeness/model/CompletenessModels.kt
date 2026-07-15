@@ -103,25 +103,25 @@ data class MatchResult(
 }
 
 sealed class MatchStrategy(val requires: Set<GraphCapability>) {
-    abstract fun match(anchorPath: String, ctx: GraphMatchContext): MatchResult
+    abstract fun match(anchorPath: String, ctx: GraphMatchContext): List<MatchResult>
     fun isPrecisionAvailable(ctx: GraphMatchContext): Boolean = ctx.capabilities.containsAll(requires)
 
     object SameBasenameImpl : MatchStrategy(emptySet()) {
-        override fun match(anchorPath: String, ctx: GraphMatchContext): MatchResult {
+        override fun match(anchorPath: String, ctx: GraphMatchContext): List<MatchResult> {
             val base = ctx.baseName(anchorPath)
             val target = "${base}Impl"
             val hit = ctx.filesUnder(ctx.dirOf(anchorPath)).firstOrNull { ctx.baseName(it) == target }
             return if (hit != null)
-                MatchResult(hit, existsInGraph = true, MatchMode.PRECISION, 1.0, "basename+Impl 규칙 일치")
+                listOf(MatchResult(hit, existsInGraph = true, MatchMode.PRECISION, 1.0, "basename+Impl 규칙 일치"))
             else
-                MatchResult(null, existsInGraph = false, MatchMode.PRECISION, 1.0, "$target 미발견 (생성 필요)")
+                listOf(MatchResult(null, existsInGraph = false, MatchMode.PRECISION, 1.0, "$target 미발견 (생성 필요)"))
         }
     }
 
     object ImplementedInterfacesMatch : MatchStrategy(emptySet()) {
-        override fun match(anchorPath: String, ctx: GraphMatchContext): MatchResult {
+        override fun match(anchorPath: String, ctx: GraphMatchContext): List<MatchResult> {
             val anchorNode = ctx.getFileNode(anchorPath)
-            if (anchorNode == null) return MatchResult(null, existsInGraph = false, MatchMode.PRECISION, 1.0, "앵커 노드 없음")
+            if (anchorNode == null) return listOf(MatchResult(null, existsInGraph = false, MatchMode.PRECISION, 1.0, "앵커 노드 없음"))
             
             // Search for any node that implements this interface
             val hitNode = ctx.allNodes().firstOrNull { node ->
@@ -132,7 +132,7 @@ sealed class MatchStrategy(val requires: Set<GraphCapability>) {
             val hitPath = hitNode?.path
             
             if (hitPath != null)
-                return MatchResult(hitPath, existsInGraph = true, MatchMode.PRECISION, 1.0, "implementedInterfaces 매칭")
+                return listOf(MatchResult(hitPath, existsInGraph = true, MatchMode.PRECISION, 1.0, "implementedInterfaces 매칭"))
 
             // Fallback: implementedInterfaces가 비어있는 경우 basename+Impl 컨벤션으로 검색
             return SameBasenameImpl.match(anchorPath, ctx)
@@ -140,7 +140,7 @@ sealed class MatchStrategy(val requires: Set<GraphCapability>) {
     }
 
     class DomainPrefixVO(val targetSuffix: String) : MatchStrategy(emptySet()) {
-        override fun match(anchorPath: String, ctx: GraphMatchContext): MatchResult {
+        override fun match(anchorPath: String, ctx: GraphMatchContext): List<MatchResult> {
             val base = ctx.baseName(anchorPath)
             // e.g., ACAMTBAPC001DEM -> ACAMTBAPC001, APCMMPsnzInfSVC -> APCMMPsnzInf
             // We assume the prefix is everything before the known suffix like DEM, DQM, SVC, BIZ
@@ -149,83 +149,120 @@ sealed class MatchStrategy(val requires: Set<GraphCapability>) {
             // Search all files for this exact basename
             val hit = ctx.allFiles().firstOrNull { ctx.baseName(it).equals(target, true) }
 
-            return if (hit != null)
-                MatchResult(hit, existsInGraph = true, MatchMode.PRECISION, 1.0, "도메인 프리픽스 매칭 ($target)")
-            else
-                MatchResult(null, existsInGraph = false, MatchMode.PRECISION, 1.0, "$target 미발견 (생성 필요)")
+            if (hit != null) return listOf(MatchResult(hit, existsInGraph = true, MatchMode.PRECISION, 1.0, "도메인 프리픽스 매칭 ($target)"))
+
+            // Fallback: check dependencies of the anchor or its known delegates
+            val anchorNode = ctx.getFileNode(anchorPath)
+            if (anchorNode != null) {
+                // First check direct dependencies of BIZ
+                val directHit = anchorNode.dependsOn.firstOrNull { it.endsWith(targetSuffix + ".java") }
+                if (directHit != null) {
+                    return listOf(MatchResult(directHit, existsInGraph = true, MatchMode.PRECISION, 1.0, "의존성 그래프 매칭 ($targetSuffix)"))
+                }
+                
+                // Then check dependencies of any DEM/DQM that BIZ calls
+                val delegates = anchorNode.dependsOn.filter { it.endsWith("DEM.java") || it.endsWith("DQM.java") }
+                for (del in delegates) {
+                    val delNode = ctx.getFileNode(del)
+                    if (delNode != null) {
+                        val delHit = delNode.dependsOn.firstOrNull { it.endsWith(targetSuffix + ".java") }
+                        if (delHit != null) {
+                            return listOf(MatchResult(delHit, existsInGraph = true, MatchMode.PRECISION, 1.0, "위임 대상 의존성 매칭 ($targetSuffix)"))
+                        }
+                    }
+                }
+            }
+
+            return listOf(MatchResult(null, existsInGraph = false, MatchMode.PRECISION, 1.0, "$target 미발견 (생성 필요)"))
+        }
+    }
+
+    class EntityDtoMatch(val suffix: String) : MatchStrategy(emptySet()) {
+        override fun match(anchorPath: String, ctx: GraphMatchContext): List<MatchResult> {
+            val base = ctx.baseName(anchorPath)
+            val target = "$base$suffix"
+            
+            val hits = ctx.allFiles().filter { 
+                val name = ctx.baseName(it)
+                name.startsWith(base) && name.endsWith(suffix)
+            }
+            
+            if (hits.isNotEmpty()) {
+                return hits.map { MatchResult(it, existsInGraph = true, MatchMode.PRECISION, 1.0, "Entity DTO 매칭 ($it)") }
+            } else {
+                return listOf(MatchResult(null, existsInGraph = false, MatchMode.PRECISION, 1.0, "$target 패턴 미발견 (생성 필요)"))
+            }
         }
     }
 
     class CallChainDelegatingMatch(val linkKind: FileKind, val delegate: MatchStrategy) : MatchStrategy(emptySet()) {
-        override fun match(anchorPath: String, ctx: GraphMatchContext): MatchResult {
-            val node = ctx.getFileNode(anchorPath)
-            if (node == null) return MatchResult(null, existsInGraph = true, MatchMode.PRECISION, 1.0, "노드 없음 (무시)")
+        override fun match(anchorPath: String, ctx: GraphMatchContext): List<MatchResult> {
+            val anchorNode = ctx.getFileNode(anchorPath) ?: return emptyList()
             
-            // Find depended nodes that match the linkKind
-            val calledPaths = node.dependsOn.filter { dependsPath ->
-                val depNode = ctx.getFileNode(dependsPath)
-                if (depNode != null) {
-                    when (linkKind) {
-                        FileKind.DEM -> depNode.className.endsWith("DEM")
-                        FileKind.DQM -> depNode.className.endsWith("DQM")
-                        FileKind.BIZ -> depNode.className.endsWith("BIZ")
-                        else -> false
-                    }
-                } else false
-            }
+            val linkCandidates = anchorNode.injections.map { it.targetType } + 
+                                 anchorNode.injections.mapNotNull { it.resolvedImpl } +
+                                 anchorNode.dependsOn // also include path-based dependencies
 
-            if (calledPaths.isEmpty()) {
-                // If the target layer is NOT called, then the companion is NOT required.
-                // We return anchorPath as matchedPath so that inRequired evaluates to true.
-                return MatchResult(anchorPath, existsInGraph = true, MatchMode.PRECISION, 1.0, "호출 체인에 $linkKind 없음 (동반 불필요)")
-            }
+            val suffix = linkKind.name
+            val linkFound = linkCandidates.firstOrNull { candidate ->
+                val name = candidate.substringAfterLast("/").substringBeforeLast(".")
+                name.endsWith(suffix, ignoreCase = true)
+            } ?: return emptyList() // Rule is inapplicable if precondition fails
 
-            // If there are called paths, evaluate the delegate on the FIRST called path.
-            // (In a complete implementation, it should evaluate all, but MatchStrategy returns one MatchResult)
-            val results = calledPaths.map { depPath ->
-                val delegateResult = delegate.match(depPath, ctx)
-                // Note: VO(BVO/DVO/SVO)는 메서드 파라미터/반환 타입으로 사용되어
-                // dependsOn에 나타나지 않는 경우가 많으므로, delegate 매칭 결과를 그대로 신뢰합니다.
-                delegateResult
-            }
-            val missing = results.firstOrNull { !it.matched }
-            
-            return missing ?: results.first()
+            // Resolve link to an actual file path in the graph
+            val delegatePath = ctx.getFileNode(linkFound)?.path 
+                ?: ctx.allFiles().firstOrNull { it.endsWith("/$linkFound.java") || it.endsWith(linkFound) }
+                ?: linkFound
+
+            // Delegate to the inner strategy
+            return delegate.match(delegatePath, ctx)
         }
     }
 
     object SameNamespaceXml : MatchStrategy(setOf(GraphCapability.XML_NAMESPACE_INDEX)) {
-        override fun match(anchorPath: String, ctx: GraphMatchContext): MatchResult {
-            if (isPrecisionAvailable(ctx)) {
-                val fqcn = ctx.fqcnOf(anchorPath)
-                if (fqcn != null) {
-                    val xmls = ctx.linkedByNamespace(fqcn).filter { it.endsWith(".xml") }
-                    if (xmls.isNotEmpty())
-                        return MatchResult(xmls.first(), existsInGraph = true, MatchMode.PRECISION, 1.0, "namespace_binding 엣지로 매핑")
-                    return MatchResult(null, existsInGraph = false, MatchMode.PRECISION, 1.0, "namespace=$fqcn 인 XML 미발견 (생성/매핑 필요)")
-                }
+        override fun match(anchorPath: String, ctx: GraphMatchContext): List<MatchResult> {
+            if (!isPrecisionAvailable(ctx)) {
+                // Heuristic Fallback
+                val base = ctx.baseName(anchorPath)
+                val hit = ctx.allFiles().firstOrNull { it.endsWith("$base.xml") }
+                return if (hit != null)
+                    listOf(MatchResult(hit, true, MatchMode.HEURISTIC, 0.7, "이름 유사성 매칭 (.xml)"))
+                else
+                    listOf(MatchResult(null, false, MatchMode.HEURISTIC, 0.7, "$base.xml 미발견"))
             }
-            return degradeToBasenameXml(anchorPath, ctx)
-        }
 
-        private fun degradeToBasenameXml(anchorPath: String, ctx: GraphMatchContext): MatchResult {
-            val base = ctx.baseName(anchorPath)
-            val hit = ctx.filesUnder(ctx.dirOf(anchorPath)).firstOrNull { it.endsWith(".xml") && ctx.baseName(it).equals(base, true) }
-            return MatchResult(hit, existsInGraph = hit != null, MatchMode.HEURISTIC, if (hit != null) 0.6 else 0.0, "XML_NAMESPACE_INDEX 미보유 → basename 휴리스틱으로 강등")
+            // Precision Match
+            val fqcn = ctx.fqcnOf(anchorPath) 
+                ?: return listOf(MatchResult(null, false, MatchMode.PRECISION, 1.0, "Java FQCN 식별 불가"))
+            
+            val xmlPaths = ctx.linkedByNamespace(fqcn)
+            val hit = xmlPaths.firstOrNull()
+            
+            return if (hit != null)
+                listOf(MatchResult(hit, true, MatchMode.PRECISION, 1.0, "XML namespace 매칭"))
+            else
+                listOf(MatchResult(null, false, MatchMode.PRECISION, 1.0, "namespace=$fqcn 인 XML 미발견"))
         }
     }
 
     object SameFeatureJs : MatchStrategy(setOf(GraphCapability.STATIC_RESOURCE_LINK)) {
-        override fun match(anchorPath: String, ctx: GraphMatchContext): MatchResult {
+        override fun match(anchorPath: String, ctx: GraphMatchContext): List<MatchResult> {
             val base = ctx.baseName(anchorPath)
-            val candidates = featureNameVariants(base)
-            val featureSeg = base.substringBefore('_').substringBefore('.')
-            val jsFiles = ctx.filesUnder(jsRootFor(featureSeg, ctx)).filter { it.endsWith(".js") }
-            val hit = jsFiles.firstOrNull { js ->
-                val jb = ctx.baseName(js)
-                candidates.any { it.equals(jb, true) }
+            
+            if (isPrecisionAvailable(ctx)) {
+                val jspNode = ctx.getResourceNode(anchorPath)
+                if (jspNode != null && jspNode.linkedTo.isNotEmpty()) {
+                    val hit = jspNode.linkedTo.firstOrNull { it.endsWith(".js") }
+                    if (hit != null) return listOf(MatchResult(hit, true, MatchMode.PRECISION, 1.0, "JSP 내부 스크립트 링크 매칭"))
+                }
             }
-            return MatchResult(hit, existsInGraph = hit != null, MatchMode.HEURISTIC, if (hit != null) 0.5 else 0.0, "STATIC_RESOURCE_LINK 미보유 → 네이밍/디렉터리 휴리스틱")
+
+            // Heuristic
+            val hit = ctx.allFiles().firstOrNull { it.endsWith("$base.js") }
+            return if (hit != null)
+                listOf(MatchResult(hit, true, MatchMode.HEURISTIC, 0.8, "이름 유사성 매칭 (.js)"))
+            else
+                listOf(MatchResult(null, false, MatchMode.HEURISTIC, 0.8, "$base.js 미발견"))
         }
 
         private fun featureNameVariants(base: String): List<String> {
@@ -240,12 +277,35 @@ sealed class MatchStrategy(val requires: Set<GraphCapability>) {
     }
 
     object ExistingController : MatchStrategy(setOf(GraphCapability.CONTROLLER_INDEX)) {
-        override fun match(anchorPath: String, ctx: GraphMatchContext): MatchResult {
+        override fun match(anchorPath: String, ctx: GraphMatchContext): List<MatchResult> {
             val controllers = ctx.existingControllers()
             return if (controllers.isNotEmpty())
-                MatchResult(controllers.first(), existsInGraph = true, MatchMode.PRECISION, 0.9, "기존 컨트롤러 재사용 권장: ${controllers.first()}")
+                listOf(MatchResult(controllers.first(), true, MatchMode.PRECISION, 1.0, "기존 컨트롤러 식별됨"))
             else
-                MatchResult(null, existsInGraph = false, MatchMode.PRECISION, 1.0, "기존 컨트롤러 없음 → 신규 허용")
+                listOf(MatchResult(null, false, MatchMode.PRECISION, 1.0, "프로젝트 내 컨트롤러 없음"))
+        }
+    }
+
+    class InjectedByMatch(val targetKind: FileKind) : MatchStrategy(emptySet()) {
+        override fun match(anchorPath: String, ctx: GraphMatchContext): List<MatchResult> {
+            val anchorNode = ctx.getFileNode(anchorPath)
+                ?: return emptyList() // No anchor node, can't find dependents
+
+            // dependsOn and dependedBy are lists of file paths in MetaGraphModels
+            val dependents = anchorNode.dependedBy
+            val matches = dependents.filter { path ->
+                // Unfortunately we can't directly call FileKindClassifier from here easily 
+                // without passing it, but MatchStrategy is in the same package!
+                net.ib.ixpert.ops.wuwagent.agent.completeness.FileKindClassifier.classify(path, ctx) == targetKind
+            }
+
+            return if (matches.isNotEmpty()) {
+                matches.map { path ->
+                    MatchResult(path, true, MatchMode.PRECISION, 1.0, "역방향 주입(dependedBy) 관계 매칭 ($targetKind)")
+                }
+            } else {
+                listOf(MatchResult(null, false, MatchMode.PRECISION, 1.0, "나를 주입하는 $targetKind 미발견"))
+            }
         }
     }
 }

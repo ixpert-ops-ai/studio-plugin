@@ -154,16 +154,80 @@ class ShadowLogRoundtripTest {
         // Verify fields of the valid logs survived roundtrip
         val parsedLog1 = result.logs.find { it.srKey == "SR-001" }!!
         assertEquals("SR-001", parsedLog1.srKey)
-        assertEquals(RootCause.NOT_IN_GRAPH, parsedLog1.violations[0].rootCause)
-        assertEquals(false, parsedLog1.violations[0].isKnownDebt)
+        assertEquals(RootCause.NOT_IN_GRAPH, parsedLog1.violations!![0].rootCause)
+        assertEquals(false, parsedLog1.violations!![0].isKnownDebt)
 
         val parsedLog2 = result.logs.find { it.srKey == "SR-002" }!!
         assertEquals("SR-002", parsedLog2.srKey)
-        assertEquals("MYBATIS_XML", parsedLog2.violations[0].missingTargetKind)
-        assertEquals(true, parsedLog2.violations[0].isKnownDebt)
+        assertEquals("MYBATIS_XML", parsedLog2.violations!![0].missingTargetKind)
+        assertEquals(true, parsedLog2.violations!![0].isKnownDebt)
         
         val parsedLog3 = result.logs.find { it.srKey == "SR-003" }!!
         assertEquals("SR-003", parsedLog3.srKey)
-        assertEquals(RootCause.NO_EDGE, parsedLog3.violations[0].rootCause)
+        assertEquals(RootCause.NO_EDGE, parsedLog3.violations!![0].rootCause)
+    }
+
+    @Test
+    fun `test recommendations serialization roundtrip`() {
+        val logWithRecs = ShadowLog(
+            timestamp = "2026-07-10T10:00:00Z",
+            srKey = "SR-REC-01",
+            runId = "RUN-REC",
+            rulesetVersion = "1.0",
+            guardMode = "SHADOW",
+            frameworkType = "SPRING_BOOT_JPA",
+            verdict = "PASS",
+            requiredFiles = listOf("A.java"),
+            recommendations = listOf(
+                net.ib.ixpert.ops.wuwagent.agent.completeness.model.CompanionRecommendation(
+                    anchorFile = "A.java",
+                    recommendedTargetKind = "RESPONSE_DTO",
+                    pairingStrength = "RECOMMENDED",
+                    satisfied = true,
+                    note = "Found exact match"
+                )
+            )
+        )
+        
+        ShadowLogger.log(testProjectRoot, logWithRecs)
+        
+        val result = ShadowLogParser.parse(testProjectRoot)
+        assertEquals(1, result.logs.size)
+        
+        val parsedLog = result.logs.first().normalized()
+        assertEquals("SR-REC-01", parsedLog.srKey)
+        assertEquals(1, parsedLog.recommendations?.size)
+        
+        val rec = parsedLog.recommendations!![0]
+        assertEquals("A.java", rec.anchorFile)
+        assertEquals("RESPONSE_DTO", rec.recommendedTargetKind)
+        assertEquals("RECOMMENDED", rec.pairingStrength)
+        assertEquals(true, rec.satisfied)
+        assertEquals("Found exact match", rec.note)
+    }
+
+    @Test
+    fun `test legacy JSON parsing without NPE`() {
+        val legacyJson = """{"timestamp":"2026-06-30T10:05:00Z","srKey":"SR-LEGACY","runId":"RUN-LEGACY","rulesetVersion":"1.0","guardMode":"SHADOW","frameworkType":"ANYFRAME","verdict":"PASS","requiredFiles":["A.java"]}"""
+        Files.write(
+            logFile.toPath(),
+            (legacyJson + "\n").toByteArray(StandardCharsets.UTF_8),
+            StandardOpenOption.CREATE,
+            StandardOpenOption.APPEND
+        )
+        
+        val result = ShadowLogParser.parse(testProjectRoot)
+        assertEquals(1, result.logs.size)
+        
+        val parsedLog = result.logs.first()
+        // Prior to normalized(), the field is null for legacy JSON.
+        // Wait, gson might leave it null. Let's call normalized()
+        val normalizedLog = parsedLog.normalized()
+        
+        assertEquals("SR-LEGACY", normalizedLog.srKey)
+        // Check that NPE does not happen and lists are empty
+        assertEquals(0, normalizedLog.recommendations?.size)
+        assertEquals(0, normalizedLog.violations?.size)
+        assertEquals(0, normalizedLog.acceptedDebts?.size)
     }
 }

@@ -43,12 +43,18 @@ class CompletenessEngine(
         val acceptedDebts = mutableListOf<CompanionFinding>()
         
         for (rr in ruleset.roleRealizations) {
-            val projectAnchors = ctx.allFiles().filter { kindOf(it) == rr.anchorKind }
-            val allAnchors = (projectAnchors + requiredFiles.filter { kindOf(it) == rr.anchorKind }).distinct()
+            // [FIX] JPA(1:N) 구조에서는 앵커 확산 시 노이즈가 폭발하므로 requiredFiles로 엄격 제한합니다.
+            // Anyframe/ISM 등 레거시 프레임워크(1:1:1)에서는 역방향 동반자 추천을 위해 전체 그래프 앵커 확산이 필요합니다.
+            val allAnchors = if (frameworkType == FrameworkType.SPRING_BOOT_JPA) {
+                requiredFiles.filter { kindOf(it) == rr.anchorKind }.distinct()
+            } else {
+                val projectAnchors = ctx.allFiles().filter { kindOf(it) == rr.anchorKind }
+                (projectAnchors + requiredFiles.filter { kindOf(it) == rr.anchorKind }).distinct()
+            }
             
             for (anchor in allAnchors) {
-                val matches = rr.companions.map { c ->
-                    c to c.matchBy.match(anchor, ctx)
+                val matches = rr.companions.flatMap { c ->
+                    c.matchBy.match(anchor, ctx).map { res -> c to res }
                 }
                 
                 // anchor가 requiredFiles에 있거나, 직접 companion(non-delegated)이 requiredFiles에 있을 때만 발동
@@ -78,10 +84,22 @@ class CompletenessEngine(
                             trigger = c.trigger, result = res,
                             existsInRequiredSet = inRequired
                         )
-                        companionFindings += finding
                         
-                        if (debtRegistry.isSuppressed(finding)) {
-                            acceptedDebts += finding
+                        val isDuplicate = companionFindings.any { 
+                            it.anchorPath == finding.anchorPath && 
+                            (
+                                (it.result.matchedPath != null && it.result.matchedPath == finding.result.matchedPath) || 
+                                (it.result.matchedPath == null && finding.result.matchedPath == null && it.companionKind == finding.companionKind)
+                            )
+                        }
+                        
+                        if (!isDuplicate) {
+                            companionFindings += finding
+                            
+                            val isViolation = !finding.result.existsInGraph || !finding.existsInRequiredSet
+                            if (isViolation && debtRegistry.isSuppressed(finding)) {
+                                acceptedDebts += finding
+                            }
                         }
                     }
                 }

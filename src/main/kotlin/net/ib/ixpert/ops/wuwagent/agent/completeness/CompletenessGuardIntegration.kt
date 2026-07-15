@@ -47,7 +47,8 @@ class CompletenessGuardIntegration(
                 rootCause = rootCause,
                 isKnownDebt = debtReason != null,
                 debtReason = debtReason,
-                resolvedCategory = ResolvedCategory.UNRESOLVED
+                resolvedCategory = ResolvedCategory.UNRESOLVED,
+                pairing = finding.pairing.name
             )
         }
 
@@ -73,9 +74,21 @@ class CompletenessGuardIntegration(
                 rootCause = RootCauseAnalyzer.analyze(finding, ctx),
                 isKnownDebt = true,
                 debtReason = "REGISTERED_KNOWN_DEBT",
-                resolvedCategory = ResolvedCategory.UNRESOLVED
+                pairing = finding.pairing.name
             )
         }
+
+        val recommendations = report.companionFindings
+            .filter { it.pairing == PairingStrength.RECOMMENDED }
+            .map {
+                CompanionRecommendation(
+                    anchorFile = it.anchorPath,
+                    recommendedTargetKind = it.companionKind.name,
+                    pairingStrength = it.pairing.name,
+                    satisfied = it.existsInRequiredSet,
+                    note = it.result.note
+                )
+            }
 
         val shadowLog = ShadowLog(
             timestamp = java.time.Instant.now().toString(),
@@ -88,6 +101,8 @@ class CompletenessGuardIntegration(
             requiredFiles = requiredFiles.toList(),
             violations = violations,
             acceptedDebts = acceptedDebtDetails,
+            recommendations = recommendations,
+            unclassifiedFiles = report.unclassifiedFiles,
             srFactsSource = srFactsSource
         )
 

@@ -10,17 +10,27 @@ object SpringBootJpaRuleset {
             RoleRealization(
                 role = ArchRole.PERSISTENCE,
                 anchorKind = FileKind.JPA_REPOSITORY,
-                companions = emptyList(),          // ★ Impl 없음
+                companions = listOf(
+                    CompanionRule(FileKind.SERVICE_IMPL, PairingStrength.RECOMMENDED, MatchStrategy.InjectedByMatch(FileKind.SERVICE_IMPL), CompanionTrigger.ON_ANY_CHANGE),
+                    CompanionRule(FileKind.CONTROLLER, PairingStrength.RECOMMENDED, MatchStrategy.InjectedByMatch(FileKind.CONTROLLER), CompanionTrigger.ON_ANY_CHANGE)
+                ),
                 preferModifyExisting = true
             ),
-            RoleRealization(ArchRole.BUSINESS, FileKind.SERVICE_IMPL, emptyList(), true),
+            RoleRealization(
+                role = ArchRole.BUSINESS, 
+                anchorKind = FileKind.SERVICE_IMPL, 
+                companions = listOf(
+                    CompanionRule(FileKind.CONTROLLER, PairingStrength.RECOMMENDED, MatchStrategy.InjectedByMatch(FileKind.CONTROLLER), CompanionTrigger.ON_ANY_CHANGE)
+                ), 
+                preferModifyExisting = true
+            ),
             RoleRealization(ArchRole.ENTRYPOINT, FileKind.CONTROLLER, emptyList(), false),
             RoleRealization(
                 role = ArchRole.DATA,
                 anchorKind = FileKind.ENTITY,
                 companions = listOf(
                     CompanionRule(FileKind.RESPONSE_DTO, PairingStrength.RECOMMENDED,
-                                  MatchStrategy.SameBasenameImpl, CompanionTrigger.ON_ANY_CHANGE)
+                                  MatchStrategy.EntityDtoMatch("Response"), CompanionTrigger.ON_ANY_CHANGE)
                 ),
                 preferModifyExisting = true
             )

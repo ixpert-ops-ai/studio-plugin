@@ -172,8 +172,8 @@ class ApcGuardIntegrationTest {
             dvoAccepted.forEach { println(" - ${it.anchorPath}") }
         }
         
-        // Assert that exactly 4 DVO violations (from the 2 BIZ anchors x 2 rules) are isolated as known debt
-        assertEquals("DVO accepted debts should be exactly 4", 4, dvoAccepted.size)
+        // Assert that exactly 0 DVO violations (false positive debts were fixed)
+        assertEquals("DVO accepted debts should be exactly 0, but was: " + dvoAccepted.joinToString("\n"), 0, dvoAccepted.size)
         assertTrue("There may be other genuine DVO violations", dvoViolations.size >= 0)
     }
 }

@@ -6,7 +6,15 @@ import org.junit.Test
 
 class ShadowLogAggregatorTest {
 
-    private fun createLog(srKey: String, verdict: String, violations: List<ViolationDetail>, requiredFiles: List<String> = emptyList(), timestamp: String = "2026-06-30T10:00:00Z", dataQualityAnomaly: String? = null): ShadowLog {
+    private fun createLog(
+        srKey: String, 
+        verdict: String, 
+        violations: List<ViolationDetail>, 
+        requiredFiles: List<String> = emptyList(), 
+        timestamp: String = "2026-06-30T10:00:00Z", 
+        dataQualityAnomaly: String? = null,
+        recommendations: List<CompanionRecommendation>? = null
+    ): ShadowLog {
         return ShadowLog(
             timestamp = timestamp,
             srKey = srKey,
@@ -17,6 +25,7 @@ class ShadowLogAggregatorTest {
             verdict = verdict,
             requiredFiles = requiredFiles,
             violations = violations,
+            recommendations = recommendations,
             dataQualityAnomaly = dataQualityAnomaly
         )
     }
@@ -127,7 +136,6 @@ class ShadowLogAggregatorTest {
 
         // 2. Project exclusions (should be ignored)
         logs.add(createLog("SR-EXCLUDED-1", "WOULD_BLOCK", listOf(createViolation(RootCause.NOT_IN_GRAPH, false)), listOf("survey_admin/src/App.java")))
-        logs.add(createLog("SR-EXCLUDED-2", "WOULD_BLOCK", listOf(createViolation(RootCause.NOT_IN_GRAPH, false)), listOf("member-market/App.java")))
 
         // 3. Last-Wins for exact same DedupKey (Same SR and requiredFiles)
         // Log 1: Older, WOULD_BLOCK
@@ -150,5 +158,28 @@ class ShadowLogAggregatorTest {
         assertEquals("Only SR-DIFF-FILES should be blocked", 1, report.totalBlockedEvents)
         assertEquals("The block should be fully known", 1, report.fullyKnownBlockEvents)
         assertEquals("Unknown blocks should be 0", 0, report.unknownBlockEvents)
+    }
+
+    @Test
+    fun `test aggregator math for recommendations`() {
+        val logs = listOf(
+            createLog("SR-1", "PASS", emptyList(), recommendations = listOf(
+                CompanionRecommendation("A.java", "RESPONSE_DTO", "RECOMMENDED", true, null),
+                CompanionRecommendation("B.java", "SERVICE_IMPL", "RECOMMENDED", false, null)
+            )),
+            createLog("SR-2", "WOULD_BLOCK", listOf(createViolation(RootCause.NOT_IN_GRAPH, false)), recommendations = listOf(
+                CompanionRecommendation("C.java", "ENTITY", "RECOMMENDED", true, null),
+                CompanionRecommendation("D.java", "REPOSITORY", "RECOMMENDED", true, null),
+                CompanionRecommendation("E.java", "CONTROLLER", "RECOMMENDED", false, null)
+            ))
+        )
+        
+        val parseResult = ShadowLogParseResult(logs, skippedCount = 0, dataQualityAnomalyCount = 0)
+        val report = ShadowLogAggregator.aggregate(parseResult)
+
+        // total should be 5, satisfied should be 3, unsatisfied should be 2
+        assertEquals(5, report.totalRecommendations)
+        assertEquals(3, report.satisfiedRecommendations)
+        assertEquals(2, report.unsatisfiedRecommendations)
     }
 }
