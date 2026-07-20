@@ -12,7 +12,8 @@ data class AgentContext(
     val payloadText: String = "",
     val startLine: Int? = null,
     val endLine: Int? = null,
-    val command: String? = null
+    val command: String? = null,
+    val attachedFilesJson: String = ""  // payload["files"] JSON — ExplainAgent 컨텍스트 우선순위 판단에 사용
 )
 
 interface WuwAgent {

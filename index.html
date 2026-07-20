@@ -459,7 +459,7 @@
     <span>iXpert AI Assistant</span>
   </a>
   <nav class="nav-links">
-    <a href="#features">기능</a>
+    <a href="#features">기능 6종</a>
     <a href="#examples">사용 예시</a>
     <a href="#architecture">아키텍처</a>
     <a href="#phase2">Phase 2</a>
@@ -499,7 +499,7 @@
 <!-- FEATURES -->
 <section id="features">
   <p class="section-label">Features</p>
-  <h2 class="section-title">개발자를 위한 AI 기능 7종</h2>
+  <h2 class="section-title">개발자를 위한 AI 기능 6종</h2>
   <p class="section-sub">우클릭 컨텍스트 메뉴 또는 웹뷰 채팅 창으로 즉시 실행됩니다.</p>
 
   <div class="features-grid">
@@ -509,13 +509,6 @@
       <h3>Explain This Code</h3>
       <p>선택한 코드 블록의 역할, 동작 흐름, 주요 로직을 자연어로 설명합니다.</p>
       <span class="tag" style="background:rgba(122,162,247,.1);color:var(--blue);border:1px solid rgba(122,162,247,.2);">단일 스텝</span>
-    </div>
-
-    <div class="feature-card">
-      <div class="feature-icon" style="background:rgba(158,206,106,.12);">✅</div>
-      <h3>Review This Code</h3>
-      <p>코드 품질·버그·보안 이슈를 리뷰하고, 개선된 코드를 SEARCH/REPLACE 형식으로 제안합니다.</p>
-      <span class="tag" style="background:rgba(158,206,106,.1);color:var(--green);border:1px solid rgba(158,206,106,.2);">2단계 파이프라인</span>
     </div>
 
     <div class="feature-card">
@@ -587,40 +580,7 @@
       </div>
     </div>
 
-    <!-- 2. Review -->
-    <div class="example-card">
-      <div class="example-header">
-        <div class="ex-icon" style="background:rgba(158,206,106,.12);">✅</div>
-        <div class="ex-title">Review This Code</div>
-        <span class="ex-tag" style="background:rgba(158,206,106,.1);color:var(--green);border:1px solid rgba(158,206,106,.2);">2단계</span>
-      </div>
-      <div class="example-body">
-        <div class="ex-trigger">🖱️ 코드 선택 후 &nbsp;<code>우클릭 → Review This Code</code></div>
-        <div class="ex-block">
-          <div class="ex-block-label input">📄 선택한 코드</div>
-          <pre class="ex-code">public User getUser(String id) {
-    return userRepo.findById(id);
-}</pre>
-        </div>
-        <div class="ex-block">
-          <div class="ex-block-label warn">⚠️ 리뷰 결과</div>
-          <div class="ex-prose">
-            <ul>
-              <li><strong>NPE 위험:</strong> findById()가 null을 반환할 경우 호출부에서 NullPointerException 발생 가능</li>
-              <li><strong>개선 제안:</strong> Optional&lt;User&gt; 반환 타입으로 변경 권장</li>
-            </ul>
-          </div>
-          <pre class="ex-code" style="border-top:1px solid var(--border);"><<<<<<< SEARCH
-    return userRepo.findById(id);
-=======
-    return userRepo.findById(id)
-        .orElseThrow(() -> new UserNotFoundException(id));
->>>>>>> REPLACE</pre>
-        </div>
-      </div>
-    </div>
-
-    <!-- 3. Improve -->
+    <!-- 2. Improve -->
     <div class="example-card">
       <div class="example-header">
         <div class="ex-icon" style="background:rgba(187,154,247,.12);">⚡</div>
@@ -805,7 +765,7 @@ UserService, InventoryService, PaymentClient</pre>
       <div class="flow-box">
         <div class="box-icon">🤖</div>
         <div class="box-label">LLM</div>
-        <div class="box-sub">Ollama / OpenAI</div>
+        <div class="box-sub">OpenAI</div>
       </div>
       <div class="flow-arrow">→</div>
       <div class="flow-box">
@@ -876,7 +836,7 @@ UserService, InventoryService, PaymentClient</pre>
   <p class="section-label">Phase 2</p>
   <h2 class="section-title">요구사항 기반 자동 코드 생성</h2>
   <p class="section-sub">
-    MetaGraph로 프로젝트 전체를 분석한 뒤, 자연어 요구사항만으로 대상 파일 선별부터 코드 작성, 단위 테스트까지 자동으로 수행합니다.
+    MetaGraph로 프로젝트 전체를 분석한 뒤, 자연어 요구사항만으로 대상 파일 선별과 변경 지시서 생성을 3단계로 수행합니다.
   </p>
 
   <div class="phase2-flow">
@@ -897,22 +857,15 @@ UserService, InventoryService, PaymentClient</pre>
     <div class="phase2-step">
       <span class="phase2-cmd">/implement</span>
       <div>
-        <h4>자동 코드 수정 (ImplementationPipeline)</h4>
-        <p>분석 결과를 바탕으로 Contract-First 순서(DTO/Entity → Interface → Impl → Controller)로 각 파일을 순차 수정합니다. SignatureValidator로 인터페이스 계약을 검증합니다.</p>
-      </div>
-    </div>
-    <div class="phase2-step">
-      <span class="phase2-cmd">/test-all</span>
-      <div>
-        <h4>단위 테스트 일괄 생성 (TestGenerationPipeline)</h4>
-        <p>수정된 파일 전체에 대해 단위 테스트를 자동 생성합니다. TestFileMapper가 기존 테스트 파일을 찾거나 새로 생성합니다.</p>
+        <h4>변경 지시서 생성 (ImplementationPipeline)</h4>
+        <p>분석 결과를 바탕으로 Contract-First 순서(DTO/Entity → Interface → Impl → Controller)로 각 파일의 변경 지시서(의사코드)를 생성합니다. 코드를 직접 수정하지 않으며, 개발자가 지시서를 검토 후 적용합니다.</p>
       </div>
     </div>
 
     <!-- Phase 2 사용 예시 -->
     <p class="section-label" style="margin-top:3.5rem;">사용 예시</p>
     <h3 class="section-title" style="font-size:1.5rem;margin-bottom:.5rem;">채팅창에서 이렇게 사용하세요</h3>
-    <p style="color:var(--muted);font-size:.875rem;margin-bottom:2rem;">4개 명령을 순서대로 실행합니다. 각 단계 결과가 다음 단계의 입력이 됩니다.</p>
+    <p style="color:var(--muted);font-size:.875rem;margin-bottom:2rem;">3개 명령을 순서대로 실행합니다. 각 단계 결과가 다음 단계의 입력이 됩니다.</p>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:1.3rem;">
 
@@ -982,45 +935,27 @@ project-graph.json 저장 완료.
           <div class="ex-trigger">💬 채팅창에 &nbsp;<code>/implement</code>&nbsp; 입력 (/analyze 후 실행)</div>
           <div class="ex-block">
             <div class="ex-block-label input">📄 진행 방식</div>
-            <div class="ex-prose">분석 결과의 파일 목록을 <strong>Contract-First 순서</strong>로 자동 처리합니다. DTO/Entity → Interface → Impl → Controller</div>
+            <div class="ex-prose">분석 결과의 파일 목록을 <strong>Contract-First 순서</strong>로 처리하여 각 파일의 변경 지시서(의사코드)를 생성합니다. DTO/Entity → Interface → Impl → Controller. 코드를 직접 수정하지 않습니다.</div>
           </div>
           <div class="ex-block">
-            <div class="ex-block-label output">✅ 순차 처리 결과</div>
-            <pre class="ex-code">[1/4] CouponDto.java       ✔ 생성
-[2/4] CouponService.java   ✔ 생성 (인터페이스)
-[3/4] CouponServiceImpl.java ✔ 생성
-[4/4] CouponController.java  ✔ 생성
-      POST /api/coupons/issue
+            <div class="ex-block-label output">📋 변경 지시서 결과</div>
+            <pre class="ex-code">[1/4] CouponDto.java
+  → 필드: couponId, userId, discountRate, expiredAt
+  → 추가: 유효성 검증 어노테이션
 
-SignatureValidator: 인터페이스 계약 일치 ✅
-각 파일은 3-way diff로 검토 가능합니다.</pre>
-          </div>
-        </div>
-      </div>
+[2/4] CouponService.java (인터페이스)
+  → issueCoupon(userId, rate): CouponDto
+  → applyCoupon(couponId, orderId): int
 
-      <!-- /test-all -->
-      <div class="example-card">
-        <div class="example-header">
-          <div class="ex-icon" style="background:rgba(125,207,255,.12);">🧪</div>
-          <div class="ex-title">/test-all</div>
-          <span class="ex-tag" style="background:rgba(125,207,255,.1);color:var(--cyan);border:1px solid rgba(125,207,255,.2);">3단계</span>
-        </div>
-        <div class="example-body">
-          <div class="ex-trigger">💬 채팅창에 &nbsp;<code>/test-all</code>&nbsp; 입력 (/implement 후 실행)</div>
-          <div class="ex-block">
-            <div class="ex-block-label input">📄 진행 방식</div>
-            <div class="ex-prose">/implement 로 수정된 파일 전체에 대해 단위 테스트를 자동 생성합니다. 기존 테스트 파일이 있으면 추가, 없으면 새로 생성합니다.</div>
-          </div>
-          <div class="ex-block">
-            <div class="ex-block-label output">✅ 생성된 테스트</div>
-            <pre class="ex-code">CouponServiceImplTest.java (신규)
-  ✔ issueCoupon_success
-  ✔ issueCoupon_duplicate_throws
-  ✔ applyCoupon_expired_throws
-  ✔ applyCoupon_valid_returns_discount
+[3/4] CouponServiceImpl.java
+  → 쿠폰 중복 발급 방지 로직 포함
+  → 만료 쿠폰 예외 처리 포함
 
-OrderServiceTest.java (기존 파일에 추가)
-  ✔ createOrder_with_coupon_applies_discount</pre>
+[4/4] CouponController.java
+  → POST /api/coupons/issue
+  → POST /api/coupons/apply/{orderId}
+
+※ 위 지시서를 검토 후 직접 코드에 반영하세요.</pre>
           </div>
         </div>
       </div>
@@ -1085,16 +1020,16 @@ OrderServiceTest.java (기존 파일에 추가)
           </div>
         </div>
 
-        <a href="https://ib.ixpertops.cloud/downloads/iXpert_AI-Assistant-Intelli-1.0-SNAPSHOT.zip" download
+        <a href="https://ib.ixpertops.cloud/downloads/ixpert-ai-assistant-1.0.0.vsix" download
            style="display:inline-flex;align-items:center;gap:.5rem;margin-bottom:1.4rem;padding:.5rem 1rem;background:rgba(125,207,255,.1);border:1px solid rgba(125,207,255,.25);border-radius:8px;font-size:.82rem;font-weight:700;color:var(--cyan);text-decoration:none;">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          .zip 다운로드
+          .vsix 다운로드
         </a>
 
         <div style="display:flex;flex-direction:column;gap:.75rem;">
           <div class="phase2-step" style="padding:.9rem 1rem;gap:.9rem;">
             <span class="step-num" style="flex-shrink:0;">1</span>
-            <div><div style="font-size:.85rem;font-weight:700;margin-bottom:.2rem;">zip 파일 저장</div><div style="font-size:.78rem;color:var(--muted);">위 버튼으로 파일을 로컬에 다운로드합니다.</div></div>
+            <div><div style="font-size:.85rem;font-weight:700;margin-bottom:.2rem;">vsix 파일 저장</div><div style="font-size:.78rem;color:var(--muted);">위 버튼으로 파일을 로컬에 다운로드합니다.</div></div>
           </div>
           <div class="phase2-step" style="padding:.9rem 1rem;gap:.9rem;">
             <span class="step-num" style="flex-shrink:0;">2</span>
@@ -1118,11 +1053,11 @@ OrderServiceTest.java (기존 파일에 추가)
     <div class="layer-grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));">
       <div class="layer-card">
         <div class="layer-name">Base URL</div>
-        <p><code style="color:var(--cyan);font-size:.8rem;">http://ollama.ixpertops.cloud</code></p>
+        <p><code style="color:var(--cyan);font-size:.8rem;">http://vllm.ixpertops.cloud</code></p>
       </div>
       <div class="layer-card">
         <div class="layer-name">Model</div>
-        <p><code style="color:var(--cyan);font-size:.8rem;">qwen3-coder:30b</code></p>
+        <p><code style="color:var(--cyan);font-size:.8rem;">Qwen/Qwen3.6-35B-A3B-FP8</code></p>
       </div>
       <div class="layer-card">
         <div class="layer-name">Context Window</div>
@@ -1149,7 +1084,6 @@ OrderServiceTest.java (기존 파일에 추가)
     <div class="stack-chip"><span class="chip-dot" style="background:#61dafb;"></span>React 18 + TypeScript</div>
     <div class="stack-chip"><span class="chip-dot" style="background:#bb9af7;"></span>Vite + vite-plugin-singlefile</div>
     <div class="stack-chip"><span class="chip-dot" style="background:#7dcfff;"></span>JCEF (Chromium Embedded)</div>
-    <div class="stack-chip"><span class="chip-dot" style="background:#9ece6a;"></span>Ollama (on-prem LLM)</div>
     <div class="stack-chip"><span class="chip-dot" style="background:#9ece6a;"></span>OpenAI-compatible API</div>
     <div class="stack-chip"><span class="chip-dot" style="background:#ff9e64;"></span>Gradle 8 + Kotlin DSL</div>
     <div class="stack-chip"><span class="chip-dot" style="background:#7aa2f7;"></span>JVM 17</div>

@@ -33,6 +33,21 @@ class ImproveAction : AnAction() {
         val improveRequest = "/improve 선택된 코드를 분석하고 최선의 방법으로 개선해주세요."
         val context = AgentContext(project, editor, improveRequest)
 
+        // 4순위: 에디터에 코드가 없는 경우 안내 메시지 후 종료
+        if (!hasSelection && editor.document.text.isBlank()) {
+            ApplicationManager.getApplication().invokeLater {
+                bridge.sendMessage("task_start", "", messageId)
+                bridge.sendMessage(
+                    subType   = "task_step",
+                    content   = "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요.",
+                    messageId = messageId,
+                    meta      = mapOf("applyable" to "false", "isSuccess" to "true")
+                )
+                bridge.sendMessage("task_success", "완료되었습니다.", messageId)
+            }
+            return
+        }
+
         // 선택 영역 없이 전체 파일이 1500줄 이상인 경우 사전 안내 말풍선 출력
         if (!hasSelection && editor.document.lineCount >= 1500) {
             val warnMsgId = "${messageId}_warn"
@@ -53,15 +68,40 @@ class ImproveAction : AnAction() {
 
         val stepNotiIdx = intArrayOf(0)
         val onStepStart = { stepLabel: String, stepMsgId: String, isApplyable: Boolean ->
-            logger.info("ImproveAction: Step 시작 → $stepLabel (stepMsgId=$stepMsgId, isApplyable=$isApplyable)")
+            logger.info("ImproveAction: Step 시작 → $stepLabel | messageId=$messageId | stepMsgId=$stepMsgId | isStep1=${stepMsgId == messageId}")
             val notiId = "${messageId}_noti_${stepNotiIdx[0]}"
             stepNotiIdx[0]++
             ApplicationManager.getApplication().invokeLater {
                 bridge.sendMessage("step_noti", stepLabel, notiId, mapOf("status" to "started"))
                 if (stepMsgId == messageId) {
-                    // Step 1: 기존 말풍선에 진행 상태 업데이트 + 분석 대상 tool_noti 전송
-                    bridge.sendMessage("task_progress", "$stepLabel LLM 응답 대기 중...", stepMsgId)
+                    // Step 1: 분석 대상 배너 (ExplainAgent와 동일한 YAML 형식)
                     val scopeText = if (hasSelection) "선택 범위" else "전체 파일"
+                    val languageId = editor.virtualFile?.extension?.uppercase() ?: "Unknown"
+                    val dateStr = java.time.LocalDate.now()
+                        .format(java.time.format.DateTimeFormatter.ISO_DATE)
+                    logger.info("ImproveAction: [배너 전송] file=$fileName, lang=$languageId, scope=$scopeText, msgId=$stepMsgId")
+                    val bannerYaml = """
+                        ```yaml
+                        ---
+                        file: "$fileName"
+                        language: "$languageId"
+                        scope: "$scopeText"
+                        analyzed_date: "$dateStr"
+                        ---
+                        ```
+
+                    """.trimIndent()
+                    val bannerTitle = "### 🔧 개선 대상: `$fileName` ($scopeText)\n\n"
+                    // task_chunk: 기존 버블(stepMsgId)에 append — task_step은 completion event라 streaming 상태 리셋됨
+                    bridge.sendMessage(
+                        subType   = "task_chunk",
+                        content   = bannerYaml + bannerTitle,
+                        messageId = stepMsgId,
+                        meta      = emptyMap()
+                    )
+                    logger.info("ImproveAction: [배너 전송 완료] msgId=$stepMsgId")
+                    // 기존: 진행 상태 + 분석 대상 tool_noti
+                    bridge.sendMessage("task_progress", "$stepLabel LLM 응답 대기 중...", stepMsgId)
                     bridge.sendMessage("tool_noti", "분석 대상 확정: $fileName ($scopeText)", stepMsgId)
                 } else if (!isApplyable && stepMsgId.endsWith("_s3")) {
                     // Step 3: 안정성 평가 - 새 말풍선 생성 후 tool_noti

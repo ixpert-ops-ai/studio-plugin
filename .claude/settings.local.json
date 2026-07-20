@@ -21,7 +21,8 @@
       "Read(//Users/jeongjunlee/Library/Application Support/Google/AndroidStudio2025.3.1/options/**)",
       "Bash(sed -i '' '/<option name=\"firstRun\"/d' \"/Users/jeongjunlee/Library/Application Support/Google/AndroidStudio2025.3.4/options/WuwAgentSettings.xml\" && echo \"초기화 완료\")",
       "Bash(npm run *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(grep \"\\\\.kt$\")"
     ]
   }
 }
