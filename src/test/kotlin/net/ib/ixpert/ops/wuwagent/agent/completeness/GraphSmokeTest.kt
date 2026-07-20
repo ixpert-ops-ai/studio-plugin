@@ -19,13 +19,13 @@ class GraphSmokeTest {
         val graph = Gson().fromJson(json, ProjectGraph::class.java)
         
         assertNotNull(graph)
-        println("Loaded ISM Graph: ${graph.resourceNodes.size} resource nodes, ${graph.sourceNodes.size} source nodes")
+        println("Loaded ISM Graph: ${graph.resourceNodes.size} resource nodes, ${graph.files.size} source nodes")
         
-        val mappers = graph.sourceNodes.filter { it.fileType == "MAPPER" }
-        println("Found ${mappers.size} mappers.")
+        val mappers = graph.files.values.filter { it.dependsOn.isNotEmpty() }
+        println("Found ${mappers.size} nodes with dependencies.")
         if (mappers.isNotEmpty()) {
             val sample = mappers.first()
-            println("Sample Mapper: ${sample.className}, layerHint: ${sample.layerHint}")
+            println("Sample Node: ${sample.className}, layer: ${sample.layer}")
             println("Dependencies: ${sample.dependsOn}")
             println("Injections: ${sample.injections}")
         }
@@ -42,13 +42,13 @@ class GraphSmokeTest {
         val graph = Gson().fromJson(json, ProjectGraph::class.java)
         
         assertNotNull(graph)
-        println("Loaded APC Graph: ${graph.resourceNodes.size} resource nodes, ${graph.sourceNodes.size} source nodes")
+        println("Loaded APC Graph: ${graph.resourceNodes.size} resource nodes, ${graph.files.size} source nodes")
         
-        val svcs = graph.sourceNodes.filter { it.fileType == "SERVICE_IMPL" }
-        println("Found ${svcs.size} SVCs.")
+        val svcs = graph.files.values.filter { it.dependsOn.isNotEmpty() }
+        println("Found ${svcs.size} nodes with dependencies.")
         if (svcs.isNotEmpty()) {
             val sample = svcs.first()
-            println("Sample SVC: ${sample.className}, layerHint: ${sample.layerHint}")
+            println("Sample Node: ${sample.className}, layer: ${sample.layer}")
             println("Dependencies: ${sample.dependsOn}")
             println("Injections: ${sample.injections}")
         }

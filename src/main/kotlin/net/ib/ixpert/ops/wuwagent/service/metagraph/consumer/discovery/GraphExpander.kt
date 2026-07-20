@@ -314,6 +314,7 @@ class GraphExpander(
             "ABSTRACT_CLASS" -> true
             "INTERFACE" -> true
             "DTO" -> true
+            "DATA_ACCESS" -> true
             else -> false
         }
     }

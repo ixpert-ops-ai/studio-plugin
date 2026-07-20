@@ -83,7 +83,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                     }
                 }
             } else {
-                onChunk?.invoke("> ⚠️ **선택이 취소되었거나 타임아웃 되었습니다. 전체 프로젝트를 대상으로 진행합니다.**\n")
+                onChunk?.invoke("> \uD83D\uDCA1 **Tip:** 전체 ${projectGraph.totalFileCount}개 파일을 대상으로 탐색 중입니다. Project 뷰에서 관련 패키지를 선택 후 실행하시면 분석의 정확도와 속도가 크게 향상됩니다.\n\n")
                 projectGraph
             }
         } else {

@@ -175,4 +175,77 @@ class IsmGuardIntegrationTest {
         // And there should be exactly 16 accepted debts recorded in the engine report.
         assertEquals("There should be 16 accepted debts", 16, evaluation.acceptedDebts.size)
     }
+
+    @Test
+    fun `diagnose isolated mappers against the known 16 cases`() {
+        val expectedIsolatedMappers = setOf(
+            "WFCCTBCCY004Mapper",
+            "StStdCdMapper_b",
+            "PADMSU23P014TrxMapper",
+            "WFCCTBCCY004TrxMapper",
+            "ECCSTBCST010TrxMapper",
+            "BatchJobTrxMapper",
+            "StStdCdMlTrxMapper",
+            "CcSiteBaseTrxMapper",
+            "StUsrWkLogTrxMapper",
+            "OrderRestoreBatchMapper",
+            "BatchJobMapper",
+            "StBatchLogMapper",
+            "StUsrWkLogMapper",
+            "BatchJobExecutionMapper",
+            "BatchStepExecutionMapper",
+            "BatchJobExecutionParamsMapper"
+        )
+
+        // Find all DAO_INTERFACE (Mappers) in the graph
+        val allMappers = ismGraph.files.values.filter { 
+            FileKindClassifier.classify(it.path, matchContext) == FileKind.DAO_INTERFACE 
+        }.map { it.path }.toSet()
+
+        // To simulate a static scan that triggers ON_ANY_CHANGE, we pass all mapper paths as requiredFiles
+        val srFacts = SrFacts(
+            hasUserAction = false,
+            readsOrWritesData = true,
+            hasBusinessLogic = false,
+            touchesUi = false,
+            addsNewMethod = true
+        )
+
+        // Evaluate all mappers using the empty debt registry so we see all raw violations
+        val pureEngine = CompletenessEngine(matchContext, JsonKnownDebtRegistry.empty())
+        val evaluation = pureEngine.evaluate(ismGraph.frameworkType, allMappers, srFacts)
+
+        // Filter violations specifically for missing MYBATIS_XML where the anchor was a DAO_INTERFACE
+        val xmlViolations = evaluation.companionViolations.filter { 
+            it.companionKind == FileKind.MYBATIS_XML && 
+            !it.result.existsInGraph 
+        }
+
+        // Extract class names from the violating anchor paths
+        val actualIsolatedMappers = xmlViolations.map { violation ->
+            matchContext.baseName(violation.anchorPath).removeSuffix(".java")
+        }.toSet()
+
+        println("=== Static Isolation Diagnosis ===")
+        println("Expected Count: ${expectedIsolatedMappers.size}")
+        println("Actual Count  : ${actualIsolatedMappers.size}")
+        
+        val falseNegatives = expectedIsolatedMappers - actualIsolatedMappers
+        val falsePositives = actualIsolatedMappers - expectedIsolatedMappers
+        val truePositives = expectedIsolatedMappers.intersect(actualIsolatedMappers)
+
+        println("\n[1. 양쪽 다 있는 것 (정확히 재현 - True Positive)] - ${truePositives.size}건")
+        truePositives.sorted().forEach { println("  - $it") }
+
+        println("\n[2. 정답에 있는데 엔진이 놓친 것 (False Negative)] - ${falseNegatives.size}건")
+        falseNegatives.sorted().forEach { println("  - $it") }
+
+        println("\n[3. 엔진이 잡았는데 정답에 없는 것 (신규 또는 False Positive)] - ${falsePositives.size}건")
+        falsePositives.sorted().forEach { println("  - $it") }
+        
+        // Assertions locked in after successful diagnostic run
+        assertEquals("Should not miss any known isolated mappers", 0, falseNegatives.size)
+        assertEquals("Should not falsely report any new isolated mappers", 0, falsePositives.size)
+        assertEquals("Should exactly reproduce all 16 isolated mappers", 16, truePositives.size)
+    }
 }
