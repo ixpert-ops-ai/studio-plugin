@@ -577,7 +577,7 @@ sealed class TaskPipeline {
                 chatFallbackMessage = "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
             ),
             AgentStep("2/3 코드 개선", "improve_prompt.txt", isApplyable = false, usesPromptVars = true),
-            AgentStep("3/3 안정성 평가", "stability_check_prompt.txt", isApplyable = false, isStabilityStep = true)
+            AgentStep("3/3 안정성 평가", "improve_stability_check_prompt.txt", isApplyable = false, isStabilityStep = true)
         )
     }
 
