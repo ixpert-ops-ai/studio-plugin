@@ -571,13 +571,13 @@ sealed class TaskPipeline {
         override val steps = listOf(
             AgentStep(
                 label               = "1/3 개선 분석",
-                promptFile          = "improve_analysis_prompt.txt",
+                promptFile          = "improve_step1_analysis_prompt.txt",
                 isApplyable         = false,
                 usesPromptVars      = true,
                 chatFallbackMessage = "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
             ),
-            AgentStep("2/3 코드 개선", "improve_prompt.txt", isApplyable = false, usesPromptVars = true),
-            AgentStep("3/3 안정성 평가", "improve_stability_check_prompt.txt", isApplyable = false, isStabilityStep = true)
+            AgentStep("2/3 코드 개선", "improve_step2_code_prompt.txt", isApplyable = false, usesPromptVars = true),
+            AgentStep("3/3 안정성 평가", "improve_step3_stability_prompt.txt", isApplyable = false, isStabilityStep = true)
         )
     }
 

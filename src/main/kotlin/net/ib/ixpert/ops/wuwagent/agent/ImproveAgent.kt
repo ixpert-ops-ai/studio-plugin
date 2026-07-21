@@ -17,6 +17,6 @@ class ImproveAgent : BaseAgent() {
         val code = EditorContextService.extractCode(editor, context.project)
         if (code.isBlank()) { onError("[알림] 분석할 코드를 도출하지 못했습니다."); return }
         callLlmAsync(context.project, "iXpert AI Assistant: Improving Code",
-            PromptManager.loadPrompt("improve_prompt.txt"), code, onSuccess, onError)
+            PromptManager.loadPrompt("improve_step2_code_prompt.txt"), code, onSuccess, onError)
     }
 }
