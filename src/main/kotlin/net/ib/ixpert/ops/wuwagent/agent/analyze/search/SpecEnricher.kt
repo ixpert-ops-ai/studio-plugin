@@ -131,6 +131,14 @@ class SpecEnricher(private val frameworkType: FrameworkType) {
                 - ModelAndView 또는 String으로 뷰 반환
             """.trimIndent()
 
+            FrameworkType.ANDROID -> """
+                - Android 규칙 적용
+                - Activity/Fragment로 UI 구성, ViewModel로 상태 관리
+                - Composable 함수로 Jetpack Compose UI 작성
+                - Repository 패턴으로 데이터 접근
+                - Hilt/Koin 등으로 의존성 주입
+            """.trimIndent()
+
             FrameworkType.CUSTOM, FrameworkType.SPRING_BOOT, FrameworkType.ANYFRAME -> """
                 - 프레임워크 특정 규칙 없음
                 - 프로젝트 기존 코드의 구조와 네이밍 컨벤션을 따를 것

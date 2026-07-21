@@ -11,6 +11,43 @@ object FrameworkDetector {
      * 메타그래프 노드들을 분석하여 프레임워크 타입을 추론합니다.
      */
     fun detectFramework(files: Map<String, FileNode>, resourceNodes: List<ResourceNode> = emptyList()): FrameworkDetectionResult {
+        // 규칙 0: Android (Spring/Anyframe보다 먼저 감지)
+
+        // 조건 1: AndroidManifest.xml — ResourceScanner에서 CONFIG 타입으로 수집됨
+        val hasManifest = resourceNodes.any { it.path.endsWith("AndroidManifest.xml") }
+
+        // 조건 2: superClass/interface FQN이 android. 또는 androidx. 로 시작하는 파일 존재
+        // SpringAnnotationResolver는 superClass를 qualifiedName(FQN)으로 저장하므로 prefix 체크가 정확함
+        // (이전 contains(base) 방식은 Spring 클래스명에도 걸려 오탐 발생 가능)
+        val hasAndroidInheritance = files.values.any { node ->
+            node.superClass?.let { sc -> sc.startsWith("android.") || sc.startsWith("androidx.") } == true ||
+            node.implementedInterfaces.any { iface -> iface.startsWith("android.") || iface.startsWith("androidx.") }
+        }
+
+        // 조건 3: Android 전용 클래스 레벨 애노테이션
+        // @Composable은 함수 레벨이라 extractAnnotationNames(psiClass.annotations)에 수집 안 됨 → 제외
+        // @HiltViewModel, @AndroidEntryPoint는 클래스 레벨로 실제 수집됨
+        val hasAndroidAnnotation = files.values.any { node ->
+            node.annotations.any { ann -> ann == "HiltViewModel" || ann == "AndroidEntryPoint" }
+        }
+
+        // (구 조건 4 제거: android./androidx. 비율 30% 기준 — Android 프로젝트에서도
+        //  직접 상속 파일은 5~15% 수준이라 거의 미달. 조건 2가 더 정확하게 커버함)
+
+        if (hasManifest || hasAndroidInheritance || hasAndroidAnnotation) {
+            val reasons = buildList {
+                if (hasManifest) add("AndroidManifest.xml 파일이 발견되었습니다.")
+                if (hasAndroidInheritance) add("android./androidx. 패키지를 상속하는 클래스가 발견되었습니다.")
+                if (hasAndroidAnnotation) add("Android 전용 클래스 애노테이션(@HiltViewModel, @AndroidEntryPoint)이 발견되었습니다.")
+            }
+            return FrameworkDetectionResult(
+                detected = FrameworkType.ANDROID,
+                confidence = 90,
+                reasons = reasons,
+                alternativeCandidates = emptyList()
+            )
+        }
+
         // 규칙 1: Anyframe AP
         val hasSVCImpl = files.values.any { it.className.contains("SVCImpl") }
         val hasBIZ = files.values.any { it.className.contains("BIZ") && it.layer == ArchitectureLayer.BUSINESS }

@@ -34,8 +34,12 @@ enum class FrameworkType(
         DaoPattern.SQL_SESSION, VoStrategy.PLAIN_POJO_DTO
     ),
     ANYFRAME_AP(
-        "Anyframe Enterprise", true, false, false, false, 
+        "Anyframe Enterprise", true, false, false, false,
         DaoPattern.ANYFRAME_DEM_DQM, VoStrategy.LAYERED_SVO_BVO_DVO
+    ),
+    ANDROID(
+        "Android", false, true, false, false,
+        DaoPattern.UNKNOWN, VoStrategy.NONE
     ),
     CUSTOM(
         "기타 (Custom)", false, true, true, false, 

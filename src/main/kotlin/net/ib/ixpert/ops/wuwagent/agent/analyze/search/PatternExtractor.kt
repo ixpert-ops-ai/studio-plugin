@@ -63,6 +63,7 @@ class PatternExtractor(private val frameworkType: FrameworkType) {
             FrameworkType.SPRING_BOOT_MYBATIS -> listOf("Controller", "ServiceImpl", "Service", "Mapper")
             FrameworkType.SPRING_BOOT_JDBC -> listOf("Controller", "ServiceImpl", "Service", "Dao", "Repository")
             FrameworkType.SPRING_MVC_MYBATIS -> listOf("Controller", "ServiceImpl", "Service", "Dao", "DaoImpl")
+            FrameworkType.ANDROID -> listOf("Activity", "Fragment", "ViewModel", "Composable", "Service", "Repository")
             FrameworkType.CUSTOM, FrameworkType.SPRING_BOOT, FrameworkType.ANYFRAME -> listOf("Controller", "Service", "Dao", "Impl")
         }
 
