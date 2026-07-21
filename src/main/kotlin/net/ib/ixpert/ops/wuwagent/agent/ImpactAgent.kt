@@ -89,7 +89,10 @@ class ImpactAgent : BaseAgent() {
 
                 // Step 2: 프롬프트 생성
                 val vars = ImpactFormatter.toPromptVariables(analysisResult, codeToAnalyze, languageId)
-                val systemPrompt = PromptManager.loadPromptWithVars("impact_prompt.txt", vars)
+                val isAndroid = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state.frameworkType ==
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANDROID
+                val impactPromptFile = if (isAndroid) "impact_android_prompt.txt" else "impact_prompt.txt"
+                val systemPrompt = PromptManager.loadPromptWithVars(impactPromptFile, vars)
                 val summaryHeader = ImpactFormatter.buildSummaryHeader(analysisResult)
                 val userMessage = "$summaryHeader\n\n위 분석 결과를 바탕으로 상세한 영향도 분석을 수행해 주세요."
 
