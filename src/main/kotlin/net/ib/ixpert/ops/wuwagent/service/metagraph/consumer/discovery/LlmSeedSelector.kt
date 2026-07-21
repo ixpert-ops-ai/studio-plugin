@@ -28,8 +28,10 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             tokens.any { token -> name.lowercase().startsWith(token) }
         }
 
-        val candidatesList = if (matchedBackend.isEmpty() && matchedFrontend.isEmpty()) {
-            println("[LlmSeedSelector] Lexical Pre-filter matched 0 candidates. Falling back to BM25.")
+        val candidatesList = run {
+            val b = matchedBackend.map { "${it.className} (${it.packageName})" }
+            val f = matchedFrontend.map { "${it.path.substringAfterLast('/')} (${it.path.substringBeforeLast('/', "")})" }
+            val track1 = (b + f)
             
             fun tokenize(text: String): List<String> {
                 val words = text.lowercase().replace(Regex("[^a-z0-9가-힣\\s]"), " ")
@@ -93,8 +95,10 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             }.sortedByDescending { it.second }
             
             val topN = 30
-            val res = scores.take(topN).map { it.first }.distinct()
-            println("[LlmSeedSelector] BM25 Top $topN candidates selected out of $N.")
+            val track2 = scores.take(topN).map { it.first }
+            
+            println("[LlmSeedSelector] Track 1 (Lexical) matched ${track1.size} candidates.")
+            println("[LlmSeedSelector] Track 2 (BM25) selected top $topN candidates out of $N.")
             
             // Temporary logging for Ground Truth rank
             val gtClasses = setOf("APCMMSmpySpacdBIZ", "APCMMSmpyCardRgSVO", "APCMMSmpyUsrrCtfInfSVO")
@@ -104,14 +108,9 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
                 }
             }
             
-            res
-        } else {
-            println("[LlmSeedSelector] Lexical Pre-filter matched ${matchedBackend.size + matchedFrontend.size} candidates.")
-            val b = matchedBackend.map { "${it.className} (${it.packageName})" }
-            val f = matchedFrontend.map { "${it.path.substringAfterLast('/')} (${it.path.substringBeforeLast('/', "")})" }
-            val res = (b + f).distinct()
-            println("[LlmSeedSelector] Candidates: $res")
-            res
+            val union = (track1 + track2).distinct()
+            println("[LlmSeedSelector] Final Candidates (Union, count=${union.size}): $union")
+            union
         }
 
         
