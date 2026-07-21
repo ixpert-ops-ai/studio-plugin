@@ -83,8 +83,18 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                     }
                 }
             } else {
-                onChunk?.invoke("> \uD83D\uDCA1 **Tip:** 전체 ${projectGraph.totalFileCount}개 파일을 대상으로 탐색 중입니다. Project 뷰에서 관련 패키지를 선택 후 실행하시면 분석의 정확도와 속도가 크게 향상됩니다.\n\n")
-                projectGraph
+                val hardLimit = 200 // [잠정값] 대형 프로젝트 Stage 0.5 스킵 방지 임계값 (member-market 105, survey 137 통과 / APC 2,419 차단 실측치 기반)
+                if (projectGraph.totalFileCount > hardLimit) {
+                    val msg = "> 📦 **대상 파일이 너무 많습니다 (${projectGraph.totalFileCount}개)**\n" +
+                              "> 파일이 많아 이 상태로는 정확한 대상을 좁히기 어렵습니다. 아래 중 하나를 진행해 주세요:\n" +
+                              "> - **범위 좁히기** — 작업과 관련된 폴더/패키지를 선택해 다시 실행해 주세요. (권장)\n" +
+                              "> - **전역 공통 변경인 경우** — 만약 여러 도메인에 공통으로 적용되는 변경(예: 전 API 공통 로깅)이라면, 개별 파일 수정보다 공통 모듈(AOP/인터셉터/부모 클래스) 관점에서 접근하는 것이 적절합니다.\n"
+                    onChunk?.invoke(msg)
+                    throw IllegalArgumentException("대상 파일이 너무 많습니다 (${projectGraph.totalFileCount}개). 폴더/패키지를 선택하여 범위를 좁히거나, 공통 모듈 관점에서 요구사항을 재정의해 주세요.")
+                } else {
+                    onChunk?.invoke("> \uD83D\uDCA1 **Tip:** 전체 ${projectGraph.totalFileCount}개 파일을 대상으로 탐색 중입니다. Project 뷰에서 관련 패키지를 선택 후 실행하시면 분석의 정확도와 속도가 크게 향상됩니다.\n\n")
+                    projectGraph
+                }
             }
         } else {
             projectGraph
