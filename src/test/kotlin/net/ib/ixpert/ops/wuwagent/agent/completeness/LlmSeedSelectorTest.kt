@@ -13,6 +13,17 @@ import org.junit.Test
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ArchitectureLayer
 
+/**
+ * [Characterization Test]
+ * 이 테스트는 현재 `LlmSeedSelector`의 Track 1 (Lexical Pre-filter) 동작과 그 한계(유실 버그)를 
+ * 있는 그대로 관찰하고 박제하기 위한 테스트입니다.
+ * 
+ * - 현재 `testPartialMatching`은 별도의 실패(red) 단언(assertion) 없이 프롬프트 후보군을 출력(println)만 하며 정상 통과(green)합니다.
+ * - 7번 케이스에서 `ChatMessage`가 유실되는 현상은 **현재 시스템의 알려진 버그**입니다.
+ * - 향후 Track 1/2 병렬 실행 및 순위 기반 융합(RRF) 리팩토링이 완료되면, 
+ *   이 테스트에 명시적인 Assertion을 추가하여 7번 케이스에서 `ChatMessage`가 유실되지 않고 
+ *   반드시 후보군에 포함됨을 검증(green)하도록 업데이트해야 합니다.
+ */
 class LlmSeedSelectorTest {
     
     @Test
