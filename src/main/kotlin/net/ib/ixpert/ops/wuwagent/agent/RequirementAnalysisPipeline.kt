@@ -83,7 +83,11 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                     }
                 }
             } else {
-                val hardLimit = 200 // [잠정값] 대형 프로젝트 Stage 0.5 스킵 방지 임계값 (member-market 105, survey 137 통과 / APC 2,419 차단 실측치 기반)
+                // 잠정 보수적 임계값 (정밀 경계 아님).
+                // 실측 근거: member-market(105), survey-admin(137) skip 시 안전 / APC(2,670) skip 시 recall 0%.
+                // 138~2,669 구간은 미검증 — 이 값이 정당한 로컬 SR을 오차단할 가능성 있음. 
+                // 향후 150~2000 규모의 SR 케이스 확보 시 재조정 요망.
+                val hardLimit = 200
                 if (projectGraph.totalFileCount > hardLimit) {
                     val msg = "> 📦 **대상 파일이 너무 많습니다 (${projectGraph.totalFileCount}개)**\n" +
                               "> 파일이 많아 이 상태로는 정확한 대상을 좁히기 어렵습니다. 아래 중 하나를 진행해 주세요:\n" +
