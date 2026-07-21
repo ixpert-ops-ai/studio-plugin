@@ -35,21 +35,26 @@ class RelevanceScorer(
             }
 
             if (fileNode != null) {
-                // NameMatchScore
+                // NameMatchScore for FileNode
                 var nameMatchScore = 0
-                if (keywords.nouns.any { fileNode.className.contains(it, ignoreCase = true) }) {
-                    nameMatchScore = 20
-                } else if (keywords.english.any { fileNode.className.contains(it, ignoreCase = true) }) {
-                    nameMatchScore = 20
+                if (keywords.directEnglish.any { eng -> fileNode.className.contains(eng, ignoreCase = true) }) {
+                    nameMatchScore = 30
+                } else if (keywords.translatedEnglish.any { eng -> fileNode.className.contains(eng, ignoreCase = true) }) {
+                    nameMatchScore = 15
+                } else if (keywords.weakTranslatedEnglish.any { eng -> fileNode.className.contains(eng, ignoreCase = true) }) {
+                    nameMatchScore = 7
                 }
 
                 // MethodMatchScore
-                var methodMatchScore = 0
-                val matchedMethods = fileNode.methodNames.count { method ->
-                    keywords.verbs.any { verb -> method.contains(verb, ignoreCase = true) } ||
-                    keywords.english.any { eng -> method.contains(eng, ignoreCase = true) }
+                var matchedMethods = 0
+                fileNode.demMethods?.forEach { dm ->
+                    val method = dm.methodName
+                    if (keywords.verbs.any { verb -> method.contains(verb, ignoreCase = true) } ||
+                        keywords.english.any { eng -> method.contains(eng, ignoreCase = true) }) {
+                        matchedMethods++
+                    }
                 }
-                methodMatchScore = minOf(matchedMethods * 5, 20)
+                val methodMatchScore = minOf(matchedMethods * 5, 20)
 
                 // LayerAlignScore
                 var layerAlignScore = 0
@@ -99,8 +104,12 @@ class RelevanceScorer(
                 // NameMatchScore for ResourceNode (using filename)
                 val fileName = path.substringAfterLast("/")
                 var nameMatchScore = 0
-                if (keywords.english.any { eng -> fileName.contains(eng, ignoreCase = true) }) {
+                if (keywords.directEnglish.any { eng -> fileName.contains(eng, ignoreCase = true) }) {
                     nameMatchScore = 30
+                } else if (keywords.translatedEnglish.any { eng -> fileName.contains(eng, ignoreCase = true) }) {
+                    nameMatchScore = 15
+                } else if (keywords.weakTranslatedEnglish.any { eng -> fileName.contains(eng, ignoreCase = true) }) {
+                    nameMatchScore = 7
                 }
                 
                 // LayerAlignScore
@@ -139,8 +148,24 @@ class RelevanceScorer(
     private val dictionary by lazy { DomainDictionary.load(graph) }
 
     private fun extractKeywords(text: String): ExtractedKeywords {
+        // 순수 아키텍처/레이어 접미사 (도메인 매칭에서 완전히 배제할 단어들)
+        val stopWords = setOf(
+            "controller", "service", "repository", "entity", "dto", "vo", "request", "response", 
+            "mapper", "view", "page", "screen", "api", "impl", "config", "exception", "handler", 
+            "util", "action", "svc", "svo", "dvo", "dao", "bo",
+            "화면", "컨트롤러", "서비스", "레파지토리", "저장소", "엔티티", "디티오", "매퍼", 
+            "액션", "페이지", "에이피아이", "구현체", "인터페이스"
+        )
+        
+        // CRUD 범용 동사 목록 (여기서 파생된 영어 단어는 강등 처리됨)
+        val crudVerbs = setOf("등록", "조회", "수정", "추가", "삭제", "변경", "목록", "상세")
+
         // 간단한 규칙 기반 키워드 추출 (추후 형태소 분석기 연동 가능)
-        val english = Regex("[a-zA-Z]{3,}").findAll(text).map { it.value }.toMutableList()
+        val directEnglish = Regex("[a-zA-Z]{3,}").findAll(text).map { it.value }.toMutableList()
+        directEnglish.removeAll { stopWords.contains(it.lowercase()) }
+        
+        val translatedEnglish = mutableListOf<String>()
+        val weakTranslatedEnglish = mutableListOf<String>()
         
         // 공백 기준 분리 후 어미/조사 단순 제거
         val words = text.split(Regex("\\s+"))
@@ -150,6 +175,7 @@ class RelevanceScorer(
         for (word in words) {
             val cleanWord = word.replace(Regex("[^가-힣a-zA-Z0-9]"), "")
             if (cleanWord.length < 2) continue
+            if (stopWords.contains(cleanWord.lowercase())) continue
             
             if (cleanWord.endsWith("한다") || cleanWord.endsWith("해라") || cleanWord.endsWith("추가") || cleanWord.endsWith("수정") || cleanWord.endsWith("삭제")) {
                 verbs.add(cleanWord.replace("한다", "").replace("해라", ""))
@@ -158,8 +184,12 @@ class RelevanceScorer(
             }
             
             // 한글 명사에 대한 영문 번역(도메인 사전) 추가
-            val translated = dictionary.translate(cleanWord)
-            english.addAll(translated)
+            val translated = dictionary.translate(cleanWord).filterNot { stopWords.contains(it.lowercase()) }
+            if (crudVerbs.any { cleanWord.contains(it) }) {
+                weakTranslatedEnglish.addAll(translated)
+            } else {
+                translatedEnglish.addAll(translated)
+            }
         }
 
         // 특정 핵심 동사들을 추가 (수동 매핑)
@@ -170,12 +200,18 @@ class RelevanceScorer(
         if (text.contains("조회") || text.contains("검색") || text.contains("목록")) verbs.add("get")
         if (text.contains("조회") || text.contains("검색") || text.contains("목록")) verbs.add("find")
 
-        return ExtractedKeywords(nouns, verbs, english)
+        return ExtractedKeywords(nouns, verbs, directEnglish, translatedEnglish, weakTranslatedEnglish)
     }
 
     data class ExtractedKeywords(
         val nouns: List<String>,
         val verbs: List<String>,
-        val english: List<String>
-    )
+        val directEnglish: List<String>,
+        val translatedEnglish: List<String>,
+        val weakTranslatedEnglish: List<String> = emptyList()
+    ) {
+        // Method match 등의 오염을 방지하기 위해 english 프로퍼티에는 weakTranslatedEnglish를 포함하지 않습니다.
+        // 범용 동사 파생어는 오직 NameMatchScore의 7점 매칭에만 사용됩니다.
+        val english: List<String> get() = directEnglish + translatedEnglish
+    }
 }

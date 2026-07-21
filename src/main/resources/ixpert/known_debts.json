@@ -1,0 +1,98 @@
+[
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/cc/WFCCTBCCY004Mapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via source inspection 2026-07 (empty interface with no inline query annotations). Accepted as project technical debt."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/cc/PADMSU23P014TrxMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via source inspection 2026-07 (custom mapper with no inline query annotations). Accepted as project technical debt."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/system/BatchJobMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via source inspection 2026-07 (custom mapper with no inline query annotations). Accepted as project technical debt."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/system/BatchJobExecutionMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via source inspection 2026-07 (custom mapper with no inline query annotations). Accepted as project technical debt."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/cc/WFCCTBCCY004TrxMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/cs/counsel/ECCSTBCST010TrxMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/or/interfaces/OrderRestoreBatchMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/system/StStdCdMapper_b.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/system/StBatchLogMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/system/StUsrWkLogMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/system/BatchJobTrxMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/system/StStdCdMlTrxMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/system/CcSiteBaseTrxMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/system/StUsrWkLogTrxMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/system/BatchStepExecutionMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  },
+  {
+    "anchorFilePath": "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/system/BatchJobExecutionParamsMapper.java",
+    "missingCompanionKind": "MYBATIS_XML",
+    "reason": "ACTUAL_DEBT",
+    "evidence": "Verified TP via 4-sample strong induction 2026-07. Assumed TP as a custom mapper lacking XML."
+  }
+]

@@ -21,7 +21,11 @@ class DomainDictionaryTest {
                     className = "CommonUtil",
                     fileType = SpringFileType.UTIL,
                     layer = ArchitectureLayer.COMMON,
-                    methodNames = listOf("getMember", "getCard", "getLimit")
+                    methods = listOf(
+                        net.ib.ixpert.ops.wuwagent.service.metagraph.model.MethodSignature("getMember", "void", emptyList()),
+                        net.ib.ixpert.ops.wuwagent.service.metagraph.model.MethodSignature("getCard", "void", emptyList()),
+                        net.ib.ixpert.ops.wuwagent.service.metagraph.model.MethodSignature("getLimit", "void", emptyList())
+                    )
                 )
             )
         )

@@ -40,7 +40,7 @@ class FileRelevanceVerifier(
         val reasoning: String
     )
 
-    fun verify(userQuery: String, candidates: List<TargetFileSpec>): VerificationOutput {
+    fun verify(userQuery: String, candidates: List<TargetFileSpec>, additionalSystemPrompt: String = ""): VerificationOutput {
         if (candidates.isEmpty()) return VerificationOutput(candidates, "")
 
         // 신규 파일도 검증 대상에 포함
@@ -118,12 +118,16 @@ class FileRelevanceVerifier(
         val topFiles = targetModifySpecs.take(MAX_BATCH_SIZE)
         val autoKept = targetModifySpecs.drop(MAX_BATCH_SIZE)
 
+        val finalSystemMessage = if (additionalSystemPrompt.isNotBlank()) {
+            "$systemMessage\n\n$additionalSystemPrompt"
+        } else systemMessage
+
         val prompt = buildBatchPrompt(userQuery, topFiles, graph, mdRoot)
         val messages = listOf(net.ib.ixpert.ops.wuwagent.model.ChatMessage(role = "user", content = prompt))
         
         val response = try {
             llmClient.chatWithTools(
-                systemPrompt = systemMessage,
+                systemPrompt = finalSystemMessage,
                 messages = messages,
                 maxTokens = 4000,
                 tools = listOf(tool),
@@ -183,6 +187,31 @@ class FileRelevanceVerifier(
                     if (normalizedVerdict != "UNNECESSARY") {
                         val reason = verdictObj?.reason ?: "Stage 3 검증 통과 (명시적 사유 없음)"
                         verifiedTopFiles.add(spec.copy(description = reason))
+                    }
+                }
+                
+                // [FIX] topFiles에 없었으나 LLM이 새로 추가한 파일(예: Completeness Guard 피드백으로 인한 누락 파일) 처리
+                verdicts.forEach { verdictObj ->
+                    if (verdictObj.verdict == "REQUIRED" && verdictObj.filePath != null) {
+                        val isAlreadyIncluded = verifiedTopFiles.any { 
+                            it.path == verdictObj.filePath ||
+                            it.path.endsWith("/" + verdictObj.filePath.substringAfterLast("/"))
+                        }
+                        if (!isAlreadyIncluded) {
+                            // [FIX] 환각 방지: 메타그래프에 실제 존재하는 노드인지 검증
+                            val className = verdictObj.filePath.substringAfterLast("/").substringBeforeLast(".")
+                            val existsInGraph = graph.files.containsKey(verdictObj.filePath) || 
+                                              graph.files.values.any { it.className.equals(className, ignoreCase = true) }
+                                              
+                            if (existsInGraph) {
+                                verifiedTopFiles.add(TargetFileSpec(
+                                    order = verifiedTopFiles.size + 1,
+                                    path = verdictObj.filePath,
+                                    type = "MODIFY", 
+                                    description = verdictObj.reason ?: "Added by Guard feedback"
+                                ))
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {

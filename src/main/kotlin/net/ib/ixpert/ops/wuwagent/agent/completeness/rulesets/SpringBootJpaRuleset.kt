@@ -1,0 +1,42 @@
+package net.ib.ixpert.ops.wuwagent.agent.completeness.rulesets
+
+import net.ib.ixpert.ops.wuwagent.agent.completeness.model.*
+import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType
+
+object SpringBootJpaRuleset {
+    val value = FrameworkRuleset(
+        frameworkType = FrameworkType.SPRING_BOOT_JPA,
+        roleRealizations = listOf(
+            RoleRealization(
+                role = ArchRole.PERSISTENCE,
+                anchorKind = FileKind.JPA_REPOSITORY,
+                companions = listOf(
+                    CompanionRule(FileKind.SERVICE_IMPL, PairingStrength.RECOMMENDED, MatchStrategy.InjectedByMatch(FileKind.SERVICE_IMPL), CompanionTrigger.ON_ANY_CHANGE),
+                    CompanionRule(FileKind.CONTROLLER, PairingStrength.RECOMMENDED, MatchStrategy.InjectedByMatch(FileKind.CONTROLLER), CompanionTrigger.ON_ANY_CHANGE)
+                ),
+                preferModifyExisting = true
+            ),
+            RoleRealization(
+                role = ArchRole.BUSINESS, 
+                anchorKind = FileKind.SERVICE_IMPL, 
+                companions = listOf(
+                    CompanionRule(FileKind.CONTROLLER, PairingStrength.RECOMMENDED, MatchStrategy.InjectedByMatch(FileKind.CONTROLLER), CompanionTrigger.ON_ANY_CHANGE)
+                ), 
+                preferModifyExisting = true
+            ),
+            RoleRealization(ArchRole.ENTRYPOINT, FileKind.CONTROLLER, emptyList(), false),
+            RoleRealization(
+                role = ArchRole.DATA,
+                anchorKind = FileKind.ENTITY,
+                companions = listOf(
+                    CompanionRule(FileKind.RESPONSE_DTO, PairingStrength.RECOMMENDED,
+                                  MatchStrategy.EntityDtoMatch("Response"), CompanionTrigger.ON_ANY_CHANGE)
+                ),
+                preferModifyExisting = true
+            )
+        ),
+        entrypointRule = EntrypointRule(
+            FileKind.CONTROLLER, EntrypointTrigger.USER_ACTION_PRESENT, CreationPolicy.ALLOW_NEW
+        )
+    )
+}

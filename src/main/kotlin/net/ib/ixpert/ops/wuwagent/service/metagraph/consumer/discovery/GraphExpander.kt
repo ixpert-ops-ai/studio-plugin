@@ -50,6 +50,8 @@ class GraphExpander(
             node?.let { domainExtractor.getDomain(it.path) }
         }.toSet()
 
+        val hop1Queue = mutableListOf<FileNode>()
+        
         // Step A: Seed 파일 해소
         for (className in seedResult.seedClasses) {
             val fileNode = graph.files.values.find { it.className == className }
@@ -67,11 +69,25 @@ class GraphExpander(
                         }
                     }
                 }
+            } else {
+                // 프론트엔드 파일(ResourceNode)인지 확인
+                val resourceNode = graph.resourceNodes.find { it.path.substringAfterLast('/') == className || it.path == className }
+                if (resourceNode != null) {
+                    visited[resourceNode.path] = ExpansionStep(hop = 0, via = "SEED")
+                    // ResourceNode는 FileNode가 아니므로 queue에 추가할 수 없으나, 
+                    // 연결된 Java 파일을 hop1Queue에 넣어 확장을 이어간다.
+                    resourceNode.linkedTo.forEach { linkedPath ->
+                        val linkedJavaNode = graph.files[linkedPath]
+                        if (linkedJavaNode != null && !visited.containsKey(linkedPath)) {
+                            visited[linkedPath] = ExpansionStep(hop = 1, via = "RESOURCE_LINK", from = resourceNode.path)
+                            hop1Queue.add(linkedJavaNode)
+                        }
+                    }
+                }
             }
         }
 
         // Step B: Hop 1 확장 (직접 의존)
-        val hop1Queue = mutableListOf<FileNode>()
         for (node in queue) { // hop 0
             // 상향 탐색: 이 파일을 사용하는 곳 (도메인 제한 적용)
             for (depPath in node.dependedBy) {
@@ -298,6 +314,7 @@ class GraphExpander(
             "ABSTRACT_CLASS" -> true
             "INTERFACE" -> true
             "DTO" -> true
+            "DATA_ACCESS" -> true
             else -> false
         }
     }

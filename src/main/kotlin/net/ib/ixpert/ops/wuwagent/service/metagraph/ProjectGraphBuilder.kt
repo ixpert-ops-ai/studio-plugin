@@ -485,10 +485,25 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         
         // Adaptive File Discovery 지원: 한글 주석 + 메서드명 수집
         val koreanComments = extractKoreanComments(primaryClass)
-        val methodNames = primaryClass.methods.map { it.name }.filter { it != primaryClass.name }
+        val methods = primaryClass.allMethods
+            .filter { !it.isConstructor }
+            .filter { it.containingClass?.qualifiedName != "java.lang.Object" }
+            .map { method ->
+                val returnType = method.returnType?.presentableText ?: "void"
+                val parameters = method.parameterList.parameters.map { param ->
+                    "${param.type.presentableText} ${param.name}"
+                }
+                val isInherited = method.containingClass?.qualifiedName != primaryClass.qualifiedName
+                MethodSignature(
+                    name = method.name,
+                    returnType = returnType,
+                    parameters = parameters,
+                    isInherited = isInherited
+                )
+            }
         node = node.copy(
             koreanComments = koreanComments,
-            methodNames = methodNames
+            methods = methods
         )
         
         return Pair(listOf(relativePath to node), calls)
