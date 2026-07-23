@@ -142,13 +142,13 @@ class GraphExpander(
                 if (node.fileType.name == "REST_CONTROLLER" || node.fileType.name == "CONTROLLER") {
                     continue
                 } else if (node.fileType.name == "SERVICE") {
-                    // Service -> Repository (하향), Service -> Controller (상향)
+                    // Service -> Repository/BIZ/DataAccess (하향), Service -> Controller (상향)
                     for (depPath in node.dependsOn) {
                         if (!visited.containsKey(depPath)) {
                             val depNode = graph.files[depPath]
-                            if (depNode != null && depNode.fileType.name == "REPOSITORY" && isCommonInfrastructure(depNode).not()
+                            if (depNode != null && (depNode.fileType.name == "REPOSITORY" || depNode.fileType.name == "BIZ" || depNode.fileType.name == "DATA_ACCESS") && isCommonInfrastructure(depNode).not()
                                 && isDomainAllowed(depPath, nodePath, seedDomains)) {
-                                visited[depPath] = ExpansionStep(hop = hop, via = "SERVICE_TO_REPO", from = nodePath)
+                                visited[depPath] = ExpansionStep(hop = hop, via = "SERVICE_TO_REPO_OR_BIZ", from = nodePath)
                                 nextQueue.add(depNode)
                             }
                         }
@@ -176,7 +176,34 @@ class GraphExpander(
                             }
                         }
                     }
-                } else if (node.fileType.name == "REPOSITORY") {
+                } else if (node.fileType.name == "BIZ") {
+                    // BIZ -> DATA_ACCESS (하향)
+                    for (depPath in node.dependsOn) {
+                        if (!visited.containsKey(depPath)) {
+                            val depNode = graph.files[depPath]
+                            if (depNode != null && (depNode.fileType.name == "DATA_ACCESS" || depNode.fileType.name == "REPOSITORY")) {
+                                // 하향(BIZ -> DATA_ACCESS) 엣지는 인프라 및 도메인 필터 우회 (Track 2 완화책)
+                                visited[depPath] = ExpansionStep(hop = hop, via = "BIZ_TO_DATA_ACCESS", from = nodePath)
+                                nextQueue.add(depNode)
+                            }
+                        }
+                    }
+                    // BIZ -> SERVICE (상향)
+                    for (depPath in node.dependedBy) {
+                        if (!visited.containsKey(depPath)) {
+                            val depNode = graph.files[depPath]
+                            if (depNode != null && depNode.fileType.name == "SERVICE"
+                                && isCommonInfrastructure(depNode).not()
+                                && isDomainAllowed(depPath, nodePath, seedDomains)) {
+                                visited[depPath] = ExpansionStep(hop = hop, via = "BIZ_TO_SERVICE", from = nodePath)
+                                nextQueue.add(depNode)
+                            }
+                        }
+                    }
+                } else if (node.fileType.name == "REPOSITORY" || node.fileType.name == "DATA_ACCESS") {
+                    // Rule 2: 하향 탐색 중 도달한 데이터 액세스 노드에서는 상향 전파 금지
+                    if (hop > 0) continue
+
                     // Repository -> Service (상향, 도메인 제한 적용)
                     for (depPath in node.dependedBy) {
                         if (!visited.containsKey(depPath)) {
@@ -202,7 +229,12 @@ class GraphExpander(
                         }
                     }
                 } else {
-                    // Entity 등 기타 노드는 상위 의존성(나를 사용하는 곳)으로만 확장 (도메인 제한 적용)
+                    // Rule 2: 하향 탐색 중 도달한 데이터 액세스 노드에서는 무관 도메인으로의 상향 전파를 원천 금지 (Track 1 상향 시드는 hop 0에서 처리됨)
+                    if ((node.fileType.name == "DATA_ACCESS" || node.fileType.name == "REPOSITORY") && hop > 0) {
+                        continue
+                    }
+                    
+                    // Entity 등 기타 노드의 상위 의존성 확장
                     for (depPath in node.dependedBy) {
                         if (!visited.containsKey(depPath)) {
                             val depNode = graph.files[depPath]
