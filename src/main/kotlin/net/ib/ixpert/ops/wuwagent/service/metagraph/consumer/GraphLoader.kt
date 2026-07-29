@@ -62,7 +62,7 @@ class GraphLoader(private val project: Project) {
                 
                 logger.info("Loading project graph from ${metaFile.absolutePath} (targetModules=${targetModules?.joinToString() ?: "ALL"}, level1Only=$level1Only)")
                 val jsonContent = metaFile.readText(Charsets.UTF_8)
-                var parsedGraph = gson.fromJson(jsonContent, ProjectGraph::class.java)
+                var parsedGraph = gson.fromJson(jsonContent, ProjectGraph::class.java).normalizeLegacyCollections()
 
                 // 하위 호환 마이그레이션 로직 및 Alias 처리
                 if (parsedGraph.frameworkType.name == "SPRING_BOOT" || parsedGraph.frameworkType.name == "ANYFRAME" || parsedGraph.frameworkType.name == "ANYFRAME_JAP") {
@@ -138,25 +138,12 @@ class GraphLoader(private val project: Project) {
 
                         try {
                             val moduleJson = moduleMetaFile.readText(Charsets.UTF_8)
-                            val moduleGraph = gson.fromJson(moduleJson, ProjectGraph::class.java)
+                            val moduleGraph = gson.fromJson(moduleJson, ProjectGraph::class.java).normalizeLegacyCollections()
 
                             // 1. 경로 정규화 및 files 병합 (키 충돌 방지)
                             moduleGraph.files.forEach { (localPath, node) ->
                                 val normalizedPath = if (module.rootPath.isNotEmpty()) "${module.rootPath}/$localPath" else localPath
-                                val safeNode = node.copy(
-                                    path = normalizedPath,
-                                    apiEndpoints = node.apiEndpoints ?: emptyList(),
-                                    beanDefinitions = node.beanDefinitions ?: emptyList(),
-                                    entityRelations = node.entityRelations ?: emptyList(),
-                                    dependsOn = node.dependsOn ?: mutableListOf(),
-                                    dependedBy = node.dependedBy ?: mutableListOf(),
-                                    injections = node.injections ?: emptyList(),
-                                    implementedInterfaces = node.implementedInterfaces ?: emptyList(),
-                                    annotations = node.annotations ?: emptyList(),
-                                    methods = node.methods ?: emptyList(),
-                                    koreanComments = node.koreanComments ?: emptyList(),
-                                    dynamicViewFolders = node.dynamicViewFolders ?: emptyList()
-                                )
+                                val safeNode = node.copy(path = normalizedPath)
                                 mergedFiles[normalizedPath] = safeNode
                             }
 
@@ -203,17 +190,8 @@ class GraphLoader(private val project: Project) {
                         val normalizedPath = "$relativeRoot/$localPath"
                         val safeNode = node.copy(
                             path = normalizedPath,
-                            apiEndpoints = node.apiEndpoints ?: emptyList(),
-                            beanDefinitions = node.beanDefinitions ?: emptyList(),
-                            entityRelations = node.entityRelations ?: emptyList(),
-                            dependsOn = (node.dependsOn ?: mutableListOf()).map { if (it.startsWith(relativeRoot)) it else "$relativeRoot/$it" }.toMutableList(),
-                            dependedBy = (node.dependedBy ?: mutableListOf()).map { if (it.startsWith(relativeRoot)) it else "$relativeRoot/$it" }.toMutableList(),
-                            injections = node.injections ?: emptyList(),
-                            implementedInterfaces = node.implementedInterfaces ?: emptyList(),
-                            annotations = node.annotations ?: emptyList(),
-                            methods = node.methods ?: emptyList(),
-                            koreanComments = node.koreanComments ?: emptyList(),
-                            dynamicViewFolders = node.dynamicViewFolders ?: emptyList()
+                            dependsOn = node.dependsOn.map { if (it.startsWith(relativeRoot)) it else "$relativeRoot/$it" }.toMutableList(),
+                            dependedBy = node.dependedBy.map { if (it.startsWith(relativeRoot)) it else "$relativeRoot/$it" }.toMutableList()
                         )
                         normalizedFiles[normalizedPath] = safeNode
                     }
@@ -226,22 +204,7 @@ class GraphLoader(private val project: Project) {
 
                     parsedGraph.copy(files = normalizedFiles, relationships = normalizedRelationships)
                 } else {
-                    val safeFiles = parsedGraph.files.mapValues { (_, node) ->
-                        node.copy(
-                            apiEndpoints = node.apiEndpoints ?: emptyList(),
-                            beanDefinitions = node.beanDefinitions ?: emptyList(),
-                            entityRelations = node.entityRelations ?: emptyList(),
-                            dependsOn = node.dependsOn ?: mutableListOf(),
-                            dependedBy = node.dependedBy ?: mutableListOf(),
-                            injections = node.injections ?: emptyList(),
-                            implementedInterfaces = node.implementedInterfaces ?: emptyList(),
-                            annotations = node.annotations ?: emptyList(),
-                            methods = node.methods ?: emptyList(),
-                            koreanComments = node.koreanComments ?: emptyList(),
-                            dynamicViewFolders = node.dynamicViewFolders ?: emptyList()
-                        )
-                    }
-                    parsedGraph.copy(files = safeFiles)
+                    parsedGraph
                 }
             }
 

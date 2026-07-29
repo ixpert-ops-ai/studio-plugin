@@ -19,6 +19,7 @@ class RelevanceScorer(
         val scoredFiles = mutableListOf<ScoredFile>()
 
         for ((path, step) in expandedFiles) {
+            java.io.File("C:/Workspace/member-market/debug-all-files.txt").appendText("Evaluating: $path\n")
             val fileNode = graph.files[path]
             
             // HopScore (API_ENDPOINT_FALLBACK/INJECTION_FALLBACK은 점수 하향)
@@ -82,8 +83,25 @@ class RelevanceScorer(
                     else -> 0
                 }
 
-                val totalScore = hopScore + nameMatchScore + methodMatchScore + layerAlignScore + commentMatchScore + typeBonusScore
+                // Feature Flag for Critical Chain Bonus (Unverified in Production)
+                // TODO: Set to true once Condition 3 SR real-world validation is acquired
+                val enableCriticalChainBonus = false
 
+                var criticalChainBonus = 0
+                if (enableCriticalChainBonus) {
+                    if (step.via == "BIZ_TO_DATA_ACCESS") {
+                        criticalChainBonus = 55 // Compensate for Hop 3 drop to 0, ensuring minScore (55) is met
+                    } else if (step.via == "SERVICE_TO_REPO_OR_BIZ") {
+                        criticalChainBonus = 20 // Compensate for Hop 2 drop to 40
+                    }
+                }
+
+                val totalScore = hopScore + nameMatchScore + methodMatchScore + layerAlignScore + commentMatchScore + typeBonusScore + criticalChainBonus
+                
+                if (fileNode.className.contains("ACAMTBAPC005DEM") || fileNode.className.contains("Product") || path.contains("ProductCreateView")) {
+                    java.io.File("C:/Workspace/member-market/debug-score.txt").appendText("BREAKDOWN for ${fileNode.className}: hopDistance=${step.hop}, hopScore=$hopScore, nameMatchScore=$nameMatchScore, methodMatchScore=$methodMatchScore, layerAlignScore=$layerAlignScore, commentMatchScore=$commentMatchScore, typeBonusScore=$typeBonusScore, criticalChainBonus=$criticalChainBonus -> totalScore=$totalScore\n")
+                }
+                
                 if (totalScore >= minScore) {
                     scoredFiles.add(
                         ScoredFile(
@@ -119,6 +137,10 @@ class RelevanceScorer(
                 }
                 
                 val totalScore = hopScore + nameMatchScore + layerAlignScore
+                
+                if (fileName.contains("Product") || fileName.contains("ProductCreateView")) {
+                    java.io.File("C:/Workspace/member-market/debug-score.txt").appendText("BREAKDOWN for RESOURCE $fileName: hopDistance=${step.hop}, hopScore=$hopScore, nameMatchScore=$nameMatchScore, layerAlignScore=$layerAlignScore -> totalScore=$totalScore\n")
+                }
                 
                 if (totalScore >= minScore) {
                     scoredFiles.add(
