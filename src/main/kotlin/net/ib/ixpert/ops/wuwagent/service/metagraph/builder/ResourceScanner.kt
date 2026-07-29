@@ -121,6 +121,7 @@ class ResourceScanner(private val projectRoot: Path) {
         return when (file.extension.lowercase()) {
             "xml" -> {
                 when {
+                    file.name == "AndroidManifest.xml" -> ResourceType.CONFIG
                     content.contains("<mapper") && content.contains("namespace") -> ResourceType.MYBATIS_MAPPER
                     content.contains("<queryService") -> ResourceType.MYBATIS_MAPPER // Anyframe
                     content.contains("<beans") || content.contains("<bean ") -> ResourceType.SPRING_XML

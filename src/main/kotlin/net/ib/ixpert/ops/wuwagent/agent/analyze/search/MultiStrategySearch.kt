@@ -104,6 +104,7 @@ class MultiStrategySearch(
                 MatchType.METHOD -> 70.0
                 MatchType.CONTENT -> 35.0
             }
+            FrameworkType.ANDROID,
             FrameworkType.CUSTOM, FrameworkType.SPRING_BOOT, FrameworkType.ANYFRAME, FrameworkType.ANYFRAME_JAP -> when (type) {
                 MatchType.FILENAME -> 90.0
                 MatchType.CLASSNAME -> 90.0

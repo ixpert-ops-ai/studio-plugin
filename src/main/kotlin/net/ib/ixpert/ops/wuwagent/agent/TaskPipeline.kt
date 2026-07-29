@@ -63,6 +63,24 @@ sealed class TaskPipeline {
     ) {
         private val logger = Logger.getInstance(AgentStep::class.java)
 
+        // Improve 파이프라인 전용: frameworkType이 ANDROID면 Android 전용 프롬프트로 교체
+        private val ANDROID_PROMPT_OVERRIDES = mapOf(
+            "improve_step1_analysis_prompt.txt" to "improve_step1_analysis_android_prompt.txt",
+            "improve_step2_code_prompt.txt" to "improve_step2_code_android_prompt.txt",
+            "improve_step3_stability_prompt.txt" to "improve_step3_stability_android_prompt.txt"
+        )
+
+        /**
+         * frameworkType이 ANDROID이고 현재 promptFile이 Android 대응 프롬프트를 가지고 있으면
+         * 해당 프롬프트 파일명으로 교체하여 반환. 그 외에는 promptFile을 그대로 반환.
+         */
+        private fun resolvePromptFile(): String {
+            val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+            val isAndroid = settings.state.frameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANDROID
+            if (!isAndroid) return promptFile
+            return ANDROID_PROMPT_OVERRIDES[promptFile] ?: promptFile
+        }
+
         // ─────────────────────────────────────────────────────────
         //  프롬프트 변수 빌더 (usesPromptVars=true 전용)
         // ─────────────────────────────────────────────────────────
@@ -255,7 +273,7 @@ sealed class TaskPipeline {
                 onToolNoti?.invoke("LLM 호출 중... ($stabilityModel)")
 
                 val stabilitySystemPrompt = PromptManager.loadPromptWithVars(
-                    promptFile, mapOf(
+                    resolvePromptFile(), mapOf(
                         "LANGUAGE"        to language,
                         "ORIGINAL_CODE"   to originalCode,
                         "IMPROVED_CODE"   to improvedCode,
@@ -287,7 +305,7 @@ sealed class TaskPipeline {
             val graphContext = contextAssembler.assemble(context, context.payloadText)
 
             // 프롬프트 파일을 템플릿으로 먼저 로드; 치환은 코드 추출 후 수행
-            val promptTemplate = PromptManager.loadPrompt(promptFile)
+            val promptTemplate = PromptManager.loadPrompt(resolvePromptFile())
 
             var originalCode = ""
             var applyScope   = ""
@@ -483,7 +501,7 @@ sealed class TaskPipeline {
             // usesPromptVars=true이면 코드 추출 결과로 플레이스홀더 치환
             var systemPrompt = if (usesPromptVars && originalCode.isNotBlank()) {
                 onToolNoti?.invoke("코드 구조 추출 중...")
-                PromptManager.loadPromptWithVars(promptFile, buildPromptVars(context, originalCode, applyScope))
+                PromptManager.loadPromptWithVars(resolvePromptFile(), buildPromptVars(context, originalCode, applyScope))
             } else {
                 promptTemplate
             }
@@ -495,7 +513,7 @@ sealed class TaskPipeline {
             val modelName = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state.model
             onToolNoti?.invoke("LLM 호출 중... ($modelName)")
             logger.warn("AgentStep[${label}] INPUT: originalCode 길이=${originalCode.length}, userMessage 길이=${userMessage.length}, prevContext 포함=${prevContext.isNotBlank()}, promptVars=${usesPromptVars}")
-            logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=$promptFile, scope=${applyScope.ifBlank { "file-search" }}, stream=${onChunk != null})")
+            logger.info("AgentStep[${label}]: LLM 호출 시작 (prompt=${resolvePromptFile()}, scope=${applyScope.ifBlank { "file-search" }}, stream=${onChunk != null})")
 
             val filteredOnChunk = onChunk
 
@@ -571,13 +589,13 @@ sealed class TaskPipeline {
         override val steps = listOf(
             AgentStep(
                 label               = "1/3 개선 분석",
-                promptFile          = "improve_analysis_prompt.txt",
+                promptFile          = "improve_step1_analysis_prompt.txt",
                 isApplyable         = false,
                 usesPromptVars      = true,
                 chatFallbackMessage = "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
             ),
-            AgentStep("2/3 코드 개선", "improve_prompt.txt", isApplyable = false, usesPromptVars = true),
-            AgentStep("3/3 안정성 평가", "stability_check_prompt.txt", isApplyable = false, isStabilityStep = true)
+            AgentStep("2/3 코드 개선", "improve_step2_code_prompt.txt", isApplyable = false, usesPromptVars = true),
+            AgentStep("3/3 안정성 평가", "improve_step3_stability_prompt.txt", isApplyable = false, isStabilityStep = true)
         )
     }
 
