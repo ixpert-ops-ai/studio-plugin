@@ -88,7 +88,7 @@ class SpecEnricher(private val frameworkType: FrameworkType) {
 
     private fun getFrameworkBaseRules(): String {
         return when (frameworkType) {
-            FrameworkType.ANYFRAME_AP -> """
+            FrameworkType.ANYFRAME_AP, FrameworkType.ANYFRAME_JAP -> """
                 - Anyframe Enterprise 규칙 적용
                 - Value Object 분리: SVO(서비스), BVO(비즈니스), DVO(데이터)
                 - Service 인터페이스 + SVCImpl 구현체 분리 필수
@@ -129,6 +129,14 @@ class SpecEnricher(private val frameworkType: FrameworkType) {
                 - @Resource 또는 setter를 통한 의존성 주입
                 - XML 매퍼 파일에 SQL 작성
                 - ModelAndView 또는 String으로 뷰 반환
+            """.trimIndent()
+
+            FrameworkType.ANDROID -> """
+                - Android 규칙 적용
+                - Activity/Fragment로 UI 구성, ViewModel로 상태 관리
+                - Composable 함수로 Jetpack Compose UI 작성
+                - Repository 패턴으로 데이터 접근
+                - Hilt/Koin 등으로 의존성 주입
             """.trimIndent()
 
             FrameworkType.CUSTOM, FrameworkType.SPRING_BOOT, FrameworkType.ANYFRAME -> """

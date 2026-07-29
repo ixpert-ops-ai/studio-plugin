@@ -34,8 +34,12 @@ enum class FrameworkType(
         DaoPattern.SQL_SESSION, VoStrategy.PLAIN_POJO_DTO
     ),
     ANYFRAME_AP(
-        "Anyframe Enterprise", true, false, false, false, 
+        "Anyframe Enterprise", true, false, false, false,
         DaoPattern.ANYFRAME_DEM_DQM, VoStrategy.LAYERED_SVO_BVO_DVO
+    ),
+    ANDROID(
+        "Android", false, true, false, false,
+        DaoPattern.UNKNOWN, VoStrategy.NONE
     ),
     CUSTOM(
         "기타 (Custom)", false, true, true, false, 
@@ -50,13 +54,18 @@ enum class FrameworkType(
     ANYFRAME(
         "Anyframe (Legacy)", true, false, false, false, 
         DaoPattern.ANYFRAME_DEM_DQM, VoStrategy.LAYERED_SVO_BVO_DVO
+    ),
+    @Deprecated("Unknown extractor output. Will be aliased to ANYFRAME_AP.")
+    ANYFRAME_JAP(
+        "Anyframe JAP (Alias)", true, false, false, false, 
+        DaoPattern.ANYFRAME_DEM_DQM, VoStrategy.LAYERED_SVO_BVO_DVO
     );
 
     companion object {
         // 기존값 마이그레이션
         fun migrateOldFrameworkType(old: String?): FrameworkType? = when(old) {
             "SPRING_BOOT" -> null  // 자동감지로 재판정
-            "ANYFRAME" -> ANYFRAME_AP
+            "ANYFRAME", "ANYFRAME_JAP" -> ANYFRAME_AP
             else -> null
         }
     }

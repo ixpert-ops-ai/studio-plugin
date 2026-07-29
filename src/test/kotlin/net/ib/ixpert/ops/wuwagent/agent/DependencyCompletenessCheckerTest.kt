@@ -21,7 +21,7 @@ class DependencyCompletenessCheckerTest {
                     className = "Controller",
                     fileType = SpringFileType.CONTROLLER,
                     layer = ArchitectureLayer.PRESENTATION,
-                    methodNames = listOf("doSomething"),
+                    methods = listOf(net.ib.ixpert.ops.wuwagent.service.metagraph.model.MethodSignature("doSomething", "void", emptyList())),
                     injections = listOf(DependencyInjection("com.example.Service", "Service", InjectionMethod.FIELD, null))
                 ),
                 "com/example/Service.java" to FileNode(
@@ -30,7 +30,7 @@ class DependencyCompletenessCheckerTest {
                     className = "Service",
                     fileType = SpringFileType.SERVICE,
                     layer = ArchitectureLayer.BUSINESS,
-                    methodNames = listOf("processKeyword"),
+                    methods = listOf(net.ib.ixpert.ops.wuwagent.service.metagraph.model.MethodSignature("processKeyword", "void", emptyList())),
                     dependedBy = mutableListOf("com/example/Controller.java")
                 )
             )
@@ -60,7 +60,7 @@ class DependencyCompletenessCheckerTest {
                     className = "Controller",
                     fileType = SpringFileType.CONTROLLER,
                     layer = ArchitectureLayer.PRESENTATION,
-                    methodNames = listOf("doSomething"),
+                    methods = listOf(net.ib.ixpert.ops.wuwagent.service.metagraph.model.MethodSignature("doSomething", "void", emptyList())),
                     injections = listOf(DependencyInjection("com.example.StringUtil", "StringUtil", InjectionMethod.FIELD, null))
                 ),
                 "com/example/StringUtil.java" to FileNode(
@@ -69,7 +69,7 @@ class DependencyCompletenessCheckerTest {
                     className = "StringUtil",
                     fileType = SpringFileType.UTIL,
                     layer = ArchitectureLayer.COMMON,
-                    methodNames = listOf("parseKeyword"),
+                    methods = listOf(net.ib.ixpert.ops.wuwagent.service.metagraph.model.MethodSignature("parseKeyword", "void", emptyList())),
                     // dependedBy size >= 10
                     dependedBy = MutableList(10) { "com/example/Class$it.java" }
                 )

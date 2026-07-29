@@ -25,7 +25,7 @@ interface ProjectGraphQueryable {
     val resolvedFrameworkType: FrameworkType
     
     val totalFileCount: Int
-        get() = files.size
+        get() = files.size + resourceNodes.size
         
     fun getAllClassNames(): List<String> = files.values.map { it.className }
 }
@@ -55,6 +55,27 @@ data class ProjectGraph(
 
     fun resolveFrameworkType(): FrameworkType {
         return this.frameworkDetection?.userOverride ?: this.frameworkType
+    }
+
+    fun normalizeLegacyCollections(): ProjectGraph {
+        val safeFiles = this.files.mapValues { (_, node) ->
+            node.copy(
+                apiEndpoints = node.apiEndpoints ?: emptyList(),
+                beanDefinitions = node.beanDefinitions ?: emptyList(),
+                entityRelations = node.entityRelations ?: emptyList(),
+                dependsOn = node.dependsOn ?: mutableListOf(),
+                dependedBy = node.dependedBy ?: mutableListOf(),
+                usesTypes = node.usesTypes ?: mutableListOf(),
+                usedByTypes = node.usedByTypes ?: mutableListOf(),
+                injections = node.injections ?: emptyList(),
+                implementedInterfaces = node.implementedInterfaces ?: emptyList(),
+                annotations = node.annotations ?: emptyList(),
+                methods = node.methods ?: emptyList(),
+                koreanComments = node.koreanComments ?: emptyList(),
+                dynamicViewFolders = node.dynamicViewFolders ?: emptyList()
+            )
+        }
+        return this.copy(files = safeFiles)
     }
 
     @Transient
@@ -101,6 +122,13 @@ data class ProjectGraph(
         }
 }
 
+data class MethodSignature(
+    val name: String,
+    val returnType: String,
+    val parameters: List<String>,
+    val isInherited: Boolean = false
+)
+
 /**
  * 개별 파일(클래스) 노드.
  */
@@ -116,12 +144,13 @@ data class FileNode(
     val superClass: String? = null,
     val implementedInterfaces: List<String> = emptyList(),
     val injections: List<DependencyInjection> = emptyList(),
-    // Phase 1c 보강 분석기용 데이터
     val apiEndpoints: List<ApiEndpoint> = emptyList(),
     val beanDefinitions: List<BeanDefinition> = emptyList(),
     val entityRelations: List<EntityRelation> = emptyList(),
     val dependsOn: MutableList<String> = mutableListOf(),
     val dependedBy: MutableList<String> = mutableListOf(),
+    val usesTypes: MutableList<String> = mutableListOf(),
+    val usedByTypes: MutableList<String> = mutableListOf(),
     var riskAssessment: RiskAssessment = RiskAssessment(0, ChangeRisk.NOT_CALCULATED, emptyList()),
     // Anyframe 지원 필드 추가
     val anyframeRole: AnyframeRole? = null,
@@ -131,11 +160,16 @@ data class FileNode(
     val datasource: String? = null,
     // Adaptive File Discovery 지원 필드
     val koreanComments: List<String> = emptyList(),
-    val methodNames: List<String> = emptyList(),
+    // TODO: [Backlog] Gson이 Kotlin 기본값을 우회하는 직렬화 문제 - 게터 null-safe는 임시 방어.
+    // 근본 해결을 위해 역직렬화 설정(기본값 존중 어댑터/@JvmField 또는 kotlinx.serialization) 검토 필요
+    val methods: List<MethodSignature> = emptyList(),
     // P5-B: 동적 뷰 역추적 필드
     val isDynamicRouter: Boolean = false,
     val dynamicViewFolders: List<String> = emptyList()
-)
+) {
+    val methodNames: List<String>
+        get() = (methods ?: emptyList()).map { it.name }
+}
 
 /**
  * DI 주입 정보.
@@ -293,7 +327,8 @@ enum class RelationshipType {
     CALLS_DEM_METHOD,
     MAPS_TO_TABLE,
     USES_DVO,
-    TRANSFORMS_VO
+    TRANSFORMS_VO,
+    USES_TYPE
 }
 
 enum class RelationshipStrength {

@@ -111,16 +111,27 @@ object PseudoCodeParser {
             warnings.add("파싱 실패: 지정된 헤더([추가], [수정] 등)를 찾을 수 없습니다.")
         }
 
-        // 3. 검증 1: 메서드명 대조 (MODIFY, DELETE 블록 대상)
+        // 3. 검증 1: 메서드 시그니처 느슨한 매칭 (MODIFY, DELETE 블록 대상)
         val fileNode = graph.files[filePath]
         if (fileNode != null) {
-            val existingMethods = fileNode.methodNames
+            val existingMethods = fileNode.methods
             for (block in blocks) {
                 if (block.type == BlockType.MODIFY || block.type == BlockType.DELETE) {
                     if (block.targetMethod != null) {
-                        val matched = existingMethods.any { it.contains(block.targetMethod) || block.targetMethod.contains(it) }
+                        val targetMethodStr = block.targetMethod!!
+                        val targetNameMatch = Regex("""\b(\w+)\s*\(""").find(targetMethodStr)
+                        val targetName = targetNameMatch?.groupValues?.get(1) ?: targetMethodStr.substringBefore("(").trim()
+                        
+                        val paramsStr = targetMethodStr.substringAfter("(").substringBeforeLast(")")
+                        val targetParamCount = if (paramsStr.isBlank()) 0 else paramsStr.split(",").size
+                        
+                        // 느슨한 정규화 매칭 (메서드 이름 일치 + 파라미터 개수 일치)
+                        val matched = existingMethods.any { existing ->
+                            existing.name == targetName && existing.parameters.size == targetParamCount
+                        }
+                        
                         if (!matched) {
-                            warnings.add("⚠️ 경고: 대상 메서드 '${block.targetMethod}'가 기존 클래스의 메서드 목록에 존재하지 않을 수 있습니다.")
+                            warnings.add("⚠️ 경고: 대상 메서드 '${block.targetMethod}'(이름: $targetName, 파라미터: $targetParamCount)가 기존 클래스의 시그니처와 일치하지 않습니다. (환각 의심)")
                         }
                     } else {
                         warnings.add("⚠️ 경고: [${block.type.name}] 블록에 대상 메서드가 명시되지 않았습니다.")

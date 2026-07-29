@@ -1235,7 +1235,7 @@ class WebviewActionRouter(private val project: Project) {
                         else -> settings.openaiServerUrl
                     }
                     val baseUrl = payload["baseUrl"] ?: defaultUrl
-                    val apiKey = payload["apiKey"] ?: settings.apiKey
+                    val apiKey = payload["apiKey"] ?: settings.effectiveApiKey()
                     logger.info("Router: /testConnection 실행 (baseUrl=$baseUrl)")
                     net.ib.ixpert.ops.wuwagent.service.WuwLlmService.testConnection(null, baseUrl, apiKey)
                 }
@@ -1249,7 +1249,7 @@ class WebviewActionRouter(private val project: Project) {
                         else -> settings.openaiServerUrl
                     }
                     val baseUrl = payload["baseUrl"] ?: defaultUrl
-                    val apiKey = payload["apiKey"] ?: settings.apiKey
+                    val apiKey = payload["apiKey"] ?: settings.effectiveApiKey()
                     logger.info("Router: /fetchModels 실행 (baseUrl=$baseUrl)")
                     
                     ApplicationManager.getApplication().executeOnPooledThread {

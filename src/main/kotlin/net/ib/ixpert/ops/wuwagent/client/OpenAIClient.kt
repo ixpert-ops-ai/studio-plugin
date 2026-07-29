@@ -15,6 +15,28 @@ class OpenAIClient : LLMClient {
     private val logger = Logger.getInstance(OpenAIClient::class.java)
     private val gson = Gson()
 
+    companion object {
+        /**
+         * apiType 기준으로 chat completions 엔드포인트 URL을 명시적으로 조합합니다.
+         * - 이미 "/chat/completions"로 끝나면 그대로 사용
+         * - AIPRO / OPENAI_COMPATIBLE 모두 "/v1/chat/completions"를 덧붙임
+         */
+        fun buildChatCompletionsUrl(
+            baseUrl: String,
+            apiType: net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType
+        ): String {
+            val trimmed = baseUrl.trimEnd('/')
+            if (trimmed.endsWith("/chat/completions")) return trimmed
+            return when (apiType) {
+                // baseUrl(예: .../open/api) + /v1/chat/completions
+                net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> "$trimmed/v1/chat/completions"
+                net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OPENAI_COMPATIBLE -> "$trimmed/v1/chat/completions"
+                // OpenAIClient는 AIPRO/OPENAI_COMPATIBLE 전용이며 OLLAMA는 별도 클라이언트(OllamaClient) 사용
+                net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OLLAMA -> "$trimmed/v1/chat/completions"
+            }
+        }
+    }
+
     override fun chat(
         systemPrompt: String,
         userCode: String,
@@ -26,13 +48,7 @@ class OpenAIClient : LLMClient {
             net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
             else -> settings.openaiServerUrl
         }
-        val serverUrl = if (baseUrl.endsWith("/chat/completions")) {
-            baseUrl
-        } else if (baseUrl.contains("/openai")) {
-            "${baseUrl.trimEnd('/')}/chat/completions"
-        } else {
-            "${baseUrl.trimEnd('/')}/v1/chat/completions"
-        }
+        val serverUrl = buildChatCompletionsUrl(baseUrl, settings.apiType)
 
         val messagesList = listOf(
             mapOf("role" to "system", "content" to systemPrompt),
@@ -60,12 +76,7 @@ class OpenAIClient : LLMClient {
         return try {
             val result = HttpRequests.post(serverUrl, "application/json")
                 .tuner { connection ->
-                    // OpenAI Compatible 타입이면 openaiApiKey 우선, 그 외(aipro 등)는 공용 apiKey 사용
-                    val effectiveKey = if (settings.apiType == net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OPENAI_COMPATIBLE) {
-                        settings.openaiApiKey.ifBlank { settings.apiKey }
-                    } else {
-                        settings.apiKey
-                    }
+                    val effectiveKey = settings.effectiveApiKey()
                     if (effectiveKey.isNotBlank()) {
                         connection.setRequestProperty("Authorization", "Bearer $effectiveKey")
                     }
@@ -216,13 +227,7 @@ class OpenAIClient : LLMClient {
             net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
             else -> settings.openaiServerUrl
         }
-        val serverUrl = if (baseUrl.endsWith("/chat/completions")) {
-            baseUrl
-        } else if (baseUrl.contains("/openai")) {
-            "${baseUrl.trimEnd('/')}/chat/completions"
-        } else {
-            "${baseUrl.trimEnd('/')}/v1/chat/completions"
-        }
+        val serverUrl = buildChatCompletionsUrl(baseUrl, settings.apiType)
 
         val requestMessages = mutableListOf<Map<String, Any?>>()
         requestMessages.add(mapOf("role" to "system", "content" to systemPrompt))
@@ -264,12 +269,7 @@ class OpenAIClient : LLMClient {
         return try {
             val responseString = HttpRequests.post(serverUrl, "application/json")
                 .tuner { connection ->
-                    // OpenAI Compatible 타입이면 openaiApiKey 우선, 그 외(aipro 등)는 공용 apiKey 사용
-                    val effectiveKey = if (settings.apiType == net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OPENAI_COMPATIBLE) {
-                        settings.openaiApiKey.ifBlank { settings.apiKey }
-                    } else {
-                        settings.apiKey
-                    }
+                    val effectiveKey = settings.effectiveApiKey()
                     if (effectiveKey.isNotBlank()) {
                         connection.setRequestProperty("Authorization", "Bearer $effectiveKey")
                     }
@@ -325,8 +325,15 @@ class OpenAIClient : LLMClient {
             }.readString()
 
             val json = JsonParser.parseString(response).asJsonObject
+
+            // 1순위: 표준 OpenAI 형식 (data[].id)
             val data = json.getAsJsonArray("data")
-            data?.mapNotNull { it.asJsonObject.get("id")?.asString }
+            val standardModels = data?.mapNotNull { it.asJsonObject.get("id")?.asString }
+            if (!standardModels.isNullOrEmpty()) return standardModels
+
+            // 2순위: AIPro 형식 (modelList[].name)
+            val modelList = json.getAsJsonArray("modelList")
+            modelList?.mapNotNull { it.asJsonObject.get("name")?.asString }
         } catch (e: Exception) {
             logger.warn("OpenAIClient: fetchModels failed", e)
             null

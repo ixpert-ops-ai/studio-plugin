@@ -243,7 +243,10 @@ class ExplainAgent : BaseAgent() {
             includeFaq = includeFaq
         )
 
-        var systemPrompt = PromptManager.loadPromptWithVars("explain_prompt.txt", promptVars)
+        val isAndroid = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state.frameworkType ==
+            net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANDROID
+        val explainPromptFile = if (isAndroid) "explain_android_prompt.txt" else "explain_prompt.txt"
+        var systemPrompt = PromptManager.loadPromptWithVars(explainPromptFile, promptVars)
 
         // [Phase 1b] 메타그래프 컨텍스트 자동 주입
         val contextAssembler = context.project.getService(

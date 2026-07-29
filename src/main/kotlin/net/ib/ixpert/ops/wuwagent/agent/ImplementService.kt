@@ -40,8 +40,16 @@ class ImplementService(
                 "- MyBatis 환경이므로 Mapper 인터페이스와 XML 작성에 유의하세요.\n" +
                 "- SQL 작성 시 파라미터 바인딩과 resultMap에 주의하세요."
             net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME_AP -> 
-                "- Anyframe 환경입니다. 인터페이스/구현체(Impl) 쌍을 작성하세요.\n" +
-                "- DEM/DQM, BIZ, SVC 구조를 엄격히 준수하고 Layered SVO/BVO/DVO 규칙에 따라 DTO를 작성하세요."
+                "- Anyframe AP 환경입니다. 계층(Layer) 분리 및 DTO(VO) 규칙을 엄격히 준수해야 합니다.\n" +
+                "- [계층 흐름]: SVC (Interface) -> SVCImpl -> BIZ -> DEM/DQM (DAO)\n" +
+                "  1. SVC/SVCImpl: 클라이언트 요청을 받는 진입점이며, 비즈니스 로직(BIZ)을 호출합니다.\n" +
+                "  2. BIZ: 핵심 비즈니스 로직을 수행하며, 데이터 접근(DEM/DQM)을 호출합니다.\n" +
+                "  3. DEM/DQM: 데이터베이스 쿼리를 실행하는 데이터 접근 계층입니다.\n" +
+                "- [VO 규칙]: 계층 간 데이터 전달 시 전용 VO를 사용해야 합니다.\n" +
+                "  - SVO (Service VO): SVCImpl 계층의 입출력용\n" +
+                "  - BVO (Business VO): BIZ 계층의 입출력용\n" +
+                "  - DVO (Data VO): DEM/DQM 계층의 입출력용\n" +
+                "- 로직을 구현할 때, 하나의 클래스에 모든 것을 처리하지 말고 위 계층 흐름에 따라 메서드를 위임(delegate)하여 구현하세요."
             else -> 
                 "- 프로젝트의 기존 계층형(Layered) 아키텍처 규칙을 따르세요."
         }
@@ -392,17 +400,23 @@ class ImplementService(
     }
 
     private fun sortTargetsByLayer(targets: List<TargetFileSpec>): List<TargetFileSpec> {
-        // 간단한 휴리스틱 정렬
-        return targets.sortedBy { spec ->
-            val path = spec.path.lowercase()
-            when {
-                path.contains("entity") || path.contains("domain") -> 1
-                path.contains("dto") || path.contains("vo") || path.contains("response") || path.contains("request") -> 2
-                path.contains("repository") || path.contains("mapper") || path.contains("dao") -> 3
-                path.contains("service") -> 4
-                path.contains("controller") -> 5
-                else -> 6
+        // 간단한 휴리스틱 정렬 (계층별 -> Interface 우선)
+        return targets.sortedWith(
+            compareBy<TargetFileSpec> { spec ->
+                val path = spec.path.lowercase()
+                when {
+                    path.contains("entity") || path.contains("domain") -> 1
+                    path.contains("dto") || path.contains("vo") || path.contains("response") || path.contains("request") -> 2
+                    path.contains("repository") || path.contains("mapper") || path.contains("dao") -> 3
+                    path.contains("service") -> 4
+                    path.contains("controller") -> 5
+                    else -> 6
+                }
+            }.thenBy { spec ->
+                // 같은 계층 내: Interface(0)를 Impl(1)보다 먼저
+                val name = spec.path.replace("\\", "/").substringAfterLast('/').lowercase()
+                if (name.endsWith("impl.java") || name.endsWith("impl.kt")) 1 else 0
             }
-        }
+        )
     }
 }

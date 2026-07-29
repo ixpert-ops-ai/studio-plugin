@@ -18,8 +18,9 @@ import net.ib.ixpert.ops.wuwagent.service.WuwLlmService
 class WuwSettingsConfigurable : SearchableConfigurable {
 
     companion object {
-        private const val AIPRO_DEFAULT_URL   = "https://aipro.samsungcard.biz:20443/open/api"
-        private const val AIPRO_DEFAULT_MODEL = "GPT-OSS_api"
+        private const val AIPRO_DEFAULT_URL     = "https://aipro.samsungcard.biz:20443/open/api"
+        private const val AIPRO_DEFAULT_MODEL   = "GPT-OSS_api"
+        private const val AIPRO_DEFAULT_API_KEY = "25dc93cc-75c2-4c47-a83e-7e35555cf65a"
     }
 
     private val settings = SettingsState.getInstance()
@@ -51,8 +52,9 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     private var openaiModelFetchButton: JButton? = null
     private var openaiModelComboRow: Row? = null
 
-    // aipro 전용: 직접 입력 텍스트 필드
-    private var modelTextField: JBTextField? = null
+    // aipro 전용: editable 드롭박스 + Fetch Models 버튼 (조회 실패 시 직접 입력 가능하도록 editable)
+    private var aiproModelComboBox: ComboBox<String>? = null
+    private var aiproModelFetchButton: JButton? = null
     private var aiproModelRow: Row? = null
 
     private var temperatureSpinner: JBTextField? = null
@@ -71,7 +73,7 @@ class WuwSettingsConfigurable : SearchableConfigurable {
             group("API 설정") {
                 row("API Type:") {
                     apiTypeComboBox = comboBox(
-                        DefaultComboBoxModel(arrayOf("OpenAI Compatible", "aipro", "Ollama"))
+                        DefaultComboBoxModel(arrayOf("OpenAI Compatible", "AIPro", "Ollama"))
                     ).component
                     apiTypeComboBox?.addActionListener {
                         if (!isResetting) onApiTypeChanged()
@@ -145,12 +147,15 @@ class WuwSettingsConfigurable : SearchableConfigurable {
                     }.component
                 }
 
-                // aipro 전용 행: 직접 입력
+                // aipro 전용 행: editable 드롭박스 + Fetch Models
+                // editable=true 이므로 조회 실패 시에도 직접 입력 가능
                 aiproModelRow = row("Model:") {
-                    modelTextField = textField()
-                        .columns(COLUMNS_MEDIUM)
-                        .comment("모델명을 직접 입력하세요 (예: GPT-OSS_api, gpt-4o)")
+                    aiproModelComboBox = comboBox(DefaultComboBoxModel<String>(arrayOf(settings.state.model)))
                         .component
+                    aiproModelComboBox?.isEditable = true
+                    aiproModelFetchButton = button("Fetch Models") {
+                        fetchAiproModels()
+                    }.component
                 }
 
                 row {
@@ -202,26 +207,37 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     private fun onApiTypeChanged() {
         val type = getCurrentApiType()
 
+        // API 타입 전환 시 API Key 필드에 해당 타입의 저장값 표시
+        swapApiKeyField(type)
+
         // aipro 선택 시 기본값 자동 입력
         if (type == SettingsState.ApiType.AIPRO) {
             if (aiproUrlField?.text.isNullOrBlank()) {
                 aiproUrlField?.setText(AIPRO_DEFAULT_URL)
             }
-            modelTextField?.setText(AIPRO_DEFAULT_MODEL)
+            val currentModel = (aiproModelComboBox?.editor?.item as? String)?.trim()
+                ?: (aiproModelComboBox?.selectedItem as? String)?.trim()
+            if (currentModel.isNullOrBlank()) {
+                aiproModelComboBox?.selectedItem = AIPRO_DEFAULT_MODEL
+            }
+            if (getCurrentApiKey().isBlank()) {
+                apiKeyField?.setText(AIPRO_DEFAULT_API_KEY)
+            }
         }
 
-        // API 타입 전환 시 API Key 필드에 해당 타입의 저장값 표시
-        swapApiKeyField(type)
         updateRowVisibility()
     }
 
     /**
      * API 타입 전환 시 API Key 필드를 해당 타입의 저장값으로 교체합니다.
-     * OpenAI Compatible → openaiApiKey, 그 외 → apiKey(Ollama/aipro 공용)
      */
     private fun swapApiKeyField(type: SettingsState.ApiType) {
         val state = settings.state
-        val key = if (type == SettingsState.ApiType.OPENAI_COMPATIBLE) state.openaiApiKey else state.apiKey
+        val key = when (type) {
+            SettingsState.ApiType.OLLAMA            -> state.ollamaApiKey
+            SettingsState.ApiType.OPENAI_COMPATIBLE -> state.openaiApiKey
+            SettingsState.ApiType.AIPRO             -> state.aiproApiKey
+        }
         apiKeyField?.setText(key)
     }
 
@@ -260,7 +276,13 @@ class WuwSettingsConfigurable : SearchableConfigurable {
                     ?: (openaiModelComboBox?.selectedItem as? String)?.trim()
                     ?: ""
             }
-            SettingsState.ApiType.AIPRO             -> modelTextField?.text?.trim() ?: ""
+            SettingsState.ApiType.AIPRO             -> {
+                // editable ComboBox: editor에 직접 입력한 값도 반영
+                val editor = aiproModelComboBox?.editor?.item as? String
+                editor?.trim()?.takeIf { it.isNotBlank() }
+                    ?: (aiproModelComboBox?.selectedItem as? String)?.trim()
+                    ?: ""
+            }
         }
     }
 
@@ -270,14 +292,14 @@ class WuwSettingsConfigurable : SearchableConfigurable {
     private fun getCurrentApiType(): SettingsState.ApiType {
         return when (apiTypeComboBox?.selectedItem as? String) {
             "OpenAI Compatible" -> SettingsState.ApiType.OPENAI_COMPATIBLE
-            "aipro"             -> SettingsState.ApiType.AIPRO
+            "AIPro"             -> SettingsState.ApiType.AIPRO
             else                -> SettingsState.ApiType.OLLAMA
         }
     }
 
     private fun apiTypeToDisplayName(apiType: SettingsState.ApiType): String = when (apiType) {
         SettingsState.ApiType.OPENAI_COMPATIBLE -> "OpenAI Compatible"
-        SettingsState.ApiType.AIPRO             -> "aipro"
+        SettingsState.ApiType.AIPRO             -> "AIPro"
         SettingsState.ApiType.OLLAMA            -> "Ollama"
     }
 
@@ -318,6 +340,24 @@ class WuwSettingsConfigurable : SearchableConfigurable {
             openaiModelFetchButton?.text = originalText
         }) { models ->
             updateOpenaiModelComboBox(models)
+        }
+    }
+
+    /** aipro 모델 조회 (GET /v1/models, 표준 OpenAI 형식 우선 → AIPro modelList[].name 폴백) */
+    private fun fetchAiproModels() {
+        val baseUrl = getCurrentUrlField()?.text ?: return
+        val apiKey = getCurrentApiKey()
+        val parent = aiproUrlField?.let { SwingUtilities.getWindowAncestor(it) }
+
+        val originalText = aiproModelFetchButton?.text
+        aiproModelFetchButton?.isEnabled = false
+        aiproModelFetchButton?.text = "Fetching..."
+
+        WuwLlmService.fetchModels(parent, baseUrl, apiKey, SettingsState.ApiType.AIPRO, onComplete = {
+            aiproModelFetchButton?.isEnabled = true
+            aiproModelFetchButton?.text = originalText
+        }) { models ->
+            updateAiproModelComboBox(models)
         }
     }
 
@@ -391,6 +431,26 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         }
     }
 
+    /** aipro 모델 콤보박스 업데이트 */
+    private fun updateAiproModelComboBox(models: List<String>) {
+        aiproModelComboBox?.let { comboBox ->
+            val savedModel = settings.state.model
+            val currentTyped = (comboBox.editor?.item as? String)?.trim()
+                ?: (comboBox.selectedItem as? String)?.trim()
+                ?: ""
+
+            comboBox.removeAllItems()
+            models.forEach { comboBox.addItem(it) }
+
+            val preferred = currentTyped.takeIf { it.isNotBlank() } ?: savedModel
+            when {
+                models.contains(preferred)  -> comboBox.selectedItem = preferred
+                models.contains(savedModel) -> comboBox.selectedItem = savedModel
+                models.isNotEmpty()         -> comboBox.selectedIndex = 0
+            }
+        }
+    }
+
     private fun testConnection() {
         val baseUrl = getCurrentUrlField()?.text ?: return
         val apiKey = getCurrentApiKey()
@@ -416,8 +476,9 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         val state = settings.state
         val currentApiKey = getCurrentApiKey()
         val apiKeyChanged = when (getCurrentApiType()) {
+            SettingsState.ApiType.OLLAMA            -> currentApiKey != state.ollamaApiKey
             SettingsState.ApiType.OPENAI_COMPATIBLE -> currentApiKey != state.openaiApiKey
-            else                                    -> currentApiKey != state.apiKey
+            SettingsState.ApiType.AIPRO             -> currentApiKey != state.aiproApiKey
         }
         return apiTypeComboBox?.selectedItem != apiTypeToDisplayName(state.apiType) ||
                 ollamaUrlField?.text != state.ollamaServerUrl ||
@@ -438,12 +499,12 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         state.ollamaServerUrl = ollamaUrlField?.text ?: ""
         state.openaiServerUrl = openaiUrlField?.text ?: ""
         state.aiproServerUrl  = aiproUrlField?.text ?: ""
-        // OpenAI Compatible 타입이면 openaiApiKey에 저장, 그 외는 공용 apiKey에 저장
+        // 타입별 독립 필드에 저장
         val currentApiKey = getCurrentApiKey()
-        if (state.apiType == SettingsState.ApiType.OPENAI_COMPATIBLE) {
-            state.openaiApiKey = currentApiKey
-        } else {
-            state.apiKey = currentApiKey
+        when (state.apiType) {
+            SettingsState.ApiType.OLLAMA            -> state.ollamaApiKey = currentApiKey
+            SettingsState.ApiType.OPENAI_COMPATIBLE -> state.openaiApiKey = currentApiKey
+            SettingsState.ApiType.AIPRO             -> state.aiproApiKey = currentApiKey
         }
         state.model = getCurrentModelValue()
         state.temperature = temperatureSpinner?.text?.toFloatOrNull() ?: 0.1f
@@ -467,7 +528,11 @@ class WuwSettingsConfigurable : SearchableConfigurable {
         openaiUrlField?.setText(state.openaiServerUrl)
         aiproUrlField?.setText(state.aiproServerUrl)
         // API 타입에 맞는 키를 API Key 필드에 복원
-        val keyToRestore = if (state.apiType == SettingsState.ApiType.OPENAI_COMPATIBLE) state.openaiApiKey else state.apiKey
+        val keyToRestore = when (state.apiType) {
+            SettingsState.ApiType.OLLAMA            -> state.ollamaApiKey
+            SettingsState.ApiType.OPENAI_COMPATIBLE -> state.openaiApiKey
+            SettingsState.ApiType.AIPRO             -> state.aiproApiKey
+        }
         apiKeyField?.setText(keyToRestore)
 
         // API 타입에 맞는 모델 필드에 저장값 복원
@@ -490,7 +555,18 @@ class WuwSettingsConfigurable : SearchableConfigurable {
                 }
             }
             SettingsState.ApiType.AIPRO -> {
-                modelTextField?.setText(state.model)
+                // editable ComboBox: 저장된 모델이 목록에 없으면 editor에 직접 세팅
+                val comboBox = aiproModelComboBox
+                if (comboBox != null) {
+                    val items = (0 until comboBox.itemCount).map { comboBox.getItemAt(it) }
+                    if (items.contains(state.model)) {
+                        comboBox.selectedItem = state.model
+                    } else {
+                        comboBox.removeAllItems()
+                        comboBox.addItem(state.model)
+                        comboBox.selectedItem = state.model
+                    }
+                }
             }
         }
 

@@ -50,6 +50,8 @@ class GraphExpander(
             node?.let { domainExtractor.getDomain(it.path) }
         }.toSet()
 
+        val hop1Queue = mutableListOf<FileNode>()
+        
         // Step A: Seed 파일 해소
         for (className in seedResult.seedClasses) {
             val fileNode = graph.files.values.find { it.className == className }
@@ -64,6 +66,24 @@ class GraphExpander(
                     graph.files.values.filter { it.packageName == packageName && it.path != fileNode.path }.forEach { sibling ->
                         if (!visited.containsKey(sibling.path) && !isEnumOrValueType(sibling)) {
                             visited[sibling.path] = ExpansionStep(hop = 1, via = "SAME_PACKAGE", from = fileNode.path)
+                            // [Fix] SAME_PACKAGE 노드도 큐에 넣어 하향 탐색이 이어지도록 수정
+                            // (과거 APC SAME_PACKAGE 관찰 결과와의 교차 확인 메모)
+                            hop1Queue.add(sibling)
+                        }
+                    }
+                }
+            } else {
+                // 프론트엔드 파일(ResourceNode)인지 확인
+                val resourceNode = graph.resourceNodes.find { it.path.substringAfterLast('/') == className || it.path == className }
+                if (resourceNode != null) {
+                    visited[resourceNode.path] = ExpansionStep(hop = 0, via = "SEED")
+                    // ResourceNode는 FileNode가 아니므로 queue에 추가할 수 없으나, 
+                    // 연결된 Java 파일을 hop1Queue에 넣어 확장을 이어간다.
+                    resourceNode.linkedTo.forEach { linkedPath ->
+                        val linkedJavaNode = graph.files[linkedPath]
+                        if (linkedJavaNode != null && !visited.containsKey(linkedPath)) {
+                            visited[linkedPath] = ExpansionStep(hop = 1, via = "RESOURCE_LINK", from = resourceNode.path)
+                            hop1Queue.add(linkedJavaNode)
                         }
                     }
                 }
@@ -71,7 +91,6 @@ class GraphExpander(
         }
 
         // Step B: Hop 1 확장 (직접 의존)
-        val hop1Queue = mutableListOf<FileNode>()
         for (node in queue) { // hop 0
             // 상향 탐색: 이 파일을 사용하는 곳 (도메인 제한 적용)
             for (depPath in node.dependedBy) {
@@ -96,6 +115,21 @@ class GraphExpander(
                     }
                 }
             }
+
+            // 하향 탐색 (타입 참조): 이 파일이 시그니처 등으로 참조하는 곳
+            for (depPath in node.usesTypes) {
+                if (!visited.containsKey(depPath)) {
+                    val depNode = graph.files[depPath]
+                    if (depNode != null && isCommonInfrastructure(depNode).not()
+                        && isDomainAllowed(depPath, node.path, seedDomains)) {
+                        visited[depPath] = ExpansionStep(hop = 1, via = "USES_TYPE", from = node.path)
+                        hop1Queue.add(depNode)
+                    }
+                }
+            }
+            
+            // TODO: [Backlog] usedByTypes(상향) 순회는 과도한 상향 확산을 막기 위해 당분간 연결 보류 (미검증)
+            // for (depPath in node.usedByTypes) { ... }
 
             // DTO/Entity의 경우, Controller의 apiEndpoints에 파라미터/반환타입으로 존재하는지 확인 (그래프 파서 누락 보정)
             if (node.fileType.name == "DTO" || node.fileType.name == "ENTITY") {
@@ -126,13 +160,24 @@ class GraphExpander(
                 if (node.fileType.name == "REST_CONTROLLER" || node.fileType.name == "CONTROLLER") {
                     continue
                 } else if (node.fileType.name == "SERVICE") {
-                    // Service -> Repository (하향), Service -> Controller (상향)
+                    // Service -> Repository/BIZ/DataAccess (하향), Service -> Controller (상향)
                     for (depPath in node.dependsOn) {
                         if (!visited.containsKey(depPath)) {
                             val depNode = graph.files[depPath]
-                            if (depNode != null && depNode.fileType.name == "REPOSITORY" && isCommonInfrastructure(depNode).not()
+                            if (depNode != null && (depNode.fileType.name == "REPOSITORY" || depNode.fileType.name == "BIZ" || depNode.fileType.name == "DATA_ACCESS") && isCommonInfrastructure(depNode).not()
                                 && isDomainAllowed(depPath, nodePath, seedDomains)) {
-                                visited[depPath] = ExpansionStep(hop = hop, via = "SERVICE_TO_REPO", from = nodePath)
+                                visited[depPath] = ExpansionStep(hop = hop, via = "SERVICE_TO_REPO_OR_BIZ", from = nodePath)
+                                nextQueue.add(depNode)
+                            }
+                        }
+                    }
+                    for (depPath in node.usesTypes) {
+                        if (!visited.containsKey(depPath)) {
+                            val depNode = graph.files[depPath]
+                            // [안전 측 기본값] Rule 2처럼 하향 탐색을 REPOSITORY/BIZ/DATA_ACCESS로만 엄격히 제한 (APC 회귀 미검증)
+                            if (depNode != null && (depNode.fileType.name == "REPOSITORY" || depNode.fileType.name == "BIZ" || depNode.fileType.name == "DATA_ACCESS") && isCommonInfrastructure(depNode).not()
+                                && isDomainAllowed(depPath, nodePath, seedDomains)) {
+                                visited[depPath] = ExpansionStep(hop = hop, via = "USES_TYPE", from = nodePath)
                                 nextQueue.add(depNode)
                             }
                         }
@@ -160,7 +205,49 @@ class GraphExpander(
                             }
                         }
                     }
-                } else if (node.fileType.name == "REPOSITORY") {
+                } else if (node.fileType.name == "BIZ") {
+                    // BIZ -> DATA_ACCESS (하향)
+                    for (depPath in node.dependsOn) {
+                        if (!visited.containsKey(depPath)) {
+                            val depNode = graph.files[depPath]
+                            if (depNode != null && (depNode.fileType.name == "DATA_ACCESS" || depNode.fileType.name == "REPOSITORY")) {
+                                // 하향(BIZ -> DATA_ACCESS) 엣지는 인프라 및 도메인 필터 우회 (Track 2 완화책)
+                                visited[depPath] = ExpansionStep(hop = hop, via = "BIZ_TO_DATA_ACCESS", from = nodePath)
+                                nextQueue.add(depNode)
+                            }
+                        }
+                    }
+                    for (depPath in node.usesTypes) {
+                        if (!visited.containsKey(depPath)) {
+                            val depNode = graph.files[depPath]
+                            // [안전 측 기본값] Rule 2처럼 하향(BIZ -> DATA_ACCESS) 엄격 제한 (APC 회귀 미검증)
+                            if (depNode != null && (depNode.fileType.name == "DATA_ACCESS" || depNode.fileType.name == "REPOSITORY")) {
+                                visited[depPath] = ExpansionStep(hop = hop, via = "USES_TYPE", from = nodePath)
+                                nextQueue.add(depNode)
+                            }
+                        }
+                    }
+                    // BIZ -> SERVICE (상향)
+                    for (depPath in node.dependedBy) {
+                        if (!visited.containsKey(depPath)) {
+                            val depNode = graph.files[depPath]
+                            if (depNode != null && depNode.fileType.name == "SERVICE"
+                                && isCommonInfrastructure(depNode).not()
+                                && isDomainAllowed(depPath, nodePath, seedDomains)) {
+                                visited[depPath] = ExpansionStep(hop = hop, via = "BIZ_TO_SERVICE", from = nodePath)
+                                nextQueue.add(depNode)
+                            }
+                        }
+                    }
+                } else if (node.fileType.name == "REPOSITORY" || node.fileType.name == "DATA_ACCESS") {
+                    // Rule 2: 하향 탐색 중 도달한 데이터 액세스 노드에서는 상향 전파 금지
+                    if (hop > 0) {
+                        if (node.className.contains("Product")) {
+                            println("[DEBUG] REPOSITORY continue blocked expansion for ${node.className} at hop $hop")
+                        }
+                        continue
+                    }
+
                     // Repository -> Service (상향, 도메인 제한 적용)
                     for (depPath in node.dependedBy) {
                         if (!visited.containsKey(depPath)) {
@@ -186,7 +273,12 @@ class GraphExpander(
                         }
                     }
                 } else {
-                    // Entity 등 기타 노드는 상위 의존성(나를 사용하는 곳)으로만 확장 (도메인 제한 적용)
+                    // Rule 2: 하향 탐색 중 도달한 데이터 액세스 노드에서는 무관 도메인으로의 상향 전파를 원천 금지 (Track 1 상향 시드는 hop 0에서 처리됨)
+                    if ((node.fileType.name == "DATA_ACCESS" || node.fileType.name == "REPOSITORY") && hop > 0) {
+                        continue
+                    }
+                    
+                    // Entity 등 기타 노드의 상위 의존성 확장
                     for (depPath in node.dependedBy) {
                         if (!visited.containsKey(depPath)) {
                             val depNode = graph.files[depPath]
@@ -204,6 +296,7 @@ class GraphExpander(
         }
 
         // Step D: Vue 연결 (frontendRelevant == true일 때만)
+        println("[DEBUG-EXPANDER] frontendRelevant: ${seedResult.frontendRelevant}")
         if (seedResult.frontendRelevant) {
             // API_ENDPOINT_FALLBACK으로 들어온 Controller는 Vue 확장 대상에서 제외
             val directControllerPaths = visited.entries
@@ -217,25 +310,49 @@ class GraphExpander(
             val vueFilterPatterns = buildVueFilterPatterns(srText, seedResult.frontendFileHints ?: emptyList())
 
             for (resource in graph.resourceNodes) {
+                if (resource.path.contains("ProductCreateView.vue")) {
+                    println("[DEBUG-VUE] Considering ${resource.path}")
+                    println("[DEBUG-VUE] resource.linkedTo: ${resource.linkedTo}")
+                    println("[DEBUG-VUE] directControllerPaths: $directControllerPaths")
+                }
                 // resource.linkedTo 와 directControllerPaths 교집합 확인
                 val intersection = resource.linkedTo.intersect(directControllerPaths)
                 if (intersection.isNotEmpty()) {
+                    if (resource.path.contains("ProductCreateView.vue")) {
+                        println("[DEBUG-VUE] intersection is not empty: $intersection")
+                    }
                     if (!visited.containsKey(resource.path)) {
                         val pathToMatch = resource.path.substringAfter("src/views/").ifEmpty { resource.path.substringAfterLast("/") }
                         // Vue 파일 경로/이름이 SR 키워드 패턴과 매칭되는 경우에만 포함
-                        if (vueFilterPatterns.isEmpty() || vueFilterPatterns.any { pattern ->
+                        val isPatternMatch = vueFilterPatterns.isEmpty() || vueFilterPatterns.any { pattern ->
                             pathToMatch.contains(pattern, ignoreCase = true)
-                        }) {
+                        }
+                        if (resource.path.contains("ProductCreateView.vue")) {
+                            println("[DEBUG-VUE] isPatternMatch: $isPatternMatch (pathToMatch: $pathToMatch, vueFilterPatterns: $vueFilterPatterns)")
+                        }
+                        if (isPatternMatch) {
                             // Vue 파일 도메인 필터링
-                            if (isVueAllowed(resource, seedDomains)) {
+                            val isAllowed = isVueAllowed(resource, seedDomains)
+                            if (resource.path.contains("ProductCreateView.vue")) {
+                                println("[DEBUG-VUE] isVueAllowed: $isAllowed (seedDomains: $seedDomains)")
+                            }
+                            if (isAllowed) {
                                 visited[resource.path] = ExpansionStep(hop = 1, via = "LINKED_TO", from = intersection.first())
                             }
+                        }
+                    } else {
+                        if (resource.path.contains("ProductCreateView.vue")) {
+                            println("[DEBUG-VUE] already visited!")
                         }
                     }
                 } else if (vueFilterPatterns.isNotEmpty()) {
                     // Fallback: If not directly linked (e.g. using Vuex/Pinia), but matches the strong SR keyword
                     val pathToMatch = resource.path.substringAfter("src/views/").ifEmpty { resource.path.substringAfterLast("/") }
-                    if (vueFilterPatterns.any { pattern -> pathToMatch.contains(pattern, ignoreCase = true) }) {
+                    val isFallbackMatch = vueFilterPatterns.any { pattern -> pathToMatch.contains(pattern, ignoreCase = true) }
+                    if (resource.path.contains("ProductCreateView.vue")) {
+                        println("[DEBUG-VUE] fallback match: $isFallbackMatch (pathToMatch: $pathToMatch)")
+                    }
+                    if (isFallbackMatch) {
                         if (!visited.containsKey(resource.path) && isVueAllowed(resource, seedDomains)) {
                             // Find the first relevant controller to mark as 'from' for graph context, or just use a generic via
                             val fallbackFrom = directControllerPaths.firstOrNull() ?: "SR_KEYWORD"
@@ -251,7 +368,12 @@ class GraphExpander(
 
     private fun isCommonInfrastructure(node: FileNode): Boolean {
         // BaseEntity, 공통 Utils 등 지나치게 참조가 많은 파일 제외
-        return node.dependedBy.size >= infraThreshold
+        val totalDependedBy = node.dependedBy.size + node.usedByTypes.size
+        val isInfra = totalDependedBy >= infraThreshold
+        if (isInfra && node.className.contains("Product")) {
+            println("[DEBUG] isCommonInfrastructure blocked ${node.className} (totalDependedBy: $totalDependedBy >= $infraThreshold)")
+        }
+        return isInfra
     }
 
     /**
@@ -298,6 +420,7 @@ class GraphExpander(
             "ABSTRACT_CLASS" -> true
             "INTERFACE" -> true
             "DTO" -> true
+            "DATA_ACCESS" -> true
             else -> false
         }
     }

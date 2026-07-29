@@ -54,32 +54,51 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             
             if (scopeResult != null && scopeResult.selectedPaths.isNotEmpty()) {
                 val subGraph = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScopeSelector.buildSubMetaGraph(projectGraph, scopeResult.selectedPaths)
-                onChunk?.invoke("> ✅ **선택 범위 반영 완료:** ${subGraph.totalFileCount}개 파일로 대상을 축소했습니다.\n")
-                
-                // 외부 의존성 제안
-                val suggestions = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DependencySuggester.suggestExternalDependencies(
-                    subGraph, projectGraph, net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.SuggestionConfig()
-                )
-                
-                if (suggestions.isNotEmpty()) {
-                    // 프론트엔드에 의존성 선택 UI(showDependency)가 아직 없으므로 자동 포함하되,
-                    // 패키지 전체(packagePath)가 아니라 "실제로 참조된 파일"만 포함하여 범위 폭발을 방지한다.
-                    val autoAcceptedFiles = suggestions
-                        .filter { !it.isUtility }                 // 유틸 패키지 제외
-                        .flatMap { it.referencedFiles }           // 패키지 통째 → 참조된 파일만
-                        .distinct()
-                        .take(50)                                 // 자동 포함 안전 캡 (UI 부재 임시방편)
-
-                    val expandedPaths = scopeResult.selectedPaths + autoAcceptedFiles
-                    val finalGraph = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScopeSelector.buildSubMetaGraph(projectGraph, expandedPaths)
-                    onChunk?.invoke("> ✅ **외부 의존성 자동 포함 완료:** ${finalGraph.totalFileCount}개 파일로 범위가 확장되었습니다.\n")
-                    finalGraph
+                if (subGraph.totalFileCount == 0) {
+                    onChunk?.invoke("> ⚠️ **선택된 패키지에 해당하는 파일이 없습니다. 전체 프로젝트를 대상으로 진행합니다.**\n")
+                    projectGraph
                 } else {
-                    subGraph
+                    onChunk?.invoke("> ✅ **선택 범위 반영 완료:** ${subGraph.totalFileCount}개 파일로 대상을 축소했습니다.\n")
+                    
+                    // 외부 의존성 제안
+                    val suggestions = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DependencySuggester.suggestExternalDependencies(
+                        subGraph, projectGraph, net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.SuggestionConfig()
+                    )
+                    
+                    if (suggestions.isNotEmpty()) {
+                        // 프론트엔드에 의존성 선택 UI(showDependency)가 아직 없으므로 자동 포함하되,
+                        // 패키지 전체(packagePath)가 아니라 "실제로 참조된 파일"만 포함하여 범위 폭발을 방지한다.
+                        val autoAcceptedFiles = suggestions
+                            .filter { !it.isUtility }                 // 유틸 패키지 제외
+                            .flatMap { it.referencedFiles }           // 패키지 통째 → 참조된 파일만
+                            .distinct()
+                            .take(50)                                 // 자동 포함 안전 캡 (UI 부재 임시방편)
+    
+                        val expandedPaths = scopeResult.selectedPaths + autoAcceptedFiles
+                        val finalGraph = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ScopeSelector.buildSubMetaGraph(projectGraph, expandedPaths)
+                        onChunk?.invoke("> ✅ **외부 의존성 자동 포함 완료:** ${finalGraph.totalFileCount}개 파일로 범위가 확장되었습니다.\n")
+                        finalGraph
+                    } else {
+                        subGraph
+                    }
                 }
             } else {
-                onChunk?.invoke("> ⚠️ **선택이 취소되었거나 타임아웃 되었습니다. 전체 프로젝트를 대상으로 진행합니다.**\n")
-                projectGraph
+                // 잠정 보수적 임계값 (정밀 경계 아님).
+                // 실측 근거: member-market(105), survey-admin(137) skip 시 안전 / APC(2,670) skip 시 recall 0%.
+                // 138~2,669 구간은 미검증 — 이 값이 정당한 로컬 SR을 오차단할 가능성 있음. 
+                // 향후 150~2000 규모의 SR 케이스 확보 시 재조정 요망.
+                val hardLimit = 200
+                if (projectGraph.totalFileCount > hardLimit) {
+                    val msg = "> 📦 **대상 파일이 너무 많습니다 (${projectGraph.totalFileCount}개)**\n" +
+                              "> 파일이 많아 이 상태로는 정확한 대상을 좁히기 어렵습니다. 아래 중 하나를 진행해 주세요:\n" +
+                              "> - **범위 좁히기** — 작업과 관련된 폴더/패키지를 선택해 다시 실행해 주세요. (권장)\n" +
+                              "> - **전역 공통 변경인 경우** — 만약 여러 도메인에 공통으로 적용되는 변경(예: 전 API 공통 로깅)이라면, 개별 파일 수정보다 공통 모듈(AOP/인터셉터/부모 클래스) 관점에서 접근하는 것이 적절합니다.\n"
+                    onChunk?.invoke(msg)
+                    throw IllegalArgumentException("대상 파일이 너무 많습니다 (${projectGraph.totalFileCount}개). 폴더/패키지를 선택하여 범위를 좁히거나, 공통 모듈 관점에서 요구사항을 재정의해 주세요.")
+                } else {
+                    onChunk?.invoke("> \uD83D\uDCA1 **Tip:** 전체 ${projectGraph.totalFileCount}개 파일을 대상으로 탐색 중입니다. Project 뷰에서 관련 패키지를 선택 후 실행하시면 분석의 정확도와 속도가 크게 향상됩니다.\n\n")
+                    projectGraph
+                }
             }
         } else {
             projectGraph
@@ -127,12 +146,53 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         val mdRoot = Paths.get(project?.basePath ?: "", "docs")
         
         onChunk?.invoke("\n> **(Stage 3) LLM Verification** - 최종 연관성 검증...\n")
+        println("=== Stage 3 Candidates ===")
+        correctedFiles.forEach { println(it.path) }
+        println("==========================")
         val verifier = FileRelevanceVerifier(client, projectGraph, mdRoot)
         val fullRequirement = if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
         val verificationOutput = verifier.verify(fullRequirement, correctedFiles)
         val verifiedFiles = verificationOutput.files
         val validatedTargetFiles = TargetFileValidator.sortByDependency(verifiedFiles, projectGraph)
         
+        // --- SHADOW LOGGER INTEGRATION ---
+        try {
+            val guard = net.ib.ixpert.ops.wuwagent.agent.completeness.CompletenessGuardIntegration(net.ib.ixpert.ops.wuwagent.agent.completeness.GuardMode.SHADOW)
+            
+            // Heuristic SrFacts derivation from validatedTargetFiles
+            val hasCreate = validatedTargetFiles.any { it.type == "CREATE" }
+            val hasService = validatedTargetFiles.any { it.path.contains("Service") }
+            val hasDataLayer = validatedTargetFiles.any { it.path.contains("Dao") || it.path.contains("Repository") || it.path.endsWith("xml") }
+            val hasUi = validatedTargetFiles.any { it.path.endsWith(".jsp") || it.path.endsWith(".html") || it.path.endsWith(".js") }
+
+            val srFacts = net.ib.ixpert.ops.wuwagent.agent.completeness.model.SrFacts(
+                hasUserAction = hasUi, // Conservative: assume UI means user action
+                touchesUi = hasUi,
+                hasBusinessLogic = hasService,
+                readsOrWritesData = hasDataLayer,
+                // [KNOWN ISSUE] addsNewMethod는 현재 파일 생성(CREATE) 여부만으로 판정하므로, 
+                // 기존 파일(MODIFY)에 새 메서드를 추가하는 경우를 놓칠 수 있습니다. 
+                // 이는 수집된 로그의 srFactsSource가 'heuristic-from-pipeline-output'일 때 분석가가 감안해야 합니다.
+                addsNewMethod = hasCreate 
+            )
+            
+            val srKeyHex = String.format("SR-%08x", primaryReq.hashCode())
+            guard.evaluateAfterVerifier(
+                frameworkType = fwType,
+                requiredFiles = validatedTargetFiles.map { it.path }.toSet(),
+                srFacts = srFacts,
+                ctx = net.ib.ixpert.ops.wuwagent.agent.completeness.ProjectGraphAdapter(projectGraph),
+                projectRoot = project?.basePath ?: projectGraph.projectRoot,
+                runId = java.util.UUID.randomUUID().toString(),
+                srKey = srKeyHex,
+                srFactsSource = "heuristic-from-pipeline-output"
+            )
+            logger.info("CompletenessGuardIntegration invoked for \$srKeyHex in SHADOW mode (addsNewMethod=\$hasCreate).")
+        } catch (e: Exception) {
+            logger.warn("Failed to execute CompletenessGuardIntegration", e)
+        }
+        // ---------------------------------
+
         val formattedOutput = buildString {
             appendLine("### 요구사항 분석 요약")
             

@@ -63,8 +63,8 @@ class OllamaClient : LLMClient {
             try {
                 val result = HttpRequests.post(serverUrl, "application/json")
                     .tuner { connection ->
-                        if (settings.apiKey.isNotBlank()) {
-                            connection.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+                        if (settings.ollamaApiKey.isNotBlank()) {
+                            connection.setRequestProperty("Authorization", "Bearer ${settings.ollamaApiKey}")
                         }
                         // 서버 측 Keep-Alive 커넥션 강제 종료 문제로 인한 간헐적 빈 응답 방지
                         connection.setRequestProperty("Connection", "close")
@@ -283,8 +283,8 @@ class OllamaClient : LLMClient {
         return try {
             val responseString = HttpRequests.post(serverUrl, "application/json")
                 .tuner { connection ->
-                    if (settings.apiKey.isNotBlank()) {
-                        connection.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+                    if (settings.ollamaApiKey.isNotBlank()) {
+                        connection.setRequestProperty("Authorization", "Bearer ${settings.ollamaApiKey}")
                     }
                     connection.setRequestProperty("Connection", "close")
                     val timeoutMs = settings.timeoutSeconds * 1000

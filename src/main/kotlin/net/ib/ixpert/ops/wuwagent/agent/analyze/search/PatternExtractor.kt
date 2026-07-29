@@ -58,11 +58,12 @@ class PatternExtractor(private val frameworkType: FrameworkType) {
     private fun derivePatternName(files: List<FileNode>): String {
         val classNames = files.mapNotNull { it.className }
         val suffixesToRemove = when (frameworkType) {
-            FrameworkType.ANYFRAME_AP -> listOf("Controller", "Action", "SVCImpl", "Service", "BIZ", "DQM", "DEM")
+            FrameworkType.ANYFRAME_AP, FrameworkType.ANYFRAME_JAP -> listOf("Controller", "Action", "SVCImpl", "Service", "BIZ", "DQM", "DEM")
             FrameworkType.SPRING_BOOT_JPA -> listOf("Controller", "RestController", "ServiceImpl", "Service", "Repository")
             FrameworkType.SPRING_BOOT_MYBATIS -> listOf("Controller", "ServiceImpl", "Service", "Mapper")
             FrameworkType.SPRING_BOOT_JDBC -> listOf("Controller", "ServiceImpl", "Service", "Dao", "Repository")
             FrameworkType.SPRING_MVC_MYBATIS -> listOf("Controller", "ServiceImpl", "Service", "Dao", "DaoImpl")
+            FrameworkType.ANDROID -> listOf("Activity", "Fragment", "ViewModel", "Composable", "Service", "Repository")
             FrameworkType.CUSTOM, FrameworkType.SPRING_BOOT, FrameworkType.ANYFRAME -> listOf("Controller", "Service", "Dao", "Impl")
         }
 

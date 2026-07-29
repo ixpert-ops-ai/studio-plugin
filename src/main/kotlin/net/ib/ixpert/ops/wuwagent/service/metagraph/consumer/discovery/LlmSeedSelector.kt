@@ -10,11 +10,111 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
     private val gson = Gson()
 
     override fun selectSeeds(srText: String, graph: ProjectGraphQueryable): SeedSelectionResult {
-        // 클래스와 패키지 정보를 함께 제공하여 LLM이 도메인을 유추하기 쉽게 함
-        val candidates = graph.files.values
-            .map { "${it.className} (${it.packageName})" }
-            .distinct()
-            .joinToString("\n")
+        val tokens = srText.split(Regex("[^A-Za-z0-9_]+"))
+            .filter { it.length >= 4 }
+            .map { it.lowercase() }
+
+        val allBackend = graph.files.values
+        val allFrontend = graph.resourceNodes.filter { 
+            it.path.endsWith(".jsp") || it.path.endsWith(".html") || 
+            it.path.endsWith(".js") || it.path.endsWith(".vue") || it.path.endsWith(".tsx") 
+        }
+
+        val matchedBackend = allBackend.filter { fileNode ->
+            tokens.any { token -> fileNode.className.lowercase().startsWith(token) }
+        }
+        val matchedFrontend = allFrontend.filter { resourceNode ->
+            val name = resourceNode.path.substringAfterLast('/').substringBeforeLast('.')
+            tokens.any { token -> name.lowercase().startsWith(token) }
+        }
+
+        val candidatesList = run {
+            val b = matchedBackend.map { "${it.className} (${it.packageName})" }
+            val f = matchedFrontend.map { "${it.path.substringAfterLast('/')} (${it.path.substringBeforeLast('/', "")})" }
+            val track1 = (b + f)
+            
+            fun tokenize(text: String): List<String> {
+                val words = text.lowercase().replace(Regex("[^a-z0-9가-힣\\s]"), " ")
+                    .split(Regex("\\s+"))
+                    .filter { it.isNotBlank() }
+                val t = mutableListOf<String>()
+                for (w in words) {
+                    if (w.length >= 2) t.addAll(w.windowed(2)) else t.add(w)
+                }
+                return t
+            }
+            
+            val qTokens = tokenize(srText)
+            val documents = mutableMapOf<String, Pair<String, List<String>>>() // ID -> Pair(PromptString, Tokens)
+            var totalLength = 0
+            
+            allBackend.forEach { fileObj ->
+                val contentBuilder = StringBuilder()
+                contentBuilder.append(fileObj.className ?: "").append(" ")
+                contentBuilder.append(fileObj.path).append(" ")
+                contentBuilder.append(fileObj.localName ?: "").append(" ")
+                fileObj.koreanComments?.forEach { contentBuilder.append(it).append(" ") }
+                fileObj.demMethods?.forEach { dm ->
+                    contentBuilder.append(dm.methodName ?: "").append(" ")
+                    contentBuilder.append(dm.localName ?: "").append(" ")
+                }
+                val docTokens = tokenize(contentBuilder.toString())
+                val promptStr = "${fileObj.className} (${fileObj.packageName})"
+                documents[fileObj.path] = promptStr to docTokens
+                totalLength += docTokens.size
+            }
+            
+            allFrontend.forEach { resourceNode ->
+                val docTokens = tokenize(resourceNode.path)
+                val promptStr = "${resourceNode.path.substringAfterLast('/')} (${resourceNode.path.substringBeforeLast('/', "")})"
+                documents[resourceNode.path] = promptStr to docTokens
+                totalLength += docTokens.size
+            }
+            
+            val N = documents.size
+            val avgdl = if (N > 0) totalLength.toDouble() / N else 1.0
+            
+            val df = mutableMapOf<String, Int>()
+            for (q in qTokens) df[q] = documents.values.count { it.second.contains(q) }
+            
+            val k1 = 1.5
+            val b_param = 0.75
+            
+            val scores = documents.map { (_, pair) ->
+                var score = 0.0
+                val docLen = pair.second.size
+                for (q in qTokens) {
+                    val tf = pair.second.count { it == q }
+                    if (tf > 0) {
+                        val n = df[q] ?: 0
+                        val idf = Math.log((N - n + 0.5) / (n + 0.5) + 1.0)
+                        score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b_param + b_param * (docLen / avgdl)))
+                    }
+                }
+                pair.first to score
+            }.sortedByDescending { it.second }
+            
+            val topN = 30
+            val track2 = scores.take(topN).map { it.first }
+            
+            println("[LlmSeedSelector] Track 1 (Lexical) matched ${track1.size} candidates.")
+            println("[LlmSeedSelector] Track 2 (BM25) selected top $topN candidates out of $N.")
+            
+            // Temporary logging for Ground Truth rank
+            val gtClasses = setOf("APCMMSmpySpacdBIZ", "APCMMSmpyCardRgSVO", "APCMMSmpyUsrrCtfInfSVO")
+            scores.forEachIndexed { index, pair ->
+                if (gtClasses.any { pair.first.contains(it) }) {
+                    println("[BM25_DEBUG] GT Rank ${index + 1}: ${pair.first} (Score: ${pair.second})")
+                }
+            }
+            
+            val union = (track1 + track2).distinct()
+            println("[LlmSeedSelector] Final Candidates (Union, count=${union.size}): $union")
+            union
+        }
+
+        
+        val candidates = candidatesList.joinToString("\n")
 
         val frameworkName = graph.frameworkDisplayName
         val additionalContext = if (graph.resolvedFrameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME_AP) {

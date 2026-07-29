@@ -19,7 +19,9 @@ class ChatAgent : BaseAgent() {
             return
         }
 
-        var systemPrompt = PromptManager.loadPrompt("chat_prompt.txt")
+        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+        val isAndroid = settings.state.frameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANDROID
+        var systemPrompt = PromptManager.loadPrompt(if (isAndroid) "chat_android_prompt.txt" else "chat_prompt.txt")
 
         // [Phase 1b] 메타그래프 컨텍스트 자동 주입
         val contextAssembler = context.project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ContextAssembler::class.java)

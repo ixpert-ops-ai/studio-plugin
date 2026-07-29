@@ -74,7 +74,7 @@ class MultiStrategySearch(
      */
     private fun baseScore(type: MatchType): Double {
         return when (frameworkType) {
-            FrameworkType.ANYFRAME_AP -> when (type) {
+            FrameworkType.ANYFRAME_AP, FrameworkType.ANYFRAME_JAP -> when (type) {
                 MatchType.FILENAME -> 80.0
                 MatchType.CLASSNAME -> 100.0
                 MatchType.METHOD -> 60.0
@@ -104,7 +104,8 @@ class MultiStrategySearch(
                 MatchType.METHOD -> 70.0
                 MatchType.CONTENT -> 35.0
             }
-            FrameworkType.CUSTOM, FrameworkType.SPRING_BOOT, FrameworkType.ANYFRAME -> when (type) {
+            FrameworkType.ANDROID,
+            FrameworkType.CUSTOM, FrameworkType.SPRING_BOOT, FrameworkType.ANYFRAME, FrameworkType.ANYFRAME_JAP -> when (type) {
                 MatchType.FILENAME -> 90.0
                 MatchType.CLASSNAME -> 90.0
                 MatchType.METHOD -> 70.0

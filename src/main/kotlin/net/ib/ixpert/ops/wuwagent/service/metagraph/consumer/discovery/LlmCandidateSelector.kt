@@ -256,7 +256,8 @@ class LlmCandidateSelector(
                 "- If a new query is needed, modify BOTH DaoInterface and DaoImpl.\n" +
                 "- Do NOT suggest JPA, @Entity, or JpaRepository — this project uses MyBatis."
             net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME_AP -> 
-                "- Target Anyframe Enterprise components: DEM/DQM, BIZ, SVC, Controller.\n" +
+                "- Target Anyframe Enterprise components: DEM/DQM, BIZ, SVC.\n" +
+                "- Note: There is no Controller layer in Anyframe AP; SVC is the entry point.\n" +
                 "- Follow LAYERED_SVO_BVO_DVO VoStrategy.\n" +
                 "- This project strictly uses Interface + Impl pairs. You MUST select BOTH the Interface and the Impl."
             else -> 
@@ -290,7 +291,7 @@ class LlmCandidateSelector(
         You MUST follow this 4-step reasoning process before selecting files:
         1. Identify the Trigger: 식별된 요구사항의 성격을 파악하세요 (예: 사용자 화면 조작, 배치 작업, 외부 연동 등).
         2. Map Trigger to Entry Point: 트리거 유형에 맞는 진입점을 찾으세요.
-           - 사용자 UI 동작이면 -> Controller 엔드포인트를 식별
+           - 사용자가 UI 조작이면 -> Controller 엔드포인트부터 식별
            - 스케줄/배치 작업이면 -> @Scheduled, Job 클래스를 식별
            - 핵심: 요구사항의 트리거 유형과 Entry Point의 역할이 일치하는지 반드시 확인하세요.
         3. Trace the Call Chain: Entry Point(Controller 또는 Job) -> Service -> DAO/Mapper 로 이어지는 실제 의존성 호출 체인을 추적하세요.

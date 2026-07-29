@@ -9,7 +9,13 @@ class ResourceScannerTest {
 
     @Test
     fun testScanner() {
-        val projectRoot = Paths.get("src/test/resources/metagraph_resource_samples").toAbsolutePath()
+        // Copy to a tmp dir to avoid ScanExclusionUtil filtering out 'test' from path
+        val sourceDir = Paths.get("src/test/resources/metagraph_resource_samples").toAbsolutePath().toFile()
+        val tmpDir = Paths.get(".agent_tmp_metagraph_resource_samples").toAbsolutePath().toFile()
+        if (!tmpDir.exists() || tmpDir.list()?.isEmpty() == true) {
+            sourceDir.copyRecursively(tmpDir, overwrite = true)
+        }
+        val projectRoot = tmpDir.toPath()
         val scanner = ResourceScanner(projectRoot)
         val nodes = scanner.scan()
 
