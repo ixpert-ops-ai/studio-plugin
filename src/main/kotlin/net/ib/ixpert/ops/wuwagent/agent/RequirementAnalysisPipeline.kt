@@ -146,6 +146,9 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         val mdRoot = Paths.get(project?.basePath ?: "", "docs")
         
         onChunk?.invoke("\n> **(Stage 3) LLM Verification** - 최종 연관성 검증...\n")
+        println("=== Stage 3 Candidates ===")
+        correctedFiles.forEach { println(it.path) }
+        println("==========================")
         val verifier = FileRelevanceVerifier(client, projectGraph, mdRoot)
         val fullRequirement = if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
         val verificationOutput = verifier.verify(fullRequirement, correctedFiles)

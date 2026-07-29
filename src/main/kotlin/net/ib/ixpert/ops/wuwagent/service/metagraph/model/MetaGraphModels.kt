@@ -57,6 +57,27 @@ data class ProjectGraph(
         return this.frameworkDetection?.userOverride ?: this.frameworkType
     }
 
+    fun normalizeLegacyCollections(): ProjectGraph {
+        val safeFiles = this.files.mapValues { (_, node) ->
+            node.copy(
+                apiEndpoints = node.apiEndpoints ?: emptyList(),
+                beanDefinitions = node.beanDefinitions ?: emptyList(),
+                entityRelations = node.entityRelations ?: emptyList(),
+                dependsOn = node.dependsOn ?: mutableListOf(),
+                dependedBy = node.dependedBy ?: mutableListOf(),
+                usesTypes = node.usesTypes ?: mutableListOf(),
+                usedByTypes = node.usedByTypes ?: mutableListOf(),
+                injections = node.injections ?: emptyList(),
+                implementedInterfaces = node.implementedInterfaces ?: emptyList(),
+                annotations = node.annotations ?: emptyList(),
+                methods = node.methods ?: emptyList(),
+                koreanComments = node.koreanComments ?: emptyList(),
+                dynamicViewFolders = node.dynamicViewFolders ?: emptyList()
+            )
+        }
+        return this.copy(files = safeFiles)
+    }
+
     @Transient
     private var _documentFrequency: Map<String, Int>? = null
 
@@ -123,12 +144,13 @@ data class FileNode(
     val superClass: String? = null,
     val implementedInterfaces: List<String> = emptyList(),
     val injections: List<DependencyInjection> = emptyList(),
-    // Phase 1c 보강 분석기용 데이터
     val apiEndpoints: List<ApiEndpoint> = emptyList(),
     val beanDefinitions: List<BeanDefinition> = emptyList(),
     val entityRelations: List<EntityRelation> = emptyList(),
     val dependsOn: MutableList<String> = mutableListOf(),
     val dependedBy: MutableList<String> = mutableListOf(),
+    val usesTypes: MutableList<String> = mutableListOf(),
+    val usedByTypes: MutableList<String> = mutableListOf(),
     var riskAssessment: RiskAssessment = RiskAssessment(0, ChangeRisk.NOT_CALCULATED, emptyList()),
     // Anyframe 지원 필드 추가
     val anyframeRole: AnyframeRole? = null,
@@ -305,7 +327,8 @@ enum class RelationshipType {
     CALLS_DEM_METHOD,
     MAPS_TO_TABLE,
     USES_DVO,
-    TRANSFORMS_VO
+    TRANSFORMS_VO,
+    USES_TYPE
 }
 
 enum class RelationshipStrength {
