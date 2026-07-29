@@ -69,13 +69,7 @@ object WuwLlmService {
                             "messages" to listOf(mapOf("role" to "user", "content" to "hi")),
                             "max_tokens" to 1
                         ))
-                        val testUrl = if (cleanUrl.endsWith("/chat/completions")) {
-                            cleanUrl
-                        } else if (cleanUrl.contains("/openai")) {
-                            "${cleanUrl.trimEnd('/')}/chat/completions"
-                        } else {
-                            "${cleanUrl.trimEnd('/')}/v1/chat/completions"
-                        }
+                        val testUrl = OpenAIClient.buildChatCompletionsUrl(cleanUrl, apiType)
                         HttpRequests.post(testUrl, "application/json").tuner {
                             if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
                             it.connectTimeout = 5000
