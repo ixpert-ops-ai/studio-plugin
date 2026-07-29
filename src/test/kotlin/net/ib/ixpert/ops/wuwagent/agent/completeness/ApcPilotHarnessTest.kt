@@ -211,8 +211,8 @@ class ApcPilotHarnessTest {
                 val rank = scores.indexOfFirst { it.first == target } + 1
                 println("Case $caseName [k1=$k1]: Rank = $rank")
                 if (k1 == 1.5) {
-                    println("  Top 5 Distribution:")
-                    scores.take(5).forEachIndexed { index, pair ->
+                    println("  Top 30 Distribution:")
+                    scores.take(30).forEachIndexed { index, pair ->
                         println("    ${index + 1}. [${String.format("%.4f", pair.second)}] ${pair.first.substringAfterLast('/')}")
                     }
                     val targetScore = scores.find { it.first == target }?.second ?: 0.0
@@ -439,5 +439,34 @@ class ApcPilotHarnessTest {
         println("False Positives: $falsePositives")
         println("Recall: ${"%.2f".format(recall * 100)}%")
         println("Precision: ${"%.2f".format(precision * 100)}%")
+    }
+
+    @Test
+    fun `testHardLimitOnApc`() = kotlinx.coroutines.runBlocking {
+        val graphFile = File("C:\\Users\\dffrp\\Downloads\\project-graph_a\\project-graph.json")
+        if (!graphFile.exists()) return@runBlocking
+        val gson = GsonBuilder().disableHtmlEscaping().create()
+        val graph = gson.fromJson(graphFile.readText(Charsets.UTF_8), ProjectGraph::class.java)
+        
+        val client = object : LLMClient {
+            override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): OllamaChatResponse? = null
+            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?): ChatCompletionResponse? = null
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = null
+        }
+        val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(null, client)
+        
+        var caughtExceptionMessage: String? = null
+        try {
+            pipeline.analyze("스마일페이 세션 정보 조회", "", graph)
+        } catch (e: IllegalArgumentException) {
+            caughtExceptionMessage = e.message
+        }
+        
+        println("=== Hard Limit Test ===")
+        if (caughtExceptionMessage != null) {
+            println("SUCCESS: Caught exception -> $caughtExceptionMessage")
+        } else {
+            println("FAILED: Expected IllegalArgumentException but none was thrown.")
+        }
     }
 }

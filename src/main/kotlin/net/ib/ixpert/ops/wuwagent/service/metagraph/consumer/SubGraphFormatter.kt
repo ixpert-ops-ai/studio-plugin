@@ -30,6 +30,15 @@ object SubGraphFormatter {
         sb.append("## 프로젝트 구조 컨텍스트\n")
         sb.append("- 프레임워크: ${graph.framework} / 총 ${graph.statistics.totalFiles}개 파일\n\n")
 
+        if (graph.frameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME_AP) {
+            sb.append("### 아키텍처 구조 특성 (Anyframe AP)\n")
+            sb.append("- **계층(Layer) 분리**: SVC (Interface) -> SVCImpl -> BIZ -> DEM/DQM(DAO)\n")
+            sb.append("  - SVCImpl: 클라이언트의 요청을 받아 비즈니스 로직(BIZ)에 위임\n")
+            sb.append("  - BIZ: 핵심 비즈니스 로직 처리, 데이터 접근(DEM/DQM) 위임\n")
+            sb.append("  - DEM/DQM: 실제 DB 접근 처리\n")
+            sb.append("- **DTO (VO) 규칙**: 각 계층에서 전용 VO 사용 (SVO -> BVO -> DVO)\n\n")
+        }
+
         // 2. 분석 대상 (Targets)
         sb.append("### 분석 대상\n")
         for (target in subGraph.targets) {

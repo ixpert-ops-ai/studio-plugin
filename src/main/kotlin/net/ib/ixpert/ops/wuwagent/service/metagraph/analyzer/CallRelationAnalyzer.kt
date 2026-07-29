@@ -1,9 +1,14 @@
 package net.ib.ixpert.ops.wuwagent.service.metagraph.analyzer
 
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.psi.PsiArrayType
 import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiMethodCallExpression
 import com.intellij.psi.PsiModifier
+import com.intellij.psi.PsiType
+import com.intellij.psi.PsiTypeVisitor
+import com.intellij.psi.PsiWildcardType
 import com.intellij.psi.util.PsiTreeUtil
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.Relationship
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.RelationshipType
@@ -88,10 +93,64 @@ class CallRelationAnalyzer {
             }
         }
 
+        for (method in methods) {
+            val signatureTypes = mutableSetOf<PsiType>()
+            method.returnType?.let { signatureTypes.add(it) }
+            for (param in method.parameterList.parameters) {
+                signatureTypes.add(param.type)
+            }
+            
+            val visitor = object : PsiTypeVisitor<Unit>() {
+                override fun visitClassType(classType: PsiClassType) {
+                    val className = classType.className
+                    val resolvedClass = classType.resolve()
+                    if (resolvedClass != null) {
+                        val targetClassName = resolvedClass.qualifiedName ?: resolvedClass.name
+                        if (targetClassName != null && targetClassName != sourceClassName) {
+                            val targetVirtualFile = resolvedClass.containingFile?.virtualFile
+                            if (targetVirtualFile != null && targetVirtualFile.path.startsWith(projectBasePath)) {
+                                val targetPath = targetVirtualFile.path.removePrefix(projectBasePath).removePrefix("/")
+                                if (targetPath != sourcePath) {
+                                    relationships.add(
+                                        Relationship(
+                                            source = sourcePath,
+                                            target = targetPath,
+                                            type = RelationshipType.USES_TYPE,
+                                            detail = "Signature type"
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    for (param in classType.parameters) {
+                        param.accept(this)
+                    }
+                }
+                
+                override fun visitArrayType(arrayType: PsiArrayType) {
+                    arrayType.componentType.accept(this)
+                }
+                
+                override fun visitWildcardType(wildcardType: PsiWildcardType) {
+                    wildcardType.bound?.accept(this)
+                }
+            }
+            
+            for (type in signatureTypes) {
+                type.accept(visitor)
+            }
+        }
+
         if (unresolvedCount > 0) {
             logger.debug("[$sourcePath] CallRelationAnalyzer: $unresolvedCount method calls could not be resolved (e.g. Lombok, generics).")
         }
 
-        return relationships.toList()
+        val callTargets = relationships.filter { it.type == RelationshipType.CALLS }.map { it.target }.toSet()
+        val finalRelationships = relationships.filter { 
+            it.type != RelationshipType.USES_TYPE || it.target !in callTargets 
+        }
+
+        return finalRelationships.toList()
     }
 }

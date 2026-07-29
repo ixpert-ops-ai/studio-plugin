@@ -18,7 +18,7 @@ object RiskCalculator {
         reasons.add("기본 계층 위험도 [${node.fileType}]: +$baseScore")
 
         // 2. Inbound Dependencies (피의존성)
-        val inboundCount = inboundCountOverride ?: node.dependedBy.size
+        val inboundCount = inboundCountOverride ?: (node.dependedBy.size + node.usedByTypes.size)
         if (inboundCount > 0) {
             score += inboundCount
             reasons.add("${inboundCount}개의 파일에서 이 파일을 의존/호출함: +$inboundCount")
@@ -32,7 +32,7 @@ object RiskCalculator {
         }
 
         // 4. Complexity (복잡도: 외부 호출)
-        val outboundCalls = outboundCountOverride ?: node.dependsOn.size
+        val outboundCalls = outboundCountOverride ?: (node.dependsOn.size + node.usesTypes.size)
         if (outboundCalls > 0) {
             val callScore = (outboundCalls * 0.5).toInt()
             if (callScore > 0) {

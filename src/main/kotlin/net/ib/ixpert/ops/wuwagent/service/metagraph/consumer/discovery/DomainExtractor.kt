@@ -135,7 +135,7 @@ fun calculateInfrastructureThreshold(
     minThreshold: Int = 3
 ): Int {
     val dependedByCounts = nodes
-        .map { it.dependedBy.size }
+        .map { it.dependedBy.size + it.usedByTypes.size }
         .filter { it > 0 }
         .sorted()
 

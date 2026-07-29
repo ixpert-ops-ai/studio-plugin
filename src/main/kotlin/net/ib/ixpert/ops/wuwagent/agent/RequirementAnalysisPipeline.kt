@@ -83,8 +83,22 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                     }
                 }
             } else {
-                onChunk?.invoke("> \uD83D\uDCA1 **Tip:** 전체 ${projectGraph.totalFileCount}개 파일을 대상으로 탐색 중입니다. Project 뷰에서 관련 패키지를 선택 후 실행하시면 분석의 정확도와 속도가 크게 향상됩니다.\n\n")
-                projectGraph
+                // 잠정 보수적 임계값 (정밀 경계 아님).
+                // 실측 근거: member-market(105), survey-admin(137) skip 시 안전 / APC(2,670) skip 시 recall 0%.
+                // 138~2,669 구간은 미검증 — 이 값이 정당한 로컬 SR을 오차단할 가능성 있음. 
+                // 향후 150~2000 규모의 SR 케이스 확보 시 재조정 요망.
+                val hardLimit = 200
+                if (projectGraph.totalFileCount > hardLimit) {
+                    val msg = "> 📦 **대상 파일이 너무 많습니다 (${projectGraph.totalFileCount}개)**\n" +
+                              "> 파일이 많아 이 상태로는 정확한 대상을 좁히기 어렵습니다. 아래 중 하나를 진행해 주세요:\n" +
+                              "> - **범위 좁히기** — 작업과 관련된 폴더/패키지를 선택해 다시 실행해 주세요. (권장)\n" +
+                              "> - **전역 공통 변경인 경우** — 만약 여러 도메인에 공통으로 적용되는 변경(예: 전 API 공통 로깅)이라면, 개별 파일 수정보다 공통 모듈(AOP/인터셉터/부모 클래스) 관점에서 접근하는 것이 적절합니다.\n"
+                    onChunk?.invoke(msg)
+                    throw IllegalArgumentException("대상 파일이 너무 많습니다 (${projectGraph.totalFileCount}개). 폴더/패키지를 선택하여 범위를 좁히거나, 공통 모듈 관점에서 요구사항을 재정의해 주세요.")
+                } else {
+                    onChunk?.invoke("> \uD83D\uDCA1 **Tip:** 전체 ${projectGraph.totalFileCount}개 파일을 대상으로 탐색 중입니다. Project 뷰에서 관련 패키지를 선택 후 실행하시면 분석의 정확도와 속도가 크게 향상됩니다.\n\n")
+                    projectGraph
+                }
             }
         } else {
             projectGraph
@@ -132,6 +146,9 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         val mdRoot = Paths.get(project?.basePath ?: "", "docs")
         
         onChunk?.invoke("\n> **(Stage 3) LLM Verification** - 최종 연관성 검증...\n")
+        println("=== Stage 3 Candidates ===")
+        correctedFiles.forEach { println(it.path) }
+        println("==========================")
         val verifier = FileRelevanceVerifier(client, projectGraph, mdRoot)
         val fullRequirement = if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
         val verificationOutput = verifier.verify(fullRequirement, correctedFiles)
