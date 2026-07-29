@@ -201,8 +201,13 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         // CALLS 관계 병합 및 노드의 dependsOn/dependedBy 업데이트
         relationships.addAll(allCalls)
         for (call in allCalls) {
-            resolvedNodes[call.source]?.dependsOn?.add(call.target)
-            resolvedNodes[call.target]?.dependedBy?.add(call.source)
+            if (call.type == RelationshipType.USES_TYPE) {
+                resolvedNodes[call.source]?.usesTypes?.add(call.target)
+                resolvedNodes[call.target]?.usedByTypes?.add(call.source)
+            } else {
+                resolvedNodes[call.source]?.dependsOn?.add(call.target)
+                resolvedNodes[call.target]?.dependedBy?.add(call.source)
+            }
         }
 
         // Phase 1 비-Java 자원 스캔 및 연결
@@ -247,6 +252,8 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
         val scoredNodes = resolvedNodes.mapValues { (path, node) ->
             val distinctDependsOn = node.dependsOn.distinct().toMutableList()
             val distinctDependedBy = node.dependedBy.distinct().toMutableList()
+            val distinctUsesTypes = node.usesTypes.distinct().toMutableList()
+            val distinctUsedByTypes = node.usedByTypes.distinct().toMutableList()
 
             val inboundCount = distinctDependedBy.size
             val outboundCalls = allCalls.filter { it.source == path }.map { it.target }.toSet().size
@@ -260,6 +267,8 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
             node.copy(
                 dependsOn = distinctDependsOn,
                 dependedBy = distinctDependedBy,
+                usesTypes = distinctUsesTypes,
+                usedByTypes = distinctUsedByTypes,
                 riskAssessment = assessment,
                 isDynamicRouter = frontControllers.any { it.controllerPath == path }
             )
@@ -642,7 +651,7 @@ class ProjectGraphBuilder(private val project: Project, private val targetDirect
 
             val jsonContent = rootMetaFile.readText(Charsets.UTF_8)
             val gson = com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
-            val rootGraph = gson.fromJson(jsonContent, ProjectGraph::class.java)
+            val rootGraph = gson.fromJson(jsonContent, ProjectGraph::class.java).normalizeLegacyCollections()
 
             if (rootGraph.graphType == GraphType.MULTI_LEVEL_1 && rootGraph.modules != null) {
                 val rootPath = ReadAction.compute<String?, Throwable> {
