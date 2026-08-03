@@ -19,7 +19,6 @@ class RelevanceScorer(
         val scoredFiles = mutableListOf<ScoredFile>()
 
         for ((path, step) in expandedFiles) {
-            java.io.File("C:/Workspace/member-market/debug-all-files.txt").appendText("Evaluating: $path\n")
             val fileNode = graph.files[path]
             
             // HopScore (API_ENDPOINT_FALLBACK/INJECTION_FALLBACK은 점수 하향)
@@ -98,10 +97,6 @@ class RelevanceScorer(
 
                 val totalScore = hopScore + nameMatchScore + methodMatchScore + layerAlignScore + commentMatchScore + typeBonusScore + criticalChainBonus
                 
-                if (fileNode.className.contains("ACAMTBAPC005DEM") || fileNode.className.contains("Product") || path.contains("ProductCreateView")) {
-                    java.io.File("C:/Workspace/member-market/debug-score.txt").appendText("BREAKDOWN for ${fileNode.className}: hopDistance=${step.hop}, hopScore=$hopScore, nameMatchScore=$nameMatchScore, methodMatchScore=$methodMatchScore, layerAlignScore=$layerAlignScore, commentMatchScore=$commentMatchScore, typeBonusScore=$typeBonusScore, criticalChainBonus=$criticalChainBonus -> totalScore=$totalScore\n")
-                }
-                
                 if (totalScore >= minScore) {
                     scoredFiles.add(
                         ScoredFile(
@@ -137,10 +132,6 @@ class RelevanceScorer(
                 }
                 
                 val totalScore = hopScore + nameMatchScore + layerAlignScore
-                
-                if (fileName.contains("Product") || fileName.contains("ProductCreateView")) {
-                    java.io.File("C:/Workspace/member-market/debug-score.txt").appendText("BREAKDOWN for RESOURCE $fileName: hopDistance=${step.hop}, hopScore=$hopScore, nameMatchScore=$nameMatchScore, layerAlignScore=$layerAlignScore -> totalScore=$totalScore\n")
-                }
                 
                 if (totalScore >= minScore) {
                     scoredFiles.add(
