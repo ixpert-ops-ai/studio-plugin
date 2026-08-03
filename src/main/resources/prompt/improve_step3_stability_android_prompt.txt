@@ -8,6 +8,14 @@
 - 개선된 코드: {{IMPROVED_CODE}}
 - 분석 결과: {{ANALYSIS_RESULT}}
 
+# 평가 관점
+- 변경된 코드가 targetSdk 상향 시 영향받는 API를 사용하는지
+- Deprecated API를 새로 도입하지는 않았는지
+- 런타임 권한이 추가로 필요해지지는 않는지
+
+SDK 관련 사항은 "targetSdk N 이상에서는 ~" 형태로 조건을 명시하고,
+코드에 실제로 존재하는 API에 한해서만 언급하세요.
+
 # Output Format
 아래 형식으로 한국어로 출력하라.
 
