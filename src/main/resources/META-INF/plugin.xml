@@ -3,8 +3,13 @@
     <name>iXpert AI Assistant</name>
     <vendor email="admin@jodongik.cloud" url="http://jodongik.cloud">IB iXpert Ops</vendor>
     <description><![CDATA[
-      iXpert AI Assistant is an on-premise AI Coding Assistant plugin powered by Ollama.
-      Provides code explain, review, refactoring, PMD analysis, and Impact Analysis.
+iXpert AI Assistant is an on-premise AI Coding Assistant plugin powered by vLLM (OpenAI-compatible API).
+Provides code explain, improve, impact analysis, query validation, unit test report, document generation, and project MetaGraph analysis.
+Supports Android and Spring-based projects with framework-aware AI responses.
+
+iXpert AI Assistant는 vLLM 기반 사내 AI 코딩 어시스턴트 플러그인입니다.
+코드 설명, 개선, 영향도 분석, 쿼리 검증, 단위 테스트 리포트, 문서 생성, 프로젝트 MetaGraph 분석 기능을 제공합니다.
+Android 및 Spring 프로젝트의 프레임워크를 자동 감지하여 맞춤형 AI 응답을 제공합니다.
     ]]></description>
 
     <!-- Product and plugin compatibility requirements.
