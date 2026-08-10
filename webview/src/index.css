@@ -876,6 +876,18 @@ body {
   text-decoration: underline;
 }
 
+/* /find 결과 등의 "open:파일경로:라인" 링크 — 에디터 이동 액션임을 시각적으로 구분 */
+.markdown-body a.markdown-open-link {
+  color: var(--text-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.markdown-body a.markdown-open-link:hover {
+  opacity: 0.85;
+}
+
 .test-actions {
   gap: 6px;
 }
@@ -1068,6 +1080,18 @@ body {
 
 .markdown-body a:hover {
   text-decoration: underline;
+}
+
+/* /find 결과 등의 "open:파일경로:라인" 링크 — 에디터 이동 액션임을 시각적으로 구분 */
+.markdown-body a.markdown-open-link {
+  color: var(--text-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.markdown-body a.markdown-open-link:hover {
+  opacity: 0.85;
 }
 
 .test-actions {
