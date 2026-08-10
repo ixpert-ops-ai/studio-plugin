@@ -1371,7 +1371,7 @@ class WebviewActionRouter(private val project: Project) {
                 // ── Open In Editor: 파일 경로로 IDE 에디터 열기 ──────────────
                 "/openInEditor" -> {
                     val filePath = payload["filePath"] ?: textBody
-                    logger.info("Router: /openInEditor → $filePath")
+                    logger.info("Router: /openInEditor → $filePath (line=${payload["line"]})")
                     if (filePath.isBlank()) {
                         bridge.sendMessage("error", "파일 경로가 없습니다.")
                         return@invokeLater
@@ -1386,7 +1386,22 @@ class WebviewActionRouter(private val project: Project) {
                         )
                         return@invokeLater
                     }
-                    FileEditorManager.getInstance(project).openFile(vFile, true)
+
+                    val requestedLine = payload["line"]?.toIntOrNull()
+                    val lineCount = if (requestedLine != null && requestedLine > 0) {
+                        ApplicationManager.getApplication().runReadAction(
+                            com.intellij.openapi.util.Computable {
+                                com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(vFile)?.lineCount
+                            }
+                        )
+                    } else null
+
+                    if (requestedLine != null && requestedLine > 0 && lineCount != null && requestedLine <= lineCount) {
+                        // OpenFileDescriptor는 0-based 라인 번호를 받음
+                        com.intellij.openapi.fileEditor.OpenFileDescriptor(project, vFile, requestedLine - 1, 0).navigate(true)
+                    } else {
+                        FileEditorManager.getInstance(project).openFile(vFile, true)
+                    }
                 }
 
                 else -> {

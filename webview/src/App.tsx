@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown, X, Info } from 'lucide-react';
-import Markdown from 'react-markdown';
+import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import mermaid from 'mermaid';
@@ -458,9 +458,12 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
         )}
         {msg.content && (
           <div className="markdown-body" style={{ maxWidth: '100%', overflowX: 'hidden' }}>
-            <Markdown 
-              remarkPlugins={[remarkGfm]} 
+            <Markdown
+              remarkPlugins={[remarkGfm]}
               rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
+              // react-markdown 기본 urlTransform은 화이트리스트에 없는 스킴(open: 포함)의 href를 ''로 지워버림
+              // → open:은 그대로 통과시키고, 그 외는 기존 defaultUrlTransform(보안 필터링)을 그대로 적용
+              urlTransform={(url) => url.startsWith('open:') ? url : defaultUrlTransform(url)}
               components={{
                 pre: (props: any) => <CodeBlock isCollapsible={!!msg.filePath}>{props.children}</CodeBlock>,
                 code(props: any) {
@@ -474,6 +477,46 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
                     return <MermaidChart chart={String(children).replace(/\n$/, '')} />;
                   }
                   return <code className={className} {...rest}>{children}</code>;
+                },
+                a(props: any) {
+                  const { href, children, ...rest } = props;
+
+                  // "open:파일전체경로:라인번호" 형식만 인터셉트 → 에디터에서 해당 라인 열기
+                  // 그 외 일반 링크는 기존 동작(react-markdown 기본 <a>) 그대로 유지
+                  if (typeof href === 'string' && href.startsWith('open:')) {
+                    const spec = href.slice('open:'.length);
+                    // 파일 경로 자체에 콜론이 있을 수 있으니 마지막 콜론 뒤만 라인번호 후보로 파싱
+                    const lastColonIdx = spec.lastIndexOf(':');
+                    let filePath = spec;
+                    let line: number | undefined;
+                    if (lastColonIdx > 0) {
+                      const linePart = spec.slice(lastColonIdx + 1);
+                      if (/^\d+$/.test(linePart)) {
+                        filePath = spec.slice(0, lastColonIdx);
+                        line = parseInt(linePart, 10);
+                      }
+                      // 라인번호 파싱 실패 시 filePath는 spec 전체(콜론 포함) 그대로 유지, line 없이 전송
+                    }
+
+                    const handleOpenLink = (e: React.MouseEvent) => {
+                      e.preventDefault();
+                      if (!window.sendToIde || !filePath) return;
+                      window.sendToIde(JSON.stringify({
+                        command: '/openInEditor',
+                        filePath,
+                        // Gson이 Map<String, String>으로 파싱하므로(JcefMessageHandler.kt) 숫자가 아닌 문자열로 전송
+                        ...(line !== undefined ? { line: String(line) } : {})
+                      }));
+                    };
+
+                    return (
+                      <a href={href} onClick={handleOpenLink} className="markdown-open-link" {...rest}>
+                        {children}
+                      </a>
+                    );
+                  }
+
+                  return <a href={href} {...rest}>{children}</a>;
                 }
               }}
             >
