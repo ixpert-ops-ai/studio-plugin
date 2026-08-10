@@ -8,6 +8,7 @@ import net.ib.ixpert.ops.wuwagent.agent.AgentContext
 import net.ib.ixpert.ops.wuwagent.agent.ChatAgent
 import net.ib.ixpert.ops.wuwagent.agent.DocGenerateAgent
 import net.ib.ixpert.ops.wuwagent.agent.ExplainAgent
+import net.ib.ixpert.ops.wuwagent.agent.FindAgent
 import net.ib.ixpert.ops.wuwagent.agent.ImpactAgent
 import net.ib.ixpert.ops.wuwagent.agent.IntentAnalyzer
 import net.ib.ixpert.ops.wuwagent.agent.QueryValidationAgent
@@ -651,6 +652,36 @@ class WebviewActionRouter(private val project: Project) {
                     val context = AgentContext(project, editor, textBody, command = "/chat")
                     ChatAgent().execute(
                         context, 
+                        onSuccess = { res ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("chat", res, messageId)
+                            }
+                        },
+                        onChunk = { chunk ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessageChunk(messageId, chunk)
+                            }
+                        },
+                        onError = { errorMsg ->
+                            ApplicationManager.getApplication().invokeLater {
+                                // "__cancelled__" 는 /cancel 핸들러에서 이미 task_cancelled 전송 완료 → 중복 방지
+                                if (errorMsg != "__cancelled__") {
+                                    bridge.sendMessage("error", errorMsg, messageId)
+                                }
+                            }
+                        }
+                    )
+                }
+
+                "/find" -> {
+                    logger.info("Router: /find 분기")
+                    val messageId = "msg_${System.currentTimeMillis()}"
+                    // 🛎 즉시 자리 만들기 (로딩 표시 유도)
+                    bridge.sendMessage("chat_start", "🔍 프로젝트 내 검색 중입니다...", messageId)
+
+                    val context = AgentContext(project, editor, textBody, command = "/find")
+                    FindAgent().execute(
+                        context,
                         onSuccess = { res ->
                             ApplicationManager.getApplication().invokeLater {
                                 bridge.sendMessage("chat", res, messageId)

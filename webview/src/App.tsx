@@ -1160,6 +1160,9 @@ function App() {
     if (text === '/explain' || text.startsWith('/explain ')) {
       command = '/explain';
       payload = text.startsWith('/explain ') ? text.slice(9).trim() : '';
+    } else if (text === '/find' || text.startsWith('/find ')) {
+      command = '/find';
+      payload = text.startsWith('/find ') ? text.slice(6).trim() : '';
     } else if (text === '/improve' || text.startsWith('/improve ')) {
       command = '/task';
       payload = '코드를 개선해주세요.';
@@ -1225,6 +1228,7 @@ function App() {
     const cmds = [
       { cmd: '/explain', desc: '코드를 설명해줘' },
       { cmd: '/improve', desc: '코드를 개선해줘' },
+      { cmd: '/find', desc: '프로젝트 내 키워드 검색' },
       { cmd: '/test', desc: '테스트 코드를 생성해줘' },
       { cmd: '/analyze', desc: '요구사항 기반 수정 대상 파일 추출' },
       { cmd: '/query', desc: '쿼리를 검증해줘' },
