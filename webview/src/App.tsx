@@ -1160,9 +1160,6 @@ function App() {
     if (text === '/explain' || text.startsWith('/explain ')) {
       command = '/explain';
       payload = text.startsWith('/explain ') ? text.slice(9).trim() : '';
-    } else if (text === '/review' || text.startsWith('/review ')) {
-      command = '/task';
-      payload = '/review 선택된 코드를 검토하고 개선 사항을 제안해주세요.';
     } else if (text === '/improve' || text.startsWith('/improve ')) {
       command = '/task';
       payload = '코드를 개선해주세요.';

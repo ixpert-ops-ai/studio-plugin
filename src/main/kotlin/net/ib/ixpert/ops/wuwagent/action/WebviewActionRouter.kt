@@ -989,16 +989,12 @@ class WebviewActionRouter(private val project: Project) {
                         }
 
                         else -> {
-                            // 4순위: Improve / Review 파이프라인인데 코드 컨텍스트가 없으면 안내 메시지로 즉시 종료
-                            val needsCode = detectedPipeline == TaskPipeline.Improve ||
-                                            detectedPipeline == TaskPipeline.Review
+                            // 4순위: Improve 파이프라인인데 코드 컨텍스트가 없으면 안내 메시지로 즉시 종료
+                            val needsCode = detectedPipeline == TaskPipeline.Improve
                             val hasFiles   = (payload["files"] ?: "").isNotBlank()
                             val hasContent = editor.document.text.isNotBlank()
                             if (needsCode && !hasFiles && !hasContent) {
-                                val noCodeMsg = if (detectedPipeline == TaskPipeline.Improve)
-                                    "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
-                                else
-                                    "리뷰할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
+                                val noCodeMsg = "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
                                 bridge.sendMessage(
                                     subType  = "task_step",
                                     content  = noCodeMsg,

@@ -60,11 +60,6 @@ Android 및 Spring 프로젝트의 프레임워크를 자동 감지하여 맞춤
                     text="Explain This Code (코드 설명)"
                     description="선택한 코드를 AI가 분석/설명합니다."/>
 
-            <action id="IxpertAiAssistant.ReviewAction"
-                    class="net.ib.ixpert.ops.wuwagent.action.ReviewAction"
-                    text="Review This Code (코드 리뷰)"
-                    description="선택한 코드를 AI가 리뷰합니다."/>
-
             <action id="IxpertAiAssistant.ImpactAnalysisAction"
                     class="net.ib.ixpert.ops.wuwagent.action.ImpactAnalysisAction"
                     text="Impact Analysis (영향도 분석)"
