@@ -20,7 +20,6 @@ object IntentAnalyzer {
         listOf("문서 생성", "분석 문서", "doc 생성", "generate doc")                                              to TaskPipeline.DocGenerate,
         listOf("단위 테스트", "unit test", "테스트 리포트", "테스트 코드 생성", "junit 테스트")                         to TaskPipeline.UnitTestReport,
         listOf("코드 개선", "이 코드 개선", "코드를 개선", "리팩토링", "리팩", "refactor", "improve", "코드 최적화", "코드를 최적화") to TaskPipeline.Improve,
-        listOf("코드 리뷰", "코드를 리뷰", "review", "코드 검토", "코드 품질")                                       to TaskPipeline.Review,
         listOf("코드 설명", "이 코드 설명", "코드 분석해줘", "explain this code", "explain the code")              to TaskPipeline.ExplainTask,
         listOf("영향 분석", "영향도", "impact analyze")                                                           to TaskPipeline.Impact,
         listOf("쿼리 검증", "query validation", "sql 검증")                                                       to TaskPipeline.QueryValidation
@@ -29,7 +28,6 @@ object IntentAnalyzer {
     // 에디터 컨텍스트(열린 파일 또는 @첨부)가 없으면 Chat으로 폴백해야 하는 파이프라인
     private val requiresEditorContext = setOf(
         TaskPipeline.Improve,
-        TaskPipeline.Review,
         TaskPipeline.ExplainTask,
         TaskPipeline.Impact,
         TaskPipeline.QueryValidation,
@@ -62,7 +60,6 @@ object IntentAnalyzer {
 
             val llmPipeline = when {
                 intent.contains("IMPROVE") -> TaskPipeline.Improve
-                intent.contains("REVIEW")  -> TaskPipeline.Review
                 intent.contains("EXPLAIN") -> TaskPipeline.ExplainTask
                 else                       -> TaskPipeline.Chat
             }

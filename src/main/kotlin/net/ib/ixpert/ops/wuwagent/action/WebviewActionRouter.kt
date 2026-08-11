@@ -8,6 +8,7 @@ import net.ib.ixpert.ops.wuwagent.agent.AgentContext
 import net.ib.ixpert.ops.wuwagent.agent.ChatAgent
 import net.ib.ixpert.ops.wuwagent.agent.DocGenerateAgent
 import net.ib.ixpert.ops.wuwagent.agent.ExplainAgent
+import net.ib.ixpert.ops.wuwagent.agent.FindAgent
 import net.ib.ixpert.ops.wuwagent.agent.ImpactAgent
 import net.ib.ixpert.ops.wuwagent.agent.IntentAnalyzer
 import net.ib.ixpert.ops.wuwagent.agent.QueryValidationAgent
@@ -672,6 +673,36 @@ class WebviewActionRouter(private val project: Project) {
                     )
                 }
 
+                "/find" -> {
+                    logger.info("Router: /find 분기")
+                    val messageId = "msg_${System.currentTimeMillis()}"
+                    // 🛎 즉시 자리 만들기 (로딩 표시 유도)
+                    bridge.sendMessage("chat_start", "🔍 프로젝트 내 검색 중입니다...", messageId)
+
+                    val context = AgentContext(project, editor, textBody, command = "/find")
+                    FindAgent().execute(
+                        context,
+                        onSuccess = { res ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("chat", res, messageId)
+                            }
+                        },
+                        onChunk = { chunk ->
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessageChunk(messageId, chunk)
+                            }
+                        },
+                        onError = { errorMsg ->
+                            ApplicationManager.getApplication().invokeLater {
+                                // "__cancelled__" 는 /cancel 핸들러에서 이미 task_cancelled 전송 완료 → 중복 방지
+                                if (errorMsg != "__cancelled__") {
+                                    bridge.sendMessage("error", errorMsg, messageId)
+                                }
+                            }
+                        }
+                    )
+                }
+
                 // ── TaskAgent (오케스트레이터) ────────────────
                 "/task" -> {
                     logger.info("Router: /task 분기 → TaskAgent 시작")
@@ -989,16 +1020,12 @@ class WebviewActionRouter(private val project: Project) {
                         }
 
                         else -> {
-                            // 4순위: Improve / Review 파이프라인인데 코드 컨텍스트가 없으면 안내 메시지로 즉시 종료
-                            val needsCode = detectedPipeline == TaskPipeline.Improve ||
-                                            detectedPipeline == TaskPipeline.Review
+                            // 4순위: Improve 파이프라인인데 코드 컨텍스트가 없으면 안내 메시지로 즉시 종료
+                            val needsCode = detectedPipeline == TaskPipeline.Improve
                             val hasFiles   = (payload["files"] ?: "").isNotBlank()
                             val hasContent = editor.document.text.isNotBlank()
                             if (needsCode && !hasFiles && !hasContent) {
-                                val noCodeMsg = if (detectedPipeline == TaskPipeline.Improve)
-                                    "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
-                                else
-                                    "리뷰할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
+                                val noCodeMsg = "개선할 코드가 없습니다. 파일을 열거나 @파일을 선택해주세요."
                                 bridge.sendMessage(
                                     subType  = "task_step",
                                     content  = noCodeMsg,
@@ -1344,7 +1371,7 @@ class WebviewActionRouter(private val project: Project) {
                 // ── Open In Editor: 파일 경로로 IDE 에디터 열기 ──────────────
                 "/openInEditor" -> {
                     val filePath = payload["filePath"] ?: textBody
-                    logger.info("Router: /openInEditor → $filePath")
+                    logger.info("Router: /openInEditor → $filePath (line=${payload["line"]})")
                     if (filePath.isBlank()) {
                         bridge.sendMessage("error", "파일 경로가 없습니다.")
                         return@invokeLater
@@ -1359,7 +1386,22 @@ class WebviewActionRouter(private val project: Project) {
                         )
                         return@invokeLater
                     }
-                    FileEditorManager.getInstance(project).openFile(vFile, true)
+
+                    val requestedLine = payload["line"]?.toIntOrNull()
+                    val lineCount = if (requestedLine != null && requestedLine > 0) {
+                        ApplicationManager.getApplication().runReadAction(
+                            com.intellij.openapi.util.Computable {
+                                com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(vFile)?.lineCount
+                            }
+                        )
+                    } else null
+
+                    if (requestedLine != null && requestedLine > 0 && lineCount != null && requestedLine <= lineCount) {
+                        // OpenFileDescriptor는 0-based 라인 번호를 받음
+                        com.intellij.openapi.fileEditor.OpenFileDescriptor(project, vFile, requestedLine - 1, 0).navigate(true)
+                    } else {
+                        FileEditorManager.getInstance(project).openFile(vFile, true)
+                    }
                 }
 
                 else -> {
