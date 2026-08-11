@@ -39,7 +39,7 @@ class Stage3TokenMeasurementTest {
         
         val dummyClient = object : LLMClient {
             override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): OllamaChatResponse? = null
-            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?): ChatCompletionResponse? {
+            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?, temperature: Double?): ChatCompletionResponse? {
                 capturedSystemPrompt = systemPrompt
                 capturedPrompt = messages.first().content ?: ""
                 capturedTools = tools

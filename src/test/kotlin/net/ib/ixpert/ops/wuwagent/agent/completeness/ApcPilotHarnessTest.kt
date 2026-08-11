@@ -345,7 +345,7 @@ class ApcPilotHarnessTest {
                 messages: List<ChatMessage>,
                 maxTokens: Int?,
                 tools: List<ToolDefinition>?,
-                toolChoice: Any?
+                toolChoice: Any?, temperature: Double?
             ): ChatCompletionResponse? {
                 try {
                     val msgs = mutableListOf(mapOf("role" to "system", "content" to systemPrompt))
@@ -450,7 +450,7 @@ class ApcPilotHarnessTest {
         
         val client = object : LLMClient {
             override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): OllamaChatResponse? = null
-            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?): ChatCompletionResponse? = null
+            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?, temperature: Double?): ChatCompletionResponse? = null
             override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = null
         }
         val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(null, client)

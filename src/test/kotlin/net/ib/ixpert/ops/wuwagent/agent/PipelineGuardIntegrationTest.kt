@@ -25,7 +25,7 @@ class PipelineGuardIntegrationTest {
             messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
             maxTokens: Int?,
             tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>?,
-            toolChoice: Any?
+            toolChoice: Any?, temperature: Double?
         ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
             callCount++
             println("--- LLM CALL $callCount ---")

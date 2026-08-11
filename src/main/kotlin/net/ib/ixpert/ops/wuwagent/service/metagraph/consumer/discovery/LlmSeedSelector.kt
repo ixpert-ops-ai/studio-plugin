@@ -44,7 +44,37 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
                 return t
             }
             
-            val qTokens = tokenize(srText)
+            val qTokens = tokenize(srText).toMutableList()
+            
+            // --- Domain Keyword Extraction & Injection ---
+            try {
+                val domainSystemPrompt = """
+                    당신은 엔터프라이즈 시스템의 도메인 분석 전문가입니다.
+                    주어진 요구사항(SR)을 읽고, 이 요구사항이 시스템의 어느 핵심 도메인에 속해야 하는지 가장 적절한 핵심 도메인 명사(예: 상품, 주문, 회원, 결제, 전시 등) 하나만 유추하세요.
+                    다른 설명은 제외하고 명사 단어 하나만 정확하게 답변하세요.
+                """.trimIndent()
+                val domainRes = llmClient.chat(domainSystemPrompt, srText, 50, null)
+                val domainKeyword = domainRes?.message?.content?.trim()?.replace(Regex("[^가-힣a-zA-Z]"), "")
+                if (!domainKeyword.isNullOrBlank()) {
+                    println("[LlmSeedSelector] Extracted domain keyword: $domainKeyword")
+                    
+                    // Add the keyword itself to boost nodes with matching korean comments
+                    for (i in 1..5) qTokens.add(domainKeyword)
+                    
+                    val dict = DomainDictionary.load(graph)
+                    val prefixes = dict.translate(domainKeyword)
+                    if (prefixes.isNotEmpty()) {
+                        println("[LlmSeedSelector] Injected domain prefixes into BM25: $prefixes")
+                        // Add each prefix 5 times to give it a strong boost in BM25
+                        prefixes.forEach { p ->
+                            for (i in 1..5) qTokens.add(p)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                println("[LlmSeedSelector] Domain extraction failed: ${e.message}")
+            }
+            // ---------------------------------------------
             val documents = mutableMapOf<String, Pair<String, List<String>>>() // ID -> Pair(PromptString, Tokens)
             var totalLength = 0
             

@@ -27,8 +27,9 @@ class ShadowModeIntegrationTest {
                 messages: List<ChatMessage>,
                 maxTokens: Int?,
                 tools: List<ToolDefinition>?,
-                toolChoice: Any?
-            ): ChatCompletionResponse {
+                toolChoice: Any?,
+                temperature: Double?
+            ): ChatCompletionResponse? {
                 return ChatCompletionResponse(
                     id = "1",
                     choices = listOf(

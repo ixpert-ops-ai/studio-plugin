@@ -220,7 +220,8 @@ class OpenAIClient : LLMClient {
         messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
         maxTokens: Int?,
         tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>?,
-        toolChoice: Any?
+        toolChoice: Any?,
+        temperature: Double?
     ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
         val baseUrl = when (settings.apiType) {
@@ -245,7 +246,7 @@ class OpenAIClient : LLMClient {
             "model" to settings.model,
             "messages" to requestMessages,
             "stream" to false,
-            "temperature" to settings.temperature,
+            "temperature" to (temperature ?: settings.temperature),
             "max_tokens" to (maxTokens ?: 4096)
         )
         if (!tools.isNullOrEmpty()) {

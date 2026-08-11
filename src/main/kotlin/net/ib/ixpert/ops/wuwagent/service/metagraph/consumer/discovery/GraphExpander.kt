@@ -120,16 +120,23 @@ class GraphExpander(
             for (depPath in node.usesTypes) {
                 if (!visited.containsKey(depPath)) {
                     val depNode = graph.files[depPath]
-                    if (depNode != null && isCommonInfrastructure(depNode).not()
-                        && isDomainAllowed(depPath, node.path, seedDomains)) {
+                    if (depNode != null && isDomainAllowed(depPath, node.path, seedDomains)) {
                         visited[depPath] = ExpansionStep(hop = 1, via = "USES_TYPE", from = node.path)
                         hop1Queue.add(depNode)
                     }
                 }
             }
             
-            // TODO: [Backlog] usedByTypes(상향) 순회는 과도한 상향 확산을 막기 위해 당분간 연결 보류 (미검증)
-            // for (depPath in node.usedByTypes) { ... }
+            // 상향 탐색 (타입 참조): 이 파일을 시그니처 등으로 참조하는 곳
+            for (depPath in node.usedByTypes) {
+                if (!visited.containsKey(depPath)) {
+                    val depNode = graph.files[depPath]
+                    if (depNode != null && isDomainAllowed(depPath, node.path, seedDomains)) {
+                        visited[depPath] = ExpansionStep(hop = 1, via = "USED_BY_TYPE", from = node.path)
+                        hop1Queue.add(depNode)
+                    }
+                }
+            }
 
             // DTO/Entity의 경우, Controller의 apiEndpoints에 파라미터/반환타입으로 존재하는지 확인 (그래프 파서 누락 보정)
             if (node.fileType.name == "DTO" || node.fileType.name == "ENTITY") {
@@ -156,6 +163,27 @@ class GraphExpander(
             val nextQueue = mutableListOf<FileNode>()
             for (node in currentQueue) {
                 val nodePath = node.path
+                
+                // 보편적 확장: usesTypes와 usedByTypes는 타입과 무관하게 상/하향 확장을 수행 (도메인 필터 적용, 인프라 컷 없음)
+                for (depPath in node.usesTypes) {
+                    if (!visited.containsKey(depPath)) {
+                        val depNode = graph.files[depPath]
+                        if (depNode != null && isDomainAllowed(depPath, nodePath, seedDomains)) {
+                            visited[depPath] = ExpansionStep(hop = hop, via = "USES_TYPE", from = nodePath)
+                            nextQueue.add(depNode)
+                        }
+                    }
+                }
+                for (depPath in node.usedByTypes) {
+                    if (!visited.containsKey(depPath)) {
+                        val depNode = graph.files[depPath]
+                        if (depNode != null && isDomainAllowed(depPath, nodePath, seedDomains)) {
+                            visited[depPath] = ExpansionStep(hop = hop, via = "USED_BY_TYPE", from = nodePath)
+                            nextQueue.add(depNode)
+                        }
+                    }
+                }
+
                 // Controller는 추가 확장 안 함
                 if (node.fileType.name == "REST_CONTROLLER" || node.fileType.name == "CONTROLLER") {
                     continue
@@ -164,24 +192,15 @@ class GraphExpander(
                     for (depPath in node.dependsOn) {
                         if (!visited.containsKey(depPath)) {
                             val depNode = graph.files[depPath]
-                            if (depNode != null && (depNode.fileType.name == "REPOSITORY" || depNode.fileType.name == "BIZ" || depNode.fileType.name == "DATA_ACCESS") && isCommonInfrastructure(depNode).not()
+                            // Phase 1.5: Fallback to dependsOn for BIZ nodes with infra cut
+                            if (depNode != null && (depNode.fileType.name == "REPOSITORY" || depNode.fileType.name == "BIZ" || depNode.className.endsWith("BIZ") || depNode.fileType.name == "DATA_ACCESS") && isCommonInfrastructure(depNode).not()
                                 && isDomainAllowed(depPath, nodePath, seedDomains)) {
                                 visited[depPath] = ExpansionStep(hop = hop, via = "SERVICE_TO_REPO_OR_BIZ", from = nodePath)
                                 nextQueue.add(depNode)
                             }
                         }
                     }
-                    for (depPath in node.usesTypes) {
-                        if (!visited.containsKey(depPath)) {
-                            val depNode = graph.files[depPath]
-                            // [안전 측 기본값] Rule 2처럼 하향 탐색을 REPOSITORY/BIZ/DATA_ACCESS로만 엄격히 제한 (APC 회귀 미검증)
-                            if (depNode != null && (depNode.fileType.name == "REPOSITORY" || depNode.fileType.name == "BIZ" || depNode.fileType.name == "DATA_ACCESS") && isCommonInfrastructure(depNode).not()
-                                && isDomainAllowed(depPath, nodePath, seedDomains)) {
-                                visited[depPath] = ExpansionStep(hop = hop, via = "USES_TYPE", from = nodePath)
-                                nextQueue.add(depNode)
-                            }
-                        }
-                    }
+                    // deleted usesTypes loop
                     for (depPath in node.dependedBy) {
                         if (!visited.containsKey(depPath)) {
                             val depNode = graph.files[depPath]
@@ -205,28 +224,19 @@ class GraphExpander(
                             }
                         }
                     }
-                } else if (node.fileType.name == "BIZ") {
-                    // BIZ -> DATA_ACCESS (하향)
+                } else if (node.fileType.name == "BIZ" || node.className.endsWith("BIZ")) {
+                    // Phase 1.5: BIZ -> DATA_ACCESS or VO (하향) fallback with infra cut
                     for (depPath in node.dependsOn) {
                         if (!visited.containsKey(depPath)) {
                             val depNode = graph.files[depPath]
-                            if (depNode != null && (depNode.fileType.name == "DATA_ACCESS" || depNode.fileType.name == "REPOSITORY")) {
-                                // 하향(BIZ -> DATA_ACCESS) 엣지는 인프라 및 도메인 필터 우회 (Track 2 완화책)
-                                visited[depPath] = ExpansionStep(hop = hop, via = "BIZ_TO_DATA_ACCESS", from = nodePath)
+                            if (depNode != null && isCommonInfrastructure(depNode).not()) {
+                                // 하향(BIZ -> DATA_ACCESS/VO) 엣지는 인프라 및 도메인 필터 우회 (Track 2 완화책)
+                                visited[depPath] = ExpansionStep(hop = hop, via = "BIZ_TO_DOWNSTREAM", from = nodePath)
                                 nextQueue.add(depNode)
                             }
                         }
                     }
-                    for (depPath in node.usesTypes) {
-                        if (!visited.containsKey(depPath)) {
-                            val depNode = graph.files[depPath]
-                            // [안전 측 기본값] Rule 2처럼 하향(BIZ -> DATA_ACCESS) 엄격 제한 (APC 회귀 미검증)
-                            if (depNode != null && (depNode.fileType.name == "DATA_ACCESS" || depNode.fileType.name == "REPOSITORY")) {
-                                visited[depPath] = ExpansionStep(hop = hop, via = "USES_TYPE", from = nodePath)
-                                nextQueue.add(depNode)
-                            }
-                        }
-                    }
+                    // deleted usesTypes loop
                     // BIZ -> SERVICE (상향)
                     for (depPath in node.dependedBy) {
                         if (!visited.containsKey(depPath)) {
@@ -240,13 +250,7 @@ class GraphExpander(
                         }
                     }
                 } else if (node.fileType.name == "REPOSITORY" || node.fileType.name == "DATA_ACCESS") {
-                    // Rule 2: 하향 탐색 중 도달한 데이터 액세스 노드에서는 상향 전파 금지
-                    if (hop > 0) {
-                        if (node.className.contains("Product")) {
-                            println("[DEBUG] REPOSITORY continue blocked expansion for ${node.className} at hop $hop")
-                        }
-                        continue
-                    }
+                    // Rule 2 check removed
 
                     // Repository -> Service (상향, 도메인 제한 적용)
                     for (depPath in node.dependedBy) {
@@ -273,10 +277,7 @@ class GraphExpander(
                         }
                     }
                 } else {
-                    // Rule 2: 하향 탐색 중 도달한 데이터 액세스 노드에서는 무관 도메인으로의 상향 전파를 원천 금지 (Track 1 상향 시드는 hop 0에서 처리됨)
-                    if ((node.fileType.name == "DATA_ACCESS" || node.fileType.name == "REPOSITORY") && hop > 0) {
-                        continue
-                    }
+                    // Rule 2 check removed
                     
                     // Entity 등 기타 노드의 상위 의존성 확장
                     for (depPath in node.dependedBy) {

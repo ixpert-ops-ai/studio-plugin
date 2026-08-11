@@ -191,7 +191,9 @@ class GraphLoader(private val project: Project) {
                         val safeNode = node.copy(
                             path = normalizedPath,
                             dependsOn = node.dependsOn.map { if (it.startsWith(relativeRoot)) it else "$relativeRoot/$it" }.toMutableList(),
-                            dependedBy = node.dependedBy.map { if (it.startsWith(relativeRoot)) it else "$relativeRoot/$it" }.toMutableList()
+                            dependedBy = node.dependedBy.map { if (it.startsWith(relativeRoot)) it else "$relativeRoot/$it" }.toMutableList(),
+                            usesTypes = node.usesTypes.map { if (it.startsWith(relativeRoot)) it else "$relativeRoot/$it" }.toMutableList(),
+                            usedByTypes = node.usedByTypes.map { if (it.startsWith(relativeRoot)) it else "$relativeRoot/$it" }.toMutableList()
                         )
                         normalizedFiles[normalizedPath] = safeNode
                     }

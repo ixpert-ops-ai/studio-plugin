@@ -11,7 +11,7 @@ import java.io.File
  * 2. **그래프 학습**: ProjectGraph의 localName, ServiceEndpoint, DemMethodInfo에서 한글↔영어 쌍 자동 수집
  */
 class DomainDictionary private constructor(
-    private val entries: Map<String, Set<String>>
+    private val entries: Map<String, Map<String, Int>>
 ) {
     /**
      * 사전에 등록된 모든 키(한글/복합어 등) 목록을 반환합니다.
@@ -19,23 +19,28 @@ class DomainDictionary private constructor(
     val keys: Set<String> get() = entries.keys
 
     /**
-     * 정확 매칭 + 부분 매칭(한글 키가 입력에 포함되거나 입력이 키에 포함)을 모두 시도합니다.
+     * 정확 매칭 + 부분 매칭(한글 키가 입력에 포함되거나 입력이 키에 포함)을 모두 시도하여 빈도 기반 Top 3 반환
      */
     fun translate(koreanNoun: String): Set<String> {
-        // 1. 정확 매칭
         val exact = entries[koreanNoun]
-        if (exact != null) return exact
-        // 1글자 입력인 경우 부분 매칭을 시도하지 않고 정확 매칭 결과만 반환 (과매칭 방지)
-        if (koreanNoun.length <= 1) return exact ?: emptySet()
-
-        // 2. 부분 매칭: 사전 키가 입력에 포함되거나 입력이 키에 포함
-        val partial = mutableSetOf<String>()
-        for ((key, values) in entries) {
+        if (exact != null && koreanNoun.length <= 1) return exact.keys
+        
+        val tokenFreqs = mutableMapOf<String, Int>()
+        
+        for ((key, tokenMap) in entries) {
             if (koreanNoun.contains(key) || key.contains(koreanNoun)) {
-                partial.addAll(values)
+                for ((token, count) in tokenMap) {
+                    tokenFreqs[token] = (tokenFreqs[token] ?: 0) + count
+                }
             }
         }
-        return partial
+        
+        // 빈도수 내림차순 정렬 후 상위 3개 토큰 반환
+        return tokenFreqs.entries
+            .sortedByDescending { it.value }
+            .take(3)
+            .map { it.key }
+            .toSet()
     }
 
     /**
@@ -48,42 +53,58 @@ class DomainDictionary private constructor(
          * 내장 사전 + 그래프의 한글 메타데이터에서 학습한 항목을 합산합니다.
          */
         fun load(graph: ProjectGraphQueryable): DomainDictionary {
-            val learned = mutableMapOf<String, MutableSet<String>>()
+            val learned = mutableMapOf<String, MutableMap<String, Int>>()
 
-            graph.files.values.forEach { node ->
-                // FileNode.localName 학습
-                node.localName?.let { korean ->
-                    if (korean.isNotBlank()) {
-                        val tokens = tokenizeCamelCase(node.className)
-                        learned.getOrPut(korean) { mutableSetOf() }.addAll(tokens)
-                    }
-                }
-
-                // ServiceEndpoint.localName 학습
-                node.serviceEndpoints?.forEach { ep ->
-                    ep.localName?.let { korean ->
-                        if (korean.isNotBlank()) {
-                            val tokens = tokenizeCamelCase(ep.methodName) + tokenizeCamelCase(ep.serviceId)
-                            learned.getOrPut(korean) { mutableSetOf() }.addAll(tokens)
-                        }
-                    }
-                }
-
-                // DemMethodInfo.localName 학습
-                node.demMethods?.forEach { dem ->
-                    dem.localName?.let { korean ->
-                        if (korean.isNotBlank()) {
-                            val tokens = tokenizeCamelCase(dem.methodName)
-                            learned.getOrPut(korean) { mutableSetOf() }.addAll(tokens)
-                        }
-                    }
+            val structuralStopwords = setOf("response", "request", "service", "impl", "vo", "dto", "controller", "repository", "mapper")
+            val koreanStopwords = setOf("검사", "등록", "유효성", "조회", "수정", "삭제", "목록", "상세", "추가", "변경", "저장", "처리", "검색", "전송", "취소", "오류", "실패", "성공", "에러", "여부", "결과", "코드", "상태", "일시", "시간", "번호", "내용", "설정", "권한", "화면", "이력")
+            
+            // 공통 처리 함수
+            fun addTokens(koreanRaw: String, className: String) {
+                if (koreanRaw.isBlank()) return
+                val tokens = tokenizeCamelCase(className).filter { it !in structuralStopwords }
+                if (tokens.isEmpty()) return
+                
+                // 띄어쓰기/특수문자로 분리하여 필터링
+                val koreanWords = koreanRaw.split(Regex("[\\s_\\-\\[\\](){}]"))
+                    .map { it.trim() }
+                    .filter { it.length >= 2 && it !in koreanStopwords }
+                
+                koreanWords.forEach { word ->
+                    val map = learned.getOrPut(word) { mutableMapOf() }
+                    tokens.forEach { t -> map[t] = (map[t] ?: 0) + 1 }
                 }
             }
 
-            // 내장 사전 + 학습 사전 합산
-            val merged = mutableMapOf<String, MutableSet<String>>()
-            BUILTIN_TERMS.forEach { (k, v) -> merged.getOrPut(k) { mutableSetOf() }.addAll(v) }
-            learned.forEach { (k, v) -> merged.getOrPut(k) { mutableSetOf() }.addAll(v) }
+            graph.files.values.forEach { node ->
+                node.localName?.let { korean -> addTokens(korean, node.className) }
+                node.koreanComments.forEach { korean -> addTokens(korean, node.className) }
+
+                node.serviceEndpoints?.forEach { ep ->
+                    ep.localName?.let { korean ->
+                        val tokens = (tokenizeCamelCase(ep.methodName) + tokenizeCamelCase(ep.serviceId)).filter { it !in structuralStopwords }
+                        val koreanWords = korean.split(Regex("[\\s_\\-\\[\\](){}]")).map { it.trim() }.filter { it.length >= 2 && it !in koreanStopwords }
+                        koreanWords.forEach { word ->
+                            val map = learned.getOrPut(word) { mutableMapOf() }
+                            tokens.forEach { t -> map[t] = (map[t] ?: 0) + 1 }
+                        }
+                    }
+                }
+
+                node.demMethods?.forEach { dem ->
+                    dem.localName?.let { korean -> addTokens(korean, dem.methodName) }
+                }
+            }
+
+            // 내장 사전 합산
+            val merged = mutableMapOf<String, MutableMap<String, Int>>()
+            BUILTIN_TERMS.forEach { (k, v) -> 
+                val map = merged.getOrPut(k) { mutableMapOf() }
+                v.forEach { t -> map[t] = 10 } // 내장 사전은 기본 가중치만 부여 (프로젝트 특화 토큰이 우선하도록)
+            }
+            learned.forEach { (k, v) -> 
+                val map = merged.getOrPut(k) { mutableMapOf() }
+                v.forEach { (t, count) -> map[t] = (map[t] ?: 0) + count }
+            }
 
             if (graph.projectRoot != null) {
                 try {
@@ -92,16 +113,16 @@ class DomainDictionary private constructor(
                         val type = object : com.google.gson.reflect.TypeToken<Map<String, List<String>>>() {}.type
                         val externalDict: Map<String, List<String>> = com.google.gson.Gson().fromJson(dictFile.readText(Charsets.UTF_8), type)
                         externalDict.forEach { (k, v) ->
-                            merged.getOrPut(k) { mutableSetOf() }.addAll(v)
+                            val map = merged.getOrPut(k) { mutableMapOf() }
+                            v.forEach { t -> map[t] = (map[t] ?: 0) + 500 }
                         }
-                        com.intellij.openapi.diagnostic.Logger.getInstance(DomainDictionary::class.java).info("Loaded external dictionary from ${dictFile.absolutePath} with ${externalDict.size} entries.")
                     }
                 } catch (e: Exception) {
                     com.intellij.openapi.diagnostic.Logger.getInstance(DomainDictionary::class.java).warn("Failed to load .meta/dictionary.json: ${e.message}")
                 }
             }
 
-            return DomainDictionary(merged.mapValues { it.value.toSet() })
+            return DomainDictionary(merged)
         }
 
         private val CAMEL_CASE_REGEX = Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")

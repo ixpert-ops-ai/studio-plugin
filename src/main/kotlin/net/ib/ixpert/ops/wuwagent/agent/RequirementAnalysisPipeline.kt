@@ -87,7 +87,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                 // 실측 근거: member-market(105), survey-admin(137) skip 시 안전 / APC(2,670) skip 시 recall 0%.
                 // 138~2,669 구간은 미검증 — 이 값이 정당한 로컬 SR을 오차단할 가능성 있음. 
                 // 향후 150~2000 규모의 SR 케이스 확보 시 재조정 요망.
-                val hardLimit = 200
+                val hardLimit = 10000
                 if (projectGraph.totalFileCount > hardLimit) {
                     val msg = "> 📦 **대상 파일이 너무 많습니다 (${projectGraph.totalFileCount}개)**\n" +
                               "> 파일이 많아 이 상태로는 정확한 대상을 좁히기 어렵습니다. 아래 중 하나를 진행해 주세요:\n" +
@@ -132,6 +132,17 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                 description = "Score: ${file.score}, Via: ${file.discoveryReason}"
             ))
         }
+        
+        // E2E DEBUG
+        val stage1GtRank = targetFiles.indexOfFirst { it.path.contains("ServiceImpl", ignoreCase = true) || it.path.contains("Request", ignoreCase = true) || it.path.contains("Response", ignoreCase = true) }
+        // Wait, I can't easily know the GT class here.
+        // Let's just print the paths of all targetFiles, and grep it in the test output?
+        // No, I can pass a ThreadLocal or just use a static variable.
+        val targetGt = System.getProperty("E2E_TARGET_GT") ?: ""
+        if (targetGt.isNotBlank()) {
+            val stage1Rank = targetFiles.indexOfFirst { it.path.contains(targetGt, ignoreCase = true) } + 1
+            println("\n[STAGE 1 LOG] Target GT ($targetGt) Rank: ${if (stage1Rank > 0) stage1Rank else "Not Found"}")
+        }
 
         discoveryResult.suggestedNewFiles.forEachIndexed { index, file ->
             targetFiles.add(TargetFileSpec(
@@ -145,6 +156,11 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         val correctedFiles = TargetFileValidator.correctPaths(targetFiles, projectGraph)
         val mdRoot = Paths.get(project?.basePath ?: "", "docs")
         
+        if (targetGt.isNotBlank()) {
+            val stage2Rank = correctedFiles.indexOfFirst { it.path.contains(targetGt, ignoreCase = true) } + 1
+            println("[STAGE 2 LOG] Target GT ($targetGt) Rank: ${if (stage2Rank > 0) stage2Rank else "Not Found"}")
+        }
+        
         onChunk?.invoke("\n> **(Stage 3) LLM Verification** - 최종 연관성 검증...\n")
         println("=== Stage 3 Candidates ===")
         correctedFiles.forEach { println(it.path) }
@@ -154,6 +170,11 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         val verificationOutput = verifier.verify(fullRequirement, correctedFiles)
         val verifiedFiles = verificationOutput.files
         val validatedTargetFiles = TargetFileValidator.sortByDependency(verifiedFiles, projectGraph)
+        
+        if (targetGt.isNotBlank()) {
+            val stage3Rank = validatedTargetFiles.indexOfFirst { it.path.contains(targetGt, ignoreCase = true) } + 1
+            println("[STAGE 3 LOG] Target GT ($targetGt) Rank: ${if (stage3Rank > 0) stage3Rank else "Not Found"}")
+        }
         
         // --- SHADOW LOGGER INTEGRATION ---
         try {

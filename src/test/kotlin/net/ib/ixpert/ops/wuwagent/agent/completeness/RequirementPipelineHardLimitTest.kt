@@ -19,7 +19,7 @@ class RequirementPipelineHardLimitTest {
     fun testHardLimitBoundary() = runBlocking {
         val client = object : LLMClient {
             override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): OllamaChatResponse? = null
-            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?): ChatCompletionResponse? = null
+            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?, temperature: Double?): ChatCompletionResponse? = null
             override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = null
         }
         val gson = GsonBuilder().create()

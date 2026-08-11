@@ -31,7 +31,7 @@ class LlmSeedSelectorTest {
         var lastPrompt = ""
         val client = object : LLMClient {
             override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): OllamaChatResponse? = null
-            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?): ChatCompletionResponse? {
+            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?, temperature: Double?): ChatCompletionResponse? {
                 lastPrompt = messages.last().content ?: ""
                 return ChatCompletionResponse(id = "1", choices = emptyList())
             }

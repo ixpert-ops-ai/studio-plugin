@@ -97,7 +97,7 @@ class E2EPipelineIntegrationTest {
                 messages: List<ChatMessage>,
                 maxTokens: Int?,
                 tools: List<ToolDefinition>?,
-                toolChoice: Any?
+                toolChoice: Any?, temperature: Double?
             ): ChatCompletionResponse? = null
 
             override fun fetchModels(baseUrl: String, apiKey: String): List<String>? {

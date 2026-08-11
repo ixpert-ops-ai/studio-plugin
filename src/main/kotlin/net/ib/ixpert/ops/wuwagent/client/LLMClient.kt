@@ -15,7 +15,8 @@ interface LLMClient {
         messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
         maxTokens: Int? = null,
         tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>? = null,
-        toolChoice: Any? = "auto"
+        toolChoice: Any? = "auto",
+        temperature: Double? = null
     ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
         return null
     }

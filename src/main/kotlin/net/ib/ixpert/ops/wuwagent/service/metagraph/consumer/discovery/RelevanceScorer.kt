@@ -5,7 +5,7 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraphQueryable
 class RelevanceScorer(
     private val graph: ProjectGraphQueryable,
     private val fileLimit: Int = 30,
-    private val minScore: Int = 50
+    private val minScore: Int = 10
 ) {
 
     fun scoreAndFilter(
@@ -15,6 +15,27 @@ class RelevanceScorer(
     ): List<ScoredFile> {
         // 1. SR 키워드 추출 (간단한 명사/동사/영문 형태)
         val keywords = extractKeywords(srText)
+        
+        val totalNodes = graph.files.size + graph.resourceNodes.size
+        val maxIdf = Math.log(totalNodes.toDouble()) // max possible IDF (when df=1)
+        
+        val dfCache = mutableMapOf<String, Int>()
+        fun getDf(token: String): Int {
+            return dfCache.getOrPut(token.lowercase()) {
+                val lowerToken = token.lowercase()
+                val fileMatches = graph.files.values.count { it.className.contains(lowerToken, ignoreCase = true) }
+                val resourceMatches = graph.resourceNodes.count { it.path.substringAfterLast("/").contains(lowerToken, ignoreCase = true) }
+                fileMatches + resourceMatches
+            }
+        }
+        
+        fun getIdfWeight(token: String): Double {
+            val df = maxOf(1, getDf(token))
+            return Math.log(totalNodes.toDouble() / df) / maxIdf
+        }
+        
+        val englishTokenWeights = keywords.english.associateWith { getIdfWeight(it) }
+        val verbTokenWeights = keywords.verbs.associateWith { getIdfWeight(it) }
         
         val scoredFiles = mutableListOf<ScoredFile>()
 
@@ -27,34 +48,48 @@ class RelevanceScorer(
                 30 // Fallback으로 발견된 파일은 보험용이므로 낮은 기본 점수
             } else {
                 when (step.hop) {
-                    0 -> 100
-                    1 -> 70
-                    2 -> 40
+                    0 -> 10
+                    1 -> 5
                     else -> 0
                 }
             }
 
             if (fileNode != null) {
                 // NameMatchScore for FileNode
-                var nameMatchScore = 0
-                if (keywords.directEnglish.any { eng -> fileNode.className.contains(eng, ignoreCase = true) }) {
-                    nameMatchScore = 30
-                } else if (keywords.translatedEnglish.any { eng -> fileNode.className.contains(eng, ignoreCase = true) }) {
-                    nameMatchScore = 15
-                } else if (keywords.weakTranslatedEnglish.any { eng -> fileNode.className.contains(eng, ignoreCase = true) }) {
-                    nameMatchScore = 7
+                var nameMatchScore = 0.0
+                val directMatches = keywords.directEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
+                if (directMatches.isNotEmpty()) {
+                    nameMatchScore = 50.0 * directMatches.maxOf { getIdfWeight(it) }
+                } else {
+                    val transMatches = keywords.translatedEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
+                    if (transMatches.isNotEmpty()) {
+                        nameMatchScore = 30.0 * transMatches.maxOf { getIdfWeight(it) }
+                    } else {
+                        val weakMatches = keywords.weakTranslatedEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
+                        if (weakMatches.isNotEmpty()) {
+                            nameMatchScore = 15.0 * weakMatches.maxOf { getIdfWeight(it) }
+                        }
+                    }
                 }
 
                 // MethodMatchScore
-                var matchedMethods = 0
+                val matchedTokens = mutableSetOf<String>()
                 fileNode.demMethods?.forEach { dm ->
                     val method = dm.methodName
-                    if (keywords.verbs.any { verb -> method.contains(verb, ignoreCase = true) } ||
-                        keywords.english.any { eng -> method.contains(eng, ignoreCase = true) }) {
-                        matchedMethods++
-                    }
+                    
+                    val verbMatches = keywords.verbs.filter { verb -> method.contains(verb, ignoreCase = true) }
+                    matchedTokens.addAll(verbMatches)
+                    
+                    val engMatches = keywords.english.filter { eng -> method.contains(eng, ignoreCase = true) }
+                    matchedTokens.addAll(engMatches)
                 }
-                val methodMatchScore = minOf(matchedMethods * 5, 20)
+                
+                var methodScoreSum = 0.0
+                matchedTokens.forEach { token ->
+                    val weight = verbTokenWeights[token] ?: englishTokenWeights[token] ?: 0.0
+                    methodScoreSum += 10.0 * weight
+                }
+                val methodMatchScore = minOf(methodScoreSum, 30.0)
 
                 // LayerAlignScore
                 var layerAlignScore = 0
@@ -68,7 +103,7 @@ class RelevanceScorer(
                     keywords.nouns.any { noun -> comment.contains(noun) } ||
                     keywords.verbs.any { verb -> comment.contains(verb) }
                 }) {
-                    commentMatchScore = 10
+                    commentMatchScore = 20
                 }
 
                 // TypeBonusScore
@@ -95,7 +130,7 @@ class RelevanceScorer(
                     }
                 }
 
-                val totalScore = hopScore + nameMatchScore + methodMatchScore + layerAlignScore + commentMatchScore + typeBonusScore + criticalChainBonus
+                val totalScore = (hopScore + nameMatchScore + methodMatchScore + layerAlignScore + commentMatchScore + typeBonusScore + criticalChainBonus).toInt()
                 
                 if (totalScore >= minScore) {
                     scoredFiles.add(
@@ -116,13 +151,20 @@ class RelevanceScorer(
                 
                 // NameMatchScore for ResourceNode (using filename)
                 val fileName = path.substringAfterLast("/")
-                var nameMatchScore = 0
-                if (keywords.directEnglish.any { eng -> fileName.contains(eng, ignoreCase = true) }) {
-                    nameMatchScore = 30
-                } else if (keywords.translatedEnglish.any { eng -> fileName.contains(eng, ignoreCase = true) }) {
-                    nameMatchScore = 15
-                } else if (keywords.weakTranslatedEnglish.any { eng -> fileName.contains(eng, ignoreCase = true) }) {
-                    nameMatchScore = 7
+                var nameMatchScore = 0.0
+                val directMatches = keywords.directEnglish.filter { eng -> fileName.contains(eng, ignoreCase = true) }
+                if (directMatches.isNotEmpty()) {
+                    nameMatchScore = 50.0 * directMatches.maxOf { getIdfWeight(it) }
+                } else {
+                    val transMatches = keywords.translatedEnglish.filter { eng -> fileName.contains(eng, ignoreCase = true) }
+                    if (transMatches.isNotEmpty()) {
+                        nameMatchScore = 30.0 * transMatches.maxOf { getIdfWeight(it) }
+                    } else {
+                        val weakMatches = keywords.weakTranslatedEnglish.filter { eng -> fileName.contains(eng, ignoreCase = true) }
+                        if (weakMatches.isNotEmpty()) {
+                            nameMatchScore = 15.0 * weakMatches.maxOf { getIdfWeight(it) }
+                        }
+                    }
                 }
                 
                 // LayerAlignScore
@@ -131,7 +173,7 @@ class RelevanceScorer(
                     layerAlignScore = 15
                 }
                 
-                val totalScore = hopScore + nameMatchScore + layerAlignScore
+                val totalScore = (hopScore + nameMatchScore + layerAlignScore).toInt()
                 
                 if (totalScore >= minScore) {
                     scoredFiles.add(

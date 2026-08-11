@@ -46,7 +46,7 @@ class Scenario7E2ETest {
                 return null
             }
             
-            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?): ChatCompletionResponse? {
+            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?, temperature: Double?): ChatCompletionResponse? {
                 val requestBodyMap = mutableMapOf<String, Any>(
                     "model" to "Qwen/Qwen3.6-35B-A3B-FP8",
                     "messages" to listOf(
@@ -121,7 +121,7 @@ class Scenario7E2ETest {
             val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
             override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): OllamaChatResponse? = null
             
-            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?): ChatCompletionResponse? {
+            override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?, temperature: Double?): ChatCompletionResponse? {
                 val requestBodyMap = mutableMapOf<String, Any>(
                     "model" to "Qwen/Qwen3.6-35B-A3B-FP8",
                     "messages" to listOf(mapOf("role" to "system", "content" to systemPrompt)) + messages.map { mapOf("role" to it.role, "content" to it.content) }

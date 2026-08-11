@@ -20,8 +20,8 @@ object AdaptiveFileDiscovery {
         onProgress?.invoke("> **(Stage 1) Discovery 시작**\n요구사항 텍스트 기반 Seed 식별 시작...")
         val srText = "$primaryReq\n$secondaryReq"
         // Phase 1: Seed Selection
-        // 테스트 환경 등에서는 MockSeedSelector가 주입될 수 있으나, 프로덕션에서는 LlmSeedSelector 사용
-        val selector: SeedSelector = seedSelector ?: LlmSeedSelector(client)
+        // 테스트 환경 등에서는 MockSeedSelector가 주입될 수 있으나, 프로덕션에서는 AgenticSeedSelector 사용
+        val selector: SeedSelector = seedSelector ?: AgenticSeedSelector(client)
         val seedResult = selector.selectSeeds(srText, graph)
 
         onProgress?.invoke("식별된 Seed 바탕으로 그래프 탐색 중... (${seedResult.seedClasses.size}개 발견)")
