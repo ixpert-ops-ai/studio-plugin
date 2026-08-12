@@ -28,7 +28,7 @@ class AgenticSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             tokens.any { token -> name.lowercase().startsWith(token) }
         }
 
-        val candidatesList = run {
+        val candidatesListPair = run {
             val b = matchedBackend.map { "${it.className} (${it.packageName})" }
             val f = matchedFrontend.map { "${it.path.substringAfterLast('/')} (${it.path.substringBeforeLast('/', "")})" }
             val track1 = (b + f)
@@ -98,6 +98,7 @@ class AgenticSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             val b_param = 0.75
             
             var bestTrack2 = emptyList<String>()
+            var finalJudgePicks = emptyList<String>()
             
             // Loop (Act -> Observe)
             for (keyword in domainKeywords) {
@@ -115,7 +116,7 @@ class AgenticSeedSelector(private val llmClient: LLMClient) : SeedSelector {
                 val df = mutableMapOf<String, Int>()
                 for (q in qTokens) df[q] = documents.values.count { it.second.contains(q) }
                 
-                val scores = documents.map { (_, pair) ->
+                val scores = documents.map { (path, pair) ->
                     var score = 0.0
                     val docLen = pair.second.size
                     for (q in qTokens) {
@@ -126,13 +127,14 @@ class AgenticSeedSelector(private val llmClient: LLMClient) : SeedSelector {
                             score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b_param + b_param * (docLen / avgdl)))
                         }
                     }
-                    pair.first to score
+                    path to score
                 }.sortedByDescending { it.second }
                 
                 val top30Ids = scores.take(30).map { it.first }
                 val top10Prompts = top30Ids.take(10).mapNotNull { documents[it]?.first }
                 
                 println("[AgenticSeedSelector] Loop - Observe: Evaluating Top 10 nodes with LLM-as-a-Judge")
+                println("[AgenticSeedSelector] Top 10 Nodes given to Judge: $top10Prompts")
                 val judgeSystemPrompt = """
                     당신은 이커머스 시스템의 도메인 분석 심판입니다.
                     아래는 특정 키워드로 검색된 시스템 클래스 목록입니다.
@@ -173,6 +175,7 @@ class AgenticSeedSelector(private val llmClient: LLMClient) : SeedSelector {
                         if (hasActualMatch) {
                             println("[AgenticSeedSelector] Loop - Terminating! Keyword '$keyword' accepted by strict stopping rule.")
                             bestTrack2 = top30Ids
+                            finalJudgePicks = matchedNodes
                             break
                         } else {
                             println("[AgenticSeedSelector] Loop - Rejected: Judge returned relevant=true, but matched_nodes were fabricated or missing.")
@@ -214,9 +217,11 @@ class AgenticSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             
             val union = (track1 + track2).distinct()
             println("[AgenticSeedSelector] Final Candidates (Union, count=${union.size}): $union")
-            union
+            Pair(union, finalJudgePicks)
         }
 
+        val candidatesList = candidatesListPair.first
+        val finalJudgePicks = candidatesListPair.second
         
         val candidates = candidatesList.joinToString("\n")
 
@@ -313,7 +318,8 @@ class AgenticSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             
             val toolCall = response?.toolCalls?.firstOrNull { it.function.name == "submit_seeds" }
             if (toolCall != null) {
-                return gson.fromJson(toolCall.function.arguments, SeedSelectionResult::class.java)
+                val res = gson.fromJson(toolCall.function.arguments, SeedSelectionResult::class.java)
+                return res.copy(judgePicks = finalJudgePicks)
             } else if (!response?.content.isNullOrBlank()) {
                 // Some models return the tool arguments directly in the text content
                 var cleanJson = response!!.content!!
@@ -333,7 +339,8 @@ class AgenticSeedSelector(private val llmClient: LLMClient) : SeedSelector {
                             changeIntent = ChangeIntent.MODIFY,
                             layerHint = listOf("SERVICE", "PRESENTATION"),
                             frontendRelevant = true,
-                            reasoning = "Parsed from JSON array fallback"
+                            reasoning = "Parsed from JSON array fallback",
+                            judgePicks = finalJudgePicks
                         )
                     }
                     throw e
@@ -343,7 +350,8 @@ class AgenticSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             println("Failed to get ToolCall from LLM: ${e.message}")
         }
 
-        return fallbackSelection(srText, graph)
+        val fallbackRes = fallbackSelection(srText, graph)
+        return fallbackRes.copy(judgePicks = finalJudgePicks)
     }
 
     private fun fallbackSelection(srText: String, graph: ProjectGraphQueryable): SeedSelectionResult {

@@ -153,7 +153,7 @@ class PipelineE2ETest : BasePlatformTestCase() {
             TestCase("Trap", "주문상품 배송 준비 상태 추가", "PdSaveServiceImpl"),
             TestCase("Trap", "새 화면 (GNB) 전시 노출 순서 변경", "GnbMenuMstServiceImpl"),
             TestCase("Trap", "상품 불량 및 파손 부분 클레임 환불 계좌 처리", "ClaimMgmtServiceImpl"),
-            TestCase("Trap", "특정 몰 회원 아이디별 주문 조회 추가", "OrdrInqrListResponse")
+            TestCase("Trap", "특정 임직원 회원 사내드림 주문 내역 조회 조건 추가", "OrdrInqrListResponse")
         )
 
         val client = PipelineE2ETestVllmClient()

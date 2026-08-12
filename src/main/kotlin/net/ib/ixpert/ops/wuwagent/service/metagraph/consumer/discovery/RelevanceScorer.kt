@@ -132,6 +132,10 @@ class RelevanceScorer(
 
                 val totalScore = (hopScore + nameMatchScore + methodMatchScore + layerAlignScore + commentMatchScore + typeBonusScore + criticalChainBonus).toInt()
                 
+                println("[RelevanceScorer] Node: ${fileNode.className}, Score: $totalScore")
+                
+                val isJudgePick = seedResult.judgePicks.any { it.equals(fileNode.className, ignoreCase = true) }
+
                 if (totalScore >= minScore) {
                     scoredFiles.add(
                         ScoredFile(
@@ -141,6 +145,20 @@ class RelevanceScorer(
                             layer = fileNode.layer.name,
                             score = totalScore,
                             discoveryReason = step.via,
+                            hopDistance = step.hop,
+                            fromPath = step.from
+                        )
+                    )
+                } else if (isJudgePick) {
+                    println("[RelevanceScorer] VETTED BYPASS: ${fileNode.className} (Score: $totalScore < $minScore) rescued by Judge Pick!")
+                    scoredFiles.add(
+                        ScoredFile(
+                            path = path,
+                            className = fileNode.className,
+                            fileType = fileNode.fileType.name,
+                            layer = fileNode.layer.name,
+                            score = totalScore, // Keep actual score for natural sorting
+                            discoveryReason = step.via + " [Judge Vetted Bypass]",
                             hopDistance = step.hop,
                             fromPath = step.from
                         )
@@ -175,6 +193,10 @@ class RelevanceScorer(
                 
                 val totalScore = (hopScore + nameMatchScore + layerAlignScore).toInt()
                 
+                println("[RelevanceScorer] Node: $fileName, Score: $totalScore")
+                
+                val isJudgePick = seedResult.judgePicks.any { it.equals(fileName, ignoreCase = true) || it.equals(fileName.substringBeforeLast("."), ignoreCase = true) }
+
                 if (totalScore >= minScore) {
                     scoredFiles.add(
                         ScoredFile(
@@ -184,6 +206,20 @@ class RelevanceScorer(
                             layer = resourceNode.layer,
                             score = totalScore,
                             discoveryReason = step.via,
+                            hopDistance = step.hop,
+                            fromPath = step.from
+                        )
+                    )
+                } else if (isJudgePick) {
+                    println("[RelevanceScorer] VETTED BYPASS: $fileName (Score: $totalScore < $minScore) rescued by Judge Pick!")
+                    scoredFiles.add(
+                        ScoredFile(
+                            path = path,
+                            className = fileName,
+                            fileType = resourceNode.type.name,
+                            layer = resourceNode.layer,
+                            score = totalScore,
+                            discoveryReason = step.via + " [Judge Vetted Bypass]",
                             hopDistance = step.hop,
                             fromPath = step.from
                         )

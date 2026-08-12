@@ -9,7 +9,8 @@ data class SeedSelectionResult(
     val layerHint: List<String>,
     val frontendRelevant: Boolean,
     val reasoning: String,
-    val frontendFileHints: List<String>? = null
+    val frontendFileHints: List<String>? = null,
+    val judgePicks: List<String> = emptyList()
 )
 
 enum class ChangeIntent {
