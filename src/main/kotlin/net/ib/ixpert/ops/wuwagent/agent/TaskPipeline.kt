@@ -38,7 +38,10 @@ sealed class TaskPipeline {
         val isSuccess: Boolean = true,
         /** 이 Step에 실제 입력된 원본 코드 (isApplyable 여부와 무관하게 항상 보존).
          *  isStabilityStep(Step3)에서 @ 파일 vs 에디터 컨텍스트를 정확히 비교하기 위해 사용. */
-        val inputCode: String = ""
+        val inputCode: String = "",
+        /** 응답이 토큰 한도 등으로 잘렸는지 여부. 현재 Improve Step2("2/3 코드 개선")에서만 세팅되고
+         *  그 외 파이프라인/Step은 기본값 false. */
+        val isTruncated: Boolean = false
     )
 
     /**
@@ -86,13 +89,16 @@ sealed class TaskPipeline {
         // ─────────────────────────────────────────────────────────
         /**
          * {{LANGUAGE}}, {{KEY_CODE}}, {{ANALYSIS_MODE}}, {{LOCATION_INFO}},
-         * {{EXTRACTION_METHOD}}, {{STRUCTURE_INFO}} 를 실제 값으로 채운 Map을 반환.
+         * {{EXTRACTION_METHOD}}, {{STRUCTURE_INFO}}, {{ANALYSIS_RESULT}} 를 실제 값으로 채운 Map을 반환.
          * 코드 추출이 완료된 시점(originalCode, applyScope 확정 후)에 호출할 것.
+         *
+         * @param previousStepResult 이전 Step의 원문 응답(rawLlmResponse). Step1처럼 이전 단계가 없으면 null.
          */
         private fun buildPromptVars(
             context: AgentContext,
             originalCode: String,
-            applyScope: String
+            applyScope: String,
+            previousStepResult: String? = null
         ): Map<String, String> {
             // applyScope이 "선택 영역" / "전체 파일"이 아니면 @ 첨부 파일 케이스
             // → language·fileName은 첨부 파일명 기준으로 추출, filePath는 알 수 없으므로 빈 값
@@ -125,7 +131,8 @@ sealed class TaskPipeline {
                 "ANALYSIS_MODE"     to analysisMode,
                 "LOCATION_INFO"     to locationInfo,
                 "EXTRACTION_METHOD" to extractionMethod,
-                "STRUCTURE_INFO"    to structureInfo
+                "STRUCTURE_INFO"    to structureInfo,
+                "ANALYSIS_RESULT"   to (previousStepResult ?: "")
             )
         }
 
@@ -314,7 +321,9 @@ sealed class TaskPipeline {
             val payload = context.payloadText.trim()
             val prevAnalysis = previousStepResult?.takeIf { it.isNotBlank() } ?: ""
             // isImproveStep이 아닌 일반 step에서는 기존 방식의 문맥 블록 사용
-            val prevContext = if (prevAnalysis.isNotBlank() && !isImproveStep)
+            // usesPromptVars step(Improve Step1/2)은 buildPromptVars()의 {{ANALYSIS_RESULT}}로
+            // 시스템 프롬프트에 명시적으로 전달되므로, User Message 쪽 중복 삽입은 제외
+            val prevContext = if (prevAnalysis.isNotBlank() && !isImproveStep && !usesPromptVars)
                 "\n\n[이전 단계 분석 결과]\n$prevAnalysis"
             else ""
 
@@ -501,7 +510,7 @@ sealed class TaskPipeline {
             // usesPromptVars=true이면 코드 추출 결과로 플레이스홀더 치환
             var systemPrompt = if (usesPromptVars && originalCode.isNotBlank()) {
                 onToolNoti?.invoke("코드 구조 추출 중...")
-                PromptManager.loadPromptWithVars(resolvePromptFile(), buildPromptVars(context, originalCode, applyScope))
+                PromptManager.loadPromptWithVars(resolvePromptFile(), buildPromptVars(context, originalCode, applyScope, previousStepResult))
             } else {
                 promptTemplate
             }
@@ -562,6 +571,19 @@ sealed class TaskPipeline {
                 result.joinToString("\n")
             }
 
+            // Improve Step2("2/3 코드 개선")에서만 잘림 여부 판단 — finish_reason == "length" 또는
+            // 닫는 코드 펜스가 없는 경우(응답이 토큰 한도 등으로 중간에 끊긴 경우) 잘림으로 간주
+            val unclosedFence = EditorApplyService.hasUnclosedCodeFence(llmResponse)
+            val isTruncated = label == "2/3 코드 개선" && !isErrorResponse &&
+                (response?.finishReason == "length" || unclosedFence)
+            if (label == "2/3 코드 개선") {
+                logger.info(
+                    "AgentStep[${label}] 잘림 판단: finishReason=${response?.finishReason}, " +
+                    "unclosedFence=$unclosedFence, isErrorResponse=$isErrorResponse, " +
+                    "응답 마지막 40자=\"${llmResponse.takeLast(40)}\" → isTruncated=$isTruncated"
+                )
+            }
+
             return StepResult(
                 originalCode = if (hasCodeDiff) originalCode else null,
                 modifiedCode = if (hasCodeDiff) strippedExtractedCode else null,
@@ -570,7 +592,8 @@ sealed class TaskPipeline {
                 rawLlmResponse = rawLlmResponse,
                 extractedCode = extractedCode,
                 isSuccess = isActuallySuccess,
-                inputCode = originalCode      // Step3(isStabilityStep)에서 올바른 코드 소스를 참조하기 위해 항상 보존
+                inputCode = originalCode,     // Step3(isStabilityStep)에서 올바른 코드 소스를 참조하기 위해 항상 보존
+                isTruncated = isTruncated
             )
         }
     }

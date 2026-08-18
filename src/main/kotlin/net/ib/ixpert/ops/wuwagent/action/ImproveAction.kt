@@ -150,7 +150,8 @@ class ImproveAction : AnAction() {
                 val meta = mutableMapOf(
                     "stepLabel" to stepLabel,
                     "applyable" to "false",
-                    "isSuccess" to result.isSuccess.toString()
+                    "isSuccess" to result.isSuccess.toString(),
+                    "isTruncated" to result.isTruncated.toString()
                 )
                 if (modifiedFullCode.isNotBlank()) meta["modifiedFullCode"] = modifiedFullCode
                 bridge.sendMessage(

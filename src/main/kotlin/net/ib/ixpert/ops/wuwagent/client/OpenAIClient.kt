@@ -92,6 +92,7 @@ class OpenAIClient : LLMClient {
                         TaskCancellationToken.activeInputStream = inputStream
                         val reader = inputStream.bufferedReader()
                         var fullContent = ""
+                        var finishReason: String? = null
 
                         try {
                             var line = reader.readLine()
@@ -105,14 +106,17 @@ class OpenAIClient : LLMClient {
                                     if (data == "[DONE]") break
                                     try {
                                         val json = JsonParser.parseString(data).asJsonObject
-                                        val delta = json.getAsJsonArray("choices")
+                                        val choice = json.getAsJsonArray("choices")
                                             ?.get(0)?.asJsonObject
-                                            ?.getAsJsonObject("delta")
+                                        val delta = choice?.getAsJsonObject("delta")
                                         val content = delta?.get("content")?.asString ?: ""
                                         if (content.isNotEmpty()) {
                                             fullContent += content
                                             onChunk(content)
                                         }
+                                        // finish_reason은 중간 청크에서 null이다가 마지막 청크에서만 채워짐 → 누적 저장
+                                        val reason = choice?.get("finish_reason")?.takeIf { !it.isJsonNull }?.asString
+                                        if (!reason.isNullOrBlank()) finishReason = reason
                                     } catch (e: Exception) {
                                         logger.warn("Failed to parse SSE chunk: $line", e)
                                     }
@@ -132,13 +136,15 @@ class OpenAIClient : LLMClient {
                         try {
                             debugEntry?.responseText = fullContent
                             debugEntry?.responseLength = fullContent.length
+                            debugEntry?.finishReason = finishReason
                         } catch (_: Exception) {}
 
                         OllamaChatResponse(
                             model = settings.model,
                             createdAt = null,
                             message = OllamaMessage("assistant", fullContent),
-                            done = true
+                            done = true,
+                            finishReason = finishReason
                         )
                     } else {
                         val httpConn = request.connection as? java.net.HttpURLConnection
@@ -151,15 +157,21 @@ class OpenAIClient : LLMClient {
                                 debugEntry?.responseLength = responseString.length
                             } catch (_: Exception) {}
                             val json = JsonParser.parseString(responseString).asJsonObject
-                            val content = json.getAsJsonArray("choices")
+                            val choice = json.getAsJsonArray("choices")
                                 ?.get(0)?.asJsonObject
+                            val content = choice
                                 ?.getAsJsonObject("message")
                                 ?.get("content")?.asString ?: ""
+                            val finishReason = choice?.get("finish_reason")?.takeIf { !it.isJsonNull }?.asString
+                            try {
+                                debugEntry?.finishReason = finishReason
+                            } catch (_: Exception) {}
                             OllamaChatResponse(
                                 model = settings.model,
                                 createdAt = null,
                                 message = OllamaMessage("assistant", content),
-                                done = true
+                                done = true,
+                                finishReason = finishReason
                             )
                         } catch (e: IOException) {
                             if (TaskCancellationToken.isCancelled.get()) {

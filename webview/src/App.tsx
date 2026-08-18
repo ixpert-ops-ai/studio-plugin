@@ -42,6 +42,7 @@ interface Message {
   modifiedFullCode?: string;
   isLoading?: boolean;
   isError?: boolean;
+  isTruncated?: boolean;
   isStreaming?: boolean;
   currentStatus?: string;
   stepNotiStatus?: 'started' | 'completed' | 'failed';
@@ -449,6 +450,13 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
           >
             📄 {fileBaseName}
           </button>
+        </div>
+      )}
+
+      {msg.isTruncated && (
+        <div className="msg-truncated-warning">
+          응답이 잘렸습니다. 파일이 너무 커서 전체 개선 코드를 생성하지 못했습니다. 적용 전 반드시 Diff로 확인하세요.
+          개선할 함수나 클래스를 선택한 뒤 다시 시도하면 더 정확한 결과를 얻을 수 있습니다.
         </div>
       )}
 
@@ -1040,6 +1048,7 @@ function App() {
               isStreaming:     isStreaming,
               subType:         data.subType,
               isSuccess:       data.isSuccess !== 'false' ? true : existing.isSuccess,
+              isTruncated:     data.subType === 'task_step' ? data.isTruncated === 'true' : existing.isTruncated,
               modifiedFullCode: modifiedFullCode,
               toolNotiText:    isCompletionEvent ? undefined : existing.toolNotiText,
             };
