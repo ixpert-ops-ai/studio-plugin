@@ -138,26 +138,59 @@ object EditorApplyService {
      *
      * - 코드 블록이 여러 개일 경우 **가장 긴 블록**을 반환합니다.
      *   (LLM이 짧은 예시 블록과 전체 코드 블록을 함께 반환할 때 전체 코드를 선택하기 위함)
-     * - 코드 블록이 없으면 전체 텍스트를 그대로 반환합니다.
+     * - 닫는 펜스가 없는 경우(응답이 토큰 한도 등으로 잘린 경우)에도
+     *   전체 텍스트를 반환하되, 첫/마지막 줄에 남은 여는 펜스는 별도로 제거합니다.
+     * - 코드 블록이 아예 없으면 전체 텍스트를 그대로 반환합니다.
      */
     fun extractCodeBlock(content: String): String {
+        val trimmedContent = content.trim()
         val regex = Regex("```(?:\\w+)?\\n?([\\s\\S]*?)```")
-        val matches = regex.findAll(content).toList()
+        val matches = regex.findAll(trimmedContent).toList()
 
-        logger.info("extractCodeBlock: 코드블록 ${matches.size}개 발견, 응답 전체 길이=${content.length}")
+        logger.info("extractCodeBlock: 코드블록 ${matches.size}개 발견, 응답 전체 길이=${trimmedContent.length}")
         matches.forEachIndexed { i, m ->
             logger.info("extractCodeBlock: 블록[$i] 길이=${m.groupValues[1].length}")
         }
 
-        if (matches.isEmpty()) {
-            logger.info("extractCodeBlock: 코드블록 없음 → 전체 텍스트 반환 (길이=${content.trim().length})")
-            return content.trim()
+        val extracted = if (matches.isEmpty()) {
+            // 닫는 펜스가 없어 정규식이 매칭되지 않은 경우(응답 잘림 등) → 원문을 그대로 후보로 사용
+            // 첫/마지막 줄에 남은 펜스는 stripFenceLines()에서 별도로 제거됨
+            logger.info("extractCodeBlock: 완결된 코드블록 없음 → 전체 텍스트를 펜스 제거 후 반환")
+            trimmedContent
+        } else {
+            // 가장 긴 블록 선택 (전체 파일일 가능성이 가장 높음)
+            val largest = matches.maxByOrNull { it.groupValues[1].length }!!
+            largest.groupValues[1].trim()
         }
 
-        // 가장 긴 블록 선택 (전체 파일일 가능성이 가장 높음)
-        val largest = matches.maxByOrNull { it.groupValues[1].length }!!
-        val extracted = largest.groupValues[1].trim()
-        logger.info("extractCodeBlock: 최대 블록 선택 (길이=${ extracted.length}) 앞 300자: ${extracted.take(300)}")
-        return extracted
+        val stripped = stripFenceLines(extracted)
+        logger.info("extractCodeBlock: 최종 선택 (길이=${stripped.length}) 앞 300자: ${stripped.take(300)}")
+        return stripped
+    }
+
+    /**
+     * 여는 코드 펜스(```)는 있는데 닫는 펜스가 없는지 확인합니다.
+     * true면 응답이 토큰 한도 등으로 중간에 잘렸을 가능성이 높다는 신호로 씁니다.
+     */
+    fun hasUnclosedCodeFence(content: String): Boolean {
+        val trimmed = content.trim()
+        if (!trimmed.contains("```")) return false
+        val regex = Regex("```(?:\\w+)?\\n?([\\s\\S]*?)```")
+        return regex.findAll(trimmed).toList().isEmpty()
+    }
+
+    /**
+     * 코드 블록의 첫 줄/마지막 줄에 남은 ``` 펜스만 제거합니다.
+     * (``` 또는 ```언어명 형태 모두 대상. 코드 중간에 있는 ```는 건드리지 않음)
+     */
+    private fun stripFenceLines(code: String): String {
+        var lines = code.trim().lines()
+        if (lines.firstOrNull()?.trimStart()?.startsWith("```") == true) {
+            lines = lines.drop(1)
+        }
+        if (lines.lastOrNull()?.trim() == "```") {
+            lines = lines.dropLast(1)
+        }
+        return lines.joinToString("\n")
     }
 }

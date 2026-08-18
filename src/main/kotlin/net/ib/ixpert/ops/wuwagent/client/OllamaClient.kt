@@ -130,13 +130,15 @@ class OllamaClient : LLMClient {
                         try {
                             debugEntry?.responseText = fullContent
                             debugEntry?.responseLength = fullContent.length
+                            debugEntry?.finishReason = lastResponse?.doneReason
                         } catch (_: Exception) {}
 
                         OllamaChatResponse(
                             model = lastResponse?.model,
                             createdAt = lastResponse?.createdAt,
                             message = OllamaMessage("assistant", fullContent),
-                            done = true
+                            done = true,
+                            finishReason = lastResponse?.doneReason
                         )
                     } else {
                         val httpConn = request.connection as? java.net.HttpURLConnection
@@ -152,7 +154,10 @@ class OllamaClient : LLMClient {
                             if (!parsedResponse.error.isNullOrBlank()) {
                                 throw Exception("Server Error: ${parsedResponse.error}")
                             }
-                            parsedResponse
+                            try {
+                                debugEntry?.finishReason = parsedResponse.doneReason
+                            } catch (_: Exception) {}
+                            parsedResponse.copy(finishReason = parsedResponse.doneReason)
                         } catch (e: IOException) {
                             if (TaskCancellationToken.isCancelled.get()) {
                                 logger.info("OllamaClient: 비스트리밍 취소로 인한 IOException (정상) — ${e.message}")

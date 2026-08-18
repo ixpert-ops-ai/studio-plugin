@@ -251,6 +251,18 @@ body {
   opacity: 1;
 }
 
+/* 응답 잘림 경고 배너 (Improve Step2) */
+.msg-truncated-warning {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(224, 179, 77, 0.4);
+  border-radius: 8px;
+  background: rgba(224, 179, 77, 0.08);
+  color: #e0b34d;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 /* AI Bubble — 다크 차콜 스틸 그레이 */
 .msg-ai {
   align-self: flex-start;

@@ -51,7 +51,7 @@ abstract class BaseAgent : WuwAgent {
                 TaskCancellationToken.activeMessageId = messageId
 
                 indicator.isIndeterminate = true
-                indicator.text = "$taskTitle 요청을 Ollama API에 전달하는 중..."
+                indicator.text = "LLM 응답 대기 중..."
 
                 logger.info("BaseAgent: 프롬프트 전달 완료. messageId=$messageId, Stream=${onChunk != null}")
 
