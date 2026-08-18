@@ -136,6 +136,7 @@ class OpenAIClient : LLMClient {
                         try {
                             debugEntry?.responseText = fullContent
                             debugEntry?.responseLength = fullContent.length
+                            debugEntry?.finishReason = finishReason
                         } catch (_: Exception) {}
 
                         OllamaChatResponse(
@@ -162,6 +163,9 @@ class OpenAIClient : LLMClient {
                                 ?.getAsJsonObject("message")
                                 ?.get("content")?.asString ?: ""
                             val finishReason = choice?.get("finish_reason")?.takeIf { !it.isJsonNull }?.asString
+                            try {
+                                debugEntry?.finishReason = finishReason
+                            } catch (_: Exception) {}
                             OllamaChatResponse(
                                 model = settings.model,
                                 createdAt = null,

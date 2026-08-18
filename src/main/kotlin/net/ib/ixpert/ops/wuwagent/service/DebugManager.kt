@@ -22,7 +22,10 @@ class DebugManager {
         var errorMessage: String = "",
         var durationMs: Long = 0L,
         var isSuccess: Boolean = false,
-        var responseLength: Int = 0
+        var responseLength: Int = 0,
+        /** LLM이 응답을 왜 멈췄는지(OpenAI 계열 finish_reason / Ollama done_reason 통일 필드).
+         *  "length"면 토큰 한도로 응답이 잘렸다는 뜻. 확인 불가하면 null. */
+        var finishReason: String? = null
     )
 
     private val logs = ConcurrentLinkedDeque<DebugEntry>()

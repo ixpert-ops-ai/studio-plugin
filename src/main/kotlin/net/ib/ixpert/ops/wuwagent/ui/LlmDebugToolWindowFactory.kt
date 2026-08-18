@@ -48,8 +48,13 @@ class LlmDebugToolWindowFactory : ToolWindowFactory {
             currentEntries = DebugManager.getInstance().getLogs()
             listModel.clear()
             currentEntries.forEach { entry ->
-                val icon = if (entry.isSuccess) "✅" else "❌"
-                listModel.addElement("$icon [${entry.timestamp}] ${entry.requestId} | ${entry.durationMs}ms | ${entry.requestUrl}")
+                val icon = when {
+                    !entry.isSuccess -> "❌"
+                    entry.finishReason == "length" -> "⚠️"
+                    else -> "✅"
+                }
+                val truncatedFlag = if (entry.finishReason == "length") " (잘림/length)" else ""
+                listModel.addElement("$icon [${entry.timestamp}] ${entry.requestId} | ${entry.durationMs}ms | ${entry.requestUrl}$truncatedFlag")
             }
             requestArea.text = ""
             responseArea.text = ""
@@ -96,13 +101,22 @@ class LlmDebugToolWindowFactory : ToolWindowFactory {
 
         fun formatResponsePanel(entry: DebugManager.DebugEntry): String {
             val sb = StringBuilder()
+            val isTruncatedByLength = entry.finishReason == "length"
+            val statusDisplay = when {
+                !entry.isSuccess -> "실패 ❌"
+                isTruncatedByLength -> "성공 (잘림) ⚠️"
+                else -> "성공 ✅"
+            }
             sb.appendLine("── 응답 정보 ──────────────────────────────")
-            sb.appendLine("성공 여부  : ${if (entry.isSuccess) "성공 ✅" else "실패 ❌"}")
+            sb.appendLine("성공 여부  : $statusDisplay")
             sb.appendLine("소요 시간  : ${entry.durationMs}ms")
             sb.appendLine("스트리밍   : ${entry.isStreaming}")
             sb.appendLine("응답 길이  : ${entry.responseLength}자")
             val lineCount = entry.responseText.lines().size
             sb.appendLine("응답 줄 수 : ${lineCount}줄")
+            val finishReasonDisplay = entry.finishReason ?: "(없음/null)"
+            val truncatedMark = if (isTruncatedByLength) "  ⚠️ 토큰 한도로 잘림" else ""
+            sb.appendLine("finishReason : $finishReasonDisplay$truncatedMark")
             sb.appendLine()
             if (entry.errorMessage.isNotEmpty()) {
                 sb.appendLine("── 에러 메시지 ────────────────────────────")

@@ -573,8 +573,16 @@ sealed class TaskPipeline {
 
             // Improve Step2("2/3 코드 개선")에서만 잘림 여부 판단 — finish_reason == "length" 또는
             // 닫는 코드 펜스가 없는 경우(응답이 토큰 한도 등으로 중간에 끊긴 경우) 잘림으로 간주
+            val unclosedFence = EditorApplyService.hasUnclosedCodeFence(llmResponse)
             val isTruncated = label == "2/3 코드 개선" && !isErrorResponse &&
-                (response?.finishReason == "length" || EditorApplyService.hasUnclosedCodeFence(llmResponse))
+                (response?.finishReason == "length" || unclosedFence)
+            if (label == "2/3 코드 개선") {
+                logger.info(
+                    "AgentStep[${label}] 잘림 판단: finishReason=${response?.finishReason}, " +
+                    "unclosedFence=$unclosedFence, isErrorResponse=$isErrorResponse, " +
+                    "응답 마지막 40자=\"${llmResponse.takeLast(40)}\" → isTruncated=$isTruncated"
+                )
+            }
 
             return StepResult(
                 originalCode = if (hasCodeDiff) originalCode else null,

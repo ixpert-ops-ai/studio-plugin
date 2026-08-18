@@ -130,6 +130,7 @@ class OllamaClient : LLMClient {
                         try {
                             debugEntry?.responseText = fullContent
                             debugEntry?.responseLength = fullContent.length
+                            debugEntry?.finishReason = lastResponse?.doneReason
                         } catch (_: Exception) {}
 
                         OllamaChatResponse(
@@ -153,6 +154,9 @@ class OllamaClient : LLMClient {
                             if (!parsedResponse.error.isNullOrBlank()) {
                                 throw Exception("Server Error: ${parsedResponse.error}")
                             }
+                            try {
+                                debugEntry?.finishReason = parsedResponse.doneReason
+                            } catch (_: Exception) {}
                             parsedResponse.copy(finishReason = parsedResponse.doneReason)
                         } catch (e: IOException) {
                             if (TaskCancellationToken.isCancelled.get()) {
