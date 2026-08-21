@@ -76,6 +76,13 @@ class ModelValidationStartupActivity : ProjectActivity {
             return
         }
 
+        if (models.isEmpty()) {
+            // 서버는 정상 응답(200)했지만 모델 목록이 비어있음 — 서버 점검 중 등으로 판단, 알림 필요
+            logger.warn("ModelValidationStartupActivity: 서버 응답은 정상이나 모델 목록이 비어있음 → 알림 표시")
+            showNoModelsAvailableNotification(project, baseUrl)
+            return
+        }
+
         if (configuredModel.isNotBlank() && models.any { it == configuredModel }) {
             logger.info("ModelValidationStartupActivity: 설정된 모델('$configuredModel') 서버 목록에서 확인됨")
             return
@@ -88,6 +95,25 @@ class ModelValidationStartupActivity : ProjectActivity {
         showModelMismatchNotification(project, configuredModel, models)
     }
 
+    /** 서버가 정상 응답했지만 사용 가능한 모델이 하나도 없는 경우(서버 점검 중 등) */
+    private fun showNoModelsAvailableNotification(project: Project, serverUrl: String) {
+        val content = "서버에 사용 가능한 모델이 없습니다.\n" +
+            "서버 상태를 확인하거나 관리자에게 문의해주세요.\n" +
+            "서버: $serverUrl"
+
+        val notification = NotificationGroupManager.getInstance()
+            .getNotificationGroup(NOTIFICATION_GROUP_ID)
+            .createNotification("iXpert AI Assistant", content, NotificationType.WARNING)
+
+        notification.addAction(NotificationAction.createSimple("설정 열기") {
+            ShowSettingsUtil.getInstance().showSettingsDialog(project, "iXpert AI Assistant")
+            notification.expire()
+        })
+
+        notification.notify(project)
+    }
+
+    /** 서버 모델 목록은 있지만(1개 이상) 설정된 모델명이 그 안에 없는 경우 */
     private fun showModelMismatchNotification(
         project: Project,
         configuredModel: String,
@@ -95,7 +121,6 @@ class ModelValidationStartupActivity : ProjectActivity {
     ) {
         val displayModel = configuredModel.ifBlank { "(설정 안 됨)" }
         val availableDisplay = availableModels.take(MAX_MODELS_IN_MESSAGE).joinToString(", ")
-            .ifBlank { "(서버에 등록된 모델 없음)" }
 
         val content = "설정된 모델을 서버에서 찾을 수 없습니다.\n" +
             "현재 설정: $displayModel\n" +
@@ -105,22 +130,19 @@ class ModelValidationStartupActivity : ProjectActivity {
             .getNotificationGroup(NOTIFICATION_GROUP_ID)
             .createNotification("iXpert AI Assistant", content, NotificationType.WARNING)
 
-        when {
-            availableModels.size == 1 -> {
-                val onlyModel = availableModels[0]
-                notification.addAction(NotificationAction.createSimple("${onlyModel}으로 변경") {
-                    SettingsState.getInstance().state.model = onlyModel
-                    logger.info("ModelValidationStartupActivity: 사용자가 모델을 '$onlyModel'(으)로 교체")
-                    notification.expire()
-                })
-            }
-            availableModels.size >= 2 -> {
-                notification.addAction(NotificationAction.createSimple("설정 열기") {
-                    ShowSettingsUtil.getInstance().showSettingsDialog(project, "iXpert AI Assistant")
-                    notification.expire()
-                })
-            }
-            // availableModels가 비어있는 경우(서버 응답은 왔으나 모델 0개): 액션 버튼 없이 안내만 표시
+        if (availableModels.size == 1) {
+            val onlyModel = availableModels[0]
+            notification.addAction(NotificationAction.createSimple("${onlyModel}으로 변경") {
+                SettingsState.getInstance().state.model = onlyModel
+                logger.info("ModelValidationStartupActivity: 사용자가 모델을 '$onlyModel'(으)로 교체")
+                notification.expire()
+            })
+        } else {
+            // availableModels.size >= 2 (이 함수는 models.isEmpty()가 걸러진 뒤에만 호출되므로 0개는 없음)
+            notification.addAction(NotificationAction.createSimple("설정 열기") {
+                ShowSettingsUtil.getInstance().showSettingsDialog(project, "iXpert AI Assistant")
+                notification.expire()
+            })
         }
 
         notification.notify(project)
