@@ -45,6 +45,9 @@ Android 및 Spring 프로젝트의 프레임워크를 자동 감지하여 맞춤
 
         <!-- 최초 실행 시 웰컴 다이얼로그 표시 (isFirstRun=true 인 경우에만 동작) -->
         <postStartupActivity implementation="net.ib.ixpert.ops.wuwagent.startup.FirstRunStartupActivity"/>
+
+        <!-- IDE 시작 시 설정된 모델이 서버에 실제로 존재하는지 백그라운드 검증 (3초 타임아웃, IDE 시작 비블로킹) -->
+        <backgroundPostStartupActivity implementation="net.ib.ixpert.ops.wuwagent.startup.ModelValidationStartupActivity"/>
     </extensions>
 
     <actions>
