@@ -21,8 +21,8 @@ class PipelineBaselineTest {
 
         val bypassOffSelector = object : SeedSelector {
             val real = AgenticSeedSelector(client)
-            override fun selectSeeds(req: String, graph: ProjectGraphQueryable): SeedSelectionResult {
-                val result = real.selectSeeds(req, graph)
+            override fun selectSeeds(srText: String, graph: ProjectGraphQueryable, projectBasePath: String?): SeedSelectionResult {
+                val result = real.selectSeeds(srText, graph)
                 return result.copy(judgePicks = emptyList())
             }
         }
