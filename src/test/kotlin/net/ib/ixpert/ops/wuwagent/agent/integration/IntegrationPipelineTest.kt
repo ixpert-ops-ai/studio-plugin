@@ -1,4 +1,4 @@
-﻿package net.ib.ixpert.ops.wuwagent.agent.integration
+package net.ib.ixpert.ops.wuwagent.agent.integration
 
 import com.google.gson.Gson
 import net.ib.ixpert.ops.wuwagent.client.OpenAIClient
@@ -32,6 +32,17 @@ class IntegrationPipelineTest {
         val results = mutableListOf<RunResult>()
 
         val projects = listOf(
+            mapOf(
+                "name" to "survey_admin_case_b",
+                "path" to "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json",
+                "sr" to "기존 설문 발송에 브랜드메시지 발송 채널 추가 및 어드민 개발",
+                "gt" to listOf(
+                    "SurveyServiceImpl", "SurveyDaoImpl", "SurveyDao", "SurveyDto",
+                    "sql_survey.xml", "survey_write.jsp", "survey.write.js",
+                    "survey_list.jsp", "survey.list.js",
+                    "BrandmessageTemplateBatchJob", "BizgoApiServiceImpl"
+                )
+            ),
             mapOf(
                 "name" to "member-market",
                 "path" to "C:/Workspace/member-market/.meta/project-graph.json",
