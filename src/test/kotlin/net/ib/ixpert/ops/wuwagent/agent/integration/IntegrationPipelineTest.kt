@@ -49,6 +49,7 @@ class IntegrationPipelineTest {
         for (proj in projects) {
             val name = proj["name"] as String
             val path = proj["path"] as String
+            val projectBasePath = if (path.contains("/.meta/")) path.substringBefore("/.meta/") else null
             val sr = proj["sr"] as String
             @Suppress("UNCHECKED_CAST")
             val gt = proj["gt"] as List<String>
@@ -78,7 +79,7 @@ class IntegrationPipelineTest {
                         graph = graph,
                         client = client,
                         project = null,
-                        projectBasePath = null,
+                        projectBasePath = projectBasePath,
                         enhancedRequirements = emptyList(),
                         seedSelector = null,
                         onProgress = { msg ->
