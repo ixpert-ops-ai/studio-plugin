@@ -10,7 +10,8 @@ data class SeedSelectionResult(
     val frontendRelevant: Boolean,
     val reasoning: String,
     val frontendFileHints: List<String>? = null,
-    val judgePicks: List<String> = emptyList()
+    val judgePicks: List<String> = emptyList(),
+    val rawCandidates: List<String> = emptyList()
 )
 
 enum class ChangeIntent {
@@ -63,7 +64,10 @@ data class DiscoveryMetadata(
     val filteredTo: Int,
     val llmTokensUsed: Int,
     val expansionTrace: Map<String, ExpansionStep>,
-    val reasoning: String = ""
+    val reasoning: String = "",
+    val rawCandidates: List<String> = emptyList(),
+    val judgePicks: List<String> = emptyList(),
+    val frontendFileHints: List<String> = emptyList()
 )
 
 /**

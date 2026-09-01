@@ -364,6 +364,22 @@ class GraphExpander(
             }
         }
 
+        // Step E: MyBatis Mapper XML 역방향 연결 (visited에 포함된 DAO/Mapper에 매핑된 XML 리소스 포함)
+        for (resource in graph.resourceNodes) {
+            if (resource.type == net.ib.ixpert.ops.wuwagent.service.metagraph.model.ResourceType.MYBATIS_MAPPER) {
+                val linkedJavaNodes = resource.linkedTo.filter { visited.containsKey(it) }
+                if (linkedJavaNodes.isNotEmpty() && !visited.containsKey(resource.path)) {
+                    val fromJava = linkedJavaNodes.first()
+                    val fromStep = visited[fromJava]
+                    visited[resource.path] = ExpansionStep(
+                        hop = (fromStep?.hop ?: 1),
+                        via = "RESOURCE_REVERSE_LINK",
+                        from = fromJava
+                    )
+                }
+            }
+        }
+
         return visited
     }
 

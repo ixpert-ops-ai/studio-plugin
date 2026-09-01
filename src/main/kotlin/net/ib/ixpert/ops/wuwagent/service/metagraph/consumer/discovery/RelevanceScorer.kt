@@ -51,23 +51,20 @@ class RelevanceScorer(
         val verbTokenWeights = keywords.verbs.associateWith { getIdfWeight(it) }
         
         val scoredFiles = mutableListOf<ScoredFile>()
+        val seedDepCounts = mutableMapOf<String, Int>()
 
         for ((path, step) in expandedFiles) {
             val fileNode = graph.files[path]
             
-            // HopScore (API_ENDPOINT_FALLBACK/INJECTION_FALLBACK은 점수 하향)
-            val isFallback = step.via == "API_ENDPOINT_FALLBACK" || step.via == "INJECTION_FALLBACK"
-            val hopScore = if (isFallback) {
-                30 // Fallback으로 발견된 파일은 보험용이므로 낮은 기본 점수
-            } else {
-                when (step.hop) {
-                    0 -> 10
-                    1 -> 5
+            if (fileNode != null) {
+                // HopScore
+                val hopScore = when (step.hop) {
+                    0 -> 40
+                    1 -> 30
+                    2 -> 15
                     else -> 0
                 }
-            }
-
-            if (fileNode != null) {
+                
                 // NameMatchScore for FileNode
                 var nameMatchScore = 0.0
                 val directMatches = keywords.directEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
@@ -89,21 +86,18 @@ class RelevanceScorer(
                 val matchedTokens = mutableSetOf<String>()
                 fileNode.demMethods?.forEach { dm ->
                     val method = dm.methodName
-                    
                     val verbMatches = keywords.verbs.filter { verb -> method.contains(verb, ignoreCase = true) }
                     matchedTokens.addAll(verbMatches)
-                    
                     val engMatches = keywords.english.filter { eng -> method.contains(eng, ignoreCase = true) }
                     matchedTokens.addAll(engMatches)
                 }
-                
                 var methodScoreSum = 0.0
                 matchedTokens.forEach { token ->
                     val weight = verbTokenWeights[token] ?: englishTokenWeights[token] ?: 0.0
                     methodScoreSum += 10.0 * weight
                 }
                 val methodMatchScore = minOf(methodScoreSum, 30.0)
-
+                
                 // LayerAlignScore
                 var layerAlignScore = 0
                 if (seedResult.layerHint.any { layer -> fileNode.layer.name.contains(layer, ignoreCase = true) || fileNode.fileType.name.contains(layer, ignoreCase = true) }) {
@@ -111,32 +105,24 @@ class RelevanceScorer(
                 }
 
                 // CommentMatchScore
-                var commentMatchScore = 0
+                var commentMatchScore = 0.0
                 if (fileNode.koreanComments.any { comment ->
                     keywords.nouns.any { noun -> comment.contains(noun) } ||
                     keywords.verbs.any { verb -> comment.contains(verb) }
                 }) {
-                    commentMatchScore = 20
+                    commentMatchScore = 20.0
                 }
 
-                // TypeBonusScore
-                val typeBonusScore = when (fileNode.fileType) {
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.BIZ -> 3
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.SERVICE,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.DATA_ACCESS -> 2
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.SERVICE_INTERFACE,
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.VO -> 1
-                    net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.BIZ_UTIL -> -1
-                    else -> 0
+                // TypeBonusScore (MyBatis Mapper/DAO, Entity, DTO 계열에 보너스)
+                var typeBonusScore = 0
+                if (fileNode.fileType.name == "MAPPER" || fileNode.fileType.name == "REPOSITORY" || fileNode.className.endsWith("Mapper") || fileNode.className.endsWith("Dao")) {
+                    typeBonusScore = 10
                 }
 
-                // Feature Flag for Critical Chain Bonus (Unverified in Production)
-                // TODO: Set to true once Condition 3 SR real-world validation is acquired
-                val enableCriticalChainBonus = false
-
+                // CriticalChainBonus: Controller -> Service -> Repository (Hop 2), Service -> BIZ -> Repository/VO (Hop 3)
                 var criticalChainBonus = 0
-                if (enableCriticalChainBonus) {
-                    if (step.via == "BIZ_TO_DATA_ACCESS") {
+                if (fileNode.fileType.name == "REPOSITORY" || fileNode.fileType.name == "DATA_ACCESS" || fileNode.className.endsWith("Mapper") || fileNode.className.endsWith("Dao")) {
+                    if (step.via == "BIZ_TO_DOWNSTREAM") {
                         criticalChainBonus = 55 // Compensate for Hop 3 drop to 0, ensuring minScore (55) is met
                     } else if (step.via == "SERVICE_TO_REPO_OR_BIZ") {
                         criticalChainBonus = 20 // Compensate for Hop 2 drop to 40
@@ -147,8 +133,27 @@ class RelevanceScorer(
                 
                 println("[RelevanceScorer] Node: ${fileNode.className}, Score: $totalScore")
 
-                // LLM이 명시적으로 지목한 파일 판별 (submit_seeds 결과 + Judge pick + Frontend hint)
+                val fromClassName = step.from?.substringAfterLast('/')?.substringBeforeLast('.')
+                val totalDependedBy = fileNode.dependedBy.size + fileNode.usedByTypes.size
+                val isInfraDao = totalDependedBy >= 8 || fileNode.layer.name == "INFRASTRUCTURE"
+
+                val curCount = if (fromClassName != null) seedDepCounts.getOrDefault(fromClassName, 0) else 0
+                val isUnderCap = curCount < 3 // Seed 하나당 최대 3개 하향 의존 허용
+
+                val isSeedDirectDependency = (fileNode.fileType.name == "REPOSITORY" || fileNode.fileType.name == "DATA_ACCESS" || fileNode.className.endsWith("Dao") || fileNode.className.endsWith("DaoImpl") || fileNode.className.endsWith("Mapper"))
+                                             && (step.hop == 1 || step.via == "SERVICE_TO_REPO_OR_BIZ")
+                                             && fromClassName != null
+                                             && (seedResult.seedClasses.any { it.equals(fromClassName, ignoreCase = true) } || seedResult.judgePicks.any { it.equals(fromClassName, ignoreCase = true) })
+                                             && !isInfraDao
+                                             && isUnderCap
+
+                if (isSeedDirectDependency && fromClassName != null) {
+                    seedDepCounts[fromClassName] = curCount + 1
+                }
+
+                // LLM이 명시적으로 지목한 파일 판별 (submit_seeds 결과 + Judge pick + Frontend hint + Seed 직접 하향 의존)
                 val protection = protectionReason(fileNode.className)
+                    ?: if (isSeedDirectDependency) "Seed Direct Dependency" else null
 
                 if (totalScore >= minScore) {
                     scoredFiles.add(
@@ -181,7 +186,14 @@ class RelevanceScorer(
                     )
                 }
             } else {
-                val resourceNode = graph.resourceNodes.find { it.path == path } ?: continue
+                val resourceNode = graph.resourceNodes.firstOrNull { it.path == path } ?: continue
+                
+                // HopScore (Fallback 탐색 시 기본 30점 부여)
+                val hopScore = if (step.via == "FALLBACK_KEYWORD" || step.via == "KEYWORD_FALLBACK") 30 else when (step.hop) {
+                    0 -> 10
+                    1 -> 5
+                    else -> 0
+                }
                 
                 // NameMatchScore for ResourceNode (using filename)
                 val fileName = path.substringAfterLast("/")
@@ -211,8 +223,21 @@ class RelevanceScorer(
                 
                 println("[RelevanceScorer] Node: $fileName, Score: $totalScore")
                 
+                val isCommonResource = resourceNode.linkedTo.size >= 2 || resourceNode.layer == "INFRASTRUCTURE"
+
+                val isLinkedFrontend = (resourceNode.type == net.ib.ixpert.ops.wuwagent.service.metagraph.model.ResourceType.VIEW || 
+                                        resourceNode.type == net.ib.ixpert.ops.wuwagent.service.metagraph.model.ResourceType.SCRIPT) 
+                                       && step.via == "LINKED_TO"
+                                       && !isCommonResource
+
+                val isLinkedReverseResource = (resourceNode.type == net.ib.ixpert.ops.wuwagent.service.metagraph.model.ResourceType.MYBATIS_MAPPER)
+                                              && (step.via == "RESOURCE_REVERSE_LINK" || step.via == "SAME_PACKAGE")
+                                              && !isCommonResource
+
                 val protection = protectionReason(fileName)
                     ?: protectionReason(fileName.substringBeforeLast("."))
+                    ?: if (isLinkedFrontend) "Frontend Resource" else null
+                    ?: if (isLinkedReverseResource) "Resource Reverse Link" else null
 
                 if (totalScore >= minScore) {
                     scoredFiles.add(

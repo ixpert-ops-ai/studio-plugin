@@ -110,8 +110,51 @@ class IntegrationPipelineTest {
                     verifiedFiles.forEach { file -> 
                         println("RESULT_FILE: [$name] " + file.path + " (Score: " + file.score + " / Reason: " + file.discoveryReason + ")")
                     }
-                    
-                    val survivedGtNames = gt.filter { g -> verifiedFiles.any { vf -> vf.path.contains(g) } }
+                    // --- Recall Diagnostics Instrument (CP0 ~ CP6) ---
+                    fun matchesGt(identifier: String, targetGt: String): Boolean {
+                        val rawName = identifier.substringAfterLast('/').substringAfterLast('\\')
+                        val nameWithoutExt = rawName.substringBeforeLast('.')
+                        val gtWithoutExt = targetGt.substringBeforeLast('.')
+                        return rawName.equals(targetGt, ignoreCase = true) ||
+                               rawName.equals(gtWithoutExt, ignoreCase = true) ||
+                               nameWithoutExt.equals(targetGt, ignoreCase = true) ||
+                               nameWithoutExt.equals(gtWithoutExt, ignoreCase = true) ||
+                               identifier.contains(targetGt, ignoreCase = true)
+                    }
+
+                    val cpReport = StringBuilder()
+                    cpReport.appendLine("\n==========================================================================================")
+                    cpReport.appendLine("📊 RECALL DIAGNOSTICS TABLE: $name (Run $i)")
+                    cpReport.appendLine("==========================================================================================")
+                    cpReport.appendLine("| GT Name | CP0(Node) | CP1(BM25) | CP2(Seed/Judge) | CP3(Graph) | CP4(Scorer) | CP6(Final) | Drop Point Diagnosis |")
+                    cpReport.appendLine("|---|:---:|:---:|:---:|:---:|:---:|:---:|---|")
+
+                    val meta = discoveryResult.metadata
+                    for (g in gt) {
+                        val cp0 = graph.files.keys.any { matchesGt(it, g) } || graph.resourceNodes.any { matchesGt(it.path, g) }
+                        val cp1 = meta.rawCandidates.any { matchesGt(it, g) }
+                        val cp2 = meta.seedClasses.any { matchesGt(it, g) } || meta.judgePicks.any { matchesGt(it, g) } || meta.frontendFileHints.any { matchesGt(it, g) }
+                        val cp3 = meta.expansionTrace.keys.any { matchesGt(it, g) }
+                        val cp4 = discoveryResult.relevantFiles.any { matchesGt(it.path, g) || matchesGt(it.className, g) }
+                        val cp6 = verifiedFiles.any { matchesGt(it.path, g) || matchesGt(it.className, g) }
+
+                        val dropReason = when {
+                            !cp0 -> "CP0: 메타그래프 노드 부재 (신규 A)"
+                            !cp1 && !cp3 -> "CP1: Layer 1 후보 풀 탈락 (BM25/사전 누락)"
+                            !cp2 && !cp3 -> "CP2->3: Seed/Judge 미선정으로 확장 단절"
+                            !cp3 -> "CP3: GraphExpander 미도달 (필터 차단 or 엣지 단절)"
+                            !cp4 -> "CP4: RelevanceScorer 컷오프 탈락 (점수<55 & Bypass 부재)"
+                            !cp6 -> "CP6: Verifier LLM 거부 (UNNECESSARY 판정)"
+                            else -> "✅ 최종 생존"
+                        }
+
+                        fun mark(b: Boolean) = if (b) "⭕" else "❌"
+                        cpReport.appendLine("| $g | ${mark(cp0)} | ${mark(cp1)} | ${mark(cp2)} | ${mark(cp3)} | ${mark(cp4)} | ${mark(cp6)} | $dropReason |")
+                    }
+                    cpReport.appendLine("==========================================================================================\n")
+                    println(cpReport.toString())
+
+                    val survivedGtNames = gt.filter { g -> verifiedFiles.any { vf -> matchesGt(vf.path, g) || matchesGt(vf.className, g) } }
                     val survivedGt = survivedGtNames.size
                     
                     val fallback = verifiedFiles.any { it.discoveryReason.contains("Fallback") || it.discoveryReason.contains("실패") }

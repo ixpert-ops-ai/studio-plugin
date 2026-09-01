@@ -319,10 +319,22 @@ class AgenticSeedSelector(
                 toolChoice = mapOf("type" to "function", "function" to mapOf("name" to "submit_seeds"))
             )
             
+            val allRaw = candidatesListPair.first + candidatesListPair.second
+            val isFrontendByRule = srText.contains("어드민") || srText.contains("화면") || 
+                                  srText.contains("UI") || srText.contains("목록") || 
+                                  srText.contains("등록") || srText.contains("조회") ||
+                                  srText.contains("프론트") || srText.contains("vue") || 
+                                  srText.contains("jsp") || srText.contains("js")
+
             val toolCall = response?.toolCalls?.firstOrNull { it.function.name == "submit_seeds" }
             if (toolCall != null) {
                 val res = gson.fromJson(toolCall.function.arguments, SeedSelectionResult::class.java)
-                return res.copy(judgePicks = finalJudgePicks)
+                val finalFrontend = res.frontendRelevant || isFrontendByRule
+                return res.copy(
+                    judgePicks = finalJudgePicks,
+                    rawCandidates = allRaw,
+                    frontendRelevant = finalFrontend
+                )
             } else if (!response?.content.isNullOrBlank()) {
                 // Some models return the tool arguments directly in the text content
                 var cleanJson = response!!.content!!
@@ -330,7 +342,13 @@ class AgenticSeedSelector(
                 val jsonMatch = Regex("\\{.*\\}", RegexOption.DOT_MATCHES_ALL).find(cleanJson)
                 val cleanJsonForParse = jsonMatch?.value ?: cleanJson.replace("```json", "").replace("```", "").trim()
                 try {
-                    return gson.fromJson(cleanJsonForParse, SeedSelectionResult::class.java)
+                    val parsed = gson.fromJson(cleanJsonForParse, SeedSelectionResult::class.java)
+                    val finalFrontend = parsed.frontendRelevant || isFrontendByRule
+                    return parsed.copy(
+                        judgePicks = finalJudgePicks,
+                        rawCandidates = allRaw,
+                        frontendRelevant = finalFrontend
+                    )
                 } catch (e: Exception) {
                     val arrayMatch = Regex("\\[.*\\]", RegexOption.DOT_MATCHES_ALL).find(cleanJson)
                     val arrayJson = arrayMatch?.value ?: cleanJson.replace("```json", "").replace("```", "").trim()
@@ -341,9 +359,10 @@ class AgenticSeedSelector(
                             seedClasses = list,
                             changeIntent = ChangeIntent.MODIFY,
                             layerHint = listOf("SERVICE", "PRESENTATION"),
-                            frontendRelevant = true,
+                            frontendRelevant = isFrontendByRule,
                             reasoning = "Parsed from JSON array fallback",
-                            judgePicks = finalJudgePicks
+                            judgePicks = finalJudgePicks,
+                            rawCandidates = allRaw
                         )
                     }
                     throw e

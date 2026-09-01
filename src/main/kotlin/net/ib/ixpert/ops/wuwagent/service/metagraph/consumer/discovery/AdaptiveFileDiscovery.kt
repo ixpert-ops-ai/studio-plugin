@@ -56,7 +56,10 @@ object AdaptiveFileDiscovery {
             filteredTo = relevantFiles.size,
             llmTokensUsed = 0, // Mock LLM Token Count (임시)
             expansionTrace = expandedFiles,
-            reasoning = seedResult.reasoning
+            reasoning = seedResult.reasoning,
+            rawCandidates = seedResult.rawCandidates,
+            judgePicks = seedResult.judgePicks,
+            frontendFileHints = seedResult.frontendFileHints ?: emptyList()
         )
 
         return DiscoveryResult(
