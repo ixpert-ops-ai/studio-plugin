@@ -12,6 +12,7 @@ object AdaptiveFileDiscovery {
         graph: ProjectGraphQueryable,
         client: LLMClient,
         project: Project?,
+        projectBasePath: String? = null,
         enhancedRequirements: List<String> = emptyList(),
         seedSelector: SeedSelector? = null,
         onProgress: ((String) -> Unit)? = null
@@ -21,7 +22,7 @@ object AdaptiveFileDiscovery {
         val srText = "$primaryReq\n$secondaryReq"
         // Phase 1: Seed Selection
         // 테스트 환경 등에서는 MockSeedSelector가 주입될 수 있으나, 프로덕션에서는 AgenticSeedSelector 사용
-        val selector: SeedSelector = seedSelector ?: AgenticSeedSelector(client)
+        val selector: SeedSelector = seedSelector ?: AgenticSeedSelector(client, projectBasePath = projectBasePath ?: project?.basePath)
         val seedResult = selector.selectSeeds(srText, graph)
 
         onProgress?.invoke("식별된 Seed 바탕으로 그래프 탐색 중... (${seedResult.seedClasses.size}개 발견)")

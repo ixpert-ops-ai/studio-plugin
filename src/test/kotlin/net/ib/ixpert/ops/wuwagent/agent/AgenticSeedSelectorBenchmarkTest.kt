@@ -18,7 +18,7 @@ class AgenticSeedSelectorBenchmarkTest {
     class VllmClient : LLMClient {
         private val gson = Gson()
         private val serverUrl = "http://vllm.ixpertops.cloud/v1/chat/completions"
-        private val modelName = "Qwen/Qwen3.6-35B-A3B-FP8"
+        private val modelName = "Qwen/Qwen3.8-27B-FP8"
         
         var callCount = 0
         

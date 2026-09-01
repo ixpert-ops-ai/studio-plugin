@@ -2,7 +2,7 @@ package net.ib.ixpert.ops.wuwagent.agent.integration
 
 import com.google.gson.Gson
 import net.ib.ixpert.ops.wuwagent.client.OpenAIClient
-import net.ib.ixpert.ops.wuwagent.agent.PureAnalyzeSurveyAdminTest.RealVllmClient
+import net.ib.ixpert.ops.wuwagent.agent.PipelineE2ETestVllmClient
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AdaptiveFileDiscovery
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AgenticSeedSelector
@@ -27,7 +27,7 @@ class IntegrationPipelineTest {
 
     @Test
     fun runAll() {
-        val client = RealVllmClient()
+        val client = PipelineE2ETestVllmClient()
         val gson = Gson()
         val results = mutableListOf<RunResult>()
 

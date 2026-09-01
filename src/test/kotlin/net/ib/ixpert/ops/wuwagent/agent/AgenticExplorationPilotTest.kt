@@ -229,7 +229,7 @@ class AgenticExplorationPilotTest {
                 println("\n--- Turn " + turnCount + " ---")
 
                 val requestBody = mapOf(
-                    "model" to "Qwen/Qwen3.6-35B-A3B-FP8",
+                    "model" to "Qwen/Qwen3.8-27B-FP8",
                     "messages" to messages,
                     "tools" to tools,
                     "tool_choice" to "auto",

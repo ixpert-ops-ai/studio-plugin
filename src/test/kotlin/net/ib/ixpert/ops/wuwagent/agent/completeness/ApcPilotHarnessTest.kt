@@ -281,7 +281,7 @@ class ApcPilotHarnessTest {
 
         val ollamaClient = object : LLMClient {
             val serverUrl = "https://vllm.ixpertops.cloud/v1/chat/completions"
-            val modelName = "Qwen/Qwen3.6-35B-A3B-FP8"
+            val modelName = "Qwen/Qwen3.8-27B-FP8"
 
             override fun fetchModels(baseUrl: String, apiKey: String): List<String>? {
                 return listOf(modelName)

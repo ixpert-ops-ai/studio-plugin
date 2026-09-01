@@ -1,11 +1,14 @@
-﻿package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery
+package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery
 
 import com.google.gson.Gson
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraphQueryable
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode
 
-class AgenticSeedSelector(private val llmClient: LLMClient) : SeedSelector {
+class AgenticSeedSelector(
+    private val llmClient: LLMClient,
+    private val projectBasePath: String? = null
+) : SeedSelector {
 
     private val gson = Gson()
 

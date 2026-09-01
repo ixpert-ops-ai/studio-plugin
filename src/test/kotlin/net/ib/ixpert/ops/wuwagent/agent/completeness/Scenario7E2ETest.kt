@@ -48,7 +48,7 @@ class Scenario7E2ETest {
             
             override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?, temperature: Double?): ChatCompletionResponse? {
                 val requestBodyMap = mutableMapOf<String, Any>(
-                    "model" to "Qwen/Qwen3.6-35B-A3B-FP8",
+                    "model" to "Qwen/Qwen3.8-27B-FP8",
                     "messages" to listOf(
                         mapOf("role" to "system", "content" to systemPrompt)
                     ) + messages.map { mapOf("role" to it.role, "content" to it.content) }
@@ -123,7 +123,7 @@ class Scenario7E2ETest {
             
             override fun chatWithTools(systemPrompt: String, messages: List<ChatMessage>, maxTokens: Int?, tools: List<ToolDefinition>?, toolChoice: Any?, temperature: Double?): ChatCompletionResponse? {
                 val requestBodyMap = mutableMapOf<String, Any>(
-                    "model" to "Qwen/Qwen3.6-35B-A3B-FP8",
+                    "model" to "Qwen/Qwen3.8-27B-FP8",
                     "messages" to listOf(mapOf("role" to "system", "content" to systemPrompt)) + messages.map { mapOf("role" to it.role, "content" to it.content) }
                 )
                 if (maxTokens != null) requestBodyMap["max_tokens"] = maxTokens

@@ -26,7 +26,7 @@ data class TestCase(val type: String, val srText: String, val targetGtClass: Str
 class PipelineE2ETestVllmClient : LLMClient {
     private val gson = Gson()
     private val serverUrl = "http://vllm.ixpertops.cloud/v1/chat/completions"
-    private val modelName = "Qwen/Qwen3.6-35B-A3B-FP8"
+    private val modelName = "Qwen/Qwen3.8-27B-FP8"
     
     override fun chat(
         systemPrompt: String,

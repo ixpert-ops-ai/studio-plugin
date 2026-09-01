@@ -32,7 +32,7 @@ class E2EPipelineIntegrationTest {
         // Custom SimpleOllamaClient mapped to OpenAI API for vLLM testing
         val ollamaClient = object : LLMClient {
             val serverUrl = "https://vllm.ixpertops.cloud/v1/chat/completions"
-            val modelName = "Qwen/Qwen3.6-35B-A3B-FP8" 
+            val modelName = "Qwen/Qwen3.8-27B-FP8" 
 
             override fun chat(
                 systemPrompt: String,
@@ -102,7 +102,7 @@ class E2EPipelineIntegrationTest {
 
             override fun fetchModels(baseUrl: String, apiKey: String): List<String>? {
                 // Return dummy to bypass the check
-                return listOf("Qwen/Qwen3.6-35B-A3B-FP8")
+                return listOf("Qwen/Qwen3.8-27B-FP8")
             }
         }
         

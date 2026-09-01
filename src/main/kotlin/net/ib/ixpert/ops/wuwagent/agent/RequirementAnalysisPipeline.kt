@@ -132,7 +132,15 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             logger.warn("Failed to dump sub-graph", e)
         }
 
-        val discoveryResult = AdaptiveFileDiscovery.filter(primaryReq, secondaryReq, workingMetaGraph, client, project, enhancedRequirements) { progress ->
+        val discoveryResult = AdaptiveFileDiscovery.filter(
+            primaryReq = primaryReq,
+            secondaryReq = secondaryReq,
+            graph = workingMetaGraph,
+            client = client,
+            project = project,
+            projectBasePath = project?.basePath,
+            enhancedRequirements = enhancedRequirements
+        ) { progress ->
             onChunk?.invoke("> $progress\n")
         }
         

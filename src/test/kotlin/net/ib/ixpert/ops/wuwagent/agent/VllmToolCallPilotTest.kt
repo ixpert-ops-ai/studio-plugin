@@ -17,7 +17,7 @@ class VllmToolCallPilotTest {
         val gson: Gson = GsonBuilder().create()
 
         val requestBody = mapOf(
-            "model" to "Qwen/Qwen3.6-35B-A3B-FP8", // 모델명은 서버에 띄워진 대로 무시되거나 매칭됨 (vLLM 기본값)
+            "model" to "Qwen/Qwen3.8-27B-FP8", // 모델명은 서버에 띄워진 대로 무시되거나 매칭됨 (vLLM 기본값)
             "messages" to listOf(
                 mapOf("role" to "system", "content" to "You are an agentic coding assistant. You must use tools when asked."),
                 mapOf("role" to "user", "content" to "나는 OrdrInqrListResponse라는 클래스에 대해 알고 싶어. 도구를 사용해서 이 클래스의 정보를 찾아봐.")

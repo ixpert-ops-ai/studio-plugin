@@ -66,7 +66,7 @@ class TokenMeasurementTest {
         """.trimIndent()
 
         val requestBodyMap = mapOf(
-            "model" to "Qwen/Qwen3.6-35B-A3B-FP8",
+            "model" to "Qwen/Qwen3.8-27B-FP8",
             "max_tokens" to 1,
             "messages" to listOf(
                 mapOf("role" to "system", "content" to systemPrompt),

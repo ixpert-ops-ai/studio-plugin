@@ -15,6 +15,19 @@ class RelevanceScorer(
     ): List<ScoredFile> {
         // 1. SR 키워드 추출 (간단한 명사/동사/영문 형태)
         val keywords = extractKeywords(srText)
+
+        // LLM이 명시적으로 지목한 파일 판별 헬퍼 (FileNode/ResourceNode 양 분기에서 공유)
+        fun protectionReason(name: String): String? {
+            if (seedResult.judgePicks.any { it.equals(name, ignoreCase = true) }) return "Judge Pick"
+            if (seedResult.seedClasses.any { it.equals(name, ignoreCase = true) }) return "Seed Class"
+            if (seedResult.frontendRelevant &&
+                (seedResult.frontendFileHints ?: emptyList()).any { hint ->
+                    val baseName = name.substringAfterLast('/').substringBeforeLast('.')
+                    hint.length >= 4 && (baseName.equals(hint, ignoreCase = true) || baseName.startsWith(hint, ignoreCase = true))
+                }
+            ) return "Frontend Hint"
+            return null
+        }
         
         val totalNodes = graph.files.size + graph.resourceNodes.size
         val maxIdf = Math.log(totalNodes.toDouble()) // max possible IDF (when df=1)
@@ -133,8 +146,9 @@ class RelevanceScorer(
                 val totalScore = (hopScore + nameMatchScore + methodMatchScore + layerAlignScore + commentMatchScore + typeBonusScore + criticalChainBonus).toInt()
                 
                 println("[RelevanceScorer] Node: ${fileNode.className}, Score: $totalScore")
-                
-                val isJudgePick = seedResult.judgePicks.any { it.equals(fileNode.className, ignoreCase = true) }
+
+                // LLM이 명시적으로 지목한 파일 판별 (submit_seeds 결과 + Judge pick + Frontend hint)
+                val protection = protectionReason(fileNode.className)
 
                 if (totalScore >= minScore) {
                     scoredFiles.add(
@@ -146,21 +160,23 @@ class RelevanceScorer(
                             score = totalScore,
                             discoveryReason = step.via,
                             hopDistance = step.hop,
-                            fromPath = step.from
+                            fromPath = step.from,
+                            isProtected = (protection != null)
                         )
                     )
-                } else if (isJudgePick) {
-                    println("[RelevanceScorer] VETTED BYPASS: ${fileNode.className} (Score: $totalScore < $minScore) rescued by Judge Pick!")
+                } else if (protection != null) {
+                    println("[RelevanceScorer] VETTED BYPASS: ${fileNode.className} (Score: $totalScore < $minScore) rescued by $protection!")
                     scoredFiles.add(
                         ScoredFile(
                             path = path,
                             className = fileNode.className,
                             fileType = fileNode.fileType.name,
                             layer = fileNode.layer.name,
-                            score = totalScore, // Keep actual score for natural sorting
-                            discoveryReason = step.via + " [Judge Vetted Bypass]",
+                            score = totalScore,
+                            discoveryReason = step.via + " [Bypass: $protection]",
                             hopDistance = step.hop,
-                            fromPath = step.from
+                            fromPath = step.from,
+                            isProtected = true
                         )
                     )
                 }
@@ -195,7 +211,8 @@ class RelevanceScorer(
                 
                 println("[RelevanceScorer] Node: $fileName, Score: $totalScore")
                 
-                val isJudgePick = seedResult.judgePicks.any { it.equals(fileName, ignoreCase = true) || it.equals(fileName.substringBeforeLast("."), ignoreCase = true) }
+                val protection = protectionReason(fileName)
+                    ?: protectionReason(fileName.substringBeforeLast("."))
 
                 if (totalScore >= minScore) {
                     scoredFiles.add(
@@ -207,11 +224,12 @@ class RelevanceScorer(
                             score = totalScore,
                             discoveryReason = step.via,
                             hopDistance = step.hop,
-                            fromPath = step.from
+                            fromPath = step.from,
+                            isProtected = (protection != null)
                         )
                     )
-                } else if (isJudgePick) {
-                    println("[RelevanceScorer] VETTED BYPASS: $fileName (Score: $totalScore < $minScore) rescued by Judge Pick!")
+                } else if (protection != null) {
+                    println("[RelevanceScorer] VETTED BYPASS: $fileName (Score: $totalScore < $minScore) rescued by $protection!")
                     scoredFiles.add(
                         ScoredFile(
                             path = path,
@@ -219,9 +237,10 @@ class RelevanceScorer(
                             fileType = resourceNode.type.name,
                             layer = resourceNode.layer,
                             score = totalScore,
-                            discoveryReason = step.via + " [Judge Vetted Bypass]",
+                            discoveryReason = step.via + " [Bypass: $protection]",
                             hopDistance = step.hop,
-                            fromPath = step.from
+                            fromPath = step.from,
+                            isProtected = true
                         )
                     )
                 }
@@ -229,8 +248,9 @@ class RelevanceScorer(
         }
 
         // 2. 정렬 및 필터링
-        // Score 내림차순, 동일하면 hop 낮은 순 (오름차순), 그래도 같으면 riskScore 오름차순
-        return scoredFiles.sortedWith(compareByDescending<ScoredFile> { it.score }
+        // isProtected 우선 → Score 내림차순 → hop 낮은 순 → riskScore 오름차순
+        return scoredFiles.sortedWith(compareByDescending<ScoredFile> { it.isProtected }
+            .thenByDescending { it.score }
             .thenBy { it.hopDistance }
             .thenBy { graph.files[it.path]?.riskAssessment?.riskScore ?: 0 })
             .take(fileLimit)
