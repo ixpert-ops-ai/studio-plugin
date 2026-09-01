@@ -297,7 +297,10 @@ class RelevanceScorer(
         val crudVerbs = setOf("등록", "조회", "수정", "추가", "삭제", "변경", "목록", "상세")
 
         // 간단한 규칙 기반 키워드 추출 (추후 형태소 분석기 연동 가능)
-        val directEnglish = Regex("[a-zA-Z]{3,}").findAll(text).map { it.value }.toMutableList()
+        val directEnglish = Regex("[a-zA-Z0-9]{3,}").findAll(text)
+            .map { it.value }
+            .filter { it.any { c -> c.isLetter() } }
+            .toMutableList()
         directEnglish.removeAll { stopWords.contains(it.lowercase()) }
         
         val translatedEnglish = mutableListOf<String>()
