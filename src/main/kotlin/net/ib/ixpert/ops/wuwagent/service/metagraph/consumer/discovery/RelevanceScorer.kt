@@ -134,14 +134,14 @@ class RelevanceScorer(
                 println("[RelevanceScorer] Node: ${fileNode.className}, Score: $totalScore")
 
                 val fromClassName = step.from?.substringAfterLast('/')?.substringBeforeLast('.')
-                val totalDependedBy = fileNode.dependedBy.size + fileNode.usedByTypes.size
+                val totalDependedBy = fileNode.dependedBy.size + (fileNode.usedByTypes?.size ?: 0)
                 val isInfraDao = totalDependedBy >= 8 || fileNode.layer.name == "INFRASTRUCTURE"
 
                 val curCount = if (fromClassName != null) seedDepCounts.getOrDefault(fromClassName, 0) else 0
                 val isUnderCap = curCount < 3 // Seed 하나당 최대 3개 하향 의존 허용
 
-                val isSeedDirectDependency = (fileNode.fileType.name == "REPOSITORY" || fileNode.fileType.name == "DATA_ACCESS" || fileNode.className.endsWith("Dao") || fileNode.className.endsWith("DaoImpl") || fileNode.className.endsWith("Mapper"))
-                                             && (step.hop == 1 || step.via == "SERVICE_TO_REPO_OR_BIZ")
+                val isSeedDirectDependency = (fileNode.fileType.name == "REPOSITORY" || fileNode.fileType.name == "DATA_ACCESS" || fileNode.className.endsWith("Dao") || fileNode.className.endsWith("DaoImpl") || fileNode.className.endsWith("Mapper") || fileNode.className.endsWith("DEM") || fileNode.className.endsWith("DQM"))
+                                             && (step.hop == 1 || step.via == "SERVICE_TO_REPO_OR_BIZ" || step.via == "BIZ_TO_DOWNSTREAM")
                                              && fromClassName != null
                                              && (seedResult.seedClasses.any { it.equals(fromClassName, ignoreCase = true) } || seedResult.judgePicks.any { it.equals(fromClassName, ignoreCase = true) })
                                              && !isInfraDao

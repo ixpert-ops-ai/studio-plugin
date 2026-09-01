@@ -54,6 +54,12 @@ class IntegrationPipelineTest {
                 "path" to "C:/Workspace/graph/project-graph-i/project-graph.json",
                 "sr" to "케어회원 관리 화면 조회",
                 "gt" to listOf("CareMemberMgmtController", "CareMemberMgmtServiceImpl", "ECMBTBISM006Mapper", "ECMBTBISM006Mapper.xml")
+            ),
+            mapOf(
+                "name" to "apc",
+                "path" to "C:/Users/dffrp/Downloads/project-graph_a/project-graph.json",
+                "sr" to "교통카드 발급업체 변경 후, 이전 모바일교통카드 이용회원 체크 및 재발급 안내를 위한 신규서비스 개발 건. 교통카드 구 발급정보 조회 신규서비스 개발 (SAPACMM0802S01 기존서비스 참고). APCMMTrcdIsInfSVO 수정, APCMMTrcdIsSVC.java 신규서비스 추가, aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회",
+                "gt" to listOf("APCMMTrcdIsInfSVO", "APCMMTrcdIsSVC", "APCMMTrcdIsSVCImpl", "APCMMTrcdIsBIZ", "ACMBTBAPC024DEM")
             )
         )
 

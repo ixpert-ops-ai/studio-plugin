@@ -115,6 +115,7 @@ class AgenticSeedSelector(
                         for (i in 1..5) qTokens.add(p)
                     }
                 }
+                println("[BM25-DIAG] Keyword: '$keyword' -> Translated Tokens: $prefixes | Final qTokens: ${qTokens.toSet()}")
                 
                 val df = mutableMapOf<String, Int>()
                 for (q in qTokens) df[q] = documents.values.count { it.second.contains(q) }
@@ -136,6 +137,7 @@ class AgenticSeedSelector(
                 val top30Ids = scores.take(30).map { it.first }
                 val top10Prompts = top30Ids.take(10).mapNotNull { documents[it]?.first }
                 
+                println("[BM25-DIAG] Top 5 Scores: ${scores.take(5).map { "${it.first.substringAfterLast('/')} (${String.format("%.2f", it.second)})" }}")
                 println("[AgenticSeedSelector] Loop - Observe: Evaluating Top 10 nodes with LLM-as-a-Judge")
                 println("[AgenticSeedSelector] Top 10 Nodes given to Judge: $top10Prompts")
                 val judgeSystemPrompt = """

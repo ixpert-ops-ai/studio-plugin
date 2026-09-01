@@ -60,9 +60,13 @@ class GraphExpander(
                 queue.add(fileNode)
                 
                 // 동일 패키지 보너스 확장 (Hop 1로 간주)
+                // DATA_ACCESS / REPOSITORY 파일(DEM, DAO, Mapper 등)은 단일 엔티티/테이블 전용이므로 동일 패키지 수평 확장의 소스로 삼지 않음
                 // Enum/값 타입 파일은 seed에 직접 포함된 경우에만 허용하고, SAME_PACKAGE 간접 확장에서는 제외
+                val isDataAccessSource = fileNode.fileType.name == "DATA_ACCESS" || fileNode.fileType.name == "REPOSITORY" ||
+                                         fileNode.className.endsWith("DEM") || fileNode.className.endsWith("DQM") ||
+                                         fileNode.className.endsWith("Dao") || fileNode.className.endsWith("Mapper")
                 val packageName = fileNode.packageName
-                if (packageName != null) {
+                if (packageName != null && !isDataAccessSource) {
                     graph.files.values.filter { it.packageName == packageName && it.path != fileNode.path }.forEach { sibling ->
                         if (!visited.containsKey(sibling.path) && !isEnumOrValueType(sibling)) {
                             visited[sibling.path] = ExpansionStep(hop = 1, via = "SAME_PACKAGE", from = fileNode.path)
@@ -117,7 +121,7 @@ class GraphExpander(
             }
 
             // 하향 탐색 (타입 참조): 이 파일이 시그니처 등으로 참조하는 곳
-            for (depPath in node.usesTypes) {
+            for (depPath in (node.usesTypes ?: emptyList())) {
                 if (!visited.containsKey(depPath)) {
                     val depNode = graph.files[depPath]
                     if (depNode != null && isDomainAllowed(depPath, node.path, seedDomains)) {
@@ -128,7 +132,7 @@ class GraphExpander(
             }
             
             // 상향 탐색 (타입 참조): 이 파일을 시그니처 등으로 참조하는 곳
-            for (depPath in node.usedByTypes) {
+            for (depPath in (node.usedByTypes ?: emptyList())) {
                 if (!visited.containsKey(depPath)) {
                     val depNode = graph.files[depPath]
                     if (depNode != null && isDomainAllowed(depPath, node.path, seedDomains)) {
@@ -165,7 +169,7 @@ class GraphExpander(
                 val nodePath = node.path
                 
                 // 보편적 확장: usesTypes와 usedByTypes는 타입과 무관하게 상/하향 확장을 수행 (도메인 필터 적용, 인프라 컷 없음)
-                for (depPath in node.usesTypes) {
+                for (depPath in (node.usesTypes ?: emptyList())) {
                     if (!visited.containsKey(depPath)) {
                         val depNode = graph.files[depPath]
                         if (depNode != null && isDomainAllowed(depPath, nodePath, seedDomains)) {
@@ -174,7 +178,7 @@ class GraphExpander(
                         }
                     }
                 }
-                for (depPath in node.usedByTypes) {
+                for (depPath in (node.usedByTypes ?: emptyList())) {
                     if (!visited.containsKey(depPath)) {
                         val depNode = graph.files[depPath]
                         if (depNode != null && isDomainAllowed(depPath, nodePath, seedDomains)) {
@@ -385,7 +389,7 @@ class GraphExpander(
 
     private fun isCommonInfrastructure(node: FileNode): Boolean {
         // BaseEntity, 공통 Utils 등 지나치게 참조가 많은 파일 제외
-        val totalDependedBy = node.dependedBy.size + node.usedByTypes.size
+        val totalDependedBy = node.dependedBy.size + (node.usedByTypes?.size ?: 0)
         val isInfra = totalDependedBy >= infraThreshold
         if (isInfra && node.className.contains("Product")) {
             println("[DEBUG] isCommonInfrastructure blocked ${node.className} (totalDependedBy: $totalDependedBy >= $infraThreshold)")
