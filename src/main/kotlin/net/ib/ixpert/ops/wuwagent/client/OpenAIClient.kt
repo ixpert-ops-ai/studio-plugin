@@ -245,7 +245,7 @@ class OpenAIClient : LLMClient {
         val requestBody = mutableMapOf<String, Any?>(
             "model" to settings.model,
             "messages" to requestMessages,
-            "stream" to false,
+            "stream" to true,
             "temperature" to (temperature ?: settings.temperature),
             "max_tokens" to (maxTokens ?: 4096)
         )
@@ -258,7 +258,7 @@ class OpenAIClient : LLMClient {
         
         val jsonPayload = gson.toJson(requestBody)
 
-        logger.info("OpenAI API Call (ToolCalling): url=$serverUrl, model=${settings.model}")
+        logger.info("OpenAI API Call (ToolCalling Stream=true): url=$serverUrl, model=${settings.model}")
         
         val startMs = System.currentTimeMillis()
         val debugEntry = if (settings.enableLlmDebug) {
@@ -268,7 +268,7 @@ class OpenAIClient : LLMClient {
         } else null
 
         return try {
-            val responseString = HttpRequests.post(serverUrl, "application/json")
+            HttpRequests.post(serverUrl, "application/json")
                 .tuner { connection ->
                     val effectiveKey = settings.effectiveApiKey()
                     if (effectiveKey.isNotBlank()) {
@@ -280,22 +280,127 @@ class OpenAIClient : LLMClient {
                 }
                 .connect { request ->
                     request.write(jsonPayload)
-                    request.readString()
-                }
+                    val inputStream = request.connection.inputStream
+                    TaskCancellationToken.activeInputStream = inputStream
+                    val reader = inputStream.bufferedReader()
+                    
+                    class ToolCallAccumulator(
+                        var id: String = "",
+                        var type: String = "function",
+                        var name: String = "",
+                        val arguments: StringBuilder = StringBuilder()
+                    )
+                    
+                    val toolCallsMap = mutableMapOf<Int, ToolCallAccumulator>()
+                    val contentBuilder = StringBuilder()
+                    val reasoningBuilder = StringBuilder()
+                    var responseId: String? = null
+                    var finishReason: String? = null
+                    var totalChunks = 0
 
-            logger.info("OpenAI API ToolCalling Response (len=${responseString.length})")
-            
-            try {
-                if (debugEntry != null) {
-                    debugEntry.durationMs = System.currentTimeMillis() - startMs
-                    debugEntry.isSuccess = true
-                    debugEntry.responseText = responseString
-                    debugEntry.responseLength = responseString.length
-                    DebugManager.getInstance().addLog(debugEntry)
+                    try {
+                        var line: String? = reader.readLine()
+                        while (line != null) {
+                            val currentLine = line
+                            if (TaskCancellationToken.isCancelled.get()) {
+                                logger.info("OpenAIClient (ToolCalling): 취소 감지 → 스트림 중단")
+                                break
+                            }
+                            if (currentLine.startsWith("data: ")) {
+                                val data = currentLine.removePrefix("data: ").trim()
+                                if (data == "[DONE]") break
+                                totalChunks++
+                                try {
+                                    val json = JsonParser.parseString(data).asJsonObject
+                                    if (responseId == null) {
+                                        responseId = json.get("id")?.asString
+                                    }
+                                    val choice = json.getAsJsonArray("choices")?.get(0)?.asJsonObject
+                                    choice?.get("finish_reason")?.asString?.let {
+                                        if (it.isNotBlank()) finishReason = it
+                                    }
+                                    val delta = choice?.getAsJsonObject("delta")
+                                    delta?.get("content")?.asString?.let { contentBuilder.append(it) }
+                                    delta?.get("reasoning_content")?.asString?.let { reasoningBuilder.append(it) }
+                                    
+                                    val toolCallsArray = delta?.getAsJsonArray("tool_calls")
+                                    if (toolCallsArray != null) {
+                                        for (tcElem in toolCallsArray) {
+                                            val tcObj = tcElem.asJsonObject
+                                            val idx = tcObj.get("index")?.asInt ?: 0
+                                            val accumulator = toolCallsMap.getOrPut(idx) { ToolCallAccumulator() }
+                                            
+                                            tcObj.get("id")?.asString?.let { if (it.isNotBlank()) accumulator.id = it }
+                                            tcObj.get("type")?.asString?.let { if (it.isNotBlank()) accumulator.type = it }
+                                            
+                                            val fnObj = tcObj.getAsJsonObject("function")
+                                            fnObj?.get("name")?.asString?.let { if (it.isNotBlank()) accumulator.name = it }
+                                            fnObj?.get("arguments")?.asString?.let { accumulator.arguments.append(it) }
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    logger.warn("Failed to parse tool calling SSE chunk: $currentLine", e)
+                                }
+                            }
+                            line = reader.readLine()
+                        }
+                    } catch (e: IOException) {
+                        if (TaskCancellationToken.isCancelled.get()) {
+                            logger.info("OpenAIClient (ToolCalling): 스트림 취소로 인한 IOException (정상) — ${e.message}")
+                        } else {
+                            throw e
+                        }
+                    } finally {
+                        TaskCancellationToken.activeInputStream = null
+                    }
+
+                    val toolCallsList = if (toolCallsMap.isNotEmpty()) {
+                        toolCallsMap.entries.sortedBy { it.key }.map { (_, acc) ->
+                            net.ib.ixpert.ops.wuwagent.model.ToolCall(
+                                id = if (acc.id.isNotBlank()) acc.id else "call_${System.currentTimeMillis()}",
+                                type = acc.type,
+                                function = net.ib.ixpert.ops.wuwagent.model.ToolCallFunction(
+                                    name = acc.name,
+                                    arguments = acc.arguments.toString()
+                                )
+                            )
+                        }
+                    } else null
+
+                    val assembledContent = if (contentBuilder.isNotEmpty()) contentBuilder.toString() else null
+                    val assembledReasoning = if (reasoningBuilder.isNotEmpty()) reasoningBuilder.toString() else null
+
+                    logger.info("OpenAI API ToolCalling Stream Complete: chunks=$totalChunks, toolCalls=${toolCallsList?.size ?: 0}, finishReason=$finishReason")
+
+                    val chatMessage = net.ib.ixpert.ops.wuwagent.model.ChatMessage(
+                        role = "assistant",
+                        content = assembledContent,
+                        reasoningContent = assembledReasoning,
+                        toolCalls = toolCallsList
+                    )
+                    val chatChoice = net.ib.ixpert.ops.wuwagent.model.ChatChoice(
+                        index = 0,
+                        message = chatMessage,
+                        finishReason = finishReason ?: "stop"
+                    )
+
+                    val response = net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse(
+                        id = responseId,
+                        choices = listOf(chatChoice)
+                    )
+
+                    try {
+                        if (debugEntry != null) {
+                            debugEntry.durationMs = System.currentTimeMillis() - startMs
+                            debugEntry.isSuccess = true
+                            debugEntry.responseText = gson.toJson(response)
+                            debugEntry.responseLength = (toolCallsList?.sumOf { it.function.arguments.length } ?: 0) + (assembledContent?.length ?: 0)
+                            DebugManager.getInstance().addLog(debugEntry)
+                        }
+                    } catch (_: Exception) {}
+
+                    response
                 }
-            } catch (_: Exception) {}
-            
-            gson.fromJson(responseString, net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse::class.java)
         } catch (e: Exception) {
             val errorMsg = e.message ?: "Unknown error"
             logger.error("OpenAI API ToolCalling Failed: $errorMsg", e)
