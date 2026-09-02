@@ -37,13 +37,26 @@ class OpenAIClient : LLMClient {
         }
     }
 
+    private fun getEffectiveSettings(): net.ib.ixpert.ops.wuwagent.setting.SettingsState.State {
+        return try {
+            net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+        } catch (_: Throwable) {
+            net.ib.ixpert.ops.wuwagent.setting.SettingsState.State().apply {
+                apiType = net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.OPENAI_COMPATIBLE
+                openaiServerUrl = "http://vllm.ixpertops.cloud"
+                model = "Qwen/Qwen3.8-27B-FP8"
+                temperature = 0.1f
+            }
+        }
+    }
+
     override fun chat(
         systemPrompt: String,
         userCode: String,
         maxTokens: Int?,
         onChunk: ((String) -> Unit)?
     ): OllamaChatResponse? {
-        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+        val settings = getEffectiveSettings()
         val baseUrl = when (settings.apiType) {
             net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
             else -> settings.openaiServerUrl
@@ -223,7 +236,7 @@ class OpenAIClient : LLMClient {
         toolChoice: Any?,
         temperature: Double?
     ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
-        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
+        val settings = getEffectiveSettings()
         val baseUrl = when (settings.apiType) {
             net.ib.ixpert.ops.wuwagent.setting.SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
             else -> settings.openaiServerUrl
@@ -313,29 +326,29 @@ class OpenAIClient : LLMClient {
                                 try {
                                     val json = JsonParser.parseString(data).asJsonObject
                                     if (responseId == null) {
-                                        responseId = json.get("id")?.asString
+                                        responseId = json.get("id")?.takeIf { it.isJsonPrimitive }?.asString
                                     }
                                     val choice = json.getAsJsonArray("choices")?.get(0)?.asJsonObject
-                                    choice?.get("finish_reason")?.asString?.let {
+                                    choice?.get("finish_reason")?.takeIf { it.isJsonPrimitive }?.asString?.let {
                                         if (it.isNotBlank()) finishReason = it
                                     }
                                     val delta = choice?.getAsJsonObject("delta")
-                                    delta?.get("content")?.asString?.let { contentBuilder.append(it) }
-                                    delta?.get("reasoning_content")?.asString?.let { reasoningBuilder.append(it) }
+                                    delta?.get("content")?.takeIf { it.isJsonPrimitive }?.asString?.let { contentBuilder.append(it) }
+                                    delta?.get("reasoning_content")?.takeIf { it.isJsonPrimitive }?.asString?.let { reasoningBuilder.append(it) }
                                     
                                     val toolCallsArray = delta?.getAsJsonArray("tool_calls")
                                     if (toolCallsArray != null) {
                                         for (tcElem in toolCallsArray) {
                                             val tcObj = tcElem.asJsonObject
-                                            val idx = tcObj.get("index")?.asInt ?: 0
+                                            val idx = tcObj.get("index")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
                                             val accumulator = toolCallsMap.getOrPut(idx) { ToolCallAccumulator() }
                                             
-                                            tcObj.get("id")?.asString?.let { if (it.isNotBlank()) accumulator.id = it }
-                                            tcObj.get("type")?.asString?.let { if (it.isNotBlank()) accumulator.type = it }
+                                            tcObj.get("id")?.takeIf { it.isJsonPrimitive }?.asString?.let { if (it.isNotBlank()) accumulator.id = it }
+                                            tcObj.get("type")?.takeIf { it.isJsonPrimitive }?.asString?.let { if (it.isNotBlank()) accumulator.type = it }
                                             
                                             val fnObj = tcObj.getAsJsonObject("function")
-                                            fnObj?.get("name")?.asString?.let { if (it.isNotBlank()) accumulator.name = it }
-                                            fnObj?.get("arguments")?.asString?.let { accumulator.arguments.append(it) }
+                                            fnObj?.get("name")?.takeIf { it.isJsonPrimitive }?.asString?.let { if (it.isNotBlank()) accumulator.name = it }
+                                            fnObj?.get("arguments")?.takeIf { it.isJsonPrimitive }?.asString?.let { accumulator.arguments.append(it) }
                                         }
                                     }
                                 } catch (e: Exception) {

@@ -213,4 +213,86 @@ class IntegrationPipelineTest {
         File("C:/Workspace/DEV-ASSISTANT/IDE-PLUGIN/intelliJ/ai-assistant-plugin/integration_test_raw.json").writeText(gson.toJson(results))
         println(out.toString())
     }
+
+    @Test
+    fun testOpenAIClientStreaming30FilesDirectly() {
+        val client = net.ib.ixpert.ops.wuwagent.client.OpenAIClient()
+        val payloadJsContent = File("C:/Users/dffrp/.gemini/antigravity/brain/dead1e82-1168-4141-b615-c0196d0a2637/scratch/vllm_payload.js").readText()
+
+        val systemPrompt = "당신은 코드 변경 범위 검증자입니다.\n아래 요구사항을 구현하기 위해 수정이 필요한 파일 목록을 검증합니다.\n반드시 제공된 `submit_verification` 도구를 호출하여 결과를 제출하세요."
+        val userPromptStartIndex = payloadJsContent.indexOf("## 요구사항")
+        val userPromptEndIndex = payloadJsContent.indexOf("`\n    }\n  ],\n  tools:")
+        val userContent = payloadJsContent.substring(userPromptStartIndex, userPromptEndIndex).replace("\\n", "\n")
+
+        val tool = net.ib.ixpert.ops.wuwagent.model.ToolDefinition(
+            type = "function",
+            function = net.ib.ixpert.ops.wuwagent.model.FunctionDefinition(
+                name = "submit_verification",
+                description = "파일 목록 검증 결과를 제출합니다.",
+                parameters = net.ib.ixpert.ops.wuwagent.model.FunctionParameters(
+                    type = "object",
+                    properties = mapOf(
+                        "fileVerdicts" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                            type = "array",
+                            description = "각 후보 파일에 대한 판정 결과 목록",
+                            items = net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                                type = "object",
+                                properties = mapOf(
+                                    "filePath" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(type = "string"),
+                                    "verdict" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(type = "string", enum = listOf("REQUIRED", "UNNECESSARY")),
+                                    "reason" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(type = "string")
+                                ),
+                                required = listOf("filePath", "verdict", "reason")
+                            )
+                        ),
+                        "reasoning" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                            type = "string",
+                            description = "전체 판정 근거 종합 요약"
+                        )
+                    ),
+                    required = listOf("fileVerdicts", "reasoning")
+                )
+            )
+        )
+
+        println("=== [START] OpenAIClient.chatWithTools Streaming 30-Files Real Test ===")
+        val startMs = System.currentTimeMillis()
+
+        val response = client.chatWithTools(
+            systemPrompt = systemPrompt,
+            messages = listOf(net.ib.ixpert.ops.wuwagent.model.ChatMessage(role = "user", content = userContent)),
+            maxTokens = 4000,
+            tools = listOf(tool),
+            toolChoice = mapOf("type" to "function", "function" to mapOf("name" to "submit_verification")),
+            temperature = 0.1
+        )
+
+        val elapsedMs = System.currentTimeMillis() - startMs
+        println("=== [COMPLETE] OpenAIClient.chatWithTools Finished in ${elapsedMs}ms (${elapsedMs / 1000}s) ===")
+
+        org.junit.Assert.assertNotNull("Response must not be null", response)
+        val choice = response?.choices?.firstOrNull()
+        org.junit.Assert.assertNotNull("Choice must not be null", choice)
+        org.junit.Assert.assertEquals("Finish reason must be stop", "stop", choice?.finishReason)
+
+        val toolCalls = choice?.message?.toolCalls
+        org.junit.Assert.assertNotNull("ToolCalls must not be null", toolCalls)
+        org.junit.Assert.assertTrue("ToolCalls must not be empty", toolCalls?.isNotEmpty() == true)
+
+        val primaryCall = toolCalls!!.first()
+        org.junit.Assert.assertEquals("submit_verification", primaryCall.function.name)
+
+        val argsJson = primaryCall.function.arguments
+        println("Assembled Arguments Length: ${argsJson.length}")
+        org.junit.Assert.assertTrue("Arguments length should be > 5000 chars", argsJson.length > 5000)
+
+        val gson = Gson()
+        val parsed = gson.fromJson(argsJson, Map::class.java)
+        val fileVerdicts = parsed["fileVerdicts"] as? List<*>
+        org.junit.Assert.assertNotNull("fileVerdicts must be present", fileVerdicts)
+        println("Parsed fileVerdicts count: ${fileVerdicts?.size}")
+        org.junit.Assert.assertEquals("Must parse 30 file verdicts", 30, fileVerdicts?.size)
+
+        println("=== OpenAIClient Streaming ToolCalling Kotlin Test PASSED PERFECTLY! ===")
+    }
 }
