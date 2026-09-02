@@ -261,6 +261,8 @@ class RelevanceScorer(
                                               && !isCommonResource
                                               && hasLivingJavaMapper
 
+                println("[RelevanceScorer-RESOURCE] Node: $fileName, Score: $totalScore, via: ${step.via}, isCommon: $isCommonResource, hasLiving: $hasLivingJavaMapper, isLinkedReverse: $isLinkedReverseResource")
+
                 val protection = protectionReason(fileName)
                     ?: protectionReason(fileName.substringBeforeLast("."))
                     ?: if (isLinkedFrontend) "Frontend Resource" else null

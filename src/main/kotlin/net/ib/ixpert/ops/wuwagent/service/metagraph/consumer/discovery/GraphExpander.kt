@@ -15,6 +15,27 @@ class GraphExpander(
         config.minInfraThreshold
     )
 
+    private fun isGodService(node: FileNode): Boolean {
+        val isService = node.fileType.name == "SERVICE" || node.className.endsWith("ServiceImpl") || node.className.endsWith("Service")
+        if (!isService) return false
+        val daoCount = node.dependsOn.count { depPath ->
+            val depNode = graph.files[depPath]
+            if (depNode != null) {
+                val depType = depNode.fileType.name
+                val depName = depNode.className
+                depType == "REPOSITORY" || depType == "DATA_ACCESS" ||
+                depName.endsWith("Dao") || depName.endsWith("DaoImpl") ||
+                depName.endsWith("Mapper") || depName.endsWith("DEM") || depName.endsWith("DQM")
+            } else {
+                depPath.endsWith("Dao") || depPath.endsWith("Mapper") || depPath.endsWith("DEM") || depPath.endsWith("DQM")
+            }
+        }
+        if (node.className == "AdminService") {
+            println("[DIAG-GOD] AdminService (fromDaoCount: $daoCount, isGodService: ${daoCount > 5})")
+        }
+        return daoCount > 5
+    }
+
     companion object {
         // SR 키워드 → Vue 파일명 패턴 매핑 (뷰 필터링용)
         private val VUE_KEYWORD_PATTERNS = mapOf(
@@ -62,11 +83,13 @@ class GraphExpander(
                 // 동일 패키지 보너스 확장 (Hop 1로 간주)
                 // DATA_ACCESS / REPOSITORY 파일(DEM, DAO, Mapper 등)은 단일 엔티티/테이블 전용이므로 동일 패키지 수평 확장의 소스로 삼지 않음
                 // Enum/값 타입 파일은 seed에 직접 포함된 경우에만 허용하고, SAME_PACKAGE 간접 확장에서는 제외
+                // God Service(하향 DAO > 5)는 동일 패키지 수평 확장의 소스로 삼지 않음 (규칙 2)
                 val isDataAccessSource = fileNode.fileType.name == "DATA_ACCESS" || fileNode.fileType.name == "REPOSITORY" ||
                                          fileNode.className.endsWith("DEM") || fileNode.className.endsWith("DQM") ||
                                          fileNode.className.endsWith("Dao") || fileNode.className.endsWith("Mapper")
+                val isGodServiceSource = isGodService(fileNode)
                 val packageName = fileNode.packageName
-                if (packageName != null && !isDataAccessSource) {
+                if (packageName != null && !isDataAccessSource && !isGodServiceSource) {
                     graph.files.values.filter { it.packageName == packageName && it.path != fileNode.path }.forEach { sibling ->
                         if (!visited.containsKey(sibling.path) && !isEnumOrValueType(sibling)) {
                             visited[sibling.path] = ExpansionStep(hop = 1, via = "SAME_PACKAGE", from = fileNode.path)
@@ -96,37 +119,45 @@ class GraphExpander(
 
         // Step B: Hop 1 확장 (직접 의존)
         for (node in queue) { // hop 0
-            // 상향 탐색: 이 파일을 사용하는 곳 (도메인 제한 적용)
-            for (depPath in node.dependedBy) {
-                if (!visited.containsKey(depPath)) {
-                    val depNode = graph.files[depPath]
-                    if (depNode != null && isCommonInfrastructure(depNode).not()
-                        && isDomainAllowed(depPath, node.path, seedDomains)) {
-                        visited[depPath] = ExpansionStep(hop = 1, via = "DEPENDED_BY", from = node.path)
-                        hop1Queue.add(depNode)
+            val isGodNode = isGodService(node)
+
+            // 상향 탐색: 이 파일을 사용하는 곳 (도메인 제한 적용) - God Service의 상향 역방향 호출 차단 (규칙 1)
+            if (!isGodNode) {
+                for (depPath in node.dependedBy) {
+                    if (!visited.containsKey(depPath)) {
+                        val depNode = graph.files[depPath]
+                        if (depNode != null && isCommonInfrastructure(depNode).not()
+                            && isDomainAllowed(depPath, node.path, seedDomains)) {
+                            visited[depPath] = ExpansionStep(hop = 1, via = "DEPENDED_BY", from = node.path)
+                            hop1Queue.add(depNode)
+                        }
                     }
                 }
             }
 
-            // 하향 탐색: 이 파일이 의존하는 곳
-            for (depPath in node.dependsOn) {
-                if (!visited.containsKey(depPath)) {
-                    val depNode = graph.files[depPath]
-                    if (depNode != null && isCommonInfrastructure(depNode).not()
-                        && isDomainAllowed(depPath, node.path, seedDomains)) {
-                        visited[depPath] = ExpansionStep(hop = 1, via = "DEPENDS_ON", from = node.path)
-                        hop1Queue.add(depNode)
+            // 하향 탐색: 이 파일이 의존하는 곳 - God Service의 하향 DAO 확산 차단
+            if (!isGodNode) {
+                for (depPath in node.dependsOn) {
+                    if (!visited.containsKey(depPath)) {
+                        val depNode = graph.files[depPath]
+                        if (depNode != null && isCommonInfrastructure(depNode).not()
+                            && isDomainAllowed(depPath, node.path, seedDomains)) {
+                            visited[depPath] = ExpansionStep(hop = 1, via = "DEPENDS_ON", from = node.path)
+                            hop1Queue.add(depNode)
+                        }
                     }
                 }
             }
 
-            // 하향 탐색 (타입 참조): 이 파일이 시그니처 등으로 참조하는 곳
-            for (depPath in (node.usesTypes ?: emptyList())) {
-                if (!visited.containsKey(depPath)) {
-                    val depNode = graph.files[depPath]
-                    if (depNode != null && isDomainAllowed(depPath, node.path, seedDomains)) {
-                        visited[depPath] = ExpansionStep(hop = 1, via = "USES_TYPE", from = node.path)
-                        hop1Queue.add(depNode)
+            // 하향 탐색 (타입 참조): 이 파일이 시그니처 등으로 참조하는 곳 - God Service의 DTO 과다 확산 차단 (규칙 3)
+            if (!isGodNode) {
+                for (depPath in (node.usesTypes ?: emptyList())) {
+                    if (!visited.containsKey(depPath)) {
+                        val depNode = graph.files[depPath]
+                        if (depNode != null && isDomainAllowed(depPath, node.path, seedDomains)) {
+                            visited[depPath] = ExpansionStep(hop = 1, via = "USES_TYPE", from = node.path)
+                            hop1Queue.add(depNode)
+                        }
                     }
                 }
             }
