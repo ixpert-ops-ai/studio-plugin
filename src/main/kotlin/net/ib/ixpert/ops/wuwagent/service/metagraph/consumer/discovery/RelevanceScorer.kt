@@ -68,18 +68,19 @@ class RelevanceScorer(
                 // NameMatchScore for FileNode
                 var nameMatchScore = 0.0
                 val directMatches = keywords.directEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
+                val transMatches = keywords.translatedEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
+                val weakMatches = keywords.weakTranslatedEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
+
                 if (directMatches.isNotEmpty()) {
                     nameMatchScore = 50.0 * directMatches.maxOf { getIdfWeight(it) }
-                } else {
-                    val transMatches = keywords.translatedEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
-                    if (transMatches.isNotEmpty()) {
-                        nameMatchScore = 30.0 * transMatches.maxOf { getIdfWeight(it) }
-                    } else {
-                        val weakMatches = keywords.weakTranslatedEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
-                        if (weakMatches.isNotEmpty()) {
-                            nameMatchScore = 15.0 * weakMatches.maxOf { getIdfWeight(it) }
-                        }
-                    }
+                } else if (transMatches.isNotEmpty()) {
+                    nameMatchScore = 30.0 * transMatches.maxOf { getIdfWeight(it) }
+                } else if (weakMatches.isNotEmpty()) {
+                    nameMatchScore = 15.0 * weakMatches.maxOf { getIdfWeight(it) }
+                }
+
+                if (directMatches.isNotEmpty() || transMatches.isNotEmpty() || weakMatches.isNotEmpty()) {
+                    println("[NAMEMATCH-DIAG] File: ${fileNode.className} | Direct: $directMatches, Trans: $transMatches, Weak: $weakMatches | Score: ${String.format("%.1f", nameMatchScore)}")
                 }
 
                 // MethodMatchScore
@@ -134,6 +135,19 @@ class RelevanceScorer(
                 println("[RelevanceScorer] Node: ${fileNode.className}, Score: $totalScore")
 
                 val fromClassName = step.from?.substringAfterLast('/')?.substringBeforeLast('.')
+                val fromFileNode = if (step.from != null) graph.files[step.from] else null
+                val fromDaoCount = fromFileNode?.dependsOn?.count { dp ->
+                    val dep = graph.files[dp]
+                    if (dep != null) {
+                        val depType = dep.fileType.name
+                        val depName = dep.className
+                        depType == "REPOSITORY" || depType == "DATA_ACCESS" ||
+                        depName.endsWith("Dao") || depName.endsWith("DaoImpl") ||
+                        depName.endsWith("Mapper") || depName.endsWith("DEM") || depName.endsWith("DQM")
+                    } else false
+                } ?: 0
+                val isGodServiceSource = fromDaoCount > 5
+
                 val totalDependedBy = fileNode.dependedBy.size + (fileNode.usedByTypes?.size ?: 0)
                 val isInfraDao = totalDependedBy >= 8 || fileNode.layer.name == "INFRASTRUCTURE"
 
@@ -145,6 +159,7 @@ class RelevanceScorer(
                                              && fromClassName != null
                                              && (seedResult.seedClasses.any { it.equals(fromClassName, ignoreCase = true) } || seedResult.judgePicks.any { it.equals(fromClassName, ignoreCase = true) })
                                              && !isInfraDao
+                                             && !isGodServiceSource
                                              && isUnderCap
 
                 if (isSeedDirectDependency && fromClassName != null) {
@@ -230,9 +245,21 @@ class RelevanceScorer(
                                        && step.via == "LINKED_TO"
                                        && !isCommonResource
 
+                // 1단계에서 생존한 Java 매퍼가 실제로 존재하는지 확인 (인터페이스 <-> Impl 구현체 상호 매칭 지원)
+                val hasLivingJavaMapper = resourceNode.linkedTo.any { javaPath ->
+                    val javaName = javaPath.substringAfterLast('/').substringBeforeLast('.')
+                    scoredFiles.any { sf -> 
+                        sf.path == javaPath || 
+                        sf.className == javaName ||
+                        sf.className == "${javaName}Impl" ||
+                        sf.className.removeSuffix("Impl") == javaName
+                    }
+                }
+
                 val isLinkedReverseResource = (resourceNode.type == net.ib.ixpert.ops.wuwagent.service.metagraph.model.ResourceType.MYBATIS_MAPPER)
                                               && (step.via == "RESOURCE_REVERSE_LINK" || step.via == "SAME_PACKAGE")
                                               && !isCommonResource
+                                              && hasLivingJavaMapper
 
                 val protection = protectionReason(fileName)
                     ?: protectionReason(fileName.substringBeforeLast("."))

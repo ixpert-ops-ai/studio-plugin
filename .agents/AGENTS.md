@@ -11,12 +11,16 @@ Always remember the following project structures and locations for our experimen
    - Status: 소스코드 + 메타그래프 모두 존재
 
 3. **apc (ANYFRAME_AP)**
-   - Status: 메타그래프만 존재
-   - Path: `C:\Users\dffrp\Downloads\project-graph_a\project-graph.json`
+   - Status: 메타그래프만 존재 (2,419개 파일)
+   - Path: `C:\Workspace\graph\project-graph-a\project-graph.json`
+   - Architecture: 삼성카드 기간계 AP 표준 체인
+     - `SVO` (서비스 VO 전문) ↔ `SVC` (서비스 인터페이스) ↔ `SVCImpl` (서비스 구현체)
+     - `SVCImpl` → `BIZ` (비즈니스 로직) ↔ `BVO` (비즈니스 VO 전문) / `BIZUtil`
+     - `BIZ` → `DEM` (단건 Entity CRUD) / `DQM` (복합 Query 조회) ↔ `DVO` (데이터 VO 전문)
 
 4. **ISM (SPRING_MVC_MYBATIS)**
-   - Status: 메타그래프만 존재
-   - Path: `C:\Workspace\project-graph_b\project-graph_b.json`
+   - Status: 메타그래프만 존재 (3,552개 파일)
+   - Path: `C:\Workspace\graph\project-graph-i\project-graph.json`
 
 ---
 
