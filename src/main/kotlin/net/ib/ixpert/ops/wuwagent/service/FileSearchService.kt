@@ -1,8 +1,11 @@
 package net.ib.ixpert.ops.wuwagent.service
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ContentIterator
+import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.util.Computable
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VfsUtilCore
@@ -10,6 +13,7 @@ import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.PsiSearchHelper
+import net.ib.ixpert.ops.wuwagent.service.metagraph.builder.ScanExclusionUtil
 
 /**
  * [FileSearchService.searchInFiles] 결과 전체.
@@ -63,6 +67,7 @@ object FileSearchService {
     private const val MAX_TOTAL_MATCHES = 150
     private const val MAX_MATCHES_PER_FILE = 10
     private const val CONTEXT_LINE_RADIUS = 2
+    private const val MAX_FILE_SIZE_BYTES = 1024 * 1024L // 1MB
 
     /**
      * [keyword]가 파일명에 포함된 프로젝트 내 파일을 반환합니다.
@@ -98,14 +103,12 @@ object FileSearchService {
 
     /**
      * [keyword]가 파일 내용에 포함된 프로젝트 내 파일을 검색합니다.
-     * IntelliJ 단어 인덱스(PsiSearchHelper) 기반이라 프로젝트 전체를 직접 순회하지 않습니다.
+     * IntelliJ 단어 인덱스(PsiSearchHelper) 기반으로 검색하며, 결과가 0건일 경우 프로젝트 파일 스캔으로 폴백합니다.
      *
      * - 대상 확장자: kt, java, xml, gradle, kts
      * - 상한: 파일 30개 / 파일당 매칭 라인 10개 / 전체 매칭 라인 150개
-     * - 전체 탐색 중단은 파일 상한(30개) 도달 시에만 발생합니다.
-     *   라인 상한(파일당 10개, 전체 150개)에 걸리면 해당 파일의 라인 수집만 멈추고 탐색은 계속됩니다.
      */
-    fun searchInFiles(project: Project, keyword: String): SearchResult {
+    fun searchInFiles(project: Project, keyword: String, indicator: ProgressIndicator? = null): SearchResult {
         if (project.isDisposed) return SearchResult(0, 0, false, false, false, emptyList())
 
         val normalizedKeyword = keyword.trim()
@@ -120,58 +123,74 @@ object FileSearchService {
             var truncatedByFileLimit = false
             var truncatedByLineLimit = false
 
+            // 1) 1차 검색: PsiSearchHelper (단어 인덱스) 기반
             searchHelper.processAllFilesWithWord(normalizedKeyword, scope, { file ->
+                indicator?.checkCanceled()
+
                 val ext = file.name.substringAfterLast('.', "").lowercase()
                 if (ext !in CONTENT_SEARCH_EXTENSIONS) return@processAllFilesWithWord true
 
-                // 전체 라인 상한에 이미 도달했으면 파일 텍스트 스캔 자체를 건너뜀
-                // (탐색은 계속하되, 더 담을 수 없는 파일의 불필요한 연산을 회피)
                 if (totalMatches < MAX_TOTAL_MATCHES) {
-                    val lines = file.text.lines()
-                    val lineMatches = mutableListOf<LineMatch>()
-
-                    for (i in lines.indices) {
-                        if (lineMatches.size >= MAX_MATCHES_PER_FILE) {
-                            truncatedByLineLimit = true
-                            break
-                        }
-                        if (totalMatches + lineMatches.size >= MAX_TOTAL_MATCHES) {
-                            truncatedByLineLimit = true
-                            break
-                        }
-                        if (lines[i].contains(normalizedKeyword, ignoreCase = true)) {
-                            val start = (i - CONTEXT_LINE_RADIUS).coerceAtLeast(0)
-                            val end = (i + CONTEXT_LINE_RADIUS).coerceAtMost(lines.size - 1)
-                            lineMatches.add(
-                                LineMatch(
-                                    lineNumber = i + 1,
-                                    text = lines[i],
-                                    context = lines.subList(start, end + 1)
-                                )
-                            )
-                        }
-                    }
-
-                    // 라인이 0건인 파일은 결과에 넣지 않음
-                    if (lineMatches.isNotEmpty()) {
-                        totalMatches += lineMatches.size
-                        fileMatches.add(
-                            FileMatch(
-                                filePath = file.virtualFile?.path ?: file.name,
-                                fileName = file.name,
-                                lines = lineMatches
-                            )
-                        )
-                    }
+                    val added = collectMatchesFromLines(
+                        lines = file.text.lines(),
+                        normalizedKeyword = normalizedKeyword,
+                        filePath = file.virtualFile?.path ?: file.name,
+                        fileName = file.name,
+                        fileMatches = fileMatches,
+                        totalMatches = totalMatches,
+                        onLineLimitTruncated = { truncatedByLineLimit = true }
+                    )
+                    totalMatches += added
                 }
 
-                // 전체 탐색 중단은 파일 상한만으로 결정
                 if (fileMatches.size >= MAX_MATCHED_FILES) {
                     truncatedByFileLimit = true
                     return@processAllFilesWithWord false
                 }
                 true
             }, false)
+
+            // 2) 2차 검색: 인덱스 검색 결과가 0건일 때 폴백 직접 스캔
+            if (fileMatches.isEmpty()) {
+                val fileIndex = ProjectFileIndex.getInstance(project)
+                fileIndex.iterateContent(ContentIterator { vf ->
+                    indicator?.checkCanceled()
+
+                    if (vf.isDirectory) return@ContentIterator true
+
+                    val ext = vf.name.substringAfterLast('.', "").lowercase()
+                    if (ext !in CONTENT_SEARCH_EXTENSIONS) return@ContentIterator true
+
+                    if (ScanExclusionUtil.shouldExclude(vf.name, vf.path)) return@ContentIterator true
+
+                    if (vf.length > MAX_FILE_SIZE_BYTES) return@ContentIterator true
+
+                    if (totalMatches < MAX_TOTAL_MATCHES) {
+                        val text = try {
+                            VfsUtilCore.loadText(vf)
+                        } catch (e: Exception) {
+                            return@ContentIterator true
+                        }
+
+                        val added = collectMatchesFromLines(
+                            lines = text.lines(),
+                            normalizedKeyword = normalizedKeyword,
+                            filePath = vf.path,
+                            fileName = vf.name,
+                            fileMatches = fileMatches,
+                            totalMatches = totalMatches,
+                            onLineLimitTruncated = { truncatedByLineLimit = true }
+                        )
+                        totalMatches += added
+                    }
+
+                    if (fileMatches.size >= MAX_MATCHED_FILES) {
+                        truncatedByFileLimit = true
+                        return@ContentIterator false
+                    }
+                    true
+                })
+            }
 
             SearchResult(
                 totalFiles = fileMatches.size,
@@ -182,6 +201,52 @@ object FileSearchService {
                 matches = fileMatches
             )
         }
+    }
+
+    private fun collectMatchesFromLines(
+        lines: List<String>,
+        normalizedKeyword: String,
+        filePath: String,
+        fileName: String,
+        fileMatches: MutableList<FileMatch>,
+        totalMatches: Int,
+        onLineLimitTruncated: () -> Unit
+    ): Int {
+        val lineMatches = mutableListOf<LineMatch>()
+
+        for (i in lines.indices) {
+            if (lineMatches.size >= MAX_MATCHES_PER_FILE) {
+                onLineLimitTruncated()
+                break
+            }
+            if (totalMatches + lineMatches.size >= MAX_TOTAL_MATCHES) {
+                onLineLimitTruncated()
+                break
+            }
+            if (lines[i].contains(normalizedKeyword, ignoreCase = true)) {
+                val start = (i - CONTEXT_LINE_RADIUS).coerceAtLeast(0)
+                val end = (i + CONTEXT_LINE_RADIUS).coerceAtMost(lines.size - 1)
+                lineMatches.add(
+                    LineMatch(
+                        lineNumber = i + 1,
+                        text = lines[i],
+                        context = lines.subList(start, end + 1)
+                    )
+                )
+            }
+        }
+
+        if (lineMatches.isNotEmpty()) {
+            fileMatches.add(
+                FileMatch(
+                    filePath = filePath,
+                    fileName = fileName,
+                    lines = lineMatches
+                )
+            )
+            return lineMatches.size
+        }
+        return 0
     }
 
     /**
