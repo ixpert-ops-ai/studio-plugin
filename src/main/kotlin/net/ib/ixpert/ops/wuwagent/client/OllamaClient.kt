@@ -213,17 +213,10 @@ class OllamaClient : LLMClient {
             }
         }
 
-        // 모든 재시도 실패 시
+        // 모든 재시도 실패 시 — 사용자에게는 분류된 안내 메시지만 노출, 원본은 logger에만 남긴다.
         val finalException = lastException ?: Exception("Unknown error")
-        val errorMsg = when {
-            finalException.message?.contains("timeout", ignoreCase = true) == true ->
-                "[Error] Ollama 서버 응답 타임아웃 ($serverUrl). 설정에서 Timeout 시간을 늘려보세요."
-            finalException.message?.contains("refused", ignoreCase = true) == true ->
-                "[Error] Ollama 서버 연결 거부 ($serverUrl). 서버가 실행 중인지 확인하세요."
-            else ->
-                "[Error] Ollama 서버 통신 실패 (재시도 $maxAttempts 회 초과): ${finalException.message}"
-        }
-        logger.error(errorMsg, finalException)
+        val errorMsg = "[Error] " + LlmErrorMessages.describe(finalException, serverUrl)
+        logger.error("OllamaClient: 재시도 $maxAttempts 회 초과 (원본: ${finalException.message})", finalException)
         try {
             if (debugEntry != null) {
                 debugEntry.durationMs = System.currentTimeMillis() - startMs

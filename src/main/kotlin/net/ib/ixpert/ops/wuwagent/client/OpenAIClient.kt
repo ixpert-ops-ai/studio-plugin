@@ -194,15 +194,9 @@ class OpenAIClient : LLMClient {
             } catch (_: Exception) {}
             result
         } catch (e: IOException) {
-            val errorMsg = when {
-                e.message?.contains("timeout", ignoreCase = true) == true ->
-                    "[Error] OpenAI 서버 응답 타임아웃 ($serverUrl). 설정에서 Timeout 시간을 늘려보세요."
-                e.message?.contains("refused", ignoreCase = true) == true ->
-                    "[Error] OpenAI 서버 연결 거부 ($serverUrl). 서버가 실행 중인지 확인하세요."
-                else ->
-                    "[Error] OpenAI 서버 통신 실패: ${e.message} ($serverUrl)"
-            }
-            logger.error(errorMsg, e)
+            // 사용자에게는 분류된 안내 메시지만 노출하고, 원본 예외는 logger에만 남긴다.
+            val errorMsg = "[Error] " + LlmErrorMessages.describe(e, serverUrl)
+            logger.error("OpenAIClient: LLM 호출 실패 (원본: ${e.message})", e)
             try {
                 if (debugEntry != null) {
                     debugEntry.durationMs = System.currentTimeMillis() - startMs
@@ -213,8 +207,8 @@ class OpenAIClient : LLMClient {
             } catch (_: Exception) {}
             OllamaChatResponse(null, null, OllamaMessage("assistant", errorMsg), true)
         } catch (e: Exception) {
-            val errorMsg = "[Error] 예상치 못한 전송/파싱 오류: ${e.message} ($serverUrl)"
-            logger.error(errorMsg, e)
+            val errorMsg = "[Error] " + LlmErrorMessages.describe(e, serverUrl)
+            logger.error("OpenAIClient: 예상치 못한 전송/파싱 오류 (원본: ${e.message})", e)
             try {
                 if (debugEntry != null) {
                     debugEntry.durationMs = System.currentTimeMillis() - startMs
