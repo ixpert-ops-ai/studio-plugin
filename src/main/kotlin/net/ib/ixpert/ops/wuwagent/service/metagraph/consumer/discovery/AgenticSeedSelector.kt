@@ -47,9 +47,20 @@ class AgenticSeedSelector(
                 return t
             }
             
-            val qTokensBase = tokenize(srText)
-            
-            // --- Domain Keyword Extraction (Think) ---
+            val dict = DomainDictionary.load(graph)
+            val qTokensBase = tokenize(srText).toMutableList()
+
+            // SR 원문의 도메인 명사(최소 불용어 제외)에 대해 사전 번역 토큰 선별 주입
+            val BM25_STOPWORDS = setOf("관리", "조회", "화면", "서비스", "컨트롤러", "추가", "수정", "삭제", "등록", "상세", "목록", "처리", "신규", "개발")
+            val srDomainWords = srText.split(Regex("[^가-힣a-zA-Z0-9]")).filter { it.length >= 2 && it !in BM25_STOPWORDS }
+            for (word in srDomainWords) {
+                val translated = dict.translate(word)
+                if (translated.isNotEmpty()) {
+                    for (t in translated) {
+                        if (t.length >= 2) qTokensBase.addAll(t.windowed(2)) else qTokensBase.add(t)
+                    }
+                }
+            }
             var domainKeywords = listOf<String>()
             try {
                 val domainSystemPrompt = """
@@ -65,8 +76,6 @@ class AgenticSeedSelector(
             } catch (e: Exception) {
                 println("[AgenticSeedSelector] Think failed: ${e.message}")
             }
-            
-            val dict = DomainDictionary.load(graph)
             
             // Build document index once
             val documents = mutableMapOf<String, Pair<String, List<String>>>() // ID -> Pair(PromptString, Tokens)
@@ -254,6 +263,7 @@ class AgenticSeedSelector(
             - `frontendRelevant`는 화면 변경 포함 여부(true/false)입니다.
             - `frontendRelevant`가 true이면, 관련될 가능성이 높은 Vue/React 파일명 키워드를 `frontendFileHints`에 포함하세요. SR 텍스트의 화면명을 영문 파일명으로 변환하세요. (예: '마이페이지' → 'MyPage', '장바구니' → 'Cart')
             - `reasoning`은 전체 요구사항의 요약과 함께, 각 대상 파일별 선정 사유를 반드시 "1. [파일명] - [사유]", "2. [파일명] - [사유]" 형식으로 번호를 매겨 상세히 작성하세요.
+            - [구체성 우선 및 추측성 선정 금지] SR이 요구하는 기능에 가장 직접적이고 구체적으로 대응하는 클래스를 Seed로 선정하세요. 후보 중에 이미 해당 기능에 특화된 전용 클래스가 존재하는 경우, "그 전용 클래스가 실제 수정 대상이 아닐 수도 있으니" 또는 "혹시 다른 곳에 로직이 있을 수도 있으니" 같은 가정에 근거해 더 포괄적이거나 일반적인 클래스를 보험용으로 추가 선정하지 마세요. 다만 SR이 명시적으로 공통·공유 로직의 수정을 요구하는 경우에는 해당 공통 클래스를 선정할 수 있습니다.
             - 중요: JSON 응답 생성 시, reasoning 필드 값 내부에 실제 줄바꿈 문자(\n)를 사용하지 마세요. 줄바꿈 대신 띄어쓰기나 마침표를 사용하세요.
             $additionalContext
         """.trimIndent()

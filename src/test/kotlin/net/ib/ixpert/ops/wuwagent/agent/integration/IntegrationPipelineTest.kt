@@ -71,7 +71,7 @@ class IntegrationPipelineTest {
             @Suppress("UNCHECKED_CAST")
             val gt = proj["gt"] as List<String>
             
-            val iterations = 1
+            val iterations = 2
             
             val actualPath = path
             

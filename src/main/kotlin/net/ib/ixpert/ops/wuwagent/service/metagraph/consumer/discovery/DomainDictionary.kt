@@ -193,6 +193,7 @@ class DomainDictionary private constructor(
             "유틸" to setOf("util", "helper", "common"),
             
             // 도메인 일반
+            "케어" to setOf("care"),
             "회원" to setOf("member", "user", "account"),
             "사용자" to setOf("user", "member", "account", "client"),
             "고객" to setOf("customer", "client", "user"),
