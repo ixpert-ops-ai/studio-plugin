@@ -48,11 +48,12 @@ class AgenticSeedSelector(
             }
             
             val dict = DomainDictionary.load(graph)
-            val qTokensBase = tokenize(srText).toMutableList()
-
-            // SR 원문의 도메인 명사(최소 불용어 제외)에 대해 사전 번역 토큰 선별 주입
             val BM25_STOPWORDS = setOf("관리", "조회", "화면", "서비스", "컨트롤러", "추가", "수정", "삭제", "등록", "상세", "목록", "처리", "신규", "개발")
             val srDomainWords = srText.split(Regex("[^가-힣a-zA-Z0-9]")).filter { it.length >= 2 && it !in BM25_STOPWORDS }
+            val srCleanDomainText = srDomainWords.joinToString(" ")
+            val qTokensBase = tokenize(srCleanDomainText).toMutableList()
+
+            // SR 원문의 도메인 명사에 대해 사전 번역 토큰 선별 주입
             for (word in srDomainWords) {
                 val translated = dict.translate(word)
                 if (translated.isNotEmpty()) {
@@ -77,7 +78,21 @@ class AgenticSeedSelector(
                 println("[AgenticSeedSelector] Think failed: ${e.message}")
             }
             
-            // Build document index once
+            // B-1: 구조적 불용어 정의 (통짜 영문 단어 필터용)
+            val STRUCTURAL_STOPWORDS = setOf(
+                "response", "request", "service", "impl", "vo", "dto", "controller", "repository",
+                "mapper", "dao", "biz", "svo", "bvo", "dvo", "dem", "dqm", "util", "helper",
+                "config", "entity", "model", "api", "app", "bo", "src", "main", "java", "com"
+            )
+
+            fun extractExactTokens(text: String): List<String> {
+                return text.replace(Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"), " ")
+                    .lowercase()
+                    .split(Regex("[^a-z0-9]"))
+                    .filter { it.length >= 3 && it !in STRUCTURAL_STOPWORDS }
+            }
+
+            // Build document index once (Hybrid: bi-gram + exact domain tokens)
             val documents = mutableMapOf<String, Pair<String, List<String>>>() // ID -> Pair(PromptString, Tokens)
             var totalLength = 0
             
@@ -91,14 +106,22 @@ class AgenticSeedSelector(
                     contentBuilder.append(dm.methodName ?: "").append(" ")
                     contentBuilder.append(dm.localName ?: "").append(" ")
                 }
-                val docTokens = tokenize(contentBuilder.toString())
+                val rawText = contentBuilder.toString()
+                val bigramTokens = tokenize(rawText)
+                val exactTokens = extractExactTokens(rawText)
+                val docTokens = bigramTokens + exactTokens
+
                 val promptStr = "${fileObj.className} (${fileObj.packageName})"
                 documents[fileObj.path] = promptStr to docTokens
                 totalLength += docTokens.size
             }
             
             allFrontend.forEach { resourceNode ->
-                val docTokens = tokenize(resourceNode.path)
+                val rawText = resourceNode.path
+                val bigramTokens = tokenize(rawText)
+                val exactTokens = extractExactTokens(rawText)
+                val docTokens = bigramTokens + exactTokens
+
                 val promptStr = "${resourceNode.path.substringAfterLast('/')} (${resourceNode.path.substringBeforeLast('/', "")})"
                 documents[resourceNode.path] = promptStr to docTokens
                 totalLength += docTokens.size
