@@ -1,0 +1,7 @@
+{
+  "project": "apc",
+  "framework": "ANYFRAME_AP",
+  "graphPath": "C:/Workspace/graph/project-graph-a/project-graph.json",
+  "sr_title": "삼성페이 MST OTC 요청 (신규서비스)",
+  "sr_body": "서버 내 인증서, 키 관리 (개발/운영 분리) 및 Private Key로 MST결제용 OTC 서명값 처리를 위한 신규 서비스 개발. 1. 서비스 인풋 체크 (고객관리번호, 카드번호ID, 결제세션정보내용, 인증방법코드) 2. 앱카드 회원ID, 등록된 보유카드ID여부 조회 3. 결제비밀번호세션인증 결과 체크 4. MST용 OTC 요청 및 이력 등록 (APC_M_ATC_00030 호출) 5. OTC track2 data -> private key로 서명 6. transactionTimestamp -> private key로 서명 7. CA -> String값 추출 8. private key / CA 앱카드 서버에서 properties로 개발/운영 분리 관리"
+}

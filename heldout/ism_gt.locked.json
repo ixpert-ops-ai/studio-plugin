@@ -1,0 +1,12 @@
+{
+  "project": "ISM",
+  "framework": "SPRING_MVC_MYBATIS",
+  "scored_gt_core": [
+    "src/main/java/com/samsungcardmall/api/bo/app/controller/st/pstat/PDsbUseController.java",
+    "src/main/java/com/samsungcardmall/api/bo/app/dto/request/st/pstat/PDsbUseRequest.java",
+    "src/main/java/com/samsungcardmall/api/bo/app/dto/response/st/pstat/PDsbUseResponse.java",
+    "src/main/java/com/samsungcardmall/api/bo/app/repository/rwdb/st/pstat/ECSITBISM015Mapper.java",
+    "src/main/resources/mapper/rwdb/st/pstat/ECSITBISM015.xml"
+  ],
+  "scored_gt_conditional": []
+}

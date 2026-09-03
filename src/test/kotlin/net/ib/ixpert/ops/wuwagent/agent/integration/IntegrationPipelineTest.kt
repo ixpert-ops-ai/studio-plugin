@@ -295,4 +295,62 @@ class IntegrationPipelineTest {
 
         println("=== OpenAIClient Streaming ToolCalling Kotlin Test PASSED PERFECTLY! ===")
     }
+
+    @Test
+    fun runHeldOutEvaluation() {
+        val client = PipelineE2ETestVllmClient()
+        val gson = Gson()
+
+        val heldOutCases = listOf(
+            mapOf(
+                "name" to "HELD_OUT_ISM",
+                "srPath" to "heldout/ism_sr.json",
+                "graphPath" to "C:/Workspace/graph/project-graph-i/project-graph.json"
+            ),
+            mapOf(
+                "name" to "HELD_OUT_APC",
+                "srPath" to "heldout/apc_sr.json",
+                "graphPath" to "C:/Workspace/graph/project-graph-a/project-graph.json"
+            )
+        )
+
+        for (hc in heldOutCases) {
+            val name = hc["name"] as String
+            val srPath = hc["srPath"] as String
+            val graphPath = hc["graphPath"] as String
+
+            val srFile = File(srPath)
+            if (!srFile.exists()) {
+                println("Skipping $name: SR file not found at $srPath")
+                continue
+            }
+            val srData = gson.fromJson(srFile.readText(), Map::class.java)
+            val srBody = srData["sr_body"] as String
+
+            println("\n=======================================================")
+            println("=== Running Held-out Evaluation for $name ===")
+            println("=======================================================")
+            println("SR: $srBody")
+            println("Graph: $graphPath")
+
+            val graphContent = File(graphPath).readText()
+            val graph = gson.fromJson(graphContent, ProjectGraph::class.java)
+
+            val discoveryResult = AdaptiveFileDiscovery.filter(
+                primaryReq = srBody,
+                secondaryReq = "",
+                graph = graph,
+                client = client,
+                project = null,
+                projectBasePath = null,
+                enhancedRequirements = emptyList()
+            )
+
+            val verifiedFiles = discoveryResult.relevantFiles
+            println("\n=== Final Surviving Files for $name (Count: ${verifiedFiles.size}) ===")
+            verifiedFiles.forEach { item ->
+                println("RESULT_FILE: [$name] ${item.path} (Score: ${item.score} / Reason: ${item.discoveryReason})")
+            }
+        }
+    }
 }

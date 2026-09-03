@@ -1,0 +1,19 @@
+{
+  "project": "apc",
+  "framework": "ANYFRAME_AP",
+  "scored_gt_core": [
+    "src/main/java/sc/chn/aps/apc/mm/mm05/biz/APCMMSspyLkBIZ.java",
+    "src/main/java/sc/chn/aps/apc/mm/mm05/svc/APCMMSspyLkSVC.java",
+    "src/main/java/sc/chn/aps/apc/mm/mm05/svc/impl/APCMMSspyLkSVCImpl.java",
+    "src/main/java/sc/chn/aps/apc/mm/mm05/svc/svo/APCMMSspyOtcAkSVO.java"
+  ],
+  "scored_gt_conditional": [
+    "src/main/resources/property/p_context.properties",
+    "src/main/resources/property/v_context.properties"
+  ],
+  "excluded_binary": [
+    "webapps/WEB-INF/spay/IntermediateV2.crt",
+    "webapps/WEB-INF/spay/monimo_spay_release_CRT.crt",
+    "webapps/WEB-INF/spay/monimo_spay_release.key"
+  ]
+}

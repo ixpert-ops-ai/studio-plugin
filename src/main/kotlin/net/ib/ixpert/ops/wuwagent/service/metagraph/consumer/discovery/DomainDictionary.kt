@@ -75,52 +75,15 @@ class DomainDictionary private constructor(
                 }
             }
 
-            graph.files.values.forEach { node ->
-                node.localName?.let { korean -> addTokens(korean, node.className) }
-                node.koreanComments.forEach { korean -> addTokens(korean, node.className) }
-
-                node.serviceEndpoints?.forEach { ep ->
-                    ep.localName?.let { korean ->
-                        val tokens = (tokenizeCamelCase(ep.methodName) + tokenizeCamelCase(ep.serviceId)).filter { it !in structuralStopwords }
-                        val koreanWords = korean.split(Regex("[\\s_\\-\\[\\](){}]")).map { it.trim() }.filter { it.length >= 2 && it !in koreanStopwords }
-                        koreanWords.forEach { word ->
-                            val map = learned.getOrPut(word) { mutableMapOf() }
-                            tokens.forEach { t -> map[t] = (map[t] ?: 0) + 1 }
-                        }
-                    }
-                }
-
-                node.demMethods?.forEach { dem ->
-                    dem.localName?.let { korean -> addTokens(korean, dem.methodName) }
-                }
-            }
-
-            // 내장 사전 합산
+            // 내장 사전 합산 (자동 사전 및 외부 dictionary.json 비활성화: 다대다 오염 노이즈 방지)
             val merged = mutableMapOf<String, MutableMap<String, Int>>()
             BUILTIN_TERMS.forEach { (k, v) -> 
                 val map = merged.getOrPut(k) { mutableMapOf() }
-                v.forEach { t -> map[t] = 10 } // 내장 사전은 기본 가중치만 부여 (프로젝트 특화 토큰이 우선하도록)
-            }
-            learned.forEach { (k, v) -> 
-                val map = merged.getOrPut(k) { mutableMapOf() }
-                v.forEach { (t, count) -> map[t] = (map[t] ?: 0) + count }
+                v.forEach { t -> map[t] = 10 }
             }
 
-            if (graph.projectRoot != null) {
-                try {
-                    val dictFile = File(graph.projectRoot!!, ".meta/dictionary.json")
-                    if (dictFile.exists()) {
-                        val type = object : com.google.gson.reflect.TypeToken<Map<String, List<String>>>() {}.type
-                        val externalDict: Map<String, List<String>> = com.google.gson.Gson().fromJson(dictFile.readText(Charsets.UTF_8), type)
-                        externalDict.forEach { (k, v) ->
-                            val map = merged.getOrPut(k) { mutableMapOf() }
-                            v.forEach { t -> map[t] = (map[t] ?: 0) + 500 }
-                        }
-                    }
-                } catch (e: Exception) {
-                    com.intellij.openapi.diagnostic.Logger.getInstance(DomainDictionary::class.java).warn("Failed to load .meta/dictionary.json: ${e.message}")
-                }
-            }
+            // NOTE: 자동 생성 사전(learned) 및 .meta/dictionary.json(+500)은 다대다 오염으로 인해 순마이너스임이 판명되어 비활성화(동결)함.
+            // 향후 원리 기반 단방향 사전 빌더 설계 시 재활성화 검토.
 
             return DomainDictionary(merged)
         }

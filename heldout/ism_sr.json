@@ -1,0 +1,7 @@
+{
+  "project": "ISM",
+  "framework": "SPRING_MVC_MYBATIS",
+  "graphPath": "C:/Workspace/graph/project-graph-i/project-graph.json",
+  "sr_title": "개인별 포인트유형별 사용내역 조회 화면 개발",
+  "sr_body": "개인별 포인트유형별 사용내역 조회 화면 개발"
+}
