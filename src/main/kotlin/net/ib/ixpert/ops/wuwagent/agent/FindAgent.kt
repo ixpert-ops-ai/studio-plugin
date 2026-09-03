@@ -1,5 +1,9 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
+import com.intellij.openapi.project.DumbService
 import net.ib.ixpert.ops.wuwagent.prompt.PromptManager
 import net.ib.ixpert.ops.wuwagent.service.FileMatch
 import net.ib.ixpert.ops.wuwagent.service.FileSearchService
@@ -24,35 +28,60 @@ class FindAgent : BaseAgent() {
             return
         }
 
-        val searchResult = FileSearchService.searchInFiles(context.project, keyword)
-        if (searchResult.matches.isEmpty()) {
-            onSuccess("검색 결과가 없습니다.")
+        if (DumbService.isDumb(context.project)) {
+            DumbService.getInstance(context.project).runWhenSmart {
+                executeSearchAndLlm(context, keyword, onSuccess, onChunk, onError)
+            }
             return
         }
 
-        val promptVars = mapOf(
-            "SEARCH_KEYWORD" to keyword,
-            "SEARCH_RESULTS" to formatSearchResults(searchResult),
-            "RESULT_SUMMARY" to formatSummary(searchResult)
-        )
+        executeSearchAndLlm(context, keyword, onSuccess, onChunk, onError)
+    }
 
-        val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
-        val isAndroid = settings.state.frameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANDROID
-        val findPromptFile = if (isAndroid) "find_android_prompt.txt" else "find_prompt.txt"
-        var systemPrompt = PromptManager.loadPromptWithVars(findPromptFile, promptVars)
+    private fun executeSearchAndLlm(
+        context: AgentContext,
+        keyword: String,
+        onSuccess: (String) -> Unit,
+        onChunk: ((String) -> Unit)?,
+        onError: (String) -> Unit
+    ) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(
+            context.project, "코드 검색 중...", true
+        ) {
+            override fun run(indicator: ProgressIndicator) {
+                val searchResult = FileSearchService.searchInFiles(context.project, keyword, indicator)
+                if (searchResult.matches.isEmpty()) {
+                    onSuccess("검색 결과가 없습니다.")
+                    return
+                }
 
-        // [Phase 1b] 메타그래프 컨텍스트 자동 주입
-        val contextAssembler = context.project.getService(
-            net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ContextAssembler::class.java
-        )
-        val graphContext = contextAssembler.assemble(context, keyword)
-        if (graphContext.isNotBlank()) {
-            systemPrompt = "$graphContext\n\n$systemPrompt"
-        }
+                indicator.checkCanceled()
 
-        val userMessage = "\"$keyword\" 검색 결과를 바탕으로 설명해주세요."
+                val promptVars = mapOf(
+                    "SEARCH_KEYWORD" to keyword,
+                    "SEARCH_RESULTS" to formatSearchResults(searchResult),
+                    "RESULT_SUMMARY" to formatSummary(searchResult)
+                )
 
-        callLlmStreamAsync(context.project, "iXpert AI Assistant: Finding in Project", systemPrompt, userMessage, onSuccess, onChunk, onError)
+                val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance()
+                val isAndroid = settings.state.frameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANDROID
+                val findPromptFile = if (isAndroid) "find_android_prompt.txt" else "find_prompt.txt"
+                var systemPrompt = PromptManager.loadPromptWithVars(findPromptFile, promptVars)
+
+                // [Phase 1b] 메타그래프 컨텍스트 자동 주입
+                val contextAssembler = context.project.getService(
+                    net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.ContextAssembler::class.java
+                )
+                val graphContext = contextAssembler.assemble(context, keyword)
+                if (graphContext.isNotBlank()) {
+                    systemPrompt = "$graphContext\n\n$systemPrompt"
+                }
+
+                val userMessage = "\"$keyword\" 검색 결과를 바탕으로 설명해주세요."
+
+                callLlmStreamAsync(context.project, "iXpert AI Assistant: Finding in Project", systemPrompt, userMessage, onSuccess, onChunk, onError)
+            }
+        })
     }
 
     // ── 검색 결과 → 프롬프트 변수 포맷팅 ────────────────────────────────
