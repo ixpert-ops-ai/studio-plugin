@@ -41,6 +41,7 @@ class AgenticSeedSelector(
               1단계 (Search): 요구사항(SR)의 핵심 목표 및 주요 업무 약어를 조합하여 `search_graph_nodes`를 호출합니다.
               2단계 (Inspect & Verify): 검색 결과 목록에서 요구사항과 관련된 유력한 핵심 후보 클래스(Service, BIZ, VO 등)를 선택하여 `inspect_node_detail` 또는 `expand_connected_nodes`로 세부 메서드/의존관계를 확인합니다.
               3단계 (Confirm): `inspect_node_detail`로 후보를 확인한 후에는 불필요한 추가 검색을 멈추고 즉시 `confirm_final_seeds`를 호출하여 핵심 업무 클래스 1~4개를 최종 확정하고 탐색을 종료하세요.
+            - 요구사항(SR)에 '신규 개발', '신규 생성' 등의 표현이 있더라도, 시스템 메타그래프에 이미 존재하는 관련 기준 클래스(Controller, Service, BIZ, Repository, VO/DTO 등)를 계층에 구애받지 않고 폭넓게 Seed 후보로 확정하세요.
             - 공통 유틸리티(StringUtil, ConstantUtil 등)나 단순 로그 클래스는 Seed로 확정하지 말고, 실제 비즈니스 로직을 수행하는 서비스(Service/SVC), BIZ, VO 클래스를 Seed로 확정하세요.
         """.trimIndent()
 
