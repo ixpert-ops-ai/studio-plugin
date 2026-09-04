@@ -302,13 +302,13 @@ class AgenticGraphTools(
                 type = "function",
                 function = FunctionDefinition(
                     name = "search_graph_nodes",
-                    description = "메타그래프에서 클래스명(약어/CamelCase), 한글 주석/로컬명, 메서드명을 검색하여 상위 관련 노드 목록을 조회합니다.",
+                    description = "메타그래프에서 클래스명(약어/CamelCase), 한글 주석/로컬명, 메서드명, API 엔드포인트 URL을 검색하여 상위 관련 노드 목록을 조회합니다.",
                     parameters = FunctionParameters(
                         type = "object",
                         properties = mapOf(
                             "query" to PropertyDefinition(
                                 type = "string",
-                                description = "검색 키워드 (예: 'sspy otc', '삼성페이 서명', 'otc 서명', 'PointHistory')"
+                                description = "검색 키워드 (예: 'sspy otc', '삼성페이 서명', 'otc 서명', 'PointHistory', '/api/point')"
                             ),
                             "domain_hint" to PropertyDefinition(
                                 type = "string",
@@ -323,7 +323,7 @@ class AgenticGraphTools(
                 type = "function",
                 function = FunctionDefinition(
                     name = "inspect_node_detail",
-                    description = "특정 클래스 노드의 상세 메타데이터(한글 주석, 메서드 목록, 입출력 VO, 호출하는 클래스 dependsOn, 호출받는 클래스 dependedBy)를 상세 조회합니다.",
+                    description = "특정 클래스 노드의 상세 메타데이터(한글 주석, 메서드 목록, API 엔드포인트, 입출력 VO, 호출하는 클래스 dependsOn, 호출받는 클래스 dependedBy)를 상세 조회합니다.",
                     parameters = FunctionParameters(
                         type = "object",
                         properties = mapOf(
@@ -350,8 +350,8 @@ class AgenticGraphTools(
                             ),
                             "direction" to PropertyDefinition(
                                 type = "string",
-                                enum = listOf("DOWNSTREAM", "UPSTREAM", "BOTH"),
-                                description = "확장 방향: DOWNSTREAM, UPSTREAM, BOTH"
+                                description = "확장 방향: DOWNSTREAM, UPSTREAM, BOTH",
+                                enum = listOf("DOWNSTREAM", "UPSTREAM", "BOTH")
                             ),
                             "max_hops" to PropertyDefinition(
                                 type = "integer",
@@ -409,8 +409,12 @@ class AgenticGraphTools(
             val comments = node.koreanComments?.joinToString(" ") ?: ""
             val methods = node.methods ?: emptyList()
             val methodSegments = methods.flatMap { splitCamelCase(it.name) }
+            val apiEndpoints = node.apiEndpoints ?: emptyList()
+            val apiSegments = apiEndpoints.flatMap { ep ->
+                splitCamelCase(ep.path) + splitCamelCase(ep.handlerMethod)
+            }
 
-            // Tier 1: CamelCase / 약어 일치
+            // Tier 1: CamelCase / 약어 / API 엔드포인트 일치
             for (eng in englishTokens) {
                 if (eng.length < 2) continue
                 if (classSegments.any { it == eng }) {
@@ -425,6 +429,12 @@ class AgenticGraphTools(
                     score += 50.0
                 } else if (methodSegments.any { it.contains(eng) }) {
                     score += 30.0
+                }
+
+                if (apiSegments.any { it == eng }) {
+                    score += 40.0
+                } else if (apiSegments.any { it.contains(eng) }) {
+                    score += 20.0
                 }
             }
 
@@ -454,7 +464,8 @@ class AgenticGraphTools(
 
         return scored.take(limit).map { (node, score, _) ->
             val keyMethods = node.methods?.map { it.name }?.take(5) ?: emptyList()
-            mapOf(
+            val apiSummary = node.apiEndpoints?.take(3)?.map { "${it.httpMethod} ${it.path}" } ?: emptyList()
+            val resultMap = mutableMapOf<String, Any>(
                 "className" to node.className,
                 "path" to node.path,
                 "fileType" to node.fileType.name,
@@ -462,6 +473,10 @@ class AgenticGraphTools(
                 "keyMethods" to keyMethods,
                 "matchScore" to score
             )
+            if (apiSummary.isNotEmpty()) {
+                resultMap["apiEndpoints"] = apiSummary
+            }
+            resultMap
         }
     }
 
@@ -485,7 +500,15 @@ class AgenticGraphTools(
             )
         } ?: emptyList()
 
-        return mapOf(
+        val apiDetails = node.apiEndpoints?.map {
+            mapOf(
+                "httpMethod" to it.httpMethod,
+                "path" to it.path,
+                "handlerMethod" to it.handlerMethod
+            )
+        } ?: emptyList()
+
+        val result = mutableMapOf<String, Any>(
             "className" to node.className,
             "path" to node.path,
             "fileType" to node.fileType.name,
@@ -495,6 +518,10 @@ class AgenticGraphTools(
             "dependsOn_Downstream" to downstream,
             "dependedBy_Upstream" to upstream
         )
+        if (apiDetails.isNotEmpty()) {
+            result["apiEndpoints"] = apiDetails
+        }
+        return result
     }
 
     fun expandConnectedNodes(className: String, direction: String = "BOTH", maxHops: Int = 1): Map<String, Any> {
