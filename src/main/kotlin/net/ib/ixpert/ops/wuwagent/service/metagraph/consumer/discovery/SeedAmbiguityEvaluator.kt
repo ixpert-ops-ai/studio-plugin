@@ -7,12 +7,14 @@ package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery
  * 1. False Positive(불필요한 질의)가 False Negative(오답 자동 확정)보다 안전하다는 원칙 적용.
  * 2. 현재 3개 케이스는 최상위 점수 격차가 크거나(30~55pt) 완전 동점(0pt)이어서 SCORE_TOLERANCE_EPSILON에 무감함.
  *    향후 근소차(비완전 동점) 케이스 확보 시 정밀 보정 요망.
- * 3. 신규 Archetype 케이스가 확보되면 정상 케이스에서의 False Positive 발생 여부를 재검증해야 함.
+ * 3. MIN_DISTINCT_PACKAGES(=2) 역시 현재 실측 데이터가 Distinct=1(ScReturn) vs Distinct=6(PDsbUse)으로
+ *    양극단 분리되어 있어 임계값(2~5)에 무감함. 경계 케이스(Distinct 2~3) 확보 시 실측 보정 필요.
+ * 4. 신규 Archetype 케이스가 확보되면 정상 케이스에서의 False Positive 발생 여부를 재검증해야 함.
  */
 object SeedAmbiguityConfig {
     const val SCORE_TOLERANCE_EPSILON = 5.0   // 동점으로 간주할 최상위 점수 허용 오차 (가설치)
     const val MIN_AMBIGUOUS_CANDIDATES = 3     // 모호성 판정 최소 상위 후보 수 (가설치)
-    const val MIN_DISTINCT_PACKAGES = 2       // 서로 다른 업무 패키지 분산 임계값 (가설치)
+    const val MIN_DISTINCT_PACKAGES = 2       // 서로 다른 업무 패키지 분산 임계값 (가설치, 현 데이터 1 vs 6 극단 분리로 무감)
 }
 
 /**
