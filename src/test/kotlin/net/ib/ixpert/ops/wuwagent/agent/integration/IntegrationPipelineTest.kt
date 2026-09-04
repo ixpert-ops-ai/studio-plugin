@@ -298,7 +298,7 @@ class IntegrationPipelineTest {
 
     @Test
     fun runHeldOutEvaluation() {
-        val client = PipelineE2ETestVllmClient()
+        val client = OpenAIClient()
         val gson = Gson()
 
         val heldOutCases = listOf(
@@ -350,6 +350,104 @@ class IntegrationPipelineTest {
             println("\n=== Final Surviving Files for $name (Count: ${verifiedFiles.size}) ===")
             verifiedFiles.forEach { item ->
                 println("RESULT_FILE: [$name] ${item.path} (Score: ${item.score} / Reason: ${item.discoveryReason})")
+            }
+        }
+    }
+
+    @Test
+    fun traceApcHeldOutPipeline() {
+        val client = OpenAIClient()
+        val gson = Gson()
+
+        val srFile = File("heldout/apc_sr.json")
+        val srData = gson.fromJson(srFile.readText(), Map::class.java)
+        val srBody = srData["sr_body"] as String
+
+        val graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json"
+        val graph = gson.fromJson(File(graphPath).readText(), ProjectGraph::class.java)
+
+        val gtTargets = listOf(
+            "src/main/java/sc/chn/aps/apc/mm/mm05/svc/impl/APCMMSspyLkSVCImpl.java",
+            "src/main/java/sc/chn/aps/apc/mm/mm05/svc/svo/APCMMSspyOtcAkSVO.java",
+            "src/main/java/sc/chn/aps/apc/mm/mm05/biz/APCMMSspyLkBIZ.java",
+            "src/main/java/sc/chn/aps/apc/mm/mm05/svc/APCMMSspyLkSVC.java"
+        )
+
+        println("\n================================================================")
+        println("   APC HELD-OUT 4-STAGE PIPELINE TRACING INSTRUMENT")
+        println("================================================================")
+        println("SR: $srBody")
+
+        // -------------------------------------------------------------
+        // STAGE 1: AgenticSeedSelector
+        // -------------------------------------------------------------
+        println("\n--- [STAGE 1] AgenticSeedSelector.selectSeeds ---")
+        val selector = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AgenticSeedSelector(client)
+        val seedResult = selector.selectSeeds(srBody, graph)
+        val seedClasses = seedResult.seedClasses
+        val judgePicks = seedResult.judgePicks
+        val rawCandidates = seedResult.rawCandidates
+
+        println("Raw BM25 Candidates Count: ${rawCandidates.size}")
+        rawCandidates.take(15).forEachIndexed { i, c -> println("  Raw Candidate ${i+1}: $c") }
+
+        println("\nJudge Picks Count: ${judgePicks.size}")
+        judgePicks.forEachIndexed { i, p -> println("  Judge Pick ${i+1}: $p") }
+
+        println("\nFinal Seed Classes Count: ${seedClasses.size}")
+        seedClasses.forEachIndexed { i, s -> println("  Seed ${i+1}: $s") }
+
+        println("\n[GT Stage 1 Seed Status]:")
+        gtTargets.forEach { gt ->
+            val className = gt.substringAfterLast('/').substringBeforeLast('.')
+            val inRaw = rawCandidates.any { it.contains(className) }
+            val inJudge = judgePicks.any { it.contains(className) }
+            val inFinal = seedClasses.any { it.contains(className) }
+            println("  * $className -> In Raw BM25? ${if (inRaw) "✅ YES" else "❌ NO"} | In Judge Picks? ${if (inJudge) "✅ YES" else "❌ NO"} | In Final Seeds? ${if (inFinal) "✅ YES" else "❌ NO"}")
+        }
+
+        // -------------------------------------------------------------
+        // STAGE 2: GraphExpander
+        // -------------------------------------------------------------
+        println("\n--- [STAGE 2] GraphExpander.expand ---")
+        val domainExtractor = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DomainExtractor(graph.files)
+        val config = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DiscoveryConfig(maxHop = 3)
+        val expander = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.GraphExpander(graph, domainExtractor, config)
+        val expandedFiles: Map<String, net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ExpansionStep> = expander.expand(seedResult, srBody)
+        val expandedPaths = expandedFiles.keys
+        println("Expanded Files Count: ${expandedPaths.size}")
+
+        println("\n[GT Stage 2 Graph Expander Status]:")
+        gtTargets.forEach { gt ->
+            val className = gt.substringAfterLast('/').substringBeforeLast('.')
+            val matchingPath = expandedPaths.find { it.contains(className) }
+            val step = if (matchingPath != null) expandedFiles[matchingPath] else null
+            println("  * $className -> In Expanded? ${if (matchingPath != null) "✅ YES (Hop: ${step?.hop}, via: ${step?.via})" else "❌ NO"}")
+        }
+
+        // -------------------------------------------------------------
+        // STAGE 3: RelevanceScorer (Stage 3 Reranking & Top 30 Cutoff)
+        // -------------------------------------------------------------
+        println("\n--- [STAGE 3] RelevanceScorer.scoreAndFilter ---")
+        val scorer = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.RelevanceScorer(graph, fileLimit = 30, minScore = 55)
+        val relevantFiles = scorer.scoreAndFilter(srBody, expandedFiles, seedResult).take(30)
+        val relevantPaths = relevantFiles.map { it.path }
+
+        println("Relevant Files (Top 30 Count: ${relevantFiles.size}):")
+        relevantFiles.forEachIndexed { i, f ->
+            println("  ${i+1}위: ${f.path.substringAfterLast('/')} (Score: ${f.score}, Reason: ${f.discoveryReason})")
+        }
+
+        println("\n[GT Stage 3 RelevanceScorer Status]:")
+        gtTargets.forEach { gt ->
+            val className = gt.substringAfterLast('/').substringBeforeLast('.')
+            val isRelevant = relevantPaths.any { it.contains(className) }
+            val rank = relevantPaths.indexOfFirst { it.contains(className) } + 1
+            val f = relevantFiles.find { it.path.contains(className) }
+            if (isRelevant) {
+                println("  * $className -> Passed Final Top 30? ✅ YES (${rank}위, Score: ${f?.score}, Reason: ${f?.discoveryReason})")
+            } else {
+                println("  * $className -> Passed Final Top 30? ❌ NO (Cutoff or Dropped)")
             }
         }
     }

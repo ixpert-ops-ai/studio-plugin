@@ -2,6 +2,11 @@ package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery
 
 import com.google.gson.Gson
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
+import net.ib.ixpert.ops.wuwagent.model.ChatMessage
+import net.ib.ixpert.ops.wuwagent.model.ToolDefinition
+import net.ib.ixpert.ops.wuwagent.model.FunctionDefinition
+import net.ib.ixpert.ops.wuwagent.model.FunctionParameters
+import net.ib.ixpert.ops.wuwagent.model.PropertyDefinition
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraphQueryable
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode
 
@@ -13,428 +18,234 @@ class AgenticSeedSelector(
     private val gson = Gson()
 
     override fun selectSeeds(srText: String, graph: ProjectGraphQueryable): SeedSelectionResult {
-        val tokens = srText.split(Regex("[^A-Za-z0-9_]+"))
-            .filter { it.length >= 4 }
-            .map { it.lowercase() }
+        println("\n================================================================")
+        println("   [AgenticGraphExplorer] Starting Autonomous Graph Search Loop")
+        println("================================================================")
+        println("SR: $srText")
 
-        val allBackend = graph.files.values
-        val allFrontend = graph.resourceNodes.filter { 
-            it.path.endsWith(".jsp") || it.path.endsWith(".html") || 
-            it.path.endsWith(".js") || it.path.endsWith(".vue") || it.path.endsWith(".tsx") 
-        }
-
-        val matchedBackend = allBackend.filter { fileNode ->
-            tokens.any { token -> fileNode.className.lowercase().startsWith(token) }
-        }
-        val matchedFrontend = allFrontend.filter { resourceNode ->
-            val name = resourceNode.path.substringAfterLast('/').substringBeforeLast('.')
-            tokens.any { token -> name.lowercase().startsWith(token) }
-        }
-
-        val candidatesListPair = run {
-            val b = matchedBackend.map { "${it.className} (${it.packageName})" }
-            val f = matchedFrontend.map { "${it.path.substringAfterLast('/')} (${it.path.substringBeforeLast('/', "")})" }
-            val track1 = (b + f)
-            
-            fun tokenize(text: String): List<String> {
-                val words = text.lowercase().replace(Regex("[^a-z0-9\\uAC00-\\uD7A3\\s]"), " ")
-                    .split(Regex("\\s+"))
-                    .filter { it.isNotBlank() }
-                val t = mutableListOf<String>()
-                for (w in words) {
-                    if (w.length >= 2) t.addAll(w.windowed(2)) else t.add(w)
-                }
-                return t
-            }
-            
-            val dict = DomainDictionary.load(graph)
-            val BM25_STOPWORDS = setOf("관리", "조회", "화면", "서비스", "컨트롤러", "추가", "수정", "삭제", "등록", "상세", "목록", "처리", "신규", "개발")
-            val srDomainWords = srText.split(Regex("[^가-힣a-zA-Z0-9]")).filter { it.length >= 2 && it !in BM25_STOPWORDS }
-            val srCleanDomainText = srDomainWords.joinToString(" ")
-            val qTokensBase = tokenize(srCleanDomainText).toMutableList()
-
-            // SR 원문의 도메인 명사에 대해 사전 번역 토큰 선별 주입
-            for (word in srDomainWords) {
-                val translated = dict.translate(word)
-                if (translated.isNotEmpty()) {
-                    for (t in translated) {
-                        if (t.length >= 2) qTokensBase.addAll(t.windowed(2)) else qTokensBase.add(t)
-                    }
-                }
-            }
-            var domainKeywords = listOf<String>()
-            try {
-                val domainSystemPrompt = """
-                    당신은 엔터프라이즈 시스템의 도메인 분석 전문가입니다.
-                    주어진 요구사항(SR)을 읽고, 이 요구사항이 시스템의 어느 핵심 도메인들에 속할 가능성이 있는지 연관된 핵심 도메인 명사(예: 상품, 주문, 클레임, 회원, 전시, 마케팅, 쿠폰, 장바구니 등)를 관련도 순으로 최대 3개 추출하세요.
-                    반드시 명사 단어들만 쉼표(,)로 구분하여 정확하게 답변해야 하며, 마침표나 추가 설명은 절대 포함하지 마세요. (예: "클레임, 주문, 상품")
-                """.trimIndent()
-                val domainRes = llmClient.chat(domainSystemPrompt, srText, 50, null)
-                val rawKeywords = domainRes?.message?.content?.trim() ?: ""
-                println("[AgenticSeedSelector] Think - Raw LLM Output: $rawKeywords")
-                domainKeywords = rawKeywords.split(",").map { it.replace(Regex("[^가-힣a-zA-Z]"), "").trim() }.filter { it.isNotEmpty() }.take(3)
-                println("[AgenticSeedSelector] Think - Extracted Keywords: $domainKeywords")
-            } catch (e: Exception) {
-                println("[AgenticSeedSelector] Think failed: ${e.message}")
-            }
-            
-            // B-1: 구조적 불용어 정의 (통짜 영문 단어 필터용)
-            val STRUCTURAL_STOPWORDS = setOf(
-                "response", "request", "service", "impl", "vo", "dto", "controller", "repository",
-                "mapper", "dao", "biz", "svo", "bvo", "dvo", "dem", "dqm", "util", "helper",
-                "config", "entity", "model", "api", "app", "bo", "src", "main", "java", "com"
-            )
-
-            fun extractExactTokens(text: String): List<String> {
-                return text.replace(Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"), " ")
-                    .lowercase()
-                    .split(Regex("[^a-z0-9]"))
-                    .filter { it.length >= 3 && it !in STRUCTURAL_STOPWORDS }
-            }
-
-            // Build document index once (Hybrid: bi-gram + exact domain tokens)
-            val documents = mutableMapOf<String, Pair<String, List<String>>>() // ID -> Pair(PromptString, Tokens)
-            var totalLength = 0
-            
-            allBackend.forEach { fileObj ->
-                val contentBuilder = StringBuilder()
-                contentBuilder.append(fileObj.className ?: "").append(" ")
-                contentBuilder.append(fileObj.path).append(" ")
-                contentBuilder.append(fileObj.localName ?: "").append(" ")
-                fileObj.koreanComments?.forEach { contentBuilder.append(it).append(" ") }
-                fileObj.demMethods?.forEach { dm ->
-                    contentBuilder.append(dm.methodName ?: "").append(" ")
-                    contentBuilder.append(dm.localName ?: "").append(" ")
-                }
-                val rawText = contentBuilder.toString()
-                val bigramTokens = tokenize(rawText)
-                val exactTokens = extractExactTokens(rawText)
-                val docTokens = bigramTokens + exactTokens
-
-                val promptStr = "${fileObj.className} (${fileObj.packageName})"
-                documents[fileObj.path] = promptStr to docTokens
-                totalLength += docTokens.size
-            }
-            
-            allFrontend.forEach { resourceNode ->
-                val rawText = resourceNode.path
-                val bigramTokens = tokenize(rawText)
-                val exactTokens = extractExactTokens(rawText)
-                val docTokens = bigramTokens + exactTokens
-
-                val promptStr = "${resourceNode.path.substringAfterLast('/')} (${resourceNode.path.substringBeforeLast('/', "")})"
-                documents[resourceNode.path] = promptStr to docTokens
-                totalLength += docTokens.size
-            }
-            
-            val N = documents.size
-            val avgdl = if (N > 0) totalLength.toDouble() / N else 1.0
-            val k1 = 1.5
-            val b_param = 0.75
-            
-            var bestTrack2 = emptyList<String>()
-            var finalJudgePicks = emptyList<String>()
-            
-            // Loop (Act -> Observe)
-            for (keyword in domainKeywords) {
-                println("\n[AgenticSeedSelector] Loop - Act: Testing keyword '$keyword'")
-                val prefixes = dict.translate(keyword)
-                
-                // Deduplicated query token set
-                val uniqueQueryTokens = (qTokensBase + keyword + prefixes).distinct()
-                val boostedTerms = (listOf(keyword) + prefixes).distinct().toSet()
-                
-                println("[BM25-DIAG] Keyword: '$keyword' -> Translated Tokens: $prefixes | Unique Query Tokens Count: ${uniqueQueryTokens.size}")
-                
-                val df = mutableMapOf<String, Int>()
-                for (q in uniqueQueryTokens) df[q] = documents.values.count { it.second.contains(q) }
-                
-                val scores = documents.map { (path, pair) ->
-                    var score = 0.0
-                    val docLen = pair.second.size
-                    for (q in uniqueQueryTokens) {
-                        val tf = pair.second.count { it == q }
-                        if (tf > 0) {
-                            val n = df[q] ?: 0
-                            val idf = Math.log((N - n + 0.5) / (n + 0.5) + 1.0)
-                            
-                            // Proper IDF-proportional boosting weight (Rare term -> up to 2.5x boost, Common term -> minimal 1.1x boost)
-                            val boostWeight = if (boostedTerms.contains(q)) {
-                                1.0 + Math.min(1.5, Math.max(0.1, idf / 3.0))
-                            } else 1.0
-                            
-                            val termScore = idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b_param + b_param * (docLen / avgdl)))
-                            score += termScore * boostWeight
-                        }
-                    }
-                    path to score
-                }.sortedByDescending { it.second }
-                
-                val top30Ids = scores.take(30).map { it.first }
-                println("[BM25-DIAG] Top 5 Scores: ${scores.take(5).map { "${it.first.substringAfterLast('/')} (${String.format("%.2f", it.second)})" }}")
-                
-                val windowSize = 10
-                val maxWindows = 3
-                var keywordAccepted = false
-
-                for (w in 0 until maxWindows) {
-                    val startIndex = w * windowSize
-                    val currentWindowIds = top30Ids.drop(startIndex).take(windowSize)
-                    if (currentWindowIds.isEmpty()) break
-                    
-                    val currentPrompts = currentWindowIds.mapNotNull { documents[it]?.first }
-                    println("[AgenticSeedSelector] Loop - Observe: Evaluating Window ${w + 1} (${startIndex + 1}~${startIndex + currentWindowIds.size}위, count=${currentPrompts.size}) with LLM-as-a-Judge")
-                    println("[AgenticSeedSelector] Window ${w + 1} Nodes given to Judge: $currentPrompts")
-
-                    val judgeSystemPrompt = """
-                        당신은 시스템의 도메인 분석 심판입니다.
-                        아래는 특정 키워드로 검색된 시스템 클래스 목록입니다.
-                        이 클래스들이 다음 요구사항(SR)을 구현하는 데 핵심적으로 관련되어 있는지 판단하세요.
-                        
-                        반드시 아래 JSON 형식으로만 답변하세요. 마크다운 기호 없이 순수 JSON만 출력하세요.
-                        {
-                          "relevant": true,
-                          "confidence": 85,
-                          "matched_nodes": ["클래스명1", "클래스명2"]
-                        }
-                    """.trimIndent()
-                    
-                    val judgeUserPrompt = """
-                        요구사항(SR): $srText
-                        
-                        검색된 클래스 목록:
-                        ${currentPrompts.joinToString("\n")}
-                    """.trimIndent()
-                    
-                    try {
-                        val judgeRes = llmClient.chat(judgeSystemPrompt, judgeUserPrompt, 300, null)
-                        var jsonStr = judgeRes?.message?.content?.trim() ?: ""
-                        jsonStr = jsonStr.replace(Regex("```json|```"), "").trim()
-                        if (jsonStr.contains("{")) {
-                            jsonStr = jsonStr.substring(jsonStr.indexOf("{"), jsonStr.lastIndexOf("}") + 1)
-                        }
-                        
-                        val judgeOutput = gson.fromJson(jsonStr, Map::class.java) as Map<String, Any>
-                        val isRelevant = judgeOutput["relevant"] as? Boolean ?: false
-                        val matchedNodesRaw = judgeOutput["matched_nodes"] as? List<*>
-                        val matchedNodes = matchedNodesRaw?.map { it.toString() } ?: emptyList()
-                        
-                        println("[AgenticSeedSelector] Window ${w + 1} Judge Output: relevant=$isRelevant, matched_nodes=$matchedNodes")
-                        
-                        if (isRelevant) {
-                            val hasActualMatch = matchedNodes.any { nodeName -> currentPrompts.any { it.contains(nodeName) } }
-                            if (hasActualMatch) {
-                                println("[AgenticSeedSelector] Loop - Terminating! Keyword '$keyword' (Window ${w + 1}) accepted by strict stopping rule. Seeds: $matchedNodes")
-                                bestTrack2 = top30Ids
-                                finalJudgePicks = matchedNodes
-                                keywordAccepted = true
-                                break
-                            } else {
-                                println("[AgenticSeedSelector] Window ${w + 1} Rejected: Judge returned relevant=true, but matched_nodes were fabricated or not in window.")
-                            }
-                        } else {
-                            println("[AgenticSeedSelector] Window ${w + 1} Rejected: Judge deemed nodes irrelevant. Sliding to next window...")
-                        }
-                    } catch (e: Exception) {
-                        println("[AgenticSeedSelector] Window ${w + 1} Judge error: ${e.message}")
-                    }
-                }
-                
-                if (keywordAccepted) {
-                    break
-                }
-            }
-            
-            if (bestTrack2.isEmpty()) {
-                println("[AgenticSeedSelector] All hypotheses exhausted or failed. Returning base lexical BM25 results.")
-                
-                // Base lexical score
-                val df = mutableMapOf<String, Int>()
-                for (q in qTokensBase) df[q] = documents.values.count { it.second.contains(q) }
-                val fallbackScores = documents.map { (_, pair) ->
-                    var score = 0.0
-                    val docLen = pair.second.size
-                    for (q in qTokensBase) {
-                        val tf = pair.second.count { it == q }
-                        if (tf > 0) {
-                            val n = df[q] ?: 0
-                            val idf = Math.log((N - n + 0.5) / (n + 0.5) + 1.0)
-                            score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b_param + b_param * (docLen / avgdl)))
-                        }
-                    }
-                    pair.first to score
-                }.sortedByDescending { it.second }
-                
-                bestTrack2 = fallbackScores.take(30).map { it.first }
-            }
-            
-            val track2 = bestTrack2
-            println("[AgenticSeedSelector] Track 1 (Lexical) matched ${track1.size} candidates.")
-            println("[AgenticSeedSelector] Track 2 (Agentic BM25) returned ${track2.size} candidates.")
-            
-            val union = (track1 + track2).distinct()
-            println("[AgenticSeedSelector] Final Candidates (Union, count=${union.size}): $union")
-            Pair(union, finalJudgePicks)
-        }
-
-        val candidatesList = candidatesListPair.first
-        val finalJudgePicks = candidatesListPair.second
-        
-        val candidates = candidatesList.joinToString("\n")
-
-        val frameworkName = graph.frameworkDisplayName
-        val additionalContext = if (graph.resolvedFrameworkType == net.ib.ixpert.ops.wuwagent.service.metagraph.model.FrameworkType.ANYFRAME_AP) {
-            """
-            - Anyframe Enterprise 프레임워크 특징:
-              - BIZ: 핵심 업무 로직 (보통 *BIZ 클래스)
-              - SVC: 서비스 인터페이스(*SVC) 및 구현체(*SVCImpl)
-              - DATA_ACCESS: DB 접근 객체 (보통 *DEM 또는 *DQM)
-              - VO: Value Object (BVO, SVO, DVO 등으로 계층화됨)
-              - BIZ_UTIL: 공통 로직 (보통 *Util)
-            """.trimIndent()
-        } else ""
+        val toolsEngine = AgenticGraphTools(graph)
+        val toolDefinitions = AgenticGraphTools.DEFINITIONS
 
         val systemPrompt = """
-            당신은 $frameworkName 프로젝트의 코드 변경 분석가입니다.
-            아래 SR(요구사항)을 읽고, 변경이 시작되어야 할 핵심 진입점(Seed) 클래스를 선정하세요.
-            반드시 제공된 `submit_seeds` 도구를 호출하여 결과를 제출하세요.
+            당신은 시스템의 소스코드 및 메타그래프를 능동적으로 탐색하는 전문 AI 분석 에이전트입니다.
+            주어진 요구사항(SR)을 분석하여, 기능을 구현하거나 수정하는 데 반드시 필요한 핵심 Seed 클래스들을 찾아내야 합니다.
             
-            ## 지침
-            - `seedClasses`에는 최대 3~4개의 핵심 클래스명(패키지 제외)을 지정하세요.
-            - `changeIntent`는 MODIFY, CREATE, DELETE 중 하나여야 합니다.
-            - `layerHint`는 변경이 걸치는 계층(ENTITY, SERVICE, PRESENTATION 등)을 배열로 제공하세요.
-            - `frontendRelevant`는 화면 변경 포함 여부(true/false)입니다.
-            - `frontendRelevant`가 true이면, 관련될 가능성이 높은 Vue/React 파일명 키워드를 `frontendFileHints`에 포함하세요. SR 텍스트의 화면명을 영문 파일명으로 변환하세요. (예: '마이페이지' → 'MyPage', '장바구니' → 'Cart')
-            - `reasoning`은 전체 요구사항의 요약과 함께, 각 대상 파일별 선정 사유를 반드시 "1. [파일명] - [사유]", "2. [파일명] - [사유]" 형식으로 번호를 매겨 상세히 작성하세요.
-            - [구체성 우선 및 추측성 선정 금지] SR이 요구하는 기능에 가장 직접적이고 구체적으로 대응하는 클래스를 Seed로 선정하세요. 후보 중에 이미 해당 기능에 특화된 전용 클래스가 존재하는 경우, "그 전용 클래스가 실제 수정 대상이 아닐 수도 있으니" 또는 "혹시 다른 곳에 로직이 있을 수도 있으니" 같은 가정에 근거해 더 포괄적이거나 일반적인 클래스를 보험용으로 추가 선정하지 마세요. 다만 SR이 명시적으로 공통·공유 로직의 수정을 요구하는 경우에는 해당 공통 클래스를 선정할 수 있습니다.
-            - 중요: JSON 응답 생성 시, reasoning 필드 값 내부에 실제 줄바꿈 문자(\n)를 사용하지 마세요. 줄바꿈 대신 띄어쓰기나 마침표를 사용하세요.
-            $additionalContext
+            당신에게는 4개의 그래프 탐색 도구가 제공됩니다:
+            1. search_graph_nodes(query, domain_hint): 메타그래프에서 클래스명(약어/CamelCase), 한글 주석/로컬명, 메서드명을 3-Tier 구조 매칭으로 검색합니다.
+            2. inspect_node_detail(class_name): 특정 클래스의 메서드, 주석, 호출하는 클래스(dependsOn) 및 호출받는 클래스(dependedBy)를 상세 조회합니다.
+            3. expand_connected_nodes(class_name, direction, max_hops): 기준 클래스로부터 연결된 호출/참조 체인을 확장합니다.
+            4. confirm_final_seeds(seed_classes, rationale): 탐색 결과를 종합하여 최종 Seed 클래스들을 확정하고 탐색을 완료합니다.
+            
+            [도메인 무관 상태 전이 및 턴 규율]
+            - 탐색은 반드시 3단계 전이 흐름(Search -> Inspect -> Confirm)으로 진행해야 합니다:
+              1단계 (Search): 요구사항(SR)의 핵심 목표 및 주요 업무 약어를 조합하여 `search_graph_nodes`를 호출합니다.
+              2단계 (Inspect & Verify): 검색 결과 목록에서 요구사항과 관련된 유력한 핵심 후보 클래스(Service, BIZ, VO 등)를 선택하여 `inspect_node_detail` 또는 `expand_connected_nodes`로 세부 메서드/의존관계를 확인합니다.
+              3단계 (Confirm): `inspect_node_detail`로 후보를 확인한 후에는 불필요한 추가 검색을 멈추고 즉시 `confirm_final_seeds`를 호출하여 핵심 업무 클래스 1~4개를 최종 확정하고 탐색을 종료하세요.
+            - 공통 유틸리티(StringUtil, ConstantUtil 등)나 단순 로그 클래스는 Seed로 확정하지 말고, 실제 비즈니스 로직을 수행하는 서비스(Service/SVC), BIZ, VO 클래스를 Seed로 확정하세요.
         """.trimIndent()
 
-        val userPrompt = """
-            ## SR
-            $srText
-
-            ## 프로젝트 클래스 목록 (클래스명 (패키지명))
-            $candidates
-        """.trimIndent()
-
-        val tool = net.ib.ixpert.ops.wuwagent.model.ToolDefinition(
-            type = "function",
-            function = net.ib.ixpert.ops.wuwagent.model.FunctionDefinition(
-                name = "submit_seeds",
-                description = "요구사항 분석 결과(Seed 클래스 및 인텐트)를 제출합니다.",
-                parameters = net.ib.ixpert.ops.wuwagent.model.FunctionParameters(
-                    type = "object",
-                    properties = mapOf(
-                        "seedClasses" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
-                            type = "array",
-                            description = "변경의 진입점이 되는 핵심 클래스 목록",
-                            items = net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(type = "string")
-                        ),
-                        "changeIntent" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
-                            type = "string",
-                            description = "작업 의도",
-                            enum = listOf("MODIFY", "CREATE", "DELETE")
-                        ),
-                        "layerHint" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
-                            type = "array",
-                            description = "영향을 받는 계층 목록",
-                            items = net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(type = "string")
-                        ),
-                        "frontendRelevant" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
-                            type = "boolean",
-                            description = "프론트엔드 연관 여부"
-                        ),
-                        "reasoning" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
-                            type = "string",
-                            description = "선정 근거"
-                        ),
-                        "frontendFileHints" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
-                            type = "array",
-                            description = "frontendRelevant가 true일 때, 관련될 가능성이 높은 프론트엔드 파일명 키워드 (예: MyPage, ProductDetail, Cart)",
-                            items = net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(type = "string")
-                        )
-                    ),
-                    required = listOf("seedClasses", "changeIntent", "layerHint", "frontendRelevant", "reasoning")
-                )
-            )
+        val messages = mutableListOf(
+            ChatMessage(role = "user", content = "요구사항(SR):\n$srText\n\n위 요구사항을 분석하여 핵심 Seed 클래스들을 탐색하고 확정해주세요.")
         )
 
-        val messages = listOf(
-            net.ib.ixpert.ops.wuwagent.model.ChatMessage(role = "user", content = userPrompt)
-        )
+        val searchTool = toolDefinitions.find { it.function.name == "search_graph_nodes" }!!
+        val inspectTool = toolDefinitions.find { it.function.name == "inspect_node_detail" }!!
+        val expandTool = toolDefinitions.find { it.function.name == "expand_connected_nodes" }!!
+        val confirmTool = toolDefinitions.find { it.function.name == "confirm_final_seeds" }!!
 
-        try {
-            val response = llmClient.chatWithTools(
-                systemPrompt = systemPrompt,
-                messages = messages,
-                maxTokens = 1500,
-                tools = listOf(tool),
-                toolChoice = mapOf("type" to "function", "function" to mapOf("name" to "submit_seeds"))
-            )
+        val phase1Tools = listOf(searchTool, inspectTool, expandTool, confirmTool)
+        val phase2Tools = listOf(inspectTool, expandTool, confirmTool)
+
+        var finalSeeds = listOf<String>()
+        var finalRationale = "기본 탐색 완료"
+        val maxTurns = 6
+        var totalSearchCount = 0
+        val executedQueries = mutableSetOf<String>()
+        val accumulatedTopCandidates = linkedMapOf<String, Double>()
+
+        for (turn in 1..maxTurns) {
+            println("\n[AgenticGraphExplorer] === TURN $turn ===")
             
-            val allRaw = candidatesListPair.first + candidatesListPair.second
-            val isFrontendByRule = srText.contains("어드민") || srText.contains("화면") || 
-                                  srText.contains("UI") || srText.contains("목록") || 
-                                  srText.contains("등록") || srText.contains("조회") ||
-                                  srText.contains("프론트") || srText.contains("vue") || 
-                                  srText.contains("jsp") || srText.contains("js")
+            // Phase gating: 2턴 이상이거나 검색을 3회 이상 수행했으면 Inspect/Confirm 단계로 강제 전이
+            val activeTools = if (turn >= 3 || totalSearchCount >= 3) phase2Tools else phase1Tools
+            val activeToolChoice = if (turn >= 5) {
+                mapOf("type" to "function", "function" to mapOf("name" to "confirm_final_seeds"))
+            } else "auto"
 
-            val toolCall = response?.toolCalls?.firstOrNull { it.function.name == "submit_seeds" }
-            if (toolCall != null) {
-                val res = gson.fromJson(toolCall.function.arguments, SeedSelectionResult::class.java)
-                val finalFrontend = res.frontendRelevant || isFrontendByRule
-                return res.copy(
-                    judgePicks = finalJudgePicks,
-                    rawCandidates = allRaw,
-                    frontendRelevant = finalFrontend
+            val response = try {
+                llmClient.chatWithTools(
+                    systemPrompt = systemPrompt,
+                    messages = messages,
+                    maxTokens = 2048,
+                    tools = activeTools,
+                    toolChoice = activeToolChoice,
+                    temperature = 0.0
                 )
-            } else if (!response?.content.isNullOrBlank()) {
-                // Some models return the tool arguments directly in the text content
-                var cleanJson = response!!.content!!
-                cleanJson = cleanJson.replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "").trim()
-                val jsonMatch = Regex("\\{.*\\}", RegexOption.DOT_MATCHES_ALL).find(cleanJson)
-                val cleanJsonForParse = jsonMatch?.value ?: cleanJson.replace("```json", "").replace("```", "").trim()
-                try {
-                    val parsed = gson.fromJson(cleanJsonForParse, SeedSelectionResult::class.java)
-                    val finalFrontend = parsed.frontendRelevant || isFrontendByRule
-                    return parsed.copy(
-                        judgePicks = finalJudgePicks,
-                        rawCandidates = allRaw,
-                        frontendRelevant = finalFrontend
-                    )
-                } catch (e: Exception) {
-                    val arrayMatch = Regex("\\[.*\\]", RegexOption.DOT_MATCHES_ALL).find(cleanJson)
-                    val arrayJson = arrayMatch?.value ?: cleanJson.replace("```json", "").replace("```", "").trim()
-                    val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                    val list: List<String> = gson.fromJson(arrayJson, type)
-                    if (list.isNotEmpty()) {
-                        return SeedSelectionResult(
-                            seedClasses = list,
-                            changeIntent = ChangeIntent.MODIFY,
-                            layerHint = listOf("SERVICE", "PRESENTATION"),
-                            frontendRelevant = isFrontendByRule,
-                            reasoning = "Parsed from JSON array fallback",
-                            judgePicks = finalJudgePicks,
-                            rawCandidates = allRaw
-                        )
-                    }
-                    throw e
-                }
+            } catch (e: Exception) {
+                println("[AgenticGraphExplorer] Turn $turn Error calling LLM: ${e.message}")
+                break
             }
-        } catch (e: Exception) {
-            println("Failed to get ToolCall from LLM: ${e.message}")
+
+            val choice = response?.choices?.firstOrNull()
+            val assistantMessage = choice?.message
+            if (assistantMessage == null) {
+                println("[AgenticGraphExplorer] Turn $turn: No response from LLM.")
+                break
+            }
+
+            messages.add(assistantMessage)
+
+            val reasoning = assistantMessage.reasoningContent
+            if (!reasoning.isNullOrBlank()) {
+                println("[AgenticGraphExplorer] Turn $turn Thought:\n$reasoning")
+            }
+            if (!assistantMessage.content.isNullOrBlank()) {
+                println("[AgenticGraphExplorer] Turn $turn Message: ${assistantMessage.content}")
+            }
+
+            val toolCalls = assistantMessage.toolCalls
+            if (toolCalls.isNullOrEmpty()) {
+                println("[AgenticGraphExplorer] Turn $turn: LLM finished without tool calls.")
+                break
+            }
+
+            var confirmed = false
+            for (tc in toolCalls) {
+                val fnName = tc.function.name
+                val argsJson = tc.function.arguments
+                println("\n>>> [AgenticGraphExplorer] Tool Call: $fnName")
+                println(">>> Args: $argsJson")
+
+                val toolResultString = when (fnName) {
+                    "search_graph_nodes" -> {
+                        val args = gson.fromJson(argsJson, Map::class.java)
+                        val q = args["query"]?.toString() ?: ""
+                        val hint = args["domain_hint"]?.toString()
+                        val queryKey = "${q.trim().lowercase()}::${hint?.trim()?.lowercase() ?: ""}"
+
+                        // [가드 1] 중복 쿼리 차단 가드
+                        if (executedQueries.contains(queryKey)) {
+                            println("<<< [Guard 1 Warning] Duplicate search query detected: '$q' (hint: $hint)")
+                            gson.toJson(mapOf(
+                                "warning" to "이미 실행된 검색어입니다. 동일한 검색을 반복하지 말고, 이전 검색 결과 후보 중 관련 노드를 inspect_node_detail로 확인하거나 confirm_final_seeds를 호출하세요.",
+                                "status" to "DUPLICATE_QUERY"
+                            ))
+                        } else {
+                            executedQueries.add(queryKey)
+                            totalSearchCount++
+                            val res = toolsEngine.searchGraphNodes(q, hint, limit = 10)
+                            println("<<< Result Count: ${res.size}")
+                            res.forEachIndexed { i, r ->
+                                val cName = r["className"]?.toString() ?: ""
+                                val score = (r["matchScore"] as? Number)?.toDouble() ?: 0.0
+                                println("    ${i+1}. $cName (${r["fileType"]}) - ${r["localName"]} (Score: $score)")
+                                if (cName.isNotBlank() && score > 0) {
+                                    val currentMax = accumulatedTopCandidates[cName] ?: 0.0
+                                    accumulatedTopCandidates[cName] = maxOf(currentMax, score)
+                                }
+                            }
+                            if (executedQueries.size >= 2) {
+                                val topCandidatesSummary = accumulatedTopCandidates.entries
+                                    .sortedByDescending { it.value }
+                                    .take(5)
+                                    .map { it.key }
+                                val responseWithGuidance = mapOf(
+                                    "searchResults" to res,
+                                    "guidance" to "충분한 검색이 수행되었습니다. 지금까지 발견된 유력 후보 $topCandidatesSummary 중 핵심 클래스를 inspect_node_detail로 확인하거나 confirm_final_seeds를 호출하여 확정하세요."
+                                )
+                                gson.toJson(responseWithGuidance)
+                            } else {
+                                gson.toJson(res)
+                            }
+                        }
+                    }
+                    "inspect_node_detail" -> {
+                        val args = gson.fromJson(argsJson, Map::class.java)
+                        val className = args["class_name"]?.toString() ?: ""
+                        val res = toolsEngine.inspectNodeDetail(className)
+                        println("<<< Inspected: $className (Methods: ${(res["methods"] as? List<*>)?.size ?: 0}, DependsOn: ${(res["dependsOn_Downstream"] as? List<*>)?.size ?: 0})")
+                        if (className.isNotBlank()) {
+                            accumulatedTopCandidates[className] = (accumulatedTopCandidates[className] ?: 50.0) + 20.0
+                        }
+                        gson.toJson(res)
+                    }
+                    "expand_connected_nodes" -> {
+                        val args = gson.fromJson(argsJson, Map::class.java)
+                        val className = args["class_name"]?.toString() ?: ""
+                        val dir = args["direction"]?.toString() ?: "BOTH"
+                        val hops = (args["max_hops"] as? Number)?.toInt() ?: 1
+                        val res = toolsEngine.expandConnectedNodes(className, dir, hops)
+                        println("<<< Expanded from $className: ${res["connectedCount"]} nodes connected")
+                        gson.toJson(res)
+                    }
+                    "confirm_final_seeds" -> {
+                        val args = gson.fromJson(argsJson, Map::class.java)
+                        val rawSeeds = args["seed_classes"] as? List<*>
+                        val seeds = rawSeeds?.map { it.toString() } ?: emptyList()
+                        val rationale = args["rationale"]?.toString() ?: ""
+                        println("<<< [AgenticGraphExplorer] SEEDS CONFIRMED! (${seeds.size} classes): $seeds")
+                        println("<<< Rationale: $rationale")
+                        finalSeeds = seeds
+                        finalRationale = rationale
+                        confirmed = true
+                        gson.toJson(mapOf("status" to "SUCCESS", "confirmed_count" to seeds.size))
+                    }
+                    else -> {
+                        gson.toJson(mapOf("error" to "알 수 없는 도구: $fnName"))
+                    }
+                }
+
+                messages.add(
+                    ChatMessage(
+                        role = "tool",
+                        content = toolResultString,
+                        toolCallId = tc.id
+                    )
+                )
+            }
+
+            if (confirmed) {
+                println("[AgenticGraphExplorer] Exploration loop gracefully completed in Turn $turn.")
+                break
+            }
         }
 
-        val fallbackRes = fallbackSelection(srText, graph)
-        return fallbackRes.copy(judgePicks = finalJudgePicks)
+        if (finalSeeds.isNotEmpty()) {
+            return SeedSelectionResult(
+                seedClasses = finalSeeds,
+                changeIntent = ChangeIntent.MODIFY,
+                layerHint = listOf("SERVICE", "BIZ", "PRESENTATION"),
+                frontendRelevant = false,
+                reasoning = finalRationale,
+                judgePicks = finalSeeds,
+                rawCandidates = finalSeeds
+            )
+        }
+
+        // [가드 2] 턴 소진 시 누적 최상위 매칭 후보 자동 Seed 채택 (Fallback 이전 방어선)
+        if (accumulatedTopCandidates.isNotEmpty()) {
+            val topPicks = accumulatedTopCandidates.entries
+                .sortedByDescending { it.value }
+                .take(3)
+                .map { it.key }
+            println("[AgenticGraphExplorer] Guard 2: Auto-adopting top candidates after turn limit: $topPicks")
+            return SeedSelectionResult(
+                seedClasses = topPicks,
+                changeIntent = ChangeIntent.MODIFY,
+                layerHint = listOf("SERVICE", "BIZ", "PRESENTATION"),
+                frontendRelevant = false,
+                reasoning = "Auto-adopted top matching nodes from exploration after turn limit",
+                judgePicks = topPicks,
+                rawCandidates = topPicks
+            )
+        }
+
+        println("[AgenticGraphExplorer] Fallback: No final seeds confirmed, applying heuristic fallback.")
+        return fallbackSelection(srText, graph)
     }
 
     private fun fallbackSelection(srText: String, graph: ProjectGraphQueryable): SeedSelectionResult {
-        // 영단어 추출 후 className 부분 일치 검사
         val englishTokens = Regex("[a-zA-Z]{3,}").findAll(srText).map { it.value }.toList()
-        // 한글 명사 추출 (간단히 2글자 이상) 및 불용어 제거
         val stopWords = setOf("추가", "생성", "신규", "삭제", "제거", "수정", "변경", "기능", "항목", "목록", "조회", "화면", "출력", "관련", "처리", "동작", "적용", "로직", "기반", "부분")
         val koreanTokens = Regex("[가-힣]{2,}").findAll(srText)
             .map { it.value }
@@ -445,13 +256,9 @@ class AgenticSeedSelector(
         
         for (node in graph.files.values) {
             val className = node.className
-            
-            // 1. 영어 매칭 (클래스명)
             if (englishTokens.isNotEmpty() && englishTokens.any { className.contains(it, ignoreCase = true) }) {
                 seeds.add(className)
             }
-            
-            // 2. 한글 매칭 (localName, koreanComments)
             if (koreanTokens.isNotEmpty()) {
                 val matchLocalName = node.localName?.let { ln -> koreanTokens.any { ln.contains(it) } } == true
                 val matchComments = node.koreanComments.any { c -> koreanTokens.any { c.contains(it) } }
@@ -459,11 +266,9 @@ class AgenticSeedSelector(
                     seeds.add(className)
                 }
             }
-            
             if (seeds.size >= 5) break
         }
 
-        // 한국어 키워드 기반 유추
         val isCreate = srText.contains("추가") || srText.contains("생성") || srText.contains("신규")
         val isDelete = srText.contains("삭제") || srText.contains("제거")
         val isFrontend = srText.contains("화면") || srText.contains("UI") || srText.contains("표시")
@@ -471,9 +276,272 @@ class AgenticSeedSelector(
         return SeedSelectionResult(
             seedClasses = seeds.toList(),
             changeIntent = if (isCreate) ChangeIntent.CREATE else if (isDelete) ChangeIntent.DELETE else ChangeIntent.MODIFY,
-            layerHint = listOf("SERVICE", "PRESENTATION"), // 임의 기본값
+            layerHint = listOf("SERVICE", "PRESENTATION"),
             frontendRelevant = isFrontend,
             reasoning = "Fallback: Keyword matching due to LLM failure or timeout"
+        )
+    }
+}
+
+/**
+ * 그래프 툴콜 에이전트를 위한 4대 탐색 도구 엔진 및 3-Tier 구조 매처
+ */
+class AgenticGraphTools(
+    private val graph: ProjectGraphQueryable
+) {
+    companion object {
+        private val STRUCTURAL_STOPWORDS = setOf(
+            "response", "request", "service", "impl", "vo", "dto", "controller", "repository",
+            "mapper", "dao", "biz", "svo", "bvo", "dvo", "dem", "dqm", "util", "helper",
+            "config", "entity", "model", "api", "app", "bo", "src", "main", "java", "com", "sc", "chn", "aps", "apc"
+        )
+
+        val DEFINITIONS: List<ToolDefinition> = listOf(
+            ToolDefinition(
+                type = "function",
+                function = FunctionDefinition(
+                    name = "search_graph_nodes",
+                    description = "메타그래프에서 클래스명(약어/CamelCase), 한글 주석/로컬명, 메서드명을 검색하여 상위 관련 노드 목록을 조회합니다.",
+                    parameters = FunctionParameters(
+                        type = "object",
+                        properties = mapOf(
+                            "query" to PropertyDefinition(
+                                type = "string",
+                                description = "검색 키워드 (예: 'sspy otc', '삼성페이 서명', 'otc 서명', 'PointHistory')"
+                            ),
+                            "domain_hint" to PropertyDefinition(
+                                type = "string",
+                                description = "특정 패키지/도메인 경로 힌트 (선택 사항, 예: 'mm05', 'st.pstat', 'py01')"
+                            )
+                        ),
+                        required = listOf("query")
+                    )
+                )
+            ),
+            ToolDefinition(
+                type = "function",
+                function = FunctionDefinition(
+                    name = "inspect_node_detail",
+                    description = "특정 클래스 노드의 상세 메타데이터(한글 주석, 메서드 목록, 입출력 VO, 호출하는 클래스 dependsOn, 호출받는 클래스 dependedBy)를 상세 조회합니다.",
+                    parameters = FunctionParameters(
+                        type = "object",
+                        properties = mapOf(
+                            "class_name" to PropertyDefinition(
+                                type = "string",
+                                description = "조회할 클래스명 (예: 'APCMMSspyLkSVCImpl', 'PDsbUseController')"
+                            )
+                        ),
+                        required = listOf("class_name")
+                    )
+                )
+            ),
+            ToolDefinition(
+                type = "function",
+                function = FunctionDefinition(
+                    name = "expand_connected_nodes",
+                    description = "특정 클래스 노드로부터 그래프 엣지(호출/참조 관계)를 따라 연결된 상하위 노드 체인을 확장 탐색합니다.",
+                    parameters = FunctionParameters(
+                        type = "object",
+                        properties = mapOf(
+                            "class_name" to PropertyDefinition(
+                                type = "string",
+                                description = "기준 클래스명"
+                            ),
+                            "direction" to PropertyDefinition(
+                                type = "string",
+                                enum = listOf("DOWNSTREAM", "UPSTREAM", "BOTH"),
+                                description = "확장 방향: DOWNSTREAM, UPSTREAM, BOTH"
+                            ),
+                            "max_hops" to PropertyDefinition(
+                                type = "integer",
+                                description = "탐색할 최대 홉 수 (기본 1, 최대 2)"
+                            )
+                        ),
+                        required = listOf("class_name")
+                    )
+                )
+            ),
+            ToolDefinition(
+                type = "function",
+                function = FunctionDefinition(
+                    name = "confirm_final_seeds",
+                    description = "요구사항(SR) 구현에 필요한 핵심 수정 대상 및 참조 진입점 Seed 클래스들을 최종 확정하고 탐색을 완료합니다.",
+                    parameters = FunctionParameters(
+                        type = "object",
+                        properties = mapOf(
+                            "seed_classes" to PropertyDefinition(
+                                type = "array",
+                                items = PropertyDefinition(type = "string"),
+                                description = "최종 확정된 Seed 클래스명 목록"
+                            ),
+                            "rationale" to PropertyDefinition(
+                                type = "string",
+                                description = "해당 클래스들을 Seed로 선정한 구체적 근거 및 구현 역할 설명"
+                            )
+                        ),
+                        required = listOf("seed_classes", "rationale")
+                    )
+                )
+            )
+        )
+    }
+
+    private fun splitCamelCase(text: String): List<String> {
+        return text.replace(Regex("([a-z])([A-Z])"), "$1 $2")
+            .replace(Regex("([A-Z])([A-Z][a-z])"), "$1 $2")
+            .lowercase()
+            .split(Regex("[^a-z0-9]"))
+            .filter { it.isNotBlank() && it !in STRUCTURAL_STOPWORDS }
+    }
+
+    fun searchGraphNodes(query: String, domainHint: String? = null, limit: Int = 10): List<Map<String, Any>> {
+        val rawTokens = query.lowercase().split(Regex("[^a-z0-9가-힣]")).filter { it.isNotBlank() }
+        val englishTokens = rawTokens.filter { it.matches(Regex("[a-z0-9]+")) }
+        val koreanTokens = rawTokens.filter { it.matches(Regex("[가-힣]+")) }
+
+        val scored = graph.files.values.mapNotNull { node ->
+            var score = 0.0
+            val className = node.className
+            val classSegments = splitCamelCase(className)
+            val pathLower = node.path.lowercase()
+            val localName = node.localName ?: ""
+            val comments = node.koreanComments?.joinToString(" ") ?: ""
+            val methods = node.methods ?: emptyList()
+            val methodSegments = methods.flatMap { splitCamelCase(it.name) }
+
+            // Tier 1: CamelCase / 약어 일치
+            for (eng in englishTokens) {
+                if (eng.length < 2) continue
+                if (classSegments.any { it == eng }) {
+                    score += 100.0
+                } else if (classSegments.any { it.contains(eng) }) {
+                    score += 60.0
+                } else if (className.lowercase().contains(eng)) {
+                    score += 40.0
+                }
+
+                if (methodSegments.any { it == eng }) {
+                    score += 50.0
+                } else if (methodSegments.any { it.contains(eng) }) {
+                    score += 30.0
+                }
+            }
+
+            // Tier 2: 한글 주석 / 로컬명 일치
+            for (kor in koreanTokens) {
+                if (kor.length < 2) continue
+                if (localName.contains(kor)) {
+                    score += 50.0
+                }
+                if (comments.contains(kor)) {
+                    score += 25.0
+                }
+            }
+
+            // Tier 3: 도메인/패키지 힌트 스코프
+            if (!domainHint.isNullOrBlank()) {
+                val hintClean = domainHint.lowercase().trim()
+                if (pathLower.contains(hintClean)) {
+                    score += 30.0
+                }
+            }
+
+            if (score > 0) {
+                Triple(node, score, classSegments)
+            } else null
+        }.sortedByDescending { it.second }
+
+        return scored.take(limit).map { (node, score, _) ->
+            val keyMethods = node.methods?.map { it.name }?.take(5) ?: emptyList()
+            mapOf(
+                "className" to node.className,
+                "path" to node.path,
+                "fileType" to node.fileType.name,
+                "localName" to (node.localName ?: "주석 없음"),
+                "keyMethods" to keyMethods,
+                "matchScore" to score
+            )
+        }
+    }
+
+    fun inspectNodeDetail(className: String): Map<String, Any> {
+        val node = graph.files.values.find { it.className == className || it.path.endsWith("/$className.java") }
+            ?: return mapOf("error" to "노드를 찾을 수 없습니다: $className")
+
+        val downstream = node.dependsOn.mapNotNull { depPath ->
+            graph.files[depPath]?.let { "${it.className} (${it.fileType.name})" } ?: depPath.substringAfterLast('/')
+        }
+
+        val upstream = graph.files.values.filter { it.dependsOn.contains(node.path) }.map {
+            "${it.className} (${it.fileType.name})"
+        }
+
+        val methodDetails = node.methods?.map {
+            mapOf(
+                "name" to it.name,
+                "returnType" to it.returnType,
+                "parameters" to it.parameters
+            )
+        } ?: emptyList()
+
+        return mapOf(
+            "className" to node.className,
+            "path" to node.path,
+            "fileType" to node.fileType.name,
+            "localName" to (node.localName ?: ""),
+            "koreanComments" to (node.koreanComments ?: emptyList()),
+            "methods" to methodDetails,
+            "dependsOn_Downstream" to downstream,
+            "dependedBy_Upstream" to upstream
+        )
+    }
+
+    fun expandConnectedNodes(className: String, direction: String = "BOTH", maxHops: Int = 1): Map<String, Any> {
+        val rootNode = graph.files.values.find { it.className == className }
+            ?: return mapOf("error" to "기준 노드를 찾을 수 없습니다: $className")
+
+        val result = mutableSetOf<FileNode>()
+        var currentFrontier = setOf(rootNode)
+        val visitedPaths = mutableSetOf(rootNode.path)
+        val actualHops = maxHops.coerceIn(1, 2)
+
+        for (hop in 1..actualHops) {
+            val nextFrontier = mutableSetOf<FileNode>()
+            for (curr in currentFrontier) {
+                if (direction == "DOWNSTREAM" || direction == "BOTH") {
+                    for (depPath in curr.dependsOn) {
+                        val target = graph.files[depPath]
+                        if (target != null && !visitedPaths.contains(target.path)) {
+                            visitedPaths.add(target.path)
+                            nextFrontier.add(target)
+                            result.add(target)
+                        }
+                    }
+                }
+                if (direction == "UPSTREAM" || direction == "BOTH") {
+                    for (candidate in graph.files.values) {
+                        if (candidate.dependsOn.contains(curr.path) && !visitedPaths.contains(candidate.path)) {
+                            visitedPaths.add(candidate.path)
+                            nextFrontier.add(candidate)
+                            result.add(candidate)
+                        }
+                    }
+                }
+            }
+            currentFrontier = nextFrontier
+        }
+
+        return mapOf(
+            "rootClass" to rootNode.className,
+            "connectedCount" to result.size,
+            "connectedNodes" to result.map { node ->
+                mapOf(
+                    "className" to node.className,
+                    "fileType" to node.fileType.name,
+                    "localName" to (node.localName ?: ""),
+                    "path" to node.path
+                )
+            }
         )
     }
 }
