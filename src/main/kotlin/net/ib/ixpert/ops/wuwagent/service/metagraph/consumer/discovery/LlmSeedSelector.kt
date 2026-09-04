@@ -47,6 +47,7 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             val qTokens = tokenize(srText).toMutableList()
             
             // --- Domain Keyword Extraction & Injection ---
+            val domainTokensToInject = mutableListOf<String>()
             try {
                 val domainSystemPrompt = """
                     당신은 엔터프라이즈 시스템의 도메인 분석 전문가입니다.
@@ -57,18 +58,13 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
                 val domainKeyword = domainRes?.message?.content?.trim()?.replace(Regex("[^가-힣a-zA-Z]"), "")
                 if (!domainKeyword.isNullOrBlank()) {
                     println("[LlmSeedSelector] Extracted domain keyword: $domainKeyword")
-                    
-                    // Add the keyword itself to boost nodes with matching korean comments
-                    for (i in 1..5) qTokens.add(domainKeyword)
+                    domainTokensToInject.add(domainKeyword)
                     
                     val dict = DomainDictionary.load(graph)
                     val prefixes = dict.translate(domainKeyword)
                     if (prefixes.isNotEmpty()) {
-                        println("[LlmSeedSelector] Injected domain prefixes into BM25: $prefixes")
-                        // Add each prefix 5 times to give it a strong boost in BM25
-                        prefixes.forEach { p ->
-                            for (i in 1..5) qTokens.add(p)
-                        }
+                        println("[LlmSeedSelector] Discovered domain prefixes for injection: $prefixes")
+                        domainTokensToInject.addAll(prefixes)
                     }
                 }
             } catch (e: Exception) {
@@ -103,6 +99,20 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             
             val N = documents.size
             val avgdl = if (N > 0) totalLength.toDouble() / N else 1.0
+            val maxIdfNorm = if (N > 1) Math.log(N.toDouble()) else 1.0
+
+            // [Arm C: Normalized IDF-Weighted Boosting (K=5)]
+            if (domainTokensToInject.isNotEmpty() && N > 0) {
+                domainTokensToInject.forEach { token ->
+                    val dfVal = documents.values.count { it.second.contains(token) }
+                    val idfWeight = Math.max(0.0, Math.min(1.0, Math.log(N.toDouble() / maxOf(1, dfVal)) / maxIdfNorm))
+                    val repeatCount = maxOf(1, minOf(5, Math.round(idfWeight * 5).toInt()))
+                    println("[LlmSeedSelector] Injected token '$token' (DF=$dfVal, IdfWeight=${String.format("%.3f", idfWeight)}, RepeatCount=$repeatCount)")
+                    for (i in 1..repeatCount) {
+                        qTokens.add(token)
+                    }
+                }
+            }
             
             val df = mutableMapOf<String, Int>()
             for (q in qTokens) df[q] = documents.values.count { it.second.contains(q) }
