@@ -138,90 +138,110 @@ class AgenticSeedSelector(
             // Loop (Act -> Observe)
             for (keyword in domainKeywords) {
                 println("\n[AgenticSeedSelector] Loop - Act: Testing keyword '$keyword'")
-                val qTokens = qTokensBase.toMutableList()
-                for (i in 1..5) qTokens.add(keyword)
-                
                 val prefixes = dict.translate(keyword)
-                if (prefixes.isNotEmpty()) {
-                    prefixes.forEach { p ->
-                        for (i in 1..5) qTokens.add(p)
-                    }
-                }
-                println("[BM25-DIAG] Keyword: '$keyword' -> Translated Tokens: $prefixes | Final qTokens: ${qTokens.toSet()}")
+                
+                // Deduplicated query token set
+                val uniqueQueryTokens = (qTokensBase + keyword + prefixes).distinct()
+                val boostedTerms = (listOf(keyword) + prefixes).distinct().toSet()
+                
+                println("[BM25-DIAG] Keyword: '$keyword' -> Translated Tokens: $prefixes | Unique Query Tokens Count: ${uniqueQueryTokens.size}")
                 
                 val df = mutableMapOf<String, Int>()
-                for (q in qTokens) df[q] = documents.values.count { it.second.contains(q) }
+                for (q in uniqueQueryTokens) df[q] = documents.values.count { it.second.contains(q) }
                 
                 val scores = documents.map { (path, pair) ->
                     var score = 0.0
                     val docLen = pair.second.size
-                    for (q in qTokens) {
+                    for (q in uniqueQueryTokens) {
                         val tf = pair.second.count { it == q }
                         if (tf > 0) {
                             val n = df[q] ?: 0
                             val idf = Math.log((N - n + 0.5) / (n + 0.5) + 1.0)
-                            score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b_param + b_param * (docLen / avgdl)))
+                            
+                            // Proper IDF-proportional boosting weight (Rare term -> up to 2.5x boost, Common term -> minimal 1.1x boost)
+                            val boostWeight = if (boostedTerms.contains(q)) {
+                                1.0 + Math.min(1.5, Math.max(0.1, idf / 3.0))
+                            } else 1.0
+                            
+                            val termScore = idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b_param + b_param * (docLen / avgdl)))
+                            score += termScore * boostWeight
                         }
                     }
                     path to score
                 }.sortedByDescending { it.second }
                 
                 val top30Ids = scores.take(30).map { it.first }
-                val top10Prompts = top30Ids.take(10).mapNotNull { documents[it]?.first }
-                
                 println("[BM25-DIAG] Top 5 Scores: ${scores.take(5).map { "${it.first.substringAfterLast('/')} (${String.format("%.2f", it.second)})" }}")
-                println("[AgenticSeedSelector] Loop - Observe: Evaluating Top 10 nodes with LLM-as-a-Judge")
-                println("[AgenticSeedSelector] Top 10 Nodes given to Judge: $top10Prompts")
-                val judgeSystemPrompt = """
-                    당신은 이커머스 시스템의 도메인 분석 심판입니다.
-                    아래는 특정 키워드로 검색된 시스템 클래스 목록입니다.
-                    이 클래스들이 다음 요구사항(SR)을 구현하는 데 핵심적으로 관련되어 있는지 판단하세요.
-                    
-                    반드시 아래 JSON 형식으로만 답변하세요. 마크다운 기호 없이 순수 JSON만 출력하세요.
-                    {
-                      "relevant": true,
-                      "confidence": 85,
-                      "matched_nodes": ["클래스명1", "클래스명2"]
-                    }
-                """.trimIndent()
                 
-                val judgeUserPrompt = """
-                    요구사항(SR): $srText
+                val windowSize = 10
+                val maxWindows = 3
+                var keywordAccepted = false
+
+                for (w in 0 until maxWindows) {
+                    val startIndex = w * windowSize
+                    val currentWindowIds = top30Ids.drop(startIndex).take(windowSize)
+                    if (currentWindowIds.isEmpty()) break
                     
-                    검색된 클래스 목록:
-                    ${top10Prompts.joinToString("\n")}
-                """.trimIndent()
-                
-                try {
-                    val judgeRes = llmClient.chat(judgeSystemPrompt, judgeUserPrompt, 300, null)
-                    var jsonStr = judgeRes?.message?.content?.trim() ?: ""
-                    jsonStr = jsonStr.replace(Regex("```json|```"), "").trim()
-                    if (jsonStr.contains("{")) {
-                        jsonStr = jsonStr.substring(jsonStr.indexOf("{"), jsonStr.lastIndexOf("}") + 1)
-                    }
-                    
-                    val judgeOutput = gson.fromJson(jsonStr, Map::class.java) as Map<String, Any>
-                    val isRelevant = judgeOutput["relevant"] as? Boolean ?: false
-                    val matchedNodesRaw = judgeOutput["matched_nodes"] as? List<*>
-                    val matchedNodes = matchedNodesRaw?.map { it.toString() } ?: emptyList()
-                    
-                    println("[AgenticSeedSelector] Judge Output: relevant=$isRelevant, matched_nodes=$matchedNodes")
-                    
-                    if (isRelevant) {
-                        val hasActualMatch = matchedNodes.any { nodeName -> top10Prompts.any { it.contains(nodeName) } }
-                        if (hasActualMatch) {
-                            println("[AgenticSeedSelector] Loop - Terminating! Keyword '$keyword' accepted by strict stopping rule.")
-                            bestTrack2 = top30Ids
-                            finalJudgePicks = matchedNodes
-                            break
-                        } else {
-                            println("[AgenticSeedSelector] Loop - Rejected: Judge returned relevant=true, but matched_nodes were fabricated or missing.")
+                    val currentPrompts = currentWindowIds.mapNotNull { documents[it]?.first }
+                    println("[AgenticSeedSelector] Loop - Observe: Evaluating Window ${w + 1} (${startIndex + 1}~${startIndex + currentWindowIds.size}위, count=${currentPrompts.size}) with LLM-as-a-Judge")
+                    println("[AgenticSeedSelector] Window ${w + 1} Nodes given to Judge: $currentPrompts")
+
+                    val judgeSystemPrompt = """
+                        당신은 시스템의 도메인 분석 심판입니다.
+                        아래는 특정 키워드로 검색된 시스템 클래스 목록입니다.
+                        이 클래스들이 다음 요구사항(SR)을 구현하는 데 핵심적으로 관련되어 있는지 판단하세요.
+                        
+                        반드시 아래 JSON 형식으로만 답변하세요. 마크다운 기호 없이 순수 JSON만 출력하세요.
+                        {
+                          "relevant": true,
+                          "confidence": 85,
+                          "matched_nodes": ["클래스명1", "클래스명2"]
                         }
-                    } else {
-                        println("[AgenticSeedSelector] Loop - Rejected: Judge deemed results irrelevant.")
+                    """.trimIndent()
+                    
+                    val judgeUserPrompt = """
+                        요구사항(SR): $srText
+                        
+                        검색된 클래스 목록:
+                        ${currentPrompts.joinToString("\n")}
+                    """.trimIndent()
+                    
+                    try {
+                        val judgeRes = llmClient.chat(judgeSystemPrompt, judgeUserPrompt, 300, null)
+                        var jsonStr = judgeRes?.message?.content?.trim() ?: ""
+                        jsonStr = jsonStr.replace(Regex("```json|```"), "").trim()
+                        if (jsonStr.contains("{")) {
+                            jsonStr = jsonStr.substring(jsonStr.indexOf("{"), jsonStr.lastIndexOf("}") + 1)
+                        }
+                        
+                        val judgeOutput = gson.fromJson(jsonStr, Map::class.java) as Map<String, Any>
+                        val isRelevant = judgeOutput["relevant"] as? Boolean ?: false
+                        val matchedNodesRaw = judgeOutput["matched_nodes"] as? List<*>
+                        val matchedNodes = matchedNodesRaw?.map { it.toString() } ?: emptyList()
+                        
+                        println("[AgenticSeedSelector] Window ${w + 1} Judge Output: relevant=$isRelevant, matched_nodes=$matchedNodes")
+                        
+                        if (isRelevant) {
+                            val hasActualMatch = matchedNodes.any { nodeName -> currentPrompts.any { it.contains(nodeName) } }
+                            if (hasActualMatch) {
+                                println("[AgenticSeedSelector] Loop - Terminating! Keyword '$keyword' (Window ${w + 1}) accepted by strict stopping rule. Seeds: $matchedNodes")
+                                bestTrack2 = top30Ids
+                                finalJudgePicks = matchedNodes
+                                keywordAccepted = true
+                                break
+                            } else {
+                                println("[AgenticSeedSelector] Window ${w + 1} Rejected: Judge returned relevant=true, but matched_nodes were fabricated or not in window.")
+                            }
+                        } else {
+                            println("[AgenticSeedSelector] Window ${w + 1} Rejected: Judge deemed nodes irrelevant. Sliding to next window...")
+                        }
+                    } catch (e: Exception) {
+                        println("[AgenticSeedSelector] Window ${w + 1} Judge error: ${e.message}")
                     }
-                } catch (e: Exception) {
-                    println("[AgenticSeedSelector] Loop - Judge error: ${e.message}")
+                }
+                
+                if (keywordAccepted) {
+                    break
                 }
             }
             
