@@ -231,7 +231,7 @@ class IntegrationPipelineTest {
                 "name" to "ISM_HeldOut_ScReturn",
                 "path" to "C:/Workspace/graph/project-graph-i/project-graph.json",
                 "sr" to "반품지연 목록 및 상세 내역 조회, 반품지연 메모 등록 기능 개발",
-                "gt" to listOf("ScReturnController", "ScReturnServiceImpl", "ECOPTBISM026Mapper", "ECOPTBISM026Mapper.xml")
+                "gt" to listOf("ScReturnController", "ScReturnServiceImpl", "SC_ECOPTBISM026Mapper", "ECOPTBISM026.xml")
             ),
             mapOf(
                 "name" to "member_market_HeldOut_Chat",
