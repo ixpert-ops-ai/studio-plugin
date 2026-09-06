@@ -1,6 +1,11 @@
 package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery
 
 /**
+ * [미사용 보류 컴포넌트]
+ * - 용도: 후단(Post-retrieval) 동점 해소 및 askUser 트리거 판정용.
+ * - 현재 상태: 파이프라인 미연결 (단독 클래스 + 단위테스트만 유지).
+ * - 사유: under-determined(복수 패키지 분산 동점) 실운영 실케이스 확보 시 재검토 예정.
+ * 
  * 3-샘플 실측(ScReturn, Chat, PDsbUse) 기반 초기 가설 파라미터.
  * 
  * [설계 철학 & 가설 명시]
