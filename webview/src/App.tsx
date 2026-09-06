@@ -7,6 +7,7 @@ import mermaid from 'mermaid';
 import 'highlight.js/styles/github-dark.css';
 import './index.css';
 import { ScopeSelectionTree } from './ScopeSelectionTree';
+import { L1ClarificationForm } from './L1ClarificationForm';
 
 // Mermaid 글로벌 초기 설정
 mermaid.initialize({
@@ -372,6 +373,31 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
             }));
           }
           window.postMessage({ type: 'ai_message', subType: 'scopeSelection/hideTree', id: 'system' }, '*');
+        }}
+      />
+    );
+  }
+
+  // 0.7 L1 Clarification (1턴 도메인 힌트 요청)
+  if (msg.subType === 'l1Clarification/request') {
+    return (
+      <L1ClarificationForm
+        payload={msg.content}
+        onCancel={(projectId) => {
+          if (window.sendToIde) {
+            window.sendToIde(JSON.stringify({
+              command: 'l1Clarification/cancel',
+              text: JSON.stringify({ projectId })
+            }));
+          }
+        }}
+        onSubmit={(projectId, userHint) => {
+          if (window.sendToIde) {
+            window.sendToIde(JSON.stringify({
+              command: 'l1Clarification/submit',
+              text: JSON.stringify({ projectId, userHint })
+            }));
+          }
         }}
       />
     );
@@ -899,6 +925,27 @@ function App() {
 
       if (data.subType === 'scopeSelection/hideTree') {
         setMessages(prev => prev.filter(m => m.subType !== 'scopeSelection/showTree'));
+        return;
+      }
+
+      if (data.subType === 'l1Clarification/request') {
+        if (messageId) {
+          setMessages(prev => {
+            const filtered = prev.filter(m => m.subType !== 'l1Clarification/request');
+            return [...filtered, {
+              id: messageId,
+              role: 'ai',
+              subType: 'l1Clarification/request',
+              content: data.content,
+              isLoading: false
+            }];
+          });
+        }
+        return;
+      }
+
+      if (data.subType === 'l1Clarification/hide') {
+        setMessages(prev => prev.filter(m => m.subType !== 'l1Clarification/request'));
         return;
       }
 
