@@ -2,6 +2,7 @@ package net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery
 
 import com.intellij.openapi.project.Project
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
+import net.ib.ixpert.ops.wuwagent.agent.JcefL1ClarificationBridge
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraphQueryable
 
 object AdaptiveFileDiscovery {
@@ -22,7 +23,12 @@ object AdaptiveFileDiscovery {
         val srText = "$primaryReq\n$secondaryReq"
         // Phase 1: Seed Selection
         // 테스트 환경 등에서는 MockSeedSelector가 주입될 수 있으나, 프로덕션에서는 AgenticSeedSelector 사용
-        val selector: SeedSelector = seedSelector ?: AgenticSeedSelector(client, projectBasePath = projectBasePath ?: project?.basePath)
+        val defaultBridge = if (project != null) JcefL1ClarificationBridge(project) else null
+        val selector: SeedSelector = seedSelector ?: AgenticSeedSelector(
+            llmClient = client,
+            projectBasePath = projectBasePath ?: project?.basePath,
+            clarificationBridge = defaultBridge
+        )
         val seedResult = selector.selectSeeds(srText, graph)
 
         onProgress?.invoke("식별된 Seed 바탕으로 그래프 탐색 중... (${seedResult.seedClasses.size}개 발견)")

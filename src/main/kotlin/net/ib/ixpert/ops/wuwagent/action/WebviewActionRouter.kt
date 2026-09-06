@@ -315,6 +315,20 @@ class WebviewActionRouter(private val project: Project) {
                     net.ib.ixpert.ops.wuwagent.agent.ScopeSelectionBridge.completeDependencyConfirmation(project, acceptedPaths)
                 }
 
+                // ── L1 Domain Clarification Events ────────
+                "l1Clarification/submit" -> {
+                    val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
+                    val userHint = payload["userHint"]?.toString()
+                    val projectId = payload["projectId"]?.toString() ?: project.locationHash
+                    net.ib.ixpert.ops.wuwagent.agent.JcefL1ClarificationBridge.completeClarification(projectId, userHint)
+                }
+
+                "l1Clarification/cancel" -> {
+                    val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
+                    val projectId = payload["projectId"]?.toString() ?: project.locationHash
+                    net.ib.ixpert.ops.wuwagent.agent.JcefL1ClarificationBridge.cancelClarification(projectId)
+                }
+
                 // ── 자동 코드 작성 스텁 (Phase 2b) ────────
                 "/implement" -> {
                     logger.info("Router: /implement 분기")

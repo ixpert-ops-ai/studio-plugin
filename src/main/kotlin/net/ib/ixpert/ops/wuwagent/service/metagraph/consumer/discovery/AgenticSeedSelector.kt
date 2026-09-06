@@ -7,12 +7,14 @@ import net.ib.ixpert.ops.wuwagent.model.ToolDefinition
 import net.ib.ixpert.ops.wuwagent.model.FunctionDefinition
 import net.ib.ixpert.ops.wuwagent.model.FunctionParameters
 import net.ib.ixpert.ops.wuwagent.model.PropertyDefinition
+import net.ib.ixpert.ops.wuwagent.agent.L1ClarificationBridge
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraphQueryable
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode
 
 class AgenticSeedSelector(
     private val llmClient: LLMClient,
-    private val projectBasePath: String? = null
+    private val projectBasePath: String? = null,
+    private val clarificationBridge: L1ClarificationBridge? = null
 ) : SeedSelector {
 
     private val gson = Gson()
@@ -61,6 +63,10 @@ class AgenticSeedSelector(
         var finalRationale = "기본 탐색 완료"
         val maxTurns = 6
         var totalSearchCount = 0
+        var turn1AnchorMissing = false
+        var turn1Query = ""
+        var turn1TopCandidates = emptyList<Map<String, Any>>()
+        var turn1Domains = emptyList<String>()
         val executedQueries = mutableSetOf<String>()
         val accumulatedTopCandidates = linkedMapOf<String, Double>()
 
@@ -145,6 +151,48 @@ class AgenticSeedSelector(
                                     accumulatedTopCandidates[cName] = maxOf(currentMax, score)
                                 }
                             }
+
+                            // [Stage 1: 1턴 앵커 실종 / 플래토 감지 텔레메트리 (Log-only Wiring)]
+                            // 가드 1: totalSearchCount == 1 조건으로 첫 검색(1턴)에 한정하여 발동 (이후 좁은 재검색 시 중복/오발동 방지).
+                            // 가드 2: res.size >= 5: 최소 5개 이상 후보가 매칭되어야 점수 낙차(Relative Spread)를 통계적으로 유의미하게 평가 가능.
+                            //        [사각지대 처리 정책]: res.size < 5 (0개 또는 극소수 매칭) 케이스는 LLM이 빈 검색 결과를 인지하고
+                            //        2턴에서 영문 번역/대체 키워드로 즉시 자율 전환(Autonomous Pivot)하므로, 불필요한 되묻기를 유발하지 않고
+                            //        에이전트의 2턴 자율 복구에 의도적으로 위임함.
+                            if (totalSearchCount == 1 && res.isNotEmpty()) {
+                                val top1Score = (res.firstOrNull()?.get("matchScore") as? Number)?.toDouble() ?: 0.0
+                                val top10Score = if (res.size >= 10) {
+                                    (res[9]["matchScore"] as? Number)?.toDouble() ?: 0.0
+                                } else {
+                                    (res.lastOrNull()?.get("matchScore") as? Number)?.toDouble() ?: 0.0
+                                }
+                                val gap = top1Score - top10Score
+                                val relativeSpread = if (top1Score > 0) (gap / top1Score) else 0.0
+                                
+                                // 동점 노드 수 (Top-1 최고점과 완전히 동일한 점수를 받은 노드 개수 - 플래토의 물리적 앵커 부재 원인)
+                                val tieCount = res.count { ((it["matchScore"] as? Number)?.toDouble() ?: 0.0) == top1Score }
+
+                                // 도메인 분산도 계측 (상위 매칭 노드들의 패키지/도메인 다양성 및 최고 도메인 점유율)
+                                val domains = res.map { extractDomainFromPath(it["path"]?.toString() ?: "") }
+                                val distinctDomains = domains.distinct().size
+                                val topDomainCount = domains.groupingBy { it }.eachCount().values.maxOrNull() ?: 0
+                                val topDomainShare = if (res.isNotEmpty()) (topDomainCount.toDouble() / res.size) * 100 else 0.0
+
+                                // 순수 플래토 단일 지표: 5개 이상 후보가 매칭되었으나 상위 10개 간 점수 낙차가 5% 이하인 경우 앵커 실종 판정
+                                val isPlateau = res.size >= 5 && relativeSpread <= 0.05
+                                val isAnchorMissing = isPlateau
+
+                                val spreadPct = String.format("%.1f", relativeSpread * 100)
+                                val sharePct = String.format("%.1f", topDomainShare)
+                                println("<<< [Turn 1 Anchor Telemetry] Top1: ${top1Score}점, Top10: ${top10Score}점, Gap: ${gap}점, RelSpread: ${spreadPct}%, Matches: ${res.size}개, TieCount: ${tieCount}개, DistinctDomains: ${distinctDomains}개, TopDomainShare: ${sharePct}% | Plateau: $isPlateau -> AnchorMissing: $isAnchorMissing")
+
+                                if (isAnchorMissing) {
+                                    turn1AnchorMissing = true
+                                    turn1Query = q
+                                    turn1TopCandidates = res.take(5)
+                                    turn1Domains = domains.distinct()
+                                }
+                            }
+
                             if (executedQueries.size >= 2) {
                                 val topCandidatesSummary = accumulatedTopCandidates.entries
                                     .sortedByDescending { it.value }
@@ -203,6 +251,32 @@ class AgenticSeedSelector(
                         toolCallId = tc.id
                     )
                 )
+            }
+
+            // 1턴 종료 시: 앵커 실종(플래토) 감지 시 사용자 되묻기(L1 Bridge) 또는 자율 폴백 가이드 주입
+            if (turn == 1 && turn1AnchorMissing && !confirmed) {
+                val userHint = clarificationBridge?.requestClarification(
+                    query = turn1Query,
+                    topCandidates = turn1TopCandidates,
+                    domains = turn1Domains
+                )
+                if (!userHint.isNullOrBlank()) {
+                    println("[AgenticGraphExplorer] L1 Clarification received from user: '$userHint'")
+                    messages.add(
+                        ChatMessage(
+                            role = "user",
+                            content = "사용자 비즈니스 힌트: \"$userHint\"\n이 힌트를 바탕으로 관련 업무 도메인(domain_hint) 또는 핵심 영문 약어로 search_graph_nodes를 다시 실행하세요."
+                        )
+                    )
+                } else {
+                    println("[AgenticGraphExplorer] L1 Clarification fallback (Headless/Timeout/No Bridge). Injecting autonomous guidance.")
+                    messages.add(
+                        ChatMessage(
+                            role = "user",
+                            content = "시스템 안내: 1턴 검색 결과가 특정 앵커 없이 여러 도메인에 분산되었습니다. SR의 다른 업무 키워드나 영문 약어(CamelCase)로 search_graph_nodes를 재시도하거나 후보 노드를 inspect_node_detail하세요."
+                        )
+                    )
+                }
             }
 
             if (confirmed) {
@@ -281,6 +355,31 @@ class AgenticSeedSelector(
             frontendRelevant = isFrontend,
             reasoning = "Fallback: Keyword matching due to LLM failure or timeout"
         )
+    }
+
+    private fun extractDomainFromPath(path: String): String {
+        val norm = path.replace('\\', '/').lowercase()
+        val parts = norm.split('/').filter { it.isNotBlank() }
+        val ismIdx = parts.indexOf("ism")
+        if (ismIdx != -1 && ismIdx + 1 < parts.size) {
+            return parts[ismIdx + 1]
+        }
+        val apcIdx = parts.indexOf("samsungcard")
+        if (apcIdx != -1 && apcIdx + 1 < parts.size) {
+            return parts[apcIdx + 1]
+        }
+        val mmIdx = parts.indexOf("membermarket")
+        if (mmIdx != -1 && mmIdx + 1 < parts.size) {
+            return parts[mmIdx + 1]
+        }
+        val surveyIdx = parts.indexOf("survey")
+        if (surveyIdx != -1) {
+            return "survey"
+        }
+        if (parts.size >= 2) {
+            return parts[parts.size - 2]
+        }
+        return "root"
     }
 }
 
