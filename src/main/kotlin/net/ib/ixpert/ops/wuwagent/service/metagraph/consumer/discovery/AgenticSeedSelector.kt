@@ -45,6 +45,9 @@ class AgenticSeedSelector(
               3단계 (Confirm): `inspect_node_detail`로 후보를 확인한 후에는 불필요한 추가 검색을 멈추고 즉시 `confirm_final_seeds`를 호출하여 핵심 업무 클래스 1~4개를 최종 확정하고 탐색을 종료하세요.
             - 요구사항(SR)에 '신규 개발', '신규 생성' 등의 표현이 있더라도, 시스템 메타그래프에 이미 존재하는 관련 기준 클래스(Controller, Service, BIZ, Repository, VO/DTO 등)를 계층에 구애받지 않고 폭넓게 Seed 후보로 확정하세요.
             - 공통 유틸리티(StringUtil, ConstantUtil 등)나 단순 로그 클래스는 Seed로 확정하지 말고, 실제 비즈니스 로직을 수행하는 서비스(Service/SVC), BIZ, VO 클래스를 Seed로 확정하세요.
+            
+            [도구 호출 시 설명 작성 지침]
+            - 도구를 호출할 때, 이번 탐색/검색의 의도, 발견된 결과에 대한 해석, 그리고 다음에 무엇을 할 것인지에 대한 간결한 설명(1~3문장)을 assistant 메시지 텍스트로 함께 작성하세요.
         """.trimIndent()
 
         val messages = mutableListOf(
@@ -63,10 +66,9 @@ class AgenticSeedSelector(
         var finalRationale = "기본 탐색 완료"
         val maxTurns = 6
         var totalSearchCount = 0
-        var turn1AnchorMissing = false
-        var turn1Query = ""
-        var turn1TopCandidates = emptyList<Map<String, Any>>()
-        var turn1Domains = emptyList<String>()
+        var lastSearchQuery = ""
+        var lastSearchCandidates = emptyList<Map<String, Any>>()
+        var lastSearchDomains = emptyList<String>()
         val executedQueries = mutableSetOf<String>()
         val accumulatedTopCandidates = linkedMapOf<String, Double>()
 
@@ -75,9 +77,7 @@ class AgenticSeedSelector(
             
             // Phase gating: 2턴 이상이거나 검색을 3회 이상 수행했으면 Inspect/Confirm 단계로 강제 전이
             val activeTools = if (turn >= 3 || totalSearchCount >= 3) phase2Tools else phase1Tools
-            val activeToolChoice = if (turn >= 5) {
-                mapOf("type" to "function", "function" to mapOf("name" to "confirm_final_seeds"))
-            } else "auto"
+            val activeToolChoice = "auto" // 강제 confirm 제거하고 항상 자율 판단(auto) 유지
 
             val response = try {
                 llmClient.chatWithTools(
@@ -152,46 +152,10 @@ class AgenticSeedSelector(
                                 }
                             }
 
-                            // [Stage 1: 1턴 앵커 실종 / 플래토 감지 텔레메트리 (Log-only Wiring)]
-                            // 가드 1: totalSearchCount == 1 조건으로 첫 검색(1턴)에 한정하여 발동 (이후 좁은 재검색 시 중복/오발동 방지).
-                            // 가드 2: res.size >= 5: 최소 5개 이상 후보가 매칭되어야 점수 낙차(Relative Spread)를 통계적으로 유의미하게 평가 가능.
-                            //        [사각지대 처리 정책]: res.size < 5 (0개 또는 극소수 매칭) 케이스는 LLM이 빈 검색 결과를 인지하고
-                            //        2턴에서 영문 번역/대체 키워드로 즉시 자율 전환(Autonomous Pivot)하므로, 불필요한 되묻기를 유발하지 않고
-                            //        에이전트의 2턴 자율 복구에 의도적으로 위임함.
-                            if (totalSearchCount == 1 && res.isNotEmpty()) {
-                                val top1Score = (res.firstOrNull()?.get("matchScore") as? Number)?.toDouble() ?: 0.0
-                                val top10Score = if (res.size >= 10) {
-                                    (res[9]["matchScore"] as? Number)?.toDouble() ?: 0.0
-                                } else {
-                                    (res.lastOrNull()?.get("matchScore") as? Number)?.toDouble() ?: 0.0
-                                }
-                                val gap = top1Score - top10Score
-                                val relativeSpread = if (top1Score > 0) (gap / top1Score) else 0.0
-                                
-                                // 동점 노드 수 (Top-1 최고점과 완전히 동일한 점수를 받은 노드 개수 - 플래토의 물리적 앵커 부재 원인)
-                                val tieCount = res.count { ((it["matchScore"] as? Number)?.toDouble() ?: 0.0) == top1Score }
-
-                                // 도메인 분산도 계측 (상위 매칭 노드들의 패키지/도메인 다양성 및 최고 도메인 점유율)
-                                val domains = res.map { extractDomainFromPath(it["path"]?.toString() ?: "") }
-                                val distinctDomains = domains.distinct().size
-                                val topDomainCount = domains.groupingBy { it }.eachCount().values.maxOrNull() ?: 0
-                                val topDomainShare = if (res.isNotEmpty()) (topDomainCount.toDouble() / res.size) * 100 else 0.0
-
-                                // 순수 플래토 단일 지표: 5개 이상 후보가 매칭되었으나 상위 10개 간 점수 낙차가 5% 이하인 경우 앵커 실종 판정
-                                val isPlateau = res.size >= 5 && relativeSpread <= 0.05
-                                val isAnchorMissing = isPlateau
-
-                                val spreadPct = String.format("%.1f", relativeSpread * 100)
-                                val sharePct = String.format("%.1f", topDomainShare)
-                                println("<<< [Turn 1 Anchor Telemetry] Top1: ${top1Score}점, Top10: ${top10Score}점, Gap: ${gap}점, RelSpread: ${spreadPct}%, Matches: ${res.size}개, TieCount: ${tieCount}개, DistinctDomains: ${distinctDomains}개, TopDomainShare: ${sharePct}% | Plateau: $isPlateau -> AnchorMissing: $isAnchorMissing")
-
-                                if (isAnchorMissing) {
-                                    turn1AnchorMissing = true
-                                    turn1Query = q
-                                    turn1TopCandidates = res.take(5)
-                                    turn1Domains = domains.distinct()
-                                }
-                            }
+                            // 이번 턴 검색 결과 저장 (되묻기 payload용)
+                            lastSearchQuery = q
+                            lastSearchCandidates = res.take(5)
+                            lastSearchDomains = res.map { extractDomainFromPath(it["path"]?.toString() ?: "") }.distinct()
 
                             if (executedQueries.size >= 2) {
                                 val topCandidatesSummary = accumulatedTopCandidates.entries
@@ -253,30 +217,26 @@ class AgenticSeedSelector(
                 )
             }
 
-            // 1턴 종료 시: 앵커 실종(플래토) 감지 시 사용자 되묻기(L1 Bridge) 또는 자율 폴백 가이드 주입
-            if (turn == 1 && turn1AnchorMissing && !confirmed) {
+            // 매 턴 검색 수행 직후: 검색 결과 + LLM 해석/계획을 사용자에게 공유하고 대화형 피드백 수신
+            if (lastSearchCandidates.isNotEmpty() && !confirmed) {
+                val explanation = assistantMessage.content ?: assistantMessage.reasoningContent ?: ""
                 val userHint = clarificationBridge?.requestClarification(
-                    query = turn1Query,
-                    topCandidates = turn1TopCandidates,
-                    domains = turn1Domains
+                    turn = turn,
+                    query = lastSearchQuery,
+                    topCandidates = lastSearchCandidates,
+                    domains = lastSearchDomains,
+                    explanation = explanation
                 )
                 if (!userHint.isNullOrBlank()) {
-                    println("[AgenticGraphExplorer] L1 Clarification received from user: '$userHint'")
+                    println("[AgenticGraphExplorer] Turn $turn Clarification received from user: '$userHint'")
                     messages.add(
                         ChatMessage(
                             role = "user",
-                            content = "사용자 비즈니스 힌트: \"$userHint\"\n이 힌트를 바탕으로 관련 업무 도메인(domain_hint) 또는 핵심 영문 약어로 search_graph_nodes를 다시 실행하세요."
-                        )
-                    )
-                } else {
-                    println("[AgenticGraphExplorer] L1 Clarification fallback (Headless/Timeout/No Bridge). Injecting autonomous guidance.")
-                    messages.add(
-                        ChatMessage(
-                            role = "user",
-                            content = "시스템 안내: 1턴 검색 결과가 특정 앵커 없이 여러 도메인에 분산되었습니다. SR의 다른 업무 키워드나 영문 약어(CamelCase)로 search_graph_nodes를 재시도하거나 후보 노드를 inspect_node_detail하세요."
+                            content = "사용자 피드백: \"$userHint\"\n이 피드백을 반영해 다음 탐색을 진행하세요. 방향이 틀렸다면 지금까지의 후보 도메인을 버리고 다른 업무 도메인이나 영문 약어로 search_graph_nodes를 다시 실행하세요."
                         )
                     )
                 }
+                lastSearchCandidates = emptyList() // 다음 턴 재초기화
             }
 
             if (confirmed) {

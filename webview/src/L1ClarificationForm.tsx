@@ -13,9 +13,11 @@ export interface L1Candidate {
 
 export interface L1ClarificationPayload {
   projectId: string;
+  turn?: number;
   query: string;
   topCandidates: L1Candidate[];
   domains: string[];
+  explanation?: string;
   message: string;
 }
 
@@ -47,7 +49,7 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
     );
   }
 
-  const { projectId, query, topCandidates = [], domains = [], message } = data;
+  const { projectId, turn, query, topCandidates = [], domains = [], explanation, message } = data;
 
   const handleChipClick = (domain: string) => {
     if (isSubmitted) return;
@@ -93,15 +95,23 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', paddingBottom: '10px' }}>
         <Compass size={20} style={{ color: '#60a5fa' }} />
         <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#93c5fd' }}>
-          도메인 힌트 확인 필요 (1턴 앵커 모호성 감지)
+          도메인 힌트 및 탐색 피드백 {turn ? `(Turn ${turn})` : ''}
         </h3>
       </div>
+
+      {/* AI Explanation / Plan */}
+      {explanation && (
+        <div style={{ background: 'rgba(59, 130, 246, 0.1)', padding: '10px 12px', borderRadius: '6px', borderLeft: '3px solid #3b82f6', marginBottom: '14px', fontSize: '12px', color: '#bfdbfe' }}>
+          <strong style={{ color: '#93c5fd' }}>🤖 AI 탐색 해석 및 다음 계획:</strong>
+          <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>{explanation}</div>
+        </div>
+      )}
 
       {/* Message & Query */}
       <div style={{ fontSize: '13px', lineHeight: '1.5', color: '#e2e8f0', marginBottom: '14px' }}>
         <p style={{ margin: '0 0 6px 0' }}>{message}</p>
         <div style={{ background: 'rgba(0, 0, 0, 0.3)', padding: '6px 10px', borderRadius: '4px', borderLeft: '3px solid #60a5fa', fontSize: '12px', color: '#cbd5e1' }}>
-          <strong>요청 검색어:</strong> {query}
+          <strong>현재 검색어:</strong> {query}
         </div>
       </div>
 

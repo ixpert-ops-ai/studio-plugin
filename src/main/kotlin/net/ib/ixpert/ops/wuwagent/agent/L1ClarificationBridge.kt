@@ -8,19 +8,23 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
- * 1턴 앵커 실종/플래토 감지 시 사용자에게 업무 도메인 확인을 요청하는 L1 Bridge 인터페이스
+ * 매 턴 검색 직후 또는 앵커 탐색 과정에서 사용자에게 검색 결과 및 LLM 해석을 공유하고 도메인/업무 확인을 요청하는 L1 Bridge 인터페이스
  */
 fun interface L1ClarificationBridge {
     /**
-     * @param query 1턴에 실행된 검색 쿼리
-     * @param topCandidates 1턴 상위 매칭 후보 목록 (className, localName, fileType, score 등)
-     * @param domains 1턴 후보군이 속한 패키지/도메인 목록
-     * @return 사용자가 입력한 업무 교정 텍스트 (예: "통계 리포트 화면"), 무응답/타임아웃/헤드리스 시 null
+     * @param turn 현재 탐색 턴 수
+     * @param query 현재 턴에 실행된 검색 쿼리
+     * @param topCandidates 상위 매칭 후보 목록 (className, localName, fileType, score 등)
+     * @param domains 후보군이 속한 패키지/도메인 목록
+     * @param explanation LLM이 생성한 이번 턴 결과 해석 및 다음 탐색 계획 설명
+     * @return 사용자가 입력한 업무 교정 텍스트 (예: "통계 리포트 화면"), 무응답/타임아웃/헤드리스/단순확인 시 null
      */
     fun requestClarification(
+        turn: Int,
         query: String,
         topCandidates: List<Map<String, Any>>,
-        domains: List<String>
+        domains: List<String>,
+        explanation: String
     ): String?
 }
 
@@ -47,9 +51,11 @@ class JcefL1ClarificationBridge(
     }
 
     override fun requestClarification(
+        turn: Int,
         query: String,
         topCandidates: List<Map<String, Any>>,
-        domains: List<String>
+        domains: List<String>,
+        explanation: String
     ): String? {
         if (project == null) return null
         val projectId = project.locationHash
@@ -62,10 +68,12 @@ class JcefL1ClarificationBridge(
                 val bridge = net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(project)
                 val payload = mapOf(
                     "projectId" to projectId,
+                    "turn" to turn,
                     "query" to query,
                     "topCandidates" to topCandidates.take(5),
                     "domains" to domains,
-                    "message" to "1턴 검색 결과가 여러 도메인에 분산되어 앵커를 특정하기 어렵습니다. 구현하고자 하는 기능의 업무/화면 영역(도메인) 힌트를 입력해주세요."
+                    "explanation" to explanation,
+                    "message" to "이번 검색 결과와 다음 진행 방향입니다. 맞으면 그대로 진행, 방향을 바꾸려면 업무/화면 영역이나 추가 정보를 알려주세요."
                 )
                 val payloadStr = Gson().toJson(payload)
                 bridge.sendMessage("l1Clarification/request", payloadStr, "system")

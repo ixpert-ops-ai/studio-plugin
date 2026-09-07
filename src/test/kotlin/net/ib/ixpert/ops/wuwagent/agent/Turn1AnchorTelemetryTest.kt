@@ -228,9 +228,9 @@ class Turn1AnchorTelemetryTest {
             )
         )
         val client = MockLlmClient(toolCalls)
-        val mockBridge = L1ClarificationBridge { query, topCandidates, domains ->
-            // 사용자가 입력한 순수 업무 교정 발화 시뮬레이션
-            "통계 리포트 화면"
+        val mockBridge = L1ClarificationBridge { turn, query, topCandidates, domains, explanation ->
+            // 1턴 검색 직후 사용자가 입력한 순수 업무 교정 발화 시뮬레이션
+            if (turn == 1) "통계 리포트 화면" else null
         }
         val selector = AgenticSeedSelector(client, clarificationBridge = mockBridge)
         val result = selector.selectSeeds("개인별 포인트유형별 사용내역 조회 화면 및 엑셀 다운로드 개발", graph)
