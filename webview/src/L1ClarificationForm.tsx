@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Compass, Check, SkipForward, Layers, FileCode, Tag } from 'lucide-react';
 
 export interface L1Candidate {
@@ -40,6 +40,13 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
   const [hintText, setHintText] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [submittedAction, setSubmittedAction] = useState<'submit' | 'cancel' | null>(null);
+
+  // 새 턴 또는 새 요청 페이로드가 도착하면 폼 상태를 초기화하여 사용자 입력을 즉시 활성화
+  useEffect(() => {
+    setIsSubmitted(false);
+    setSubmittedAction(null);
+    setHintText('');
+  }, [data?.turn, data?.query, payload]);
 
   if (!data) {
     return (

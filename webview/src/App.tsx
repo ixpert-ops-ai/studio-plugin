@@ -378,10 +378,11 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
     );
   }
 
-  // 0.7 L1 Clarification (1턴 도메인 힌트 요청)
+  // 0.7 L1 Clarification (도메인 힌트 및 멀티턴 탐색 피드백)
   if (msg.subType === 'l1Clarification/request') {
     return (
       <L1ClarificationForm
+        key={msg.id}
         payload={msg.content}
         onCancel={(projectId) => {
           if (window.sendToIde) {
@@ -929,18 +930,17 @@ function App() {
       }
 
       if (data.subType === 'l1Clarification/request') {
-        if (messageId) {
-          setMessages(prev => {
-            const filtered = prev.filter(m => m.subType !== 'l1Clarification/request');
-            return [...filtered, {
-              id: messageId,
-              role: 'ai',
-              subType: 'l1Clarification/request',
-              content: data.content,
-              isLoading: false
-            }];
-          });
-        }
+        const uniqueId = `l1_${Date.now()}`;
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.subType !== 'l1Clarification/request');
+          return [...filtered, {
+            id: uniqueId,
+            role: 'ai',
+            subType: 'l1Clarification/request',
+            content: data.content,
+            isLoading: false
+          }];
+        });
         return;
       }
 
