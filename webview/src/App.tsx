@@ -8,6 +8,7 @@ import 'highlight.js/styles/github-dark.css';
 import './index.css';
 import { ScopeSelectionTree } from './ScopeSelectionTree';
 import { L1ClarificationForm } from './L1ClarificationForm';
+import { Stage3ConfirmationForm } from './Stage3ConfirmationForm';
 
 // Mermaid 글로벌 초기 설정
 mermaid.initialize({
@@ -397,6 +398,32 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
             window.sendToIde(JSON.stringify({
               command: 'l1Clarification/submit',
               text: JSON.stringify({ projectId, userHint })
+            }));
+          }
+        }}
+      />
+    );
+  }
+
+  // 0.8 Stage 3 User Confirmation (최종 LLM 검증 전 대상 파일 확인)
+  if (msg.subType === 'stage3Confirmation/request') {
+    return (
+      <Stage3ConfirmationForm
+        key={msg.id}
+        payload={msg.content}
+        onCancel={(projectId) => {
+          if (window.sendToIde) {
+            window.sendToIde(JSON.stringify({
+              command: 'stage3Confirmation/cancel',
+              text: JSON.stringify({ projectId })
+            }));
+          }
+        }}
+        onSubmit={(projectId, selectedPaths) => {
+          if (window.sendToIde) {
+            window.sendToIde(JSON.stringify({
+              command: 'stage3Confirmation/submit',
+              text: JSON.stringify({ projectId, selectedPaths })
             }));
           }
         }}
@@ -946,6 +973,26 @@ function App() {
 
       if (data.subType === 'l1Clarification/hide') {
         setMessages(prev => prev.filter(m => m.subType !== 'l1Clarification/request'));
+        return;
+      }
+
+      if (data.subType === 'stage3Confirmation/request') {
+        const uniqueId = `s3_${Date.now()}`;
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.subType !== 'stage3Confirmation/request');
+          return [...filtered, {
+            id: uniqueId,
+            role: 'ai',
+            subType: 'stage3Confirmation/request',
+            content: data.content,
+            isLoading: false
+          }];
+        });
+        return;
+      }
+
+      if (data.subType === 'stage3Confirmation/hide') {
+        setMessages(prev => prev.filter(m => m.subType !== 'stage3Confirmation/request'));
         return;
       }
 

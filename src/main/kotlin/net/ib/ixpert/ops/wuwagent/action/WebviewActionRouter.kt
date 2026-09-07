@@ -329,6 +329,20 @@ class WebviewActionRouter(private val project: Project) {
                     net.ib.ixpert.ops.wuwagent.agent.JcefL1ClarificationBridge.cancelClarification(projectId)
                 }
 
+                // ── Stage 3 User Confirmation Events ────────
+                "stage3Confirmation/submit" -> {
+                    val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
+                    val selectedPaths = (payload["selectedPaths"] as? List<*>)?.mapNotNull { it as? String }
+                    val projectId = payload["projectId"]?.toString() ?: project.locationHash
+                    net.ib.ixpert.ops.wuwagent.agent.JcefStage3ConfirmationBridge.completeConfirmation(projectId, selectedPaths)
+                }
+
+                "stage3Confirmation/cancel" -> {
+                    val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
+                    val projectId = payload["projectId"]?.toString() ?: project.locationHash
+                    net.ib.ixpert.ops.wuwagent.agent.JcefStage3ConfirmationBridge.cancelConfirmation(projectId)
+                }
+
                 // ── 자동 코드 작성 스텁 (Phase 2b) ────────
                 "/implement" -> {
                     logger.info("Router: /implement 분기")

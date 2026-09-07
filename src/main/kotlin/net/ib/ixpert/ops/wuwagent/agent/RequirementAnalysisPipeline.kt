@@ -187,11 +187,37 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         println("=== Stage 3 Candidates ===")
         correctedFiles.forEach { println(it.path) }
         println("==========================")
-        val verifier = FileRelevanceVerifier(client, projectGraph, mdRoot)
-        val fullRequirement = if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
-        val verificationOutput = verifier.verify(fullRequirement, correctedFiles)
-        val verifiedFiles = verificationOutput.files
-        val validatedTargetFiles = TargetFileValidator.sortByDependency(verifiedFiles, projectGraph)
+
+        // [Stage 3 User Confirmation Hook]
+        val confirmationBridge = JcefStage3ConfirmationBridge(project)
+        val selectedPaths = confirmationBridge.requestConfirmation(correctedFiles)
+
+        val (validatedTargetFiles, verificationOutput) = try {
+            val userSelection: List<TargetFileSpec>? = if (!selectedPaths.isNullOrEmpty()) {
+                val pathSet = selectedPaths.toSet()
+                correctedFiles.filter { it.path in pathSet }
+            } else {
+                null
+            }
+
+            val filesToVerify = userSelection ?: correctedFiles
+            val verifier = FileRelevanceVerifier(client, projectGraph, mdRoot)
+            val fullRequirement = if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
+            val verificationOutput = verifier.verify(fullRequirement, filesToVerify)
+
+            // 사용자가 명시적으로 선택한 파일은 verify 결과에서 누락되었더라도 강제 복원 (Union)
+            val verifiedFiles = if (userSelection != null) {
+                val verifiedPaths = verificationOutput.files.map { it.path }.toSet()
+                val restored = userSelection.filter { it.path !in verifiedPaths }
+                verificationOutput.files + restored
+            } else {
+                verificationOutput.files
+            }
+
+            Pair(TargetFileValidator.sortByDependency(verifiedFiles, projectGraph), verificationOutput)
+        } finally {
+            confirmationBridge.hideConfirmation()
+        }
         
         if (targetGt.isNotBlank()) {
             val stage3Rank = validatedTargetFiles.indexOfFirst { it.path.contains(targetGt, ignoreCase = true) } + 1
