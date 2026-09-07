@@ -213,10 +213,6 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
 
   const handleDelete = (idx: number) => {
     if (isSubmitted) return;
-    if (requirements.length <= 1) {
-      alert("최소 1개의 요구사항이 필요합니다.");
-      return;
-    }
     setRequirements(requirements.filter((_, i) => i !== idx));
   };
 
@@ -236,10 +232,6 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
 
   const handleSubmit = () => {
     if (isSubmitted) return;
-    if (requirements.length === 0) {
-      alert("최소 1개의 요구사항이 필요합니다.");
-      return;
-    }
     setIsSubmitted(true);
     
     const payload = {
@@ -293,7 +285,9 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
                 ))}
               </ul>
             ) : (
-              <p style={{ fontSize: '13px', color: '#ef4444' }}>최소 1개의 요구사항이 필요합니다.</p>
+              <p style={{ fontSize: '13px', color: '#888', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', borderLeft: '3px solid #666', margin: '10px 0' }}>
+                💡 보강된 항목이 없습니다. [제출] 시 최초 입력한 원본 요구사항으로 분석이 진행됩니다.
+              </p>
             )}
 
             {!isSubmitted && (
@@ -329,10 +323,10 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
           <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
             <button 
               onClick={handleSubmit} 
-              disabled={isSubmitted || requirements.length === 0}
-              style={{ padding: '6px 16px', background: (isSubmitted || requirements.length === 0) ? '#444' : '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: (isSubmitted || requirements.length === 0) ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
+              disabled={isSubmitted}
+              style={{ padding: '6px 16px', background: isSubmitted ? '#444' : '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: isSubmitted ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
             >
-              {isSubmitted ? '제출 완료' : '확인하고 다음 단계로 →'}
+              {isSubmitted ? '제출 완료' : (requirements.length === 0 ? '원본 요구사항으로 진행 →' : '확인하고 다음 단계로 →')}
             </button>
           </div>
         </div>
