@@ -45,6 +45,7 @@ class AgenticSeedSelector(
               3단계 (Confirm): `inspect_node_detail`로 후보를 확인한 후에는 불필요한 추가 검색을 멈추고 즉시 `confirm_final_seeds`를 호출하여 핵심 업무 클래스 1~4개를 최종 확정하고 탐색을 종료하세요.
             - 요구사항(SR)에 '신규 개발', '신규 생성' 등의 표현이 있더라도, 시스템 메타그래프에 이미 존재하는 관련 기준 클래스(Controller, Service, BIZ, Repository, VO/DTO 등)를 계층에 구애받지 않고 폭넓게 Seed 후보로 확정하세요.
             - 공통 유틸리티(StringUtil, ConstantUtil 등)나 단순 로그 클래스는 Seed로 확정하지 말고, 실제 비즈니스 로직을 수행하는 서비스(Service/SVC), BIZ, VO 클래스를 Seed로 확정하세요.
+            - 각 턴의 탐색 결과는 사용자에게 제시되며, 사용자가 자유로운 형식의 피드백을 줄 수 있습니다. 피드백이 오면 그 의도를 해석해 다음 도구 호출에 반영하되, 피드백이 없으면 자율적으로 탐색을 이어가세요.
             
             [도구 호출 시 설명 작성 지침]
             - 도구를 호출할 때, 이번 탐색/검색의 의도, 발견된 결과에 대한 해석, 그리고 다음에 무엇을 할 것인지에 대한 간결한 설명(1~3문장)을 assistant 메시지 텍스트로 함께 작성하세요.
@@ -242,7 +243,13 @@ class AgenticSeedSelector(
                     messages.add(
                         ChatMessage(
                             role = "user",
-                            content = "사용자 피드백: \"$userHint\"\n이 피드백을 반영해 다음 탐색을 진행하세요. 이전 방향이 틀렸다면 지금까지의 후보 도메인을 버리고 새로 제공된 업무 도메인이나 영문 약어로 search_graph_nodes를 다시 실행하세요."
+                            content = """
+                                [사용자 피드백]
+                                "$userHint"
+
+                                사용자가 이번 탐색 결과를 보고 위와 같은 피드백을 주었습니다.
+                                이 피드백의 의도를 스스로 해석하여 다음 행동(재검색, 상세 조회, 방향 전환, 또는 확정)을 판단하고 도구를 호출하세요.
+                            """.trimIndent()
                         )
                     )
                 }
