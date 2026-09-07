@@ -60,24 +60,19 @@ class AgenticSeedSelector(
         val confirmTool = toolDefinitions.find { it.function.name == "confirm_final_seeds" }!!
 
         val phase1Tools = listOf(searchTool, inspectTool, expandTool, confirmTool)
-        val phase2Tools = listOf(inspectTool, expandTool, confirmTool)
 
         var finalSeeds = listOf<String>()
         var finalRationale = "기본 탐색 완료"
-        val maxTurns = 6
+        val maxTurns = 10
         var totalSearchCount = 0
-        var lastSearchQuery = ""
-        var lastSearchCandidates = emptyList<Map<String, Any>>()
-        var lastSearchDomains = emptyList<String>()
         val executedQueries = mutableSetOf<String>()
         val accumulatedTopCandidates = linkedMapOf<String, Double>()
 
         for (turn in 1..maxTurns) {
             println("\n[AgenticGraphExplorer] === TURN $turn ===")
             
-            // Phase gating: 2턴 이상이거나 검색을 3회 이상 수행했으면 Inspect/Confirm 단계로 강제 전이
-            val activeTools = if (turn >= 3 || totalSearchCount >= 3) phase2Tools else phase1Tools
-            val activeToolChoice = "auto" // 강제 confirm 제거하고 항상 자율 판단(auto) 유지
+            val activeTools = phase1Tools // 모든 턴에서 4대 도구(검색, 상세조회, 확장, 확정) 자율 사용 허용
+            val activeToolChoice = "auto" // 항상 자율 판단(auto) 유지
 
             val response = try {
                 llmClient.chatWithTools(
@@ -117,6 +112,11 @@ class AgenticSeedSelector(
             }
 
             var confirmed = false
+            var searchExecutedInTurn = false
+            var lastSearchQuery = ""
+            val turnCandidates = mutableListOf<Map<String, Any>>()
+            val turnDomains = mutableListOf<String>()
+
             for (tc in toolCalls) {
                 val fnName = tc.function.name
                 val argsJson = tc.function.arguments
@@ -129,6 +129,9 @@ class AgenticSeedSelector(
                         val q = args["query"]?.toString() ?: ""
                         val hint = args["domain_hint"]?.toString()
                         val queryKey = "${q.trim().lowercase()}::${hint?.trim()?.lowercase() ?: ""}"
+
+                        searchExecutedInTurn = true
+                        lastSearchQuery = if (lastSearchQuery.isBlank()) q else "$lastSearchQuery, $q"
 
                         // [가드 1] 중복 쿼리 차단 가드
                         if (executedQueries.contains(queryKey)) {
@@ -152,12 +155,13 @@ class AgenticSeedSelector(
                                 }
                             }
 
-                            // 이번 턴 검색 결과 저장 (되묻기 payload용)
-                            lastSearchQuery = q
-                            lastSearchCandidates = res.take(5)
-                            lastSearchDomains = res.map { extractDomainFromPath(it["path"]?.toString() ?: "") }.distinct()
+                            if (res.isNotEmpty()) {
+                                turnCandidates.addAll(res.take(5))
+                                val domains = res.map { extractDomainFromPath(it["path"]?.toString() ?: "") }.filter { it.isNotBlank() }
+                                turnDomains.addAll(domains)
+                            }
 
-                            if (executedQueries.size >= 2) {
+                            if (executedQueries.size >= 3) {
                                 val topCandidatesSummary = accumulatedTopCandidates.entries
                                     .sortedByDescending { it.value }
                                     .take(5)
@@ -178,7 +182,7 @@ class AgenticSeedSelector(
                         val res = toolsEngine.inspectNodeDetail(className)
                         println("<<< Inspected: $className (Methods: ${(res["methods"] as? List<*>)?.size ?: 0}, DependsOn: ${(res["dependsOn_Downstream"] as? List<*>)?.size ?: 0})")
                         if (className.isNotBlank()) {
-                            accumulatedTopCandidates[className] = (accumulatedTopCandidates[className] ?: 50.0) + 20.0
+                            accumulatedTopCandidates[className] = (accumulatedTopCandidates[className] ?: 50.0) + 30.0
                         }
                         gson.toJson(res)
                     }
@@ -217,26 +221,31 @@ class AgenticSeedSelector(
                 )
             }
 
-            // 매 턴 검색 수행 직후: 검색 결과 + LLM 해석/계획을 사용자에게 공유하고 대화형 피드백 수신
-            if (lastSearchCandidates.isNotEmpty() && !confirmed) {
+            // 매 턴 검색 수행 직후 (결과가 0건이어도): 검색 결과 + LLM 해석/계획을 사용자에게 공유하고 대화형 피드백 수신
+            if (searchExecutedInTurn && !confirmed) {
                 val explanation = assistantMessage.content ?: assistantMessage.reasoningContent ?: ""
+                val distinctCandidates = turnCandidates.distinctBy { it["className"]?.toString() ?: "" }.take(5)
+                val distinctDomains = turnDomains.distinct()
                 val userHint = clarificationBridge?.requestClarification(
                     turn = turn,
                     query = lastSearchQuery,
-                    topCandidates = lastSearchCandidates,
-                    domains = lastSearchDomains,
+                    topCandidates = distinctCandidates,
+                    domains = distinctDomains,
                     explanation = explanation
                 )
                 if (!userHint.isNullOrBlank()) {
                     println("[AgenticGraphExplorer] Turn $turn Clarification received from user: '$userHint'")
+                    // 사용자가 새 힌트를 입력하면 이전 턴의 누적 점수를 감쇠하여 새 피드백 탐색 결과가 우선순위를 갖도록 조정
+                    accumulatedTopCandidates.keys.toList().forEach { k ->
+                        accumulatedTopCandidates[k] = (accumulatedTopCandidates[k] ?: 0.0) * 0.2
+                    }
                     messages.add(
                         ChatMessage(
                             role = "user",
-                            content = "사용자 피드백: \"$userHint\"\n이 피드백을 반영해 다음 탐색을 진행하세요. 방향이 틀렸다면 지금까지의 후보 도메인을 버리고 다른 업무 도메인이나 영문 약어로 search_graph_nodes를 다시 실행하세요."
+                            content = "사용자 피드백: \"$userHint\"\n이 피드백을 반영해 다음 탐색을 진행하세요. 이전 방향이 틀렸다면 지금까지의 후보 도메인을 버리고 새로 제공된 업무 도메인이나 영문 약어로 search_graph_nodes를 다시 실행하세요."
                         )
                     )
                 }
-                lastSearchCandidates = emptyList() // 다음 턴 재초기화
             }
 
             if (confirmed) {
