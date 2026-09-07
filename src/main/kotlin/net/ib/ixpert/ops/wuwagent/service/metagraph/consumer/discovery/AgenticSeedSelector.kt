@@ -40,7 +40,11 @@ class AgenticSeedSelector(
             
             [도메인 무관 상태 전이 및 턴 규율]
             - 탐색은 반드시 3단계 전이 흐름(Search -> Inspect -> Confirm)으로 진행해야 합니다:
-              1단계 (Search): 요구사항(SR)의 핵심 목표 및 주요 업무 약어를 조합하여 `search_graph_nodes`를 호출합니다.
+              1단계 (Search): 요구사항(SR)의 핵심 도메인 명사를 식별하고, 이를 영어 단어로 번역하여 검색어에 반드시 포함시킵니다.
+                * 코드베이스의 클래스명은 대부분 영어(CamelCase)이므로, 한글 검색어만으로는 매칭에 실패합니다. 도메인을 나타내는 명사를 영어로 옮겨 검색하세요.
+                * '관리', '조회', '등록', '화면' 같은 범용 동작/보조 단어보다, 그 기능의 핵심 대상이 되는 고유 도메인 명사를 우선 번역하세요.
+                * 확실히 아는 번역어만 사용하고, 시스템 고유 코드나 프로젝트 약어는 추측하여 지어내지 마세요. 그런 코드성 노드는 후속 Inspect/Expand 단계에서 의존관계를 통해 자연히 도달됩니다.
+                * 검색 결과가 요구사항과 무관해 보이거나 상위 결과 점수가 모두 동일하게 낮으면, 이는 매칭 실패 신호입니다. 다른 영어 번역어나 동의어로 즉시 재검색하세요.
               2단계 (Inspect & Verify): 검색 결과 목록에서 요구사항과 관련된 유력한 핵심 후보 클래스(Service, BIZ, VO 등)를 선택하여 `inspect_node_detail` 또는 `expand_connected_nodes`로 세부 메서드/의존관계를 확인합니다.
               3단계 (Confirm): `inspect_node_detail`로 후보를 확인한 후에는 불필요한 추가 검색을 멈추고 즉시 `confirm_final_seeds`를 호출하여 핵심 업무 클래스 1~4개를 최종 확정하고 탐색을 종료하세요.
             - 요구사항(SR)에 '신규 개발', '신규 생성' 등의 표현이 있더라도, 시스템 메타그래프에 이미 존재하는 관련 기준 클래스(Controller, Service, BIZ, Repository, VO/DTO 등)를 계층에 구애받지 않고 폭넓게 Seed 후보로 확정하세요.
@@ -52,7 +56,7 @@ class AgenticSeedSelector(
         """.trimIndent()
 
         val messages = mutableListOf(
-            ChatMessage(role = "user", content = "요구사항(SR):\n$srText\n\n위 요구사항을 분석하여 핵심 Seed 클래스들을 탐색하고 확정해주세요.")
+            ChatMessage(role = "user", content = "요구사항(SR):\n$srText\n\n위 요구사항을 분석하여 핵심 Seed 클래스들을 탐색하고 확정해주세요. 도메인 명사를 영어로 번역한 키워드를 포함하여 탐색을 시작하세요.")
         )
 
         val searchTool = toolDefinitions.find { it.function.name == "search_graph_nodes" }!!
