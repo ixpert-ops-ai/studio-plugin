@@ -157,7 +157,7 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
       {topCandidates.length > 0 && (
         <div style={{ marginBottom: '14px' }}>
           <div style={{ fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Layers size={13} /> 1턴 상위 동점/유력 후보군 (최대 5건):
+            <Layers size={13} /> {turn ? `Turn ${turn} 상위 검색 후보군 (최대 5건):` : '상위 검색 후보군 (최대 5건):'}
           </div>
           <div style={{ background: 'rgba(0, 0, 0, 0.25)', borderRadius: '4px', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
             {topCandidates.map((cand, idx) => (
@@ -283,7 +283,7 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
         }}>
           <Check size={14} />
           {submittedAction === 'submit' ? (
-            <span>도메인 힌트가 제출되었습니다: <strong>&quot;{hintText}&quot;</strong> (2턴 탐색 재진입)</span>
+            <span>도메인 힌트가 제출되었습니다: <strong>&quot;{hintText}&quot;</strong> (다음 턴 반영 진행)</span>
           ) : (
             <span>건너뛰기가 선택되었습니다. 시스템 자율 탐색으로 계속 진행합니다.</span>
           )}
