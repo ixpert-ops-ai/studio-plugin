@@ -58,6 +58,16 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
 
   const { projectId, turn, query, topCandidates = [], domains = [], explanation, message } = data;
 
+  const handleCandidateClick = (candPath?: string) => {
+    if (!candPath) return;
+    if (window.sendToIde) {
+      window.sendToIde(JSON.stringify({
+        command: '/openInEditor',
+        filePath: candPath
+      }));
+    }
+  };
+
   const handleChipClick = (domain: string) => {
     if (isSubmitted) return;
     // 도메인 패키지에서 마지막 단어 또는 의미 있는 토큰 추출
@@ -157,19 +167,29 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
       {topCandidates.length > 0 && (
         <div style={{ marginBottom: '14px' }}>
           <div style={{ fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Layers size={13} /> {turn ? `Turn ${turn} 상위 검색 후보군 (최대 5건):` : '상위 검색 후보군 (최대 5건):'}
+            <Layers size={13} /> {turn ? `Turn ${turn} 상위 검색 후보군 (최대 10건, 클릭 시 에디터 열기):` : '상위 검색 후보군 (최대 10건, 클릭 시 에디터 열기):'}
           </div>
           <div style={{ background: 'rgba(0, 0, 0, 0.25)', borderRadius: '4px', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
             {topCandidates.map((cand, idx) => (
               <div
                 key={idx}
+                onClick={() => handleCandidateClick(cand.path)}
+                title={cand.path ? `클릭하여 IDE 에디터에서 열기:\n${cand.path}` : undefined}
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  padding: '6px 10px',
+                  padding: '7px 10px',
                   borderBottom: idx < topCandidates.length - 1 ? '1px solid rgba(255, 255, 255, 0.05)' : 'none',
-                  fontSize: '12px'
+                  fontSize: '12px',
+                  cursor: cand.path ? 'pointer' : 'default',
+                  transition: 'background 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  if (cand.path) e.currentTarget.style.background = 'rgba(59, 130, 246, 0.15)';
+                }}
+                onMouseLeave={(e) => {
+                  if (cand.path) e.currentTarget.style.background = 'transparent';
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
@@ -200,7 +220,7 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
         <div>
           <div style={{ marginBottom: '10px' }}>
             <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#e2e8f0', marginBottom: '4px' }}>
-              🎯 대상 도메인 / 업무 화면 힌트 입력:
+              🎯 대상 도메인 / 업무 화면 힌트 입력 (클래스·메서드·패키지 경로):
             </label>
             <input
               type="text"
@@ -212,7 +232,7 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
                   handleSubmit();
                 }
               }}
-              placeholder="예: 통계 리포트 화면, pstat, 마일리지 정산 등"
+              placeholder="예: 통계 리포트 화면, pstat, PDsbUseController, getPDsbUseList 등 (업무명·약어·클래스·메서드)"
               style={{
                 width: '100%',
                 padding: '8px 10px',

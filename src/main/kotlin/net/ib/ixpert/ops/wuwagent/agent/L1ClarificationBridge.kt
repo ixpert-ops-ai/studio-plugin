@@ -75,7 +75,7 @@ class JcefL1ClarificationBridge(
                     "projectId" to projectId,
                     "turn" to turn,
                     "query" to query,
-                    "topCandidates" to topCandidates.take(5),
+                    "topCandidates" to topCandidates.take(10),
                     "domains" to domains,
                     "explanation" to explanation,
                     "message" to "이번 검색 결과와 다음 진행 방향입니다. 맞으면 그대로 진행, 방향을 바꾸려면 업무/화면 영역이나 추가 정보를 알려주세요."

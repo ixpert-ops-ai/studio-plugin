@@ -156,7 +156,7 @@ class AgenticSeedSelector(
                             }
 
                             if (res.isNotEmpty()) {
-                                turnCandidates.addAll(res.take(5))
+                                turnCandidates.addAll(res)
                                 val domains = res.map { extractDomainFromPath(it["path"]?.toString() ?: "") }.filter { it.isNotBlank() }
                                 turnDomains.addAll(domains)
                             }
@@ -224,7 +224,7 @@ class AgenticSeedSelector(
             // 매 턴 검색 수행 직후 (결과가 0건이어도): 검색 결과 + LLM 해석/계획을 사용자에게 공유하고 대화형 피드백 수신
             if (searchExecutedInTurn && !confirmed) {
                 val explanation = assistantMessage.content ?: assistantMessage.reasoningContent ?: ""
-                val distinctCandidates = turnCandidates.distinctBy { it["className"]?.toString() ?: "" }.take(5)
+                val distinctCandidates = turnCandidates.distinctBy { it["className"]?.toString() ?: "" }.take(10)
                 val distinctDomains = turnDomains.distinct()
                 val userHint = clarificationBridge?.requestClarification(
                     turn = turn,

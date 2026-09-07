@@ -1390,9 +1390,17 @@ class WebviewActionRouter(private val project: Project) {
                         bridge.sendMessage("error", "파일 경로가 없습니다.")
                         return@invokeLater
                     }
-                    val vFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
-                        .findFileByPath(filePath)
+                    val fileObj = java.io.File(filePath)
+                    val resolvedPath = if (fileObj.isAbsolute) {
+                        fileObj.absolutePath
+                    } else {
+                        java.io.File(project.basePath ?: "", filePath).absolutePath
+                    }.replace('\\', '/')
+
+                    val lfs = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                    val vFile = lfs.findFileByPath(resolvedPath) ?: lfs.refreshAndFindFileByPath(resolvedPath)
                     if (vFile == null) {
+                        logger.warn("Router: 파일을 찾을 수 없음 → $resolvedPath (raw: $filePath)")
                         com.intellij.openapi.ui.Messages.showInfoMessage(
                             project,
                             "파일을 찾을 수 없습니다:\n$filePath",
