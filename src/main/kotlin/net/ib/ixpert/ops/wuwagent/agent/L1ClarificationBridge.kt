@@ -26,6 +26,11 @@ fun interface L1ClarificationBridge {
         domains: List<String>,
         explanation: String
     ): String?
+
+    /**
+     * 탐색이 완료되었을 때 웹뷰의 L1 Clarification 카드를 숨김 처리
+     */
+    fun hideClarification() {}
 }
 
 /**
@@ -88,6 +93,18 @@ class JcefL1ClarificationBridge(
         } catch (e: Exception) {
             pendingClarifications.remove(projectId)
             null
+        }
+    }
+
+    override fun hideClarification() {
+        if (project == null) return
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                val bridge = net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(project)
+                bridge.sendMessage("l1Clarification/hide", "", "system")
+            } catch (e: Exception) {
+                // ignore
+            }
         }
     }
 }

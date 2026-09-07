@@ -250,9 +250,12 @@ class AgenticSeedSelector(
 
             if (confirmed) {
                 println("[AgenticGraphExplorer] Exploration loop gracefully completed in Turn $turn.")
+                clarificationBridge?.hideClarification()
                 break
             }
         }
+
+        clarificationBridge?.hideClarification()
 
         if (finalSeeds.isNotEmpty()) {
             return SeedSelectionResult(
