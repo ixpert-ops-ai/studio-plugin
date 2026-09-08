@@ -39,7 +39,8 @@ data class ScoredFile(
     val discoveryReason: String,
     val hopDistance: Int,
     val fromPath: String?,
-    val isProtected: Boolean = false  // seed/judge/hint로 명시적으로 지목된 항목
+    val isProtected: Boolean = false,  // seed/judge/hint로 명시적으로 지목된 항목
+    val protectionReason: String? = null
 )
 
 /**

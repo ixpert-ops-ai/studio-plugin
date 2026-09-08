@@ -181,7 +181,8 @@ class RelevanceScorer(
                             discoveryReason = step.via,
                             hopDistance = step.hop,
                             fromPath = step.from,
-                            isProtected = (protection != null)
+                            isProtected = (protection != null),
+                            protectionReason = protection
                         )
                     )
                 } else if (protection != null) {
@@ -196,7 +197,8 @@ class RelevanceScorer(
                             discoveryReason = step.via + " [Bypass: $protection]",
                             hopDistance = step.hop,
                             fromPath = step.from,
-                            isProtected = true
+                            isProtected = true,
+                            protectionReason = protection
                         )
                     )
                 }
@@ -294,7 +296,8 @@ class RelevanceScorer(
                             discoveryReason = step.via,
                             hopDistance = step.hop,
                             fromPath = step.from,
-                            isProtected = (protection != null)
+                            isProtected = (protection != null),
+                            protectionReason = protection
                         )
                     )
                 } else if (protection != null) {
@@ -309,7 +312,8 @@ class RelevanceScorer(
                             discoveryReason = step.via + " [Bypass: $protection]",
                             hopDistance = step.hop,
                             fromPath = step.from,
-                            isProtected = true
+                            isProtected = true,
+                            protectionReason = protection
                         )
                     )
                 }
@@ -317,12 +321,19 @@ class RelevanceScorer(
         }
 
         // 2. 정렬 및 필터링
-        // isProtected 우선 → Score 내림차순 → hop 낮은 순 → riskScore 오름차순
-        return scoredFiles.sortedWith(compareByDescending<ScoredFile> { it.isProtected }
+        // Tier 1~4 우선순위 (낮을수록 우선) → Score 내림차순 → hop 낮은 순 → riskScore 오름차순
+        return scoredFiles.sortedWith(compareBy<ScoredFile> { protectionTier(it.protectionReason) }
             .thenByDescending { it.score }
             .thenBy { it.hopDistance }
             .thenBy { graph.files[it.path]?.riskAssessment?.riskScore ?: 0 })
             .take(fileLimit)
+    }
+
+    private fun protectionTier(protection: String?): Int = when (protection) {
+        "Seed Class", "Judge Pick", "Frontend Hint" -> 1  // Tier 1: LLM 직접 지목
+        "Seed Direct Dependency", "Resource Reverse Link" -> 2  // Tier 2: 생존 노드 결정론적 연계
+        "Frontend Resource" -> 3  // Tier 3: Controller 연계 리소스
+        else -> 4  // Tier 4: 일반 탐색
     }
 
     private val dictionary by lazy { DomainDictionary.load(graph) }
