@@ -268,20 +268,39 @@ class AgenticSeedSelector(
 
         clarificationBridge?.hideClarification()
 
-        val isFrontendByRule = srText.contains("어드민") || srText.contains("화면") || 
-                              srText.contains("UI") || srText.contains("목록") || 
-                              srText.contains("등록") || srText.contains("조회") ||
-                              srText.contains("프론트") || srText.contains("vue") || 
-                              srText.contains("jsp") || srText.contains("js") ||
-                              srText.contains("추가") || srText.contains("채널") ||
-                              srText.contains("발송")
+        val isExplicitFrontendByKeyword = srText.contains("어드민") || srText.contains("화면") || 
+                                          srText.contains("UI") || srText.contains("프론트") || 
+                                          srText.contains("vue", ignoreCase = true) || 
+                                          srText.contains("jsp", ignoreCase = true) || 
+                                          srText.contains("페이지") || srText.contains("웹") ||
+                                          srText.contains("frontend", ignoreCase = true) ||
+                                          srText.contains("admin", ignoreCase = true)
+
+        fun isFrontendByStructure(seeds: List<String>): Boolean {
+            return seeds.any { seed ->
+                val fileNode = graph.files.values.find { 
+                    it.className.equals(seed, ignoreCase = true) || 
+                    it.path.endsWith("/$seed.java") || 
+                    it.path.endsWith("/$seed.kt") 
+                }
+                val isController = fileNode?.let { 
+                    it.fileType.name == "CONTROLLER" || it.fileType.name == "REST_CONTROLLER" || it.className.endsWith("Controller") 
+                } ?: (seed.endsWith("Controller") || seed.endsWith("View") || seed.endsWith("Page"))
+
+                val isUiResource = graph.resourceNodes.any { 
+                    it.path.contains(seed) && (it.type.name == "VIEW" || it.type.name == "SCRIPT" || it.path.endsWith(".jsp") || it.path.endsWith(".vue") || it.path.endsWith(".js"))
+                }
+                isController || isUiResource
+            }
+        }
 
         if (finalSeeds.isNotEmpty()) {
+            val isFrontend = isExplicitFrontendByKeyword || isFrontendByStructure(finalSeeds)
             return SeedSelectionResult(
                 seedClasses = finalSeeds,
                 changeIntent = ChangeIntent.MODIFY,
                 layerHint = listOf("SERVICE", "BIZ", "PRESENTATION"),
-                frontendRelevant = isFrontendByRule,
+                frontendRelevant = isFrontend,
                 reasoning = finalRationale,
                 judgePicks = finalSeeds,
                 rawCandidates = finalSeeds
@@ -295,11 +314,12 @@ class AgenticSeedSelector(
                 .take(3)
                 .map { it.key }
             println("[AgenticGraphExplorer] Guard 2: Auto-adopting top candidates after turn limit: $topPicks")
+            val isFrontend = isExplicitFrontendByKeyword || isFrontendByStructure(topPicks)
             return SeedSelectionResult(
                 seedClasses = topPicks,
                 changeIntent = ChangeIntent.MODIFY,
                 layerHint = listOf("SERVICE", "BIZ", "PRESENTATION"),
-                frontendRelevant = isFrontendByRule,
+                frontendRelevant = isFrontend,
                 reasoning = "Auto-adopted top matching nodes from exploration after turn limit",
                 judgePicks = topPicks,
                 rawCandidates = topPicks
@@ -340,7 +360,8 @@ class AgenticSeedSelector(
 
         val isCreate = srText.contains("추가") || srText.contains("생성") || srText.contains("신규")
         val isDelete = srText.contains("삭제") || srText.contains("제거")
-        val isFrontend = srText.contains("어드민") || srText.contains("화면") || srText.contains("UI") || srText.contains("표시") || srText.contains("채널")
+        val isExplicitFrontend = srText.contains("어드민") || srText.contains("화면") || srText.contains("UI") || srText.contains("프론트") || srText.contains("vue", ignoreCase = true) || srText.contains("jsp", ignoreCase = true)
+        val isFrontend = isExplicitFrontend || seeds.any { it.endsWith("Controller") || it.endsWith("View") }
 
         return SeedSelectionResult(
             seedClasses = seeds.toList(),
