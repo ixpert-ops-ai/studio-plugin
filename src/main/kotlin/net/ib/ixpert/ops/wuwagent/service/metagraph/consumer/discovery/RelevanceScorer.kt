@@ -238,7 +238,22 @@ class RelevanceScorer(
                 
                 println("[RelevanceScorer] Node: $fileName, Score: $totalScore")
                 
-                val isCommonResource = resourceNode.linkedTo.size >= 2 || resourceNode.layer == "INFRASTRUCTURE"
+                val pathLower = path.lowercase()
+                val isInfrastructurePath = pathLower.contains("/common/") || 
+                                           pathLower.contains("/libs/") || 
+                                           pathLower.contains("/plugin/") || 
+                                           pathLower.contains("/plugins/") || 
+                                           pathLower.contains("/vendor/")
+                
+                val isCommonViewOrScript = fileName.matches(Regex("^(400|403|404|500|error|header|footer|loginForm|top|menu)(_old)?\\.(jsp|html|js)$", RegexOption.IGNORE_CASE)) ||
+                                           fileName.endsWith(".min.js") ||
+                                           fileName.startsWith("jquery", ignoreCase = true) ||
+                                           fileName.startsWith("bootstrap", ignoreCase = true)
+
+                val isCommonResource = resourceNode.linkedTo.size >= 2 || 
+                                       resourceNode.layer == "INFRASTRUCTURE" ||
+                                       isInfrastructurePath ||
+                                       isCommonViewOrScript
 
                 val isLinkedFrontend = (resourceNode.type == net.ib.ixpert.ops.wuwagent.service.metagraph.model.ResourceType.VIEW || 
                                         resourceNode.type == net.ib.ixpert.ops.wuwagent.service.metagraph.model.ResourceType.SCRIPT) 

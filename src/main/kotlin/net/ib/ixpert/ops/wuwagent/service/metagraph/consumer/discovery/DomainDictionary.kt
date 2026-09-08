@@ -156,6 +156,11 @@ class DomainDictionary private constructor(
             "유틸" to setOf("util", "helper", "common"),
             
             // 도메인 일반
+            "설문" to setOf("survey", "poll", "questionnaire"),
+            "발송" to setOf("send", "dispatch", "transmit"),
+            "채널" to setOf("channel", "chnl"),
+            "브랜드" to setOf("brand"),
+            "메시지" to setOf("message", "msg"),
             "케어" to setOf("care"),
             "회원" to setOf("member", "user", "account"),
             "사용자" to setOf("user", "member", "account", "client"),

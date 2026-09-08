@@ -268,8 +268,45 @@ class FileRelevanceVerifier(
             return extractMdSections(mdFile, listOf(1, 3, 5), node)
         }
         
-        if (node == null) return "정보 없음"
-        return buildGraphContext(node)
+        if (node != null) {
+            return buildGraphContext(node)
+        }
+
+        val resourceNode = graph.resourceNodes.find { it.path == path || it.path.endsWith("/$fileName") }
+        if (resourceNode != null) {
+            return buildResourceContext(resourceNode)
+        }
+        
+        return "정보 없음"
+    }
+
+    private fun buildResourceContext(resource: net.ib.ixpert.ops.wuwagent.service.metagraph.model.ResourceNode): String {
+        return buildString {
+            appendLine("- fileType: ${resource.type}, layer: ${resource.layer}")
+            appendLine("- path: ${resource.path}")
+            if (resource.linkedTo.isNotEmpty()) {
+                appendLine("- linkedTo: ${resource.linkedTo.joinToString(", ")}")
+            }
+            val meta = resource.metadata
+            if (meta.isNotEmpty()) {
+                val inputFields = (meta["input_field"] as? List<*>)?.mapNotNull { it?.toString() }
+                if (!inputFields.isNullOrEmpty()) {
+                    appendLine("- inputFields: ${inputFields.take(10).joinToString(", ")}")
+                }
+                val methods = (meta["methods"] as? List<*>)?.mapNotNull { it?.toString() }
+                if (!methods.isNullOrEmpty()) {
+                    appendLine("- methods: ${methods.take(10).joinToString(", ")}")
+                }
+                val sqlIds = (meta["sql_id"] as? List<*>)?.mapNotNull { it?.toString() }
+                if (!sqlIds.isNullOrEmpty()) {
+                    appendLine("- sqlIds: ${sqlIds.take(10).joinToString(", ")}")
+                }
+                val scriptSrc = (meta["script_src"] as? List<*>)?.mapNotNull { it?.toString() }
+                if (!scriptSrc.isNullOrEmpty()) {
+                    appendLine("- scriptSrc: ${scriptSrc.joinToString(", ")}")
+                }
+            }
+        }
     }
 
     private fun extractFileName(path: String): String {

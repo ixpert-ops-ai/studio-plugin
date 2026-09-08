@@ -268,12 +268,20 @@ class AgenticSeedSelector(
 
         clarificationBridge?.hideClarification()
 
+        val isFrontendByRule = srText.contains("어드민") || srText.contains("화면") || 
+                              srText.contains("UI") || srText.contains("목록") || 
+                              srText.contains("등록") || srText.contains("조회") ||
+                              srText.contains("프론트") || srText.contains("vue") || 
+                              srText.contains("jsp") || srText.contains("js") ||
+                              srText.contains("추가") || srText.contains("채널") ||
+                              srText.contains("발송")
+
         if (finalSeeds.isNotEmpty()) {
             return SeedSelectionResult(
                 seedClasses = finalSeeds,
                 changeIntent = ChangeIntent.MODIFY,
                 layerHint = listOf("SERVICE", "BIZ", "PRESENTATION"),
-                frontendRelevant = false,
+                frontendRelevant = isFrontendByRule,
                 reasoning = finalRationale,
                 judgePicks = finalSeeds,
                 rawCandidates = finalSeeds
@@ -291,7 +299,7 @@ class AgenticSeedSelector(
                 seedClasses = topPicks,
                 changeIntent = ChangeIntent.MODIFY,
                 layerHint = listOf("SERVICE", "BIZ", "PRESENTATION"),
-                frontendRelevant = false,
+                frontendRelevant = isFrontendByRule,
                 reasoning = "Auto-adopted top matching nodes from exploration after turn limit",
                 judgePicks = topPicks,
                 rawCandidates = topPicks
@@ -303,12 +311,15 @@ class AgenticSeedSelector(
     }
 
     private fun fallbackSelection(srText: String, graph: ProjectGraphQueryable): SeedSelectionResult {
-        val englishTokens = Regex("[a-zA-Z]{3,}").findAll(srText).map { it.value }.toList()
+        val directEnglishTokens = Regex("[a-zA-Z]{3,}").findAll(srText).map { it.value }.toList()
         val stopWords = setOf("추가", "생성", "신규", "삭제", "제거", "수정", "변경", "기능", "항목", "목록", "조회", "화면", "출력", "관련", "처리", "동작", "적용", "로직", "기반", "부분")
         val koreanTokens = Regex("[가-힣]{2,}").findAll(srText)
             .map { it.value }
             .filter { it !in stopWords }
             .toList()
+        val dict = DomainDictionary.load(graph)
+        val translatedTokens = koreanTokens.flatMap { dict.translate(it) }.filter { it.length >= 2 }
+        val englishTokens = (directEnglishTokens + translatedTokens).distinct()
         
         val seeds = mutableSetOf<String>()
         
@@ -329,7 +340,7 @@ class AgenticSeedSelector(
 
         val isCreate = srText.contains("추가") || srText.contains("생성") || srText.contains("신규")
         val isDelete = srText.contains("삭제") || srText.contains("제거")
-        val isFrontend = srText.contains("화면") || srText.contains("UI") || srText.contains("표시")
+        val isFrontend = srText.contains("어드민") || srText.contains("화면") || srText.contains("UI") || srText.contains("표시") || srText.contains("채널")
 
         return SeedSelectionResult(
             seedClasses = seeds.toList(),
@@ -477,12 +488,16 @@ class AgenticGraphTools(
             .filter { it.isNotBlank() && it !in STRUCTURAL_STOPWORDS }
     }
 
+    private val dictionary by lazy { DomainDictionary.load(graph) }
+
     fun searchGraphNodes(query: String, domainHint: String? = null, limit: Int = 10): List<Map<String, Any>> {
         val rawTokens = query.lowercase().split(Regex("[^a-z0-9가-힣]")).filter { it.isNotBlank() }
-        val englishTokens = rawTokens.filter { it.matches(Regex("[a-z0-9]+")) }
+        val directEnglishTokens = rawTokens.filter { it.matches(Regex("[a-z0-9]+")) }
         val koreanTokens = rawTokens.filter { it.matches(Regex("[가-힣]+")) }
+        val translatedTokens = koreanTokens.flatMap { dictionary.translate(it) }.filter { it.length >= 2 }
+        val englishTokens = (directEnglishTokens + translatedTokens).distinct()
 
-        val scored = graph.files.values.mapNotNull { node ->
+        val scoredFiles = graph.files.values.mapNotNull { node ->
             var score = 0.0
             val className = node.className
             val classSegments = splitCamelCase(className)
@@ -540,70 +555,138 @@ class AgenticGraphTools(
             }
 
             if (score > 0) {
-                Triple(node, score, classSegments)
+                val keyMethods = node.methods?.map { it.name }?.take(5) ?: emptyList()
+                val apiSummary = node.apiEndpoints?.take(3)?.map { "${it.httpMethod} ${it.path}" } ?: emptyList()
+                val resultMap = mutableMapOf<String, Any>(
+                    "className" to node.className,
+                    "path" to node.path,
+                    "fileType" to node.fileType.name,
+                    "localName" to (node.localName ?: "주석 없음"),
+                    "keyMethods" to keyMethods,
+                    "matchScore" to score
+                )
+                if (apiSummary.isNotEmpty()) {
+                    resultMap["apiEndpoints"] = apiSummary
+                }
+                Pair(resultMap, score)
             } else null
-        }.sortedByDescending { it.second }
-
-        return scored.take(limit).map { (node, score, _) ->
-            val keyMethods = node.methods?.map { it.name }?.take(5) ?: emptyList()
-            val apiSummary = node.apiEndpoints?.take(3)?.map { "${it.httpMethod} ${it.path}" } ?: emptyList()
-            val resultMap = mutableMapOf<String, Any>(
-                "className" to node.className,
-                "path" to node.path,
-                "fileType" to node.fileType.name,
-                "localName" to (node.localName ?: "주석 없음"),
-                "keyMethods" to keyMethods,
-                "matchScore" to score
-            )
-            if (apiSummary.isNotEmpty()) {
-                resultMap["apiEndpoints"] = apiSummary
-            }
-            resultMap
         }
+
+        val scoredResources = graph.resourceNodes.mapNotNull { rNode ->
+            var score = 0.0
+            val path = rNode.path
+            val fileName = path.substringAfterLast('/')
+            val nameWithoutExt = fileName.substringBeforeLast('.')
+            val fileSegments = splitCamelCase(nameWithoutExt) + fileName.lowercase().split(Regex("[^a-z0-9]")).filter { it.isNotBlank() }
+            val pathLower = path.lowercase()
+
+            val meta = rNode.metadata
+            val metaInputFields = (meta?.get("input_field") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+            val metaMethods = (meta?.get("methods") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+            val metaSqlIds = (meta?.get("sql_id") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+
+            for (eng in englishTokens) {
+                if (eng.length < 2) continue
+                if (fileSegments.any { it == eng }) {
+                    score += 90.0
+                } else if (fileSegments.any { it.contains(eng) }) {
+                    score += 50.0
+                } else if (fileName.lowercase().contains(eng)) {
+                    score += 35.0
+                }
+
+                if (metaInputFields.any { it.contains(eng, ignoreCase = true) } ||
+                    metaMethods.any { it.contains(eng, ignoreCase = true) } ||
+                    metaSqlIds.any { it.contains(eng, ignoreCase = true) }) {
+                    score += 25.0
+                }
+            }
+
+            if (!domainHint.isNullOrBlank()) {
+                val hintClean = domainHint.lowercase().trim()
+                if (pathLower.contains(hintClean)) {
+                    score += 30.0
+                }
+            }
+
+            if (score > 0) {
+                val resultMap = mutableMapOf<String, Any>(
+                    "className" to fileName,
+                    "path" to rNode.path,
+                    "fileType" to rNode.type.name,
+                    "localName" to "${rNode.layer} 리소스 (${rNode.type})",
+                    "keyMethods" to (metaMethods.ifEmpty { metaSqlIds }).take(5),
+                    "matchScore" to score
+                )
+                Pair(resultMap, score)
+            } else null
+        }
+
+        val allScored = (scoredFiles + scoredResources).sortedByDescending { it.second }
+        return allScored.take(limit).map { it.first }
     }
 
     fun inspectNodeDetail(className: String): Map<String, Any> {
         val node = graph.files.values.find { it.className == className || it.path.endsWith("/$className.java") }
-            ?: return mapOf("error" to "노드를 찾을 수 없습니다: $className")
+        if (node != null) {
+            val downstream = node.dependsOn.mapNotNull { depPath ->
+                graph.files[depPath]?.let { "${it.className} (${it.fileType.name})" } ?: depPath.substringAfterLast('/')
+            }
 
-        val downstream = node.dependsOn.mapNotNull { depPath ->
-            graph.files[depPath]?.let { "${it.className} (${it.fileType.name})" } ?: depPath.substringAfterLast('/')
-        }
+            val upstream = graph.files.values.filter { it.dependsOn.contains(node.path) }.map {
+                "${it.className} (${it.fileType.name})"
+            }
 
-        val upstream = graph.files.values.filter { it.dependsOn.contains(node.path) }.map {
-            "${it.className} (${it.fileType.name})"
-        }
+            val methodDetails = node.methods?.map {
+                mapOf(
+                    "name" to it.name,
+                    "returnType" to it.returnType,
+                    "parameters" to it.parameters
+                )
+            } ?: emptyList()
 
-        val methodDetails = node.methods?.map {
-            mapOf(
-                "name" to it.name,
-                "returnType" to it.returnType,
-                "parameters" to it.parameters
+            val apiDetails = node.apiEndpoints?.map {
+                mapOf(
+                    "httpMethod" to it.httpMethod,
+                    "path" to it.path,
+                    "handlerMethod" to it.handlerMethod
+                )
+            } ?: emptyList()
+
+            val result = mutableMapOf<String, Any>(
+                "className" to node.className,
+                "path" to node.path,
+                "fileType" to node.fileType.name,
+                "localName" to (node.localName ?: ""),
+                "koreanComments" to (node.koreanComments ?: emptyList()),
+                "methods" to methodDetails,
+                "dependsOn_Downstream" to downstream,
+                "dependedBy_Upstream" to upstream
             )
-        } ?: emptyList()
-
-        val apiDetails = node.apiEndpoints?.map {
-            mapOf(
-                "httpMethod" to it.httpMethod,
-                "path" to it.path,
-                "handlerMethod" to it.handlerMethod
-            )
-        } ?: emptyList()
-
-        val result = mutableMapOf<String, Any>(
-            "className" to node.className,
-            "path" to node.path,
-            "fileType" to node.fileType.name,
-            "localName" to (node.localName ?: ""),
-            "koreanComments" to (node.koreanComments ?: emptyList()),
-            "methods" to methodDetails,
-            "dependsOn_Downstream" to downstream,
-            "dependedBy_Upstream" to upstream
-        )
-        if (apiDetails.isNotEmpty()) {
-            result["apiEndpoints"] = apiDetails
+            if (apiDetails.isNotEmpty()) {
+                result["apiEndpoints"] = apiDetails
+            }
+            return result
         }
-        return result
+
+        val rNode = graph.resourceNodes.find { 
+            it.path.endsWith(className) || 
+            it.path.substringAfterLast('/') == className ||
+            it.path.substringAfterLast('/').substringBeforeLast('.') == className
+        }
+        if (rNode != null) {
+            return mutableMapOf<String, Any>(
+                "className" to rNode.path.substringAfterLast('/'),
+                "path" to rNode.path,
+                "fileType" to rNode.type.name,
+                "layer" to rNode.layer,
+                "localName" to "${rNode.layer} 리소스 (${rNode.type})",
+                "linkedTo" to rNode.linkedTo,
+                "metadata" to (rNode.metadata ?: emptyMap<String, Any>())
+            )
+        }
+
+        return mapOf("error" to "노드를 찾을 수 없습니다: $className")
     }
 
     fun expandConnectedNodes(className: String, direction: String = "BOTH", maxHops: Int = 1): Map<String, Any> {
