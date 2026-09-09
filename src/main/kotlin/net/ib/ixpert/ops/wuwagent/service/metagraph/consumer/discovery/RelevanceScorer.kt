@@ -421,13 +421,27 @@ class RelevanceScorer(
         }
         scoredFiles.addAll(contractPairAdditions)
 
-        // 2. 정렬 및 필터링
-        // Tier 1~4 우선순위 (낮을수록 우선) → Score 내림차순 → hop 낮은 순 → riskScore 오름차순
+        // 2. Tier 1 Seed들의 토큰 세트 수집 (확장자 제외 순수 basename 기반)
+        val seedTokens = scoredFiles.filter { protectionTier(it.protectionReason) == 1 }
+            .flatMap { sf -> extractBasenameTokens(sf.path) }
+            .toSet()
+
+        // 3. 정렬 및 필터링
+        // Tier 1~4 우선순위 (낮을수록 우선) → Score 내림차순 → hop 낮은 순 → Seed Token Affinity (동점 tie-breaker) → riskScore 오름차순
         return scoredFiles.sortedWith(compareBy<ScoredFile> { protectionTier(it.protectionReason) }
             .thenByDescending { it.score }
             .thenBy { it.hopDistance }
+            .thenByDescending { sf -> extractBasenameTokens(sf.path).count { it in seedTokens } }
             .thenBy { graph.files[it.path]?.riskAssessment?.riskScore ?: 0 })
             .take(fileLimit)
+    }
+
+    private fun extractBasenameTokens(path: String): List<String> {
+        val rawBasename = path.substringAfterLast('/').substringBeforeLast('.')
+        return Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|[^a-zA-Z0-9]+")
+            .split(rawBasename)
+            .map { it.lowercase() }
+            .filter { it.length >= 2 }
     }
 
     private fun protectionTier(protection: String?): Int = when (protection) {
