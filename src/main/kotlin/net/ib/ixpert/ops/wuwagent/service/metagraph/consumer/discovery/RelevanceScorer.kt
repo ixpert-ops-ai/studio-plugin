@@ -320,6 +320,107 @@ class RelevanceScorer(
             }
         }
 
+        // 1.5 DAO/Mapper 인터페이스-구현체 계약 쌍(Contract Pair) 보장
+        // 보호 확정된(isProtected == true) DAO/Mapper 구현체 또는 인터페이스의 짝꿍을 찾아 Tier 2로 동반 승급/추가
+        val protectedDaoNodes = scoredFiles.filter { sf ->
+            sf.isProtected && (
+                sf.fileType == "REPOSITORY" || sf.fileType == "DATA_ACCESS" ||
+                sf.className.endsWith("Dao") || sf.className.endsWith("DaoImpl") ||
+                sf.className.endsWith("Mapper") || sf.className.endsWith("DEM") || sf.className.endsWith("DQM")
+            )
+        }
+
+        val contractPairAdditions = mutableListOf<ScoredFile>()
+
+        for (item in protectedDaoNodes) {
+            val node = graph.files[item.path] ?: continue
+            
+            // A. 구현체 -> 인터페이스 방향 탐색
+            if (!node.isInterface) {
+                val targetInterfaceNames = node.implementedInterfaces.ifEmpty {
+                    if (node.className.endsWith("Impl")) listOf(node.className.removeSuffix("Impl")) else emptyList()
+                }
+                for (ifaceRef in targetInterfaceNames) {
+                    val ifaceSimpleName = ifaceRef.substringAfterLast('.')
+                    val ifaceEntry = graph.files.entries.find { (p, f) ->
+                        f.isInterface && (f.className == ifaceSimpleName || f.className == ifaceRef || p.endsWith("/$ifaceSimpleName.java") || p.endsWith("/$ifaceSimpleName.kt"))
+                    } ?: continue
+
+                    val ifacePath = ifaceEntry.key
+                    val ifaceNode = ifaceEntry.value
+                    val existing = scoredFiles.find { it.path == ifacePath } ?: contractPairAdditions.find { it.path == ifacePath }
+
+                    if (existing == null) {
+                        val step = expandedFiles[ifacePath] ?: ExpansionStep(hop = item.hopDistance, via = "CONTRACT_PAIR", from = item.path)
+                        println("[RelevanceScorer] CONTRACT PAIR: Added interface ${ifaceNode.className} for protected impl ${node.className}")
+                        contractPairAdditions.add(
+                            ScoredFile(
+                                path = ifacePath,
+                                className = ifaceNode.className,
+                                fileType = ifaceNode.fileType.name,
+                                layer = ifaceNode.layer.name,
+                                score = 40,
+                                discoveryReason = "${step.via} [Pair: ${node.className}]",
+                                hopDistance = item.hopDistance,
+                                fromPath = item.path,
+                                isProtected = true,
+                                protectionReason = "Seed Direct Dependency"
+                            )
+                        )
+                    } else if (existing.protectionReason == null) {
+                        val index = scoredFiles.indexOf(existing)
+                        if (index != -1) {
+                            println("[RelevanceScorer] CONTRACT PAIR: Promoted interface ${ifaceNode.className} to Tier 2 for protected impl ${node.className}")
+                            scoredFiles[index] = existing.copy(
+                                isProtected = true,
+                                protectionReason = "Seed Direct Dependency"
+                            )
+                        }
+                    }
+                }
+            }
+            // B. 인터페이스 -> 구현체 방향 탐색 (역방향)
+            else {
+                val implEntries = graph.files.entries.filter { (_, f) ->
+                    !f.isInterface && (
+                        f.implementedInterfaces.any { it == node.className || it.endsWith(".${node.className}") } ||
+                        f.className == "${node.className}Impl"
+                    )
+                }
+                for ((implPath, implNode) in implEntries) {
+                    val existing = scoredFiles.find { it.path == implPath } ?: contractPairAdditions.find { it.path == implPath }
+                    if (existing == null) {
+                        val step = expandedFiles[implPath] ?: ExpansionStep(hop = item.hopDistance, via = "CONTRACT_PAIR", from = item.path)
+                        println("[RelevanceScorer] CONTRACT PAIR: Added impl ${implNode.className} for protected interface ${node.className}")
+                        contractPairAdditions.add(
+                            ScoredFile(
+                                path = implPath,
+                                className = implNode.className,
+                                fileType = implNode.fileType.name,
+                                layer = implNode.layer.name,
+                                score = 40,
+                                discoveryReason = "${step.via} [Pair: ${node.className}]",
+                                hopDistance = item.hopDistance,
+                                fromPath = item.path,
+                                isProtected = true,
+                                protectionReason = "Seed Direct Dependency"
+                            )
+                        )
+                    } else if (existing.protectionReason == null) {
+                        val index = scoredFiles.indexOf(existing)
+                        if (index != -1) {
+                            println("[RelevanceScorer] CONTRACT PAIR: Promoted impl ${implNode.className} to Tier 2 for protected interface ${node.className}")
+                            scoredFiles[index] = existing.copy(
+                                isProtected = true,
+                                protectionReason = "Seed Direct Dependency"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        scoredFiles.addAll(contractPairAdditions)
+
         // 2. 정렬 및 필터링
         // Tier 1~4 우선순위 (낮을수록 우선) → Score 내림차순 → hop 낮은 순 → riskScore 오름차순
         return scoredFiles.sortedWith(compareBy<ScoredFile> { protectionTier(it.protectionReason) }
