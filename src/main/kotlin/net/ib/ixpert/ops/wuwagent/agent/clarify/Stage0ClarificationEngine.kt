@@ -83,29 +83,70 @@ class Stage0ClarificationEngine(
         var newSeedTokens = state.seedSet
         if (!userInput.userStatement.isNullOrBlank()) {
             val stmt = userInput.userStatement.trim()
-            val userTokens = scanner.extractTokens(stmt, state.seedSet)
-            newSeedTokens = state.seedSet + userTokens
+            val utteredTokens = scanner.extractTokens(stmt, emptySet())
+            newSeedTokens = state.seedSet + utteredTokens
 
-            // 그래프에 없는 신규 생성 지시인 경우 RequirementItem으로 적재
-            val isExistingInGraph = graph.files.values.any { it.className.contains(stmt, ignoreCase = true) } ||
-                                    graph.resourceNodes.any { it.path.contains(stmt, ignoreCase = true) }
-            val hint = if (isExistingInGraph) {
-                LinkHint.ExistingRef(stmt, emptyList())
-            } else {
-                LinkHint.NewCreation
+            // Rule-3: 토큰 기반 그래프 조회 및 분기 판정
+            // 그래프 실재 여부 확인 (발화에서 추출된 토큰 중 클래스명, 파일 경로, 리소스 노드 매칭)
+            val structuralTokens = utteredTokens.filter { it.kind == TokenKind.STRUCTURAL }.map { it.value.lowercase() }
+            val matchedExistingNodes = mutableListOf<Pair<String, String>>() // (filePath, matchedSymbol)
+
+            for (st in structuralTokens) {
+                val matchedFile = graph.files.values.find { 
+                    it.className.equals(st, ignoreCase = true) || 
+                    it.path.substringAfterLast("/").substringBeforeLast(".").equals(st, ignoreCase = true) ||
+                    it.path.substringAfterLast("/").equals(st, ignoreCase = true)
+                }
+                if (matchedFile != null) {
+                    matchedExistingNodes.add(matchedFile.path to matchedFile.className)
+                }
+                val matchedResource = graph.resourceNodes.find { 
+                    val fileName = it.path.substringAfterLast("/")
+                    val fileNameWithoutExt = fileName.substringBeforeLast(".")
+                    fileName.equals(st, ignoreCase = true) || fileNameWithoutExt.equals(st, ignoreCase = true)
+                }
+                if (matchedResource != null) {
+                    // 리소스 노드(JSP/JS/XML)는 별도 클래스명이 없으므로 완전 일치한 파일명 식별자(st)를 심볼로 보존
+                    matchedExistingNodes.add(matchedResource.path to st)
+                }
             }
 
-            val newItem = RequirementItem(
-                id = RequirementItem.deriveId(hint, stmt),
-                statement = stmt,
-                source = HintSource.USER_UTTERED,
-                hint = hint,
-                anchorRationale = "사용자 직접 발화 요구사항",
-                verdict = Verdict.CONFIRMED // 사용자 발화는 즉시 동결
-            )
-            // 중복 id가 없으면 추가
-            if (updatedItems.none { it.id == newItem.id }) {
-                updatedItems.add(newItem)
+            if (matchedExistingNodes.isNotEmpty()) {
+                // 분기 A: 그래프 실재 노드 (엣지 보유 / 실존 파일) -> ExistingRef + USER_UTTERANCE 출처
+                for ((filePath, symbol) in matchedExistingNodes.distinctBy { it.first }) {
+                    val fileName = filePath.substringAfterLast("/")
+                    val statement = "$stmt (관련 파일: $fileName)"
+                    val hint = LinkHint.ExistingRef(filePath, listOf(symbol))
+                    val newItem = RequirementItem(
+                        id = RequirementItem.deriveId(hint, statement),
+                        statement = statement,
+                        source = HintSource.USER_UTTERED,
+                        hint = hint,
+                        anchorRationale = "사용자 발화 기반 그래프 실재 노드 식별 ($stmt)",
+                        verdict = Verdict.CONFIRMED, // 사용자 발화는 즉시 동결
+                        confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                        provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+                    )
+                    if (updatedItems.none { it.id == newItem.id }) {
+                        updatedItems.add(newItem)
+                    }
+                }
+            } else {
+                // 분기 B: 그래프 부존재 / 0-degree (신규 생성 요구) -> NewCreation
+                val hint = LinkHint.NewCreation
+                val newItem = RequirementItem(
+                    id = RequirementItem.deriveId(hint, stmt),
+                    statement = stmt,
+                    source = HintSource.USER_UTTERED,
+                    hint = hint,
+                    anchorRationale = "사용자 직접 발화 신규 컴포넌트 생성 요구사항",
+                    verdict = Verdict.CONFIRMED, // 사용자 발화는 즉시 동결
+                    confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+                )
+                if (updatedItems.none { it.id == newItem.id }) {
+                    updatedItems.add(newItem)
+                }
             }
         }
 
