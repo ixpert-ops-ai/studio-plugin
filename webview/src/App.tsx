@@ -183,65 +183,95 @@ const CodeBlock = ({ children, isCollapsible = false }: { children: React.ReactN
 };
 
 // ─────────────────────────────────────────────
-//  컴포넌트: ClarifyForm (요구사항 구체화 폼)
+//  컴포넌트: ClarifyForm (Stage 0 요구사항 구체화 폼)
 // ─────────────────────────────────────────────
+interface ClarifyItem {
+  id: string;
+  statement: string;
+  anchorRationale: string;
+  verdict: 'PENDING' | 'CONFIRMED' | 'REJECTED';
+  source?: string;
+  hint?: {
+    type: string;
+    filePath?: string;
+    matchedTokens?: string[];
+  };
+}
+
+interface ClarifyPayload {
+  originalRequirement: string;
+  items: ClarifyItem[];
+  openQuestion?: string | null;
+  isExhausted?: boolean;
+  isReadyForStage1?: boolean;
+}
+
 const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
-  const data = msg.clarifyData;
-  if (!data) return null;
+  const payload: ClarifyPayload = useMemo(() => {
+    try {
+      if (msg.content) return JSON.parse(msg.content);
+    } catch (e) {
+      // ignore
+    }
+    return {
+      originalRequirement: '',
+      items: [],
+      openQuestion: null,
+      isExhausted: false,
+      isReadyForStage1: false
+    };
+  }, [msg.content]);
 
-  const [requirements, setRequirements] = useState<string[]>(data.enhancedRequirements || []);
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const [isAdding, setIsAdding] = useState(false);
-  const [newValue, setNewValue] = useState('');
+  // id -> Verdict
+  const [verdicts, setVerdicts] = useState<Record<string, 'CONFIRMED' | 'REJECTED' | 'PENDING'>>(() => {
+    const init: Record<string, 'CONFIRMED' | 'REJECTED' | 'PENDING'> = {};
+    payload.items.forEach(item => {
+      init[item.id] = item.verdict || 'PENDING';
+    });
+    return init;
+  });
 
+  const [openAnswer, setOpenAnswer] = useState('');
+  const [additionalStatement, setAdditionalStatement] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
-  
-  const handleEditStart = (idx: number, text: string) => {
+
+  // payload 갱신 시 verdicts 동기화 (기존 선택 보존)
+  useEffect(() => {
+    setVerdicts(prev => {
+      const next = { ...prev };
+      payload.items.forEach(item => {
+        if (!next[item.id]) {
+          next[item.id] = item.verdict || 'PENDING';
+        }
+      });
+      return next;
+    });
+  }, [payload.items]);
+
+  const toggleVerdict = (id: string, targetVerdict: 'CONFIRMED' | 'REJECTED') => {
     if (isSubmitted) return;
-    setEditingIndex(idx);
-    setEditValue(text);
+    setVerdicts(prev => ({
+      ...prev,
+      [id]: prev[id] === targetVerdict ? 'PENDING' : targetVerdict
+    }));
   };
 
-  const handleEditSave = (idx: number) => {
-    if (!editValue.trim()) return;
-    const newReqs = [...requirements];
-    newReqs[idx] = editValue.trim();
-    setRequirements(newReqs);
-    setEditingIndex(null);
-  };
-
-  const handleDelete = (idx: number) => {
-    if (isSubmitted) return;
-    setRequirements(requirements.filter((_, i) => i !== idx));
-  };
-
-  const handleAddSave = () => {
-    if (!newValue.trim()) {
-      setIsAdding(false);
-      return;
-    }
-    if (requirements.length >= 10) {
-      alert("최대 10개까지 추가 가능합니다.");
-      return;
-    }
-    setRequirements([...requirements, newValue.trim()]);
-    setNewValue('');
-    setIsAdding(false);
-  };
-
-  const handleSubmit = () => {
+  const handleSendResponse = (isCompletionDeclared: boolean) => {
     if (isSubmitted) return;
     setIsSubmitted(true);
-    
-    const payload = {
-      requirements
+
+    const combinedStatement = [openAnswer.trim(), additionalStatement.trim()].filter(Boolean).join(' / ');
+
+    const responsePayload = {
+      verdictUpdates: verdicts,
+      userStatement: combinedStatement.length > 0 ? combinedStatement : null,
+      isCompletionDeclared
     };
-    
+
     if (window.sendToIde) {
       window.sendToIde(JSON.stringify({
         command: '/analyze-confirm',
-        text: JSON.stringify(payload)
+        text: JSON.stringify(responsePayload)
       }));
     }
   };
@@ -250,84 +280,201 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
     <div className="msg-ai analysis" data-message-role="ai" data-message-id={msg.id}>
       <div className="msg-ai-content">
         <div className="markdown-body">
-          <h3>🤖 요구사항 자동 구체화 결과 (Stage 0)</h3>
-          
-          <div className="requirements-edit-list">
-            <h4>[보강된 요구사항]</h4>
-            {requirements.length > 0 ? (
-              <ul className="req-list" style={{ listStyle: 'none', padding: 0, margin: '10px 0' }}>
-                {requirements.map((req, idx) => (
-                  <li key={idx} style={{ padding: '8px', marginBottom: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', borderLeft: '3px solid #3b82f6', display: 'flex', flexDirection: 'column' }}>
-                    {editingIndex === idx ? (
-                      <div className="req-edit-mode" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <textarea 
-                          value={editValue} 
-                          onChange={e => setEditValue(e.target.value)}
-                          style={{ width: '100%', minHeight: '60px', padding: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid #555', color: '#fff', borderRadius: '4px', resize: 'vertical' }}
-                        />
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                          <button onClick={() => setEditingIndex(null)} className="req-btn-icon" style={{ padding: '4px 8px', fontSize: '12px', background: '#444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>취소</button>
-                          <button onClick={() => handleEditSave(idx)} className="req-btn-icon" style={{ padding: '4px 8px', fontSize: '12px', background: '#3b82f6', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>저장</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <span style={{ fontSize: '18px' }}>🤖</span>
+            <h3 style={{ margin: 0 }}>요구사항 구체화 대화 (Stage 0)</h3>
+          </div>
+
+          {payload.originalRequirement && (
+            <div style={{ fontSize: '12px', color: '#aaa', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', marginBottom: '12px', borderLeft: '2px solid #3b82f6' }}>
+              <strong>요구사항:</strong> {payload.originalRequirement}
+            </div>
+          )}
+
+          {/* 1. 감지된 변경 대상 및 연관 파일 후보 */}
+          <div style={{ marginTop: '12px' }}>
+            <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#60a5fa' }}>📋 감지된 변경 대상 & 후보군</h4>
+            {payload.items && payload.items.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {payload.items.map(item => {
+                  const currentVerdict = verdicts[item.id] || item.verdict || 'PENDING';
+                  const isConfirmed = currentVerdict === 'CONFIRMED';
+                  const isRejected = currentVerdict === 'REJECTED';
+
+                  return (
+                    <div 
+                      key={item.id}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '4px',
+                        background: isConfirmed ? 'rgba(16, 185, 129, 0.1)' : isRejected ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255,255,255,0.04)',
+                        border: `1px solid ${isConfirmed ? '#10b981' : isRejected ? '#ef4444' : 'rgba(255,255,255,0.1)'}`,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <div style={{ flex: 1, marginRight: '10px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', color: isRejected ? '#888' : '#eee', textDecoration: isRejected ? 'line-through' : 'none' }}>
+                          {item.statement}
                         </div>
-                      </div>
-                    ) : (
-                      <div className="req-view-mode" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <span style={{ fontSize: '13px', lineHeight: '1.4', flex: 1 }}>{idx + 1}. {req}</span>
-                        {!isSubmitted && (
-                          <div style={{ display: 'flex', gap: '4px', marginLeft: '12px' }}>
-                            <button onClick={() => handleEditStart(idx, req)} className="req-btn-icon" title="수정" style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', padding: '4px', borderRadius: '4px' }}>✎</button>
-                            <button onClick={() => handleDelete(idx)} className="req-btn-icon" title="삭제" style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '4px', borderRadius: '4px' }}>🗑</button>
+                        {item.anchorRationale && (
+                          <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px' }}>
+                            💡 {item.anchorRationale}
                           </div>
                         )}
                       </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p style={{ fontSize: '13px', color: '#888', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', borderLeft: '3px solid #666', margin: '10px 0' }}>
-                💡 보강된 항목이 없습니다. [제출] 시 최초 입력한 원본 요구사항으로 분석이 진행됩니다.
-              </p>
-            )}
 
-            {!isSubmitted && (
-              <div className="req-add-section" style={{ marginTop: '12px', marginBottom: '24px' }}>
-                {isAdding ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px', background: 'rgba(255,255,255,0.02)', borderRadius: '4px', border: '1px dashed #555' }}>
-                    <textarea 
-                      placeholder="새 요구사항 입력..."
-                      value={newValue}
-                      onChange={e => setNewValue(e.target.value)}
-                      style={{ width: '100%', minHeight: '60px', padding: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid #555', color: '#fff', borderRadius: '4px', resize: 'vertical' }}
-                    />
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                      <button onClick={() => setIsAdding(false)} style={{ padding: '4px 8px', fontSize: '12px', background: '#444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>취소</button>
-                      <button onClick={handleAddSave} style={{ padding: '4px 8px', fontSize: '12px', background: '#10b981', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>추가</button>
+                      {!isSubmitted && (
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button
+                            type="button"
+                            onClick={() => toggleVerdict(item.id, 'CONFIRMED')}
+                            style={{
+                              padding: '3px 8px',
+                              fontSize: '11px',
+                              borderRadius: '3px',
+                              border: 'none',
+                              cursor: 'pointer',
+                              background: isConfirmed ? '#10b981' : '#374151',
+                              color: '#fff',
+                              fontWeight: isConfirmed ? 'bold' : 'normal'
+                            }}
+                          >
+                            ✓ 포함
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleVerdict(item.id, 'REJECTED')}
+                            style={{
+                              padding: '3px 8px',
+                              fontSize: '11px',
+                              borderRadius: '3px',
+                              border: 'none',
+                              cursor: 'pointer',
+                              background: isRejected ? '#ef4444' : '#374151',
+                              color: '#fff',
+                              fontWeight: isRejected ? 'bold' : 'normal'
+                            }}
+                          >
+                            ✗ 제외
+                          </button>
+                        </div>
+                      )}
+                      {isSubmitted && (
+                        <span style={{ fontSize: '11px', color: isConfirmed ? '#10b981' : isRejected ? '#ef4444' : '#aaa', fontWeight: 'bold' }}>
+                          {isConfirmed ? '✓ 포함됨' : isRejected ? '✗ 제외됨' : '미판정'}
+                        </span>
+                      )}
                     </div>
-                  </div>
-                ) : (
-                  <button 
-                    onClick={() => setIsAdding(true)}
-                    disabled={requirements.length >= 10}
-                    style={{ width: '100%', padding: '8px', background: 'rgba(255,255,255,0.05)', border: '1px dashed #555', color: '#aaa', borderRadius: '4px', cursor: requirements.length >= 10 ? 'not-allowed' : 'pointer', fontSize: '13px' }}
-                  >
-                    + 항목 추가
-                  </button>
-                )}
+                  );
+                })}
               </div>
+            ) : (
+              <p style={{ fontSize: '12px', color: '#888', padding: '8px', background: 'rgba(255,255,255,0.02)', borderRadius: '4px' }}>
+                구조적으로 즉시 감지된 후보가 없습니다.
+              </p>
             )}
           </div>
 
+          {/* 2. 개방형 질문 영역 */}
+          {payload.openQuestion && (
+            <div style={{ marginTop: '16px', padding: '10px 12px', background: 'rgba(245, 158, 11, 0.08)', borderLeft: '3px solid #f59e0b', borderRadius: '4px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#fbbf24', marginBottom: '6px' }}>
+                ❓ 추가 확인 필요 (개방형 질문)
+              </div>
+              <div style={{ fontSize: '12px', color: '#e5e7eb', marginBottom: '8px', lineHeight: '1.4' }}>
+                {payload.openQuestion}
+              </div>
+              {!isSubmitted && (
+                <textarea
+                  placeholder="예: 외부 Bizgo API 연동 모듈을 호출하여 발송합니다."
+                  value={openAnswer}
+                  onChange={e => setOpenAnswer(e.target.value)}
+                  style={{
+                    width: '100%',
+                    minHeight: '50px',
+                    padding: '6px 8px',
+                    fontSize: '12px',
+                    background: 'rgba(0,0,0,0.3)',
+                    border: '1px solid #4b5563',
+                    borderRadius: '4px',
+                    color: '#fff',
+                    resize: 'vertical'
+                  }}
+                />
+              )}
+            </div>
+          )}
 
+          {/* 3. 추가 발화 / 요구사항 입력란 */}
+          {!isSubmitted && (
+            <div style={{ marginTop: '12px' }}>
+              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>
+                ✍️ 추가 요구사항 또는 변경 지시사항 (선택사항)
+              </label>
+              <input
+                type="text"
+                placeholder="추가로 고려할 도메인/화면이 있다면 입력..."
+                value={additionalStatement}
+                onChange={e => setAdditionalStatement(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  fontSize: '12px',
+                  background: 'rgba(0,0,0,0.2)',
+                  border: '1px solid #4b5563',
+                  borderRadius: '4px',
+                  color: '#fff'
+                }}
+              />
+            </div>
+          )}
 
-          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
-            <button 
-              onClick={handleSubmit} 
-              disabled={isSubmitted}
-              style={{ padding: '6px 16px', background: isSubmitted ? '#444' : '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: isSubmitted ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
-            >
-              {isSubmitted ? '제출 완료' : (requirements.length === 0 ? '원본 요구사항으로 진행 →' : '확인하고 다음 단계로 →')}
-            </button>
+          {/* 4. 액션 버튼 영역 */}
+          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            {!isSubmitted && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleSendResponse(false)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    background: '#374151',
+                    color: '#e5e7eb',
+                    border: '1px solid #4b5563',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }}
+                  title="새로운 추가 정보를 반영하여 미판정 영역을 다시 스캔합니다."
+                >
+                  ↻ 추가 턴 반영
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendResponse(true)}
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    background: '#10b981',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  확인 완료 및 분석 시작 →
+                </button>
+              </>
+            )}
+            {isSubmitted && (
+              <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 'bold' }}>
+                ✓ 확인이 제출되었습니다. 분석을 진행 중입니다...
+              </span>
+            )}
           </div>
         </div>
       </div>
