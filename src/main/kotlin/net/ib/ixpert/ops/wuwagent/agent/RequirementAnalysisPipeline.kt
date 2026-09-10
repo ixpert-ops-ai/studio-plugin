@@ -37,6 +37,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         secondaryReq: String, 
         projectGraph: ProjectGraph, 
         enhancedRequirements: List<String> = emptyList(),
+        stage0Contract: net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine.Stage0TransitionContract? = null,
         onChunk: ((String) -> Unit)? = null
     ): RequirementAnalysisResult {
         val fwType = projectGraph.frameworkDetection?.userOverride ?: projectGraph.frameworkType
@@ -174,6 +175,31 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                 description = "- suggestedFileType: ${file.suggestedFileType}\n- reason: ${file.reason}\n- referencePattern: ${file.referencePattern}"
             ))
         }
+
+        // Stage 0 사용자 확정 기존 파일 (trustedExistingRefs) 합성
+        stage0Contract?.trustedExistingRefs?.forEach { ref ->
+            if (targetFiles.none { it.path == ref.filePath }) {
+                targetFiles.add(TargetFileSpec(
+                    order = targetFiles.size + 1,
+                    path = ref.filePath,
+                    type = "MODIFY",
+                    description = "Stage 0 확정 기존 파일 (매칭: ${ref.symbols.joinToString()})"
+                ))
+            }
+        }
+
+        // Stage 0 사용자 명시 신규 생성 항목 (newCreations) 독립 합성 (그래프 탐색 seed 배제)
+        stage0Contract?.newCreations?.forEach { item ->
+            if (targetFiles.none { it.path == item.statement }) {
+                targetFiles.add(TargetFileSpec(
+                    order = targetFiles.size + 1,
+                    path = item.statement,
+                    type = "CREATE",
+                    description = "Stage 0 사용자 신규 생성 지정 (${item.anchorRationale})"
+                ))
+            }
+        }
+
         onChunk?.invoke("\n> **(Stage 2) Trimming** - 불필요한 파일 경로 보정 및 필터링...\n")
         val correctedFiles = TargetFileValidator.correctPaths(targetFiles, projectGraph)
         val mdRoot = Paths.get(project?.basePath ?: "", "docs")
@@ -202,7 +228,8 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
 
             val filesToVerify = userSelection ?: correctedFiles
             val verifier = FileRelevanceVerifier(client, projectGraph, mdRoot)
-            val fullRequirement = if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
+            val fullRequirement = stage0Contract?.enrichedRequirementText
+                ?: if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
             val verificationOutput = verifier.verify(fullRequirement, filesToVerify)
 
             // 사용자가 명시적으로 선택한 파일은 verify 결과에서 누락되었더라도 강제 복원 (Union)

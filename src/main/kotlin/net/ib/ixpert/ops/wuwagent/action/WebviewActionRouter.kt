@@ -114,7 +114,7 @@ class WebviewActionRouter(private val project: Project) {
                     val isSkipMode = rawInput.startsWith("!")
                     val initialRequirement = if (isSkipMode) rawInput.removePrefix("!").trim() else rawInput
                     
-                    bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프를 분석하여 요구사항 대상 파일을 추출하고 있습니다...", messageId)
+                    bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프를 분석하고 있습니다...", messageId)
                     
                     ApplicationManager.getApplication().executeOnPooledThread {
                         try {
@@ -123,50 +123,41 @@ class WebviewActionRouter(private val project: Project) {
                             
                             val client = WuwLlmService.getClient()
                             
-                            var finalRequirementText = initialRequirement
-                            
-                            var finalEnhancedRequirements = emptyList<String>()
-                            
-                            // Stage 0: Clarify Engine 실행
+                            // Stage 0: Stage0ClarificationEngine 실행
                             if (!isSkipMode) {
                                 try {
-                                    val clarifier = net.ib.ixpert.ops.wuwagent.agent.clarify.RequirementClarifier(
-                                        client,
-                                        net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyPromptBuilder()
-                                    )
+                                    val scanner = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0GraphScanner(projectGraph)
+                                    val engine = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine(scanner, projectGraph)
+                                    val turnResult = engine.initSession(initialRequirement)
                                     
-                                    val scopeSummary = try {
-                                        net.ib.ixpert.ops.wuwagent.agent.clarify.ScopeSummaryBuilder.buildScopeSummary(projectGraph)
-                                    } catch (e: Exception) {
-                                        logger.warn("Failed to build scope summary, using empty fallback", e)
-                                        ""
-                                    }
-                                    
-                                    val clarifyResult = clarifier.clarify(initialRequirement, projectGraph.frameworkType, scopeSummary)
-                                    
-                                    val hasEnhancements = clarifyResult.enhancedRequirements.isNotEmpty()
-                                    
-                                    if (hasEnhancements) {
-                                        // UI 확인 대기가 필요한 경우
-                                        net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.saveSession(project, initialRequirement, clarifyResult)
+                                    if (turnResult.state.items.isNotEmpty() || turnResult.openQuestion != null) {
+                                        // UI 확인 대기
+                                        net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.saveSession(
+                                            project,
+                                            initialRequirement,
+                                            engine,
+                                            turnResult.state,
+                                            turnResult
+                                        )
                                         
-                                        val jsonPayload = com.google.gson.Gson().toJson(clarifyResult)
+                                        val payload = mapOf(
+                                            "originalRequirement" to initialRequirement,
+                                            "items" to turnResult.state.items,
+                                            "openQuestion" to turnResult.openQuestion,
+                                            "isExhausted" to turnResult.isExhausted,
+                                            "isReadyForStage1" to turnResult.isReadyForStage1
+                                        )
+                                        val jsonPayload = com.google.gson.Gson().toJson(payload)
                                         ApplicationManager.getApplication().invokeLater {
                                             bridge.sendMessage("analyze_clarify", jsonPayload, messageId)
                                         }
                                         return@executeOnPooledThread
                                     } else {
-                                        // 질문도 없고 보강 항목도 없으면 자동 진행
-                                        val parser = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyUserResponseParser()
-                                        val defaultResponse = parser.parse("")
-                                        val finalReq = clarifier.finalize(clarifyResult, defaultResponse, initialRequirement)
-                                        finalRequirementText = finalReq.fullText
-                                        finalEnhancedRequirements = clarifyResult.enhancedRequirements
-                                        logger.info("Stage 0 Clarify 자동 완료 (보강/질문 없음): $finalRequirementText")
+                                        logger.info("Stage 0 감지 항목 없음, Stage 1 직접 진행")
                                     }
                                 } catch (e: Exception) {
                                     logger.warn("Stage 0 실패, 원본 요구사항으로 계속 진행", e)
-                                    val fallbackMsg = "\n> ⚠️ **요구사항 구체화 중 오류 발생 (타임아웃 등). 원본 요구사항으로 바로 분석을 진행합니다.**\n\n"
+                                    val fallbackMsg = "\n> ⚠️ **요구사항 구체화 중 오류 발생. 원본 요구사항으로 바로 분석을 진행합니다.**\n\n"
                                     ApplicationManager.getApplication().invokeLater {
                                         bridge.sendMessageChunk(messageId, fallbackMsg)
                                     }
@@ -176,10 +167,9 @@ class WebviewActionRouter(private val project: Project) {
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
                             val result = kotlinx.coroutines.runBlocking {
                                 pipeline.analyze(
-                                    initialRequirement, 
-                                    finalRequirementText.removePrefix(initialRequirement).trim(), 
-                                    projectGraph,
-                                    finalEnhancedRequirements
+                                    primaryReq = initialRequirement, 
+                                    secondaryReq = "", 
+                                    projectGraph = projectGraph
                                 ) { chunk ->
                                     ApplicationManager.getApplication().invokeLater {
                                         bridge.sendMessageChunk(messageId, chunk)
@@ -229,20 +219,60 @@ class WebviewActionRouter(private val project: Project) {
                     
                     // 파싱
                     val jsonPayload = textBody.trim()
-                    val userResponse = try {
-                        com.google.gson.Gson().fromJson(jsonPayload, net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyUserResponse::class.java)
+                    val gson = com.google.gson.Gson()
+                    val payloadMap = try {
+                        gson.fromJson(jsonPayload, Map::class.java)
                     } catch (e: Exception) {
+                        null
+                    }
+                    
+                    if (payloadMap == null) {
                         bridge.sendMessage("error", "잘못된 응답 형식입니다. 다시 제출해주세요.", messageId)
                         return@invokeLater
                     }
-                    
-                    val client = WuwLlmService.getClient()
-                    val clarifier = net.ib.ixpert.ops.wuwagent.agent.clarify.RequirementClarifier(
-                        client,
-                        net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyPromptBuilder()
+
+                    // verdictUpdates 매핑: Map<String, String> -> Map<String, Verdict>
+                    val rawVerdictMap = payloadMap["verdictUpdates"] as? Map<*, *> ?: emptyMap<Any, Any>()
+                    val verdictUpdates = rawVerdictMap.mapNotNull { (k, v) ->
+                        val id = k?.toString() ?: return@mapNotNull null
+                        val verdict = when (v?.toString()?.uppercase()) {
+                            "CONFIRMED" -> net.ib.ixpert.ops.wuwagent.agent.clarify.model.Verdict.CONFIRMED
+                            "REJECTED" -> net.ib.ixpert.ops.wuwagent.agent.clarify.model.Verdict.REJECTED
+                            else -> net.ib.ixpert.ops.wuwagent.agent.clarify.model.Verdict.PENDING
+                        }
+                        id to verdict
+                    }.toMap()
+
+                    val userStatement = payloadMap["userStatement"] as? String
+                    val isCompletionDeclared = (payloadMap["isCompletionDeclared"] as? Boolean) ?: true
+
+                    val userInput = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine.UserInput(
+                        verdictUpdates = verdictUpdates,
+                        userStatement = userStatement,
+                        isCompletionDeclared = isCompletionDeclared
                     )
-                    
-                    val finalReq = clarifier.finalize(session.clarifyResult, userResponse, session.initialRequirement)
+
+                    val turnResult = session.engine.processTurn(session.currentState, userInput)
+                    session.currentState = turnResult.state
+                    session.lastTurnResult = turnResult
+
+                    if (!isCompletionDeclared && !turnResult.isReadyForStage1) {
+                        // 다음 턴 대화 진행
+                        val nextPayload = mapOf(
+                            "originalRequirement" to session.initialRequirement,
+                            "items" to turnResult.state.items,
+                            "openQuestion" to turnResult.openQuestion,
+                            "isExhausted" to turnResult.isExhausted,
+                            "isReadyForStage1" to turnResult.isReadyForStage1
+                        )
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage("analyze_clarify", gson.toJson(nextPayload), messageId)
+                        }
+                        return@invokeLater
+                    }
+
+                    // Stage 1 전이
+                    val contract = session.engine.transitionToStage1(turnResult.state)
                     net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
                     
                     bridge.sendMessage("analyze_start", "🔍 확정된 요구사항을 바탕으로 대상 파일을 추출하고 있습니다...", messageId)
@@ -251,14 +281,15 @@ class WebviewActionRouter(private val project: Project) {
                         try {
                             val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
                             val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다.")
+                            val client = WuwLlmService.getClient()
                             
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
                             val result = kotlinx.coroutines.runBlocking {
                                 pipeline.analyze(
-                                    session.initialRequirement, 
-                                    finalReq.fullText.removePrefix(session.initialRequirement).trim(), 
-                                    projectGraph,
-                                    finalReq.confirmedItems
+                                    primaryReq = session.initialRequirement, 
+                                    secondaryReq = "", 
+                                    projectGraph = projectGraph,
+                                    stage0Contract = contract
                                 ) { chunk ->
                                     ApplicationManager.getApplication().invokeLater {
                                         bridge.sendMessageChunk(messageId, chunk)

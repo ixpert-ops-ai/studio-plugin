@@ -125,6 +125,21 @@ class Stage0RouterAndContractTest {
         // 3. PENDING 항목은 그대로 유지/갱신
         val turn1ListJs = turn1.state.items.first { it.id == listJsItem.id }
         assertEquals(Verdict.PENDING, turn1ListJs.verdict)
+
+        // 4. Turn 2: 추가 사용자 발화 및 재탐색이 트리거되어도 CONFIRMED/REJECTED가 덮어써지거나 부활하지 않는지 재검증 (mergeCandidates 동결 보호)
+        val turn2 = engine.processTurn(
+            turn1.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "추가적으로 결제 연동 방식을 지정합니다.",
+                isCompletionDeclared = false
+            )
+        )
+
+        val turn2ListJsp = turn2.state.items.first { it.id == listJspItem.id }
+        assertEquals("Turn 2: CONFIRMED item must stay CONFIRMED after rescan!", Verdict.CONFIRMED, turn2ListJsp.verdict)
+
+        val turn2WriteJsp = turn2.state.items.first { it.id == writeJspItem.id }
+        assertEquals("Turn 2: REJECTED item must stay REJECTED after rescan!", Verdict.REJECTED, turn2WriteJsp.verdict)
     }
 
     /**

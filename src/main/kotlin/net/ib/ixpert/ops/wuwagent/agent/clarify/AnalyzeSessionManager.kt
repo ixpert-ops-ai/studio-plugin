@@ -1,12 +1,15 @@
 package net.ib.ixpert.ops.wuwagent.agent.clarify
 
 import com.intellij.openapi.project.Project
+import net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0State
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-data class AnalyzeSession(
+data class Stage0Session(
     val initialRequirement: String,
-    val clarifyResult: ClarifyResult,
+    val engine: Stage0ClarificationEngine,
+    var currentState: Stage0State,
+    var lastTurnResult: Stage0ClarificationEngine.Stage0TurnResult,
     val createdAtMs: Long = System.currentTimeMillis()
 ) {
     fun isExpired(ttlMinutes: Long = 5): Boolean {
@@ -16,15 +19,26 @@ data class AnalyzeSession(
 
 object AnalyzeSessionManager {
     // Project base path -> Session
-    private val sessions = ConcurrentHashMap<String, AnalyzeSession>()
+    private val sessions = ConcurrentHashMap<String, Stage0Session>()
     private const val TTL_MINUTES = 5L
 
-    fun saveSession(project: Project, initialRequirement: String, clarifyResult: ClarifyResult) {
+    fun saveSession(
+        project: Project,
+        initialRequirement: String,
+        engine: Stage0ClarificationEngine,
+        currentState: Stage0State,
+        lastTurnResult: Stage0ClarificationEngine.Stage0TurnResult
+    ) {
         val basePath = project.basePath ?: return
-        sessions[basePath] = AnalyzeSession(initialRequirement, clarifyResult)
+        sessions[basePath] = Stage0Session(
+            initialRequirement = initialRequirement,
+            engine = engine,
+            currentState = currentState,
+            lastTurnResult = lastTurnResult
+        )
     }
 
-    fun getSession(project: Project): AnalyzeSession? {
+    fun getSession(project: Project): Stage0Session? {
         val basePath = project.basePath ?: return null
         val session = sessions[basePath] ?: return null
         
@@ -38,5 +52,9 @@ object AnalyzeSessionManager {
     fun removeSession(project: Project) {
         val basePath = project.basePath ?: return
         sessions.remove(basePath)
+    }
+
+    fun clearAll() {
+        sessions.clear()
     }
 }
