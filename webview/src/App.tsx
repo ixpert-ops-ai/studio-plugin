@@ -1556,6 +1556,9 @@ function App() {
       } else {
         payload = '요구사항 대상 파일을 추출해주세요.';
       }
+    } else if (text === '/clarify' || text.startsWith('/clarify ')) {
+      command = '/clarify';
+      payload = text.startsWith('/clarify ') ? text.slice(9).trim() : '';
     } else if (text === '/implement' || text.startsWith('/implement ')) {
       command = '/implement';
       payload = '';
@@ -1607,6 +1610,7 @@ function App() {
     let idx = 0;
     fetchedModels.forEach(m => items.push({ type: 'model', cmd: m, index: idx++ }));
     const cmds = [
+      { cmd: '/clarify', desc: '요구사항 대화형 구체화 (Stage 0)' },
       { cmd: '/explain', desc: '코드를 설명해줘' },
       { cmd: '/improve', desc: '코드를 개선해줘' },
       { cmd: '/find', desc: '프로젝트 내 키워드 검색' },

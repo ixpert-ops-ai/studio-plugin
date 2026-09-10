@@ -63,11 +63,27 @@ class WebviewActionRouter(private val project: Project) {
         ApplicationManager.getApplication().invokeLater {
             val bridge = JcefBridge.getInstance(project)
             val editor = FileEditorManager.getInstance(project).selectedTextEditor
-            val textBody = payload["text"] ?: ""
+            var textBody = payload["text"] ?: ""
+            var targetCommand = command
 
-            logger.info("Router: 수신 명령어='$command'")
+            // 방어 로직: /clarify 또는 /analyze 명령어가 /chat 등으로 감싸여 들어온 경우 복구 라우팅
+            if (targetCommand == "/chat" || targetCommand == "/task") {
+                if (textBody.startsWith("/clarify ") || textBody == "/clarify") {
+                    targetCommand = "/clarify"
+                    textBody = textBody.removePrefix("/clarify").trim()
+                } else if (textBody.startsWith("/analyze ") || textBody == "/analyze" || textBody.startsWith("/analyze!")) {
+                    targetCommand = "/analyze"
+                    if (textBody.startsWith("/analyze!")) {
+                        textBody = "!" + textBody.removePrefix("/analyze!").trim()
+                    } else {
+                        textBody = textBody.removePrefix("/analyze").trim()
+                    }
+                }
+            }
 
-            when (command) {
+            logger.info("Router: 수신 명령어='$command', 실행 명령어='$targetCommand'")
+
+            when (targetCommand) {
                 // ── 직접 라우팅 ──────────────────────────────
                 "/explain" -> {
                     logger.info("Router: /explain 분기")
