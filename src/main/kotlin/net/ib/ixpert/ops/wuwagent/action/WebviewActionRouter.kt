@@ -285,11 +285,24 @@ class WebviewActionRouter(private val project: Project) {
                         id to verdict
                     }.toMap()
 
+                    // rejectionReasonUpdates 매핑: Map<String, String> -> Map<String, RejectionReason>
+                    val rawRejectionMap = payloadMap["rejectionReasonUpdates"] as? Map<*, *> ?: emptyMap<Any, Any>()
+                    val rejectionReasonUpdates = rawRejectionMap.mapNotNull { (k, v) ->
+                        val id = k?.toString() ?: return@mapNotNull null
+                        val reason = when (v?.toString()?.uppercase()?.trim()) {
+                            "CONCEPT_IRRELEVANT" -> net.ib.ixpert.ops.wuwagent.agent.clarify.model.RejectionReason.CONCEPT_IRRELEVANT
+                            "FILE_MISMATCH" -> net.ib.ixpert.ops.wuwagent.agent.clarify.model.RejectionReason.FILE_MISMATCH
+                            else -> null
+                        }
+                        if (reason != null) id to reason else null
+                    }.toMap()
+
                     val userStatement = payloadMap["userStatement"] as? String
                     val isCompletionDeclared = (payloadMap["isCompletionDeclared"] as? Boolean) ?: true
 
                     val userInput = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine.UserInput(
                         verdictUpdates = verdictUpdates,
+                        rejectionReasonUpdates = rejectionReasonUpdates,
                         userStatement = userStatement,
                         isCompletionDeclared = isCompletionDeclared
                     )

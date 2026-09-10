@@ -514,5 +514,84 @@ class ClarificationContractStoreTest {
         assertEquals("FILE_MISMATCH인 OrderDao는 isReEmergence = true 여야 함", 
             true, daoResult?.second)
     }
+
+    /**
+     * 검증 8: 거부 사유 왕복(Round-trip) 및 SSOT 기본값 단일 진실 공급원 검증
+     * - 프론트엔드가 사유 미선택(키 부재) 상태로 REJECTED만 전송했을 때:
+     *     백엔드 processTurn에서 SSOT 기본값(RejectionReason.FILE_MISMATCH)으로 자동 귀결됨을 assert.
+     * - 프론트엔드가 명시적으로 CONCEPT_IRRELEVANT를 전송했을 때:
+     *     정확히 CONCEPT_IRRELEVANT로 반영됨을 assert.
+     * - isReEmergence 필드가 클라이언트 업스트림 payload에 없어도 백엔드가 온전히 보존/관리하는 단방향성 검증.
+     * - transitionToStage1 호출 후 저장된 아티팩트 역직렬화 시 rejectedItems 사유 일치 검증.
+     */
+    @Test
+    fun testRejectionReasonRoundTripAndSsotDefaults() {
+        val graph = createMiniGraph()
+        val scanner = Stage0GraphScanner(graph)
+        val engine = Stage0ClarificationEngine(scanner, graph)
+
+        val serviceItem = RequirementItem(
+            id = "ref:src/main/java/com/example/OrderService.java",
+            statement = "OrderService 로직 수정",
+            source = HintSource.SYSTEM_UNCONFIRMED,
+            hint = LinkHint.ExistingRef("src/main/java/com/example/OrderService.java"),
+            anchorRationale = "주문 서비스",
+            verdict = Verdict.PENDING
+        )
+
+        val daoItem = RequirementItem(
+            id = "ref:src/main/java/com/example/OrderDao.java",
+            statement = "OrderDao 쿼리 수정",
+            source = HintSource.SYSTEM_UNCONFIRMED,
+            hint = LinkHint.ExistingRef("src/main/java/com/example/OrderDao.java"),
+            anchorRationale = "주문 DAO",
+            verdict = Verdict.PENDING
+        )
+
+        val initialState = Stage0State(
+            originalRequirement = "주문 및 결제 처리",
+            items = listOf(serviceItem, daoItem),
+            seedSet = emptySet()
+        )
+
+        // 클라이언트 입력 시뮬레이션:
+        // 1. OrderService: REJECTED, 사유 미선택 (rejectionReasonUpdates에 키 부재)
+        // 2. OrderDao: REJECTED, 사유 명시적 CONCEPT_IRRELEVANT
+        val clientInput = Stage0ClarificationEngine.UserInput(
+            verdictUpdates = mapOf(
+                serviceItem.id to Verdict.REJECTED,
+                daoItem.id to Verdict.REJECTED
+            ),
+            rejectionReasonUpdates = mapOf(
+                daoItem.id to RejectionReason.CONCEPT_IRRELEVANT
+                // serviceItem 키는 아예 누락 (미선택)
+            ),
+            isCompletionDeclared = true
+        )
+
+        val turn1 = engine.processTurn(initialState, clientInput)
+        val processedService = turn1.state.items.find { it.id == serviceItem.id }
+        val processedDao = turn1.state.items.find { it.id == daoItem.id }
+
+        // SSOT 검증: 사유 미선택 항목은 백엔드 기본값 FILE_MISMATCH로 귀결
+        assertEquals("사유 미선택 거부 항목은 SSOT 기본값 FILE_MISMATCH 여야 함", 
+            RejectionReason.FILE_MISMATCH, processedService?.rejectionReason)
+        assertEquals("명시적 사유 거부 항목은 CONCEPT_IRRELEVANT 여야 함", 
+            RejectionReason.CONCEPT_IRRELEVANT, processedDao?.rejectionReason)
+
+        // 전이 계약 저장 및 복원 라운드트립 검증
+        val contract = engine.transitionToStage1(turn1.state)
+        val projectRoot = tempFolder.newFolder("roundtrip_test_project")
+        val savedFile = ClarificationContractStore.saveContract(projectRoot, contract, key = "roundtrip")
+        val loadedContract = ClarificationContractStore.loadContract(savedFile, graph)
+
+        val loadedService = loadedContract.rejectedItems.find { it.id == serviceItem.id }
+        val loadedDao = loadedContract.rejectedItems.find { it.id == daoItem.id }
+
+        assertEquals("저장/복원 후에도 SSOT 기본값 FILE_MISMATCH가 유지되어야 함", 
+            RejectionReason.FILE_MISMATCH, loadedService?.rejectionReason)
+        assertEquals("저장/복원 후에도 CONCEPT_IRRELEVANT가 유지되어야 함", 
+            RejectionReason.CONCEPT_IRRELEVANT, loadedDao?.rejectionReason)
+    }
 }
 

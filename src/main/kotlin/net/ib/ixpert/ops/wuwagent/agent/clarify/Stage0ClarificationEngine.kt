@@ -16,6 +16,7 @@ class Stage0ClarificationEngine(
      */
     data class UserInput(
         val verdictUpdates: Map<String, Verdict> = emptyMap(), // id -> CONFIRMED / REJECTED
+        val rejectionReasonUpdates: Map<String, RejectionReason> = emptyMap(), // id -> FILE_MISMATCH / CONCEPT_IRRELEVANT
         val userStatement: String? = null,                    // 추가 발화 또는 개방형 질문 답변
         val isCompletionDeclared: Boolean = false             // 사용자의 완결 선언 여부
     )
@@ -125,13 +126,15 @@ class Stage0ClarificationEngine(
      * 3절: 대화 턴 처리 (증분 seed 확장 + 미판정 영역 재탐색 + 확정분 동결)
      */
     fun processTurn(state: Stage0State, userInput: UserInput): Stage0TurnResult {
-        // 1. 기존 items에 사용자 판정(CONFIRMED/REJECTED) 반영
+        // 1. 기존 items에 사용자 판정(CONFIRMED/REJECTED) 및 거부 사유 반영
         val updatedItems = state.items.map { item ->
             val update = userInput.verdictUpdates[item.id]
+            val reasonUpdate = userInput.rejectionReasonUpdates[item.id]
             if (update != null && update != Verdict.PENDING) {
                 item.copy(
                     verdict = update,
-                    source = if (update == Verdict.CONFIRMED) HintSource.USER_CONFIRMED else item.source
+                    source = if (update == Verdict.CONFIRMED) HintSource.USER_CONFIRMED else item.source,
+                    rejectionReason = if (update == Verdict.REJECTED) (reasonUpdate ?: item.rejectionReason ?: RejectionReason.FILE_MISMATCH) else null
                 )
             } else {
                 item
