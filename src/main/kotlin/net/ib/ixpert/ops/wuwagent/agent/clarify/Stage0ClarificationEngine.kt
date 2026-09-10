@@ -31,26 +31,46 @@ class Stage0ClarificationEngine(
     )
 
     /**
-     * 6절: Stage 1 전이 계약 산출물
-     */
-    data class Stage0TransitionContract(
-        val confirmedItems: List<RequirementItem>,
-        val trustedExistingRefs: List<LinkHint.ExistingRef>,
-        val newCreations: List<RequirementItem>,
-        val enrichedRequirementText: String
-    )
-
-    /**
      * 초기 세션 생성 (Turn 0)
+     * - previousContract가 전달된 경우, 이전 세션에서 거부된 항목(rejectedNewCreations, rejectedExistingRefs)을
+     *   동결 항목으로 사전 주입하여 재제안/재질문되는 것을 원천 억제합니다.
      */
-    fun initSession(originalRequirement: String): Stage0TurnResult {
+    fun initSession(
+        originalRequirement: String,
+        previousContract: Stage0TransitionContract? = null
+    ): Stage0TurnResult {
         val initialTokens = scanner.extractTokens(originalRequirement)
-        val initialCandidates = scanner.rescanUnverified(initialTokens, emptyList())
+
+        // 이전 계약의 거부 항목을 frozen 리스트로 구성
+        val frozenRejectedItems = mutableListOf<RequirementItem>()
+        if (previousContract != null) {
+            for (rejRef in previousContract.rejectedExistingRefs) {
+                val item = RequirementItem(
+                    id = RequirementItem.deriveId(rejRef),
+                    statement = "이전 세션에서 거부된 기존 파일: ${rejRef.filePath}",
+                    source = HintSource.SYSTEM_UNCONFIRMED,
+                    hint = rejRef,
+                    anchorRationale = "이전 세션 REJECTED 이력 보존",
+                    verdict = Verdict.REJECTED,
+                    confidence = ConfidenceBucket.HIGH_CONFIDENCE
+                )
+                frozenRejectedItems.add(item)
+            }
+            for (rejNew in previousContract.rejectedNewCreations) {
+                val item = rejNew.copy(verdict = Verdict.REJECTED)
+                frozenRejectedItems.add(item)
+            }
+        }
+
+        val initialCandidates = scanner.rescanUnverified(initialTokens, frozenRejectedItems)
         val openQ = checkOpenQuestionTrigger(initialTokens, initialCandidates)
+
+        // 초기 items = 새로 발견된 후보군 + 이전 세션 거부 동결 항목
+        val combinedItems = initialCandidates + frozenRejectedItems
 
         val state = Stage0State(
             originalRequirement = originalRequirement,
-            items = initialCandidates,
+            items = combinedItems,
             seedSet = initialTokens
         )
 
@@ -278,10 +298,32 @@ class Stage0ClarificationEngine(
     /**
      * 6절: Stage 1로의 전이 산출물 생성
      */
-    fun transitionToStage1(state: Stage0State): Stage0TransitionContract {
+    /**
+     * 6절: Stage 1로의 전이 산출물 생성
+     */
+    fun transitionToStage1(state: Stage0State, sessionId: String = "default", srId: String = ""): Stage0TransitionContract {
         val confirmed = state.items.filter { it.verdict == Verdict.CONFIRMED }
         val trustedExistingRefs = confirmed.mapNotNull { it.hint as? LinkHint.ExistingRef }
         val newCreations = confirmed.filter { it.hint is LinkHint.NewCreation }
+
+        val rejectedItems = state.items.filter { it.verdict == Verdict.REJECTED }
+        val rejectedExistingRefs = rejectedItems.mapNotNull { it.hint as? LinkHint.ExistingRef }
+        val rejectedNewCreations = rejectedItems.filter { it.hint is LinkHint.NewCreation }
+
+        // 신규 슬롯 제안 중 수락(CONFIRMED)된 항목들의 원본 템플릿 컴포넌트(앵커 형제들) 추출
+        val anchorSiblingPaths = mutableSetOf<String>()
+        for (item in confirmed) {
+            val proposal = item.structuralSlotProposal ?: continue
+            for (tmpl in proposal.templateComponents) {
+                val matchedFile = graph.files.values.find { 
+                    it.path.endsWith(tmpl) || it.className == tmpl.substringBeforeLast(".") 
+                }
+                if (matchedFile != null) {
+                    anchorSiblingPaths.add(matchedFile.path)
+                }
+            }
+        }
+        val anchorSiblingRefs = anchorSiblingPaths.map { LinkHint.ExistingRef(filePath = it) }
 
         val statementsSummary = confirmed.joinToString("\n") { "- ${it.statement}" }
         val enrichedText = buildString {
@@ -293,10 +335,21 @@ class Stage0ClarificationEngine(
             }
         }.trim()
 
+        val graphHash = ClarificationContractStore.calculateGraphHash(graph)
+        val createdAt = java.time.Instant.now().toString()
+
         return Stage0TransitionContract(
+            contractVersion = "1.0",
+            createdAt = createdAt,
+            graphHash = graphHash,
+            sessionId = sessionId,
+            srId = srId,
             confirmedItems = confirmed,
             trustedExistingRefs = trustedExistingRefs,
             newCreations = newCreations,
+            anchorSiblingRefs = anchorSiblingRefs,
+            rejectedExistingRefs = rejectedExistingRefs,
+            rejectedNewCreations = rejectedNewCreations,
             enrichedRequirementText = enrichedText
         )
     }

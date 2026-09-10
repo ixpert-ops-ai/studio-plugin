@@ -37,7 +37,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         secondaryReq: String, 
         projectGraph: ProjectGraph, 
         enhancedRequirements: List<String> = emptyList(),
-        stage0Contract: net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine.Stage0TransitionContract? = null,
+        stage0Contract: net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract? = null,
         onChunk: ((String) -> Unit)? = null
     ): RequirementAnalysisResult {
         val fwType = projectGraph.frameworkDetection?.userOverride ?: projectGraph.frameworkType

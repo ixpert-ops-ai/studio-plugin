@@ -85,7 +85,9 @@ class RequirementAnalysisPipelineIntegrationTest {
             confidence = net.ib.ixpert.ops.wuwagent.agent.clarify.model.ConfidenceBucket.HIGH_CONFIDENCE
         )
 
-        val contract = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine.Stage0TransitionContract(
+        val contract = net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract(
+            createdAt = java.time.Instant.now().toString(),
+            graphHash = "dummyHash",
             confirmedItems = listOf(existingRefItem, newCreationItem),
             trustedExistingRefs = listOf(existingRefItem.hint as net.ib.ixpert.ops.wuwagent.agent.clarify.model.LinkHint.ExistingRef),
             newCreations = listOf(newCreationItem),

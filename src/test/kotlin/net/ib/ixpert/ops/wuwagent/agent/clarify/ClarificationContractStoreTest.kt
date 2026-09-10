@@ -1,0 +1,289 @@
+package net.ib.ixpert.ops.wuwagent.agent.clarify
+
+import net.ib.ixpert.ops.wuwagent.agent.clarify.model.*
+import net.ib.ixpert.ops.wuwagent.service.metagraph.model.*
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
+
+/**
+ * 합성 미니그래프 기반 ClarificationContractStore 및 불변식 단위 테스트:
+ * 1) 정본화 해시(Canonical graphHash) 안정성 (노드/엣지 셔플 무관 동일성)
+ * 2) 무조건 Fail-Fast 계약 검증 (플래그 없음, 해시/버전 불일치 시 ContractValidationException 발생)
+ * 3) rejectedNewCreations의 후속 /clarify 세션 재제안 억제
+ * 4) Stage 1 결정론적 위상 후보군 순서 리스트 멱등성 (디스크 재로드 인스턴스 포함 3회 일치)
+ */
+class ClarificationContractStoreTest {
+
+    @get:Rule
+    val tempFolder = TemporaryFolder()
+
+    private fun createMiniGraph(): ProjectGraph {
+        val files = mapOf(
+            "file1" to FileNode(
+                path = "src/main/java/com/example/OrderService.java",
+                className = "OrderService",
+                packageName = "com.example",
+                fileType = SpringFileType.SERVICE,
+                layer = ArchitectureLayer.BUSINESS,
+                annotations = listOf("Service"),
+                methods = listOf(MethodSignature("createOrder", "void", listOf("OrderDto")))
+            ),
+            "file2" to FileNode(
+                path = "src/main/java/com/example/OrderDao.java",
+                className = "OrderDao",
+                packageName = "com.example",
+                fileType = SpringFileType.REPOSITORY,
+                layer = ArchitectureLayer.PERSISTENCE,
+                annotations = listOf("Repository"),
+                methods = listOf(MethodSignature("insertOrder", "int", listOf("OrderDto")))
+            ),
+            "file3" to FileNode(
+                path = "src/main/java/com/example/OrderDto.java",
+                className = "OrderDto",
+                packageName = "com.example",
+                fileType = SpringFileType.DTO,
+                layer = ArchitectureLayer.MODEL
+            )
+        )
+
+        val resources = listOf(
+            ResourceNode(
+                path = "src/main/resources/mapper/OrderMapper.xml",
+                type = ResourceType.MYBATIS_MAPPER,
+                layer = "PERSISTENCE",
+                linkedTo = listOf("src/main/java/com/example/OrderDao.java"),
+                linkType = "namespace_binding",
+                metadata = mapOf("namespace" to "com.example.OrderDao")
+            )
+        )
+
+        val relationships = listOf(
+            Relationship("src/main/java/com/example/OrderService.java", "src/main/java/com/example/OrderDao.java", RelationshipType.INJECTS),
+            Relationship("src/main/java/com/example/OrderDao.java", "src/main/resources/mapper/OrderMapper.xml", RelationshipType.CALLS),
+            Relationship("src/main/java/com/example/OrderService.java", "src/main/java/com/example/OrderDto.java", RelationshipType.USES_TYPE)
+        )
+
+        return ProjectGraph(
+            version = "1.0",
+            generatedAt = "2026-09-10T00:00:00Z",
+            projectRoot = "/test",
+            framework = "spring-boot",
+            frameworkType = FrameworkType.SPRING_BOOT_JPA,
+            files = files,
+            resourceNodes = resources,
+            relationships = relationships,
+            statistics = GraphStatistics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        )
+    }
+
+    /**
+     * 검증 1: 정본화 해시 안정성 검증
+     * - 노드/리소스/릴레이션십 컬렉션의 순서를 셔플하여도 100% 동일한 해시가 생성되는지 확인
+     * - 내용이 변경(새 노드 추가 등)되면 다른 해시가 생성되는지 확인
+     */
+    @Test
+    fun testCanonicalGraphHashStability() {
+        val graph1 = createMiniGraph()
+
+        // 동일 데이터이나 Map / List의 순서가 뒤섞인 graph2 생성
+        val shuffledFiles = graph1.files.entries.toList().shuffled().associate { it.key to it.value }
+        val shuffledResources = graph1.resourceNodes.shuffled()
+        val shuffledRels = graph1.relationships.shuffled()
+
+        val graph2 = graph1.copy(
+            files = shuffledFiles,
+            resourceNodes = shuffledResources,
+            relationships = shuffledRels
+        )
+
+        val hash1 = ClarificationContractStore.calculateGraphHash(graph1)
+        val hash2 = ClarificationContractStore.calculateGraphHash(graph2)
+
+        assertEquals("노드/엣지 순서가 셔플되어도 정본화 해시는 100% 동일해야 함", hash1, hash2)
+        assertTrue("해시 문자열은 유효한 SHA-256 (64 hex characters) 이어야 함", hash1.matches(Regex("^[a-f0-9]{64}$")))
+
+        // 그래프 변형 시 해시 변경 확인
+        val modifiedFiles = graph1.files + ("file4" to FileNode(
+            path = "src/main/java/com/example/PaymentService.java",
+            className = "PaymentService",
+            packageName = "com.example",
+            fileType = SpringFileType.SERVICE,
+            layer = ArchitectureLayer.BUSINESS,
+            annotations = listOf("Service")
+        ))
+        val graph3 = graph1.copy(files = modifiedFiles)
+        val hash3 = ClarificationContractStore.calculateGraphHash(graph3)
+        assertNotEquals("그래프 내용이 달라지면 해시도 달라져야 함", hash1, hash3)
+    }
+
+    /**
+     * 검증 2: 무조건 Fail-Fast 계약 검증 (플래그 없음)
+     * - graphHash 불일치 시 ContractValidationException(GRAPH_HASH_MISMATCH) 발생
+     * - contractVersion 불일치 시 ContractValidationException(VERSION_MISMATCH) 발생
+     */
+    @Test
+    fun testUnconditionalFailFastValidation() {
+        val projectRoot = tempFolder.newFolder("projectA")
+        val graph = createMiniGraph()
+        val graphHash = ClarificationContractStore.calculateGraphHash(graph)
+
+        val validContract = Stage0TransitionContract(
+            contractVersion = "1.0",
+            createdAt = java.time.Instant.now().toString(),
+            graphHash = graphHash,
+            trustedExistingRefs = listOf(LinkHint.ExistingRef("src/main/java/com/example/OrderService.java")),
+            enrichedRequirementText = "주문 생성 기능 수정"
+        )
+
+        val contractFile = ClarificationContractStore.saveContract(projectRoot, validContract, key = "test1")
+        assertTrue("계약 파일이 정상 저장되어야 함", contractFile.exists())
+
+        // 1. 정상 로드 검증
+        val loaded = ClarificationContractStore.loadContract(contractFile, graph)
+        assertEquals("저장된 계약 내용이 일치해야 함", validContract.enrichedRequirementText, loaded.enrichedRequirementText)
+
+        // 2. 그래프 해시 불일치 (stale artifact) 시 Fail-Fast 검증
+        val modifiedGraph = graph.copy(
+            files = graph.files + ("extra" to FileNode(
+                path = "src/main/java/com/example/Extra.java", 
+                className = "Extra", 
+                packageName = "com.example", 
+                fileType = SpringFileType.COMPONENT, 
+                layer = ArchitectureLayer.COMMON
+            ))
+        )
+
+        try {
+            ClarificationContractStore.loadContract(contractFile, modifiedGraph)
+            fail("그래프 해시 불일치 시 ContractValidationException이 발생해야 함")
+        } catch (e: ContractValidationException) {
+            assertEquals("사유는 GRAPH_HASH_MISMATCH 여야 함", ContractValidationReason.GRAPH_HASH_MISMATCH, e.reason)
+            assertNotNull("오류 메시지가 null이 아니어야 함", e.message)
+            assertTrue("오류 메시지에 해시 불일치 설명이 포함되어야 함", e.message?.contains("그래프 무결성 불일치") == true)
+        }
+
+        // 3. 스키마 버전 불일치 시 Fail-Fast 검증
+        val invalidVersionContract = validContract.copy(contractVersion = "2.0")
+        val versionFile = ClarificationContractStore.saveContract(projectRoot, invalidVersionContract, key = "test_ver")
+        try {
+            ClarificationContractStore.loadContract(versionFile, graph)
+            fail("스키마 버전 불일치 시 ContractValidationException이 발생해야 함")
+        } catch (e: ContractValidationException) {
+            assertEquals("사유는 VERSION_MISMATCH 여야 함", ContractValidationReason.VERSION_MISMATCH, e.reason)
+            assertNotNull("오류 메시지가 null이 아니어야 함", e.message)
+            assertTrue("오류 메시지에 버전 불일치 설명이 포함되어야 함", e.message?.contains("지원하지 않는 계약 스키마 버전") == true)
+        }
+    }
+
+    /**
+     * 검증 3: rejectedNewCreations의 후속 /clarify 세션 재제안 억제
+     * - 이전 계약에서 REJECTED된 신규 제안이 다음 /clarify 세션 시작 시 재제안되지 않고 REJECTED로 동결 보존되는지 검증
+     */
+    @Test
+    fun testRejectedNewCreationsSuppressionInClarifyReSession() {
+        val graph = createMiniGraph()
+        val scanner = Stage0GraphScanner(graph)
+        val engine = Stage0ClarificationEngine(scanner, graph)
+
+        val rejectedNewItem = RequirementItem(
+            id = "new:test_rejected",
+            statement = "신규 쿠폰 정산 모듈 개발",
+            source = HintSource.SYSTEM_UNCONFIRMED,
+            hint = LinkHint.NewCreation,
+            anchorRationale = "신규 제안",
+            verdict = Verdict.REJECTED
+        )
+
+        val previousContract = Stage0TransitionContract(
+            contractVersion = "1.0",
+            createdAt = java.time.Instant.now().toString(),
+            graphHash = ClarificationContractStore.calculateGraphHash(graph),
+            rejectedNewCreations = listOf(rejectedNewItem)
+        )
+
+        // 후속 /clarify 세션 시작 (previousContract 주입)
+        val turn0 = engine.initSession("주문 생성 및 쿠폰 처리", previousContract)
+
+        val itemInState = turn0.state.items.find { it.id == rejectedNewItem.id }
+        assertNotNull("이전 거부 항목이 세션에 동결 상태로 존재해야 함", itemInState)
+        assertEquals("거부 상태(REJECTED)가 유지되어야 함", Verdict.REJECTED, itemInState?.verdict)
+    }
+
+    /**
+     * 검증 4: Stage 1 결정론적 위상 후보군 순서 리스트 멱등성
+     * - 동일한 계약으로 Stage 1 후보군 합성을 3회 실행할 때,
+     *   최소 1회는 디스크에서 역직렬화한 새 인스턴스로 실행하여 캐시 누수 없이
+     *   후보군 리스트(순서 포함)가 100% 비트 동일함을 assert 검증.
+     */
+    @Test
+    fun testStage1DeterministicOrderedListIdempotency() {
+        val projectRoot = tempFolder.newFolder("project_idempotent")
+        val graph = createMiniGraph()
+        val graphHash = ClarificationContractStore.calculateGraphHash(graph)
+
+        val contract = Stage0TransitionContract(
+            contractVersion = "1.0",
+            createdAt = java.time.Instant.now().toString(),
+            graphHash = graphHash,
+            trustedExistingRefs = listOf(
+                LinkHint.ExistingRef("src/main/java/com/example/OrderService.java"),
+                LinkHint.ExistingRef("src/main/java/com/example/OrderDao.java")
+            ),
+            newCreations = listOf(
+                RequirementItem(
+                    id = "new:batch_slot",
+                    statement = "신규 주문 배치 처리기",
+                    source = HintSource.USER_CONFIRMED,
+                    hint = LinkHint.NewCreation,
+                    anchorRationale = "슬롯 수락"
+                )
+            ),
+            rejectedExistingRefs = listOf(
+                LinkHint.ExistingRef("src/main/java/com/example/OrderDto.java")
+            ),
+            enrichedRequirementText = "주문 처리 기능 개선"
+        )
+
+        val savedFile = ClarificationContractStore.saveContract(projectRoot, contract, key = "idempotent")
+
+        fun executeStage1DeterministicCandidateDerivation(contractInstance: Stage0TransitionContract): List<Pair<String, String>> {
+            // 결정론적 Stage 1 시드 합성 및 거부 필터링 시뮬레이션
+            val candidateList = mutableListOf<Pair<String, String>>()
+
+            // 1. trustedExistingRefs
+            contractInstance.trustedExistingRefs.forEach { ref ->
+                if (contractInstance.rejectedExistingRefs.none { it.filePath == ref.filePath }) {
+                    candidateList.add(ref.filePath to "MODIFY")
+                }
+            }
+
+            // 2. newCreations
+            contractInstance.newCreations.forEach { item ->
+                candidateList.add(item.statement to "CREATE")
+            }
+
+            return candidateList
+        }
+
+        // Run 1: 메모리 객체 인스턴스로 실행
+        val run1Result = executeStage1DeterministicCandidateDerivation(contract)
+
+        // Run 2: 메모리 객체로 재실행
+        val run2Result = executeStage1DeterministicCandidateDerivation(contract)
+
+        // Run 3: 디스크에서 완전히 새 인스턴스로 역직렬화 로드하여 실행
+        val reloadedContract = ClarificationContractStore.loadContract(savedFile, graph)
+        val run3Result = executeStage1DeterministicCandidateDerivation(reloadedContract)
+
+        // 순서 있는 리스트의 exact match assert
+        assertEquals("Run 1과 Run 2의 결과 리스트(순서 포함)는 100% 동일해야 함", run1Result, run2Result)
+        assertEquals("Run 1과 Run 3(디스크 재로드 인스턴스)의 결과 리스트(순서 포함)는 100% 동일해야 함", run1Result, run3Result)
+
+        // REJECTED 필터링 동작 확인 (OrderDto는 배제되어야 함)
+        assertFalse("rejectedExistingRefs(OrderDto)는 결과에 절대 포함되지 않아야 함", run3Result.any { it.first.contains("OrderDto") })
+        assertEquals("결과 크기는 정확히 3개 (OrderService, OrderDao, NewBatch)여야 함", 3, run3Result.size)
+    }
+}
