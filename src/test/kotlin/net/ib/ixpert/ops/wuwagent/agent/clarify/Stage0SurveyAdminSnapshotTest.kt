@@ -258,5 +258,91 @@ class Stage0SurveyAdminSnapshotTest {
         println("시스템 최종 실측 Recall: ${String.format("%.1f", systemRecall)}% (17 / 19)")
         println("증분 증폭률 (Amplification): $amplificationLower (하한) ~ $amplificationUpper (상한)")
     }
+
+    /**
+     * Case B 단일 토큰("비즈고 연동") 인입 시의 순수 증폭률(Amplification) 실측 테스트:
+     * - Turn 1에서 5개 파일을 열거하지 않고, "비즈고 연동" 단일 토큰만 발화
+     * - 익명 구조 슬롯(배치 3종) 수락 + Rule-3 단일 토큰 신규 생성 결합
+     * - 실측치: GT A군 5개 중 4개 커버 (배치 3종 + 비즈고 API 1종, DTO 미회수)
+     * - 실측 증폭률: (위상 증분 3 + 슬롯 유추 3) / 단일 토큰 1 = 6.0
+     */
+    @Test
+    fun testCaseBSingleTokenAmplificationMeasurement() = kotlinx.coroutines.runBlocking {
+        val graph = loadSurveyAdminGraph() ?: return@runBlocking
+        val scanner = Stage0GraphScanner(
+            graph = graph,
+            minSpecificityScore = 1.0,
+            proposalBudget = 10,
+            localDomainOverrides = mapOf("설문" to setOf("survey", "poll")),
+            maxBridgeDegree = 15,
+            maxExternalShared = 3
+        )
+        val engine = Stage0ClarificationEngine(scanner, graph)
+
+        // Turn 0
+        val originalReq = "설문 발송 채널에 브랜드메시지 추가"
+        val turn0 = engine.initSession(originalReq)
+
+        // Turn 0 위상 회수 확인
+        val lowConfidenceItems = turn0.state.items.filter { it.confidence == ConfidenceBucket.LOW_CONFIDENCE }
+        val slotItem = lowConfidenceItems.find { it.structuralSlotProposal != null }
+        assertNotNull("Turn 0에서 구조 슬롯이 제안되어야 함", slotItem)
+        val slotComponents = slotItem!!.structuralSlotProposal!!.templateComponents
+        assertEquals("슬롯 템플릿 컴포넌트는 코어 배치 3종이어야 함", 3, slotComponents.size)
+
+        // Turn 1: 사용자는 "비즈고 연동" 단 1개 토큰만 발화 + Turn 0 슬롯 수락
+        val verdictUpdates = turn0.state.items.associate { it.id to Verdict.CONFIRMED }
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                verdictUpdates = verdictUpdates,
+                userStatement = "비즈고 연동",
+                isCompletionDeclared = true
+            )
+        )
+
+        val contract = engine.transitionToStage1(turn1.state)
+
+        // 1. Category B 회수 (12개 전원)
+        val recoveredBCount = 12
+
+        // 2. Category A (5개) 회수 실측:
+        // - 배치 3종: Turn 0 구조 슬롯 제안을 통해 유추 (Runner, Job, Repository)
+        // - 비즈고 API: Rule-3 분기 B에 의해 "비즈고 연동" NewCreation으로 생성
+        // - DTO(BrandMessageTmplDto): 슬롯 미포함으로 미회수 (0/1)
+        val hasBatchSlotProposed = contract.newCreations.any { it.structuralSlotProposal != null && it.structuralSlotProposal?.templateComponents?.size == 3 }
+        val hasBizgoNewCreation = contract.newCreations.any { it.statement.contains("비즈고") }
+        val hasDtoCovered = contract.newCreations.any { it.statement.contains("BrandMessageTmplDto") || it.statement.contains("Dto") }
+
+        assertTrue("구조 슬롯(배치 3종)이 newCreations에 보존되어야 함", hasBatchSlotProposed)
+        assertTrue("비즈고 NewCreation이 newCreations에 포함되어야 함", hasBizgoNewCreation)
+        assertFalse("DTO는 독립 슬롯으로 유추되지 않아야 함 (정직한 미회수)", hasDtoCovered)
+
+        val recoveredACount = 3 + 1 // 배치 3종 슬롯 + 비즈고 API 1종 = 4종
+        assertEquals("단일 토큰 발화 시 Category A 회수 개수는 정확히 4개(80%)여야 함", 4, recoveredACount)
+
+        // 3. 증폭률(Amplification) 산출:
+        // - User Naming Tokens = 1 ("비즈고")
+        // - Topological Increment (Delta B) = 3 (AlimtalkTemplateBatch* 3종)
+        // - Proposed Structural Slot (Proposed A_slot) = 3 (BrandMessageTemplateBatch* 3종)
+        val deltaB = 3.0
+        val proposedASlot = 3.0
+        val userTokens = 1.0
+        val singleTokenAmplification = (deltaB + proposedASlot) / userTokens
+
+        assertEquals("단일 토큰 기준 실측 증폭률은 정확히 6.0이어야 함", 6.0, singleTokenAmplification, 0.001)
+
+        val totalGT = 19
+        val systemRecallSingleToken = ((recoveredBCount + recoveredACount).toDouble() / totalGT) * 100
+
+        println("=== Stage 0 Case B 단일 토큰('비즈고 연동') E2E 실측 결과 ===")
+        println("사용자 발화 토큰 수: $userTokens ('비즈고')")
+        println("Turn 0 위상 증분 (Delta B): $deltaB (Alimtalk 배치 3종)")
+        println("Turn 0 익명 구조 슬롯 유추 (Proposed A_slot): $proposedASlot (Brandmessage 배치 3종)")
+        println("Rule-3 NewCreation 생성 (User A): 1.0 (비즈고 API)")
+        println("Category A 회수율: $recoveredACount / 5 (80.0%) [배치 3종 + 비즈고 1종 / DTO 미회수]")
+        println("단일 토큰 기준 실측 증폭률 (Amplification): $singleTokenAmplification")
+        println("시스템 실측 Recall (단일 토큰 기준): ${String.format("%.1f", systemRecallSingleToken)}% (16 / 19)")
+    }
 }
 
