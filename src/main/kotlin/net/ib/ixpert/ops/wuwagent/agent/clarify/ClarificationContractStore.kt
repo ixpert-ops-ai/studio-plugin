@@ -138,6 +138,11 @@ object ClarificationContractStore {
         val gitignore = File(wuwDir, ".gitignore")
         if (!gitignore.exists()) {
             gitignore.writeText("*\n", Charsets.UTF_8)
+        } else {
+            val existingLines = gitignore.readLines(Charsets.UTF_8).map { it.trim() }
+            if ("*" !in existingLines && "**" !in existingLines) {
+                gitignore.appendText("\n*\n", Charsets.UTF_8)
+            }
         }
 
         val json = gson.toJson(contract)

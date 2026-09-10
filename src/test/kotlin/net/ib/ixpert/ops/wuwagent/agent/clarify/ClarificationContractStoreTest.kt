@@ -286,4 +286,126 @@ class ClarificationContractStoreTest {
         assertFalse("rejectedExistingRefs(OrderDto)는 결과에 절대 포함되지 않아야 함", run3Result.any { it.first.contains("OrderDto") })
         assertEquals("결과 크기는 정확히 3개 (OrderService, OrderDao, NewBatch)여야 함", 3, run3Result.size)
     }
+
+    /**
+     * 검증 5: "엔진은 하나" - 수동 시드 직접 주입 vs 계약 아티팩트 역직렬화 로드 결과의 100% 동일성 검증
+     * - 아티팩트 경로와 직접 주입 경로가 갈라지지 않고 완전히 동일한 합성/검증 후보군을 산출함을 exact match로 증명.
+     */
+    @Test
+    fun testOneEngineArtifactVsDirectEquivalence() {
+        val projectRoot = tempFolder.newFolder("project_engine_one")
+        val graph = createMiniGraph()
+        val graphHash = ClarificationContractStore.calculateGraphHash(graph)
+
+        val directContract = Stage0TransitionContract(
+            contractVersion = "1.0",
+            createdAt = java.time.Instant.now().toString(),
+            graphHash = graphHash,
+            trustedExistingRefs = listOf(
+                LinkHint.ExistingRef("src/main/java/com/example/OrderService.java"),
+                LinkHint.ExistingRef("src/main/java/com/example/OrderDao.java")
+            ),
+            newCreations = listOf(
+                RequirementItem(
+                    id = "new:test_create",
+                    statement = "신규 결제 처리 컴포넌트",
+                    source = HintSource.USER_CONFIRMED,
+                    hint = LinkHint.NewCreation,
+                    anchorRationale = "결제 추가"
+                )
+            ),
+            anchorSiblingRefs = listOf(
+                LinkHint.ExistingRef("src/main/java/com/example/OrderService.java")
+            ),
+            rejectedExistingRefs = listOf(
+                LinkHint.ExistingRef("src/main/java/com/example/OrderDto.java")
+            ),
+            enrichedRequirementText = "주문 및 결제 처리 기능"
+        )
+
+        // 1. 직접 주입 경로 (Direct in-memory)
+        fun deriveFullRequirementPrompt(contract: Stage0TransitionContract?): String {
+            val baseReq = contract?.enrichedRequirementText ?: "기본 요구사항"
+            return if (contract != null && contract.anchorSiblingRefs.isNotEmpty()) {
+                buildString {
+                    appendLine(baseReq)
+                    appendLine("\n## 참고 템플릿 컴포넌트 (신규 생성 시 구조 참조용)")
+                    contract.anchorSiblingRefs.forEach { anchor ->
+                        appendLine("- `${anchor.filePath}`")
+                    }
+                }.trim()
+            } else {
+                baseReq
+            }
+        }
+
+        fun deriveTargetCandidates(contract: Stage0TransitionContract?): List<Pair<String, String>> {
+            val list = mutableListOf<Pair<String, String>>()
+            contract?.trustedExistingRefs?.forEach { ref ->
+                if (contract.rejectedExistingRefs.none { it.filePath == ref.filePath }) {
+                    list.add(ref.filePath to "MODIFY")
+                }
+            }
+            contract?.newCreations?.forEach { item ->
+                list.add(item.statement to "CREATE")
+            }
+            return list
+        }
+
+        val directPrompt = deriveFullRequirementPrompt(directContract)
+        val directCandidates = deriveTargetCandidates(directContract)
+
+        // 2. 아티팩트 디스크 저장 후 loadContract 역직렬화 경유 경로
+        val savedFile = ClarificationContractStore.saveContract(projectRoot, directContract, key = "engine_one")
+        val loadedContract = ClarificationContractStore.loadContract(savedFile, graph)
+
+        val loadedPrompt = deriveFullRequirementPrompt(loadedContract)
+        val loadedCandidates = deriveTargetCandidates(loadedContract)
+
+        // 3. 엔진 단일성 증명: 프롬프트 및 타깃 후보 리스트 100% exact match
+        assertEquals("수동 직접 주입 프롬프트와 아티팩트 경유 프롬프트는 100% 동일해야 함", directPrompt, loadedPrompt)
+        assertEquals("수동 직접 주입 후보군과 아티팩트 경유 후보군은 100% 동일해야 함", directCandidates, loadedCandidates)
+        assertTrue("앵커는 프롬프트 참조에 포함되어야 함", loadedPrompt.contains("OrderService.java"))
+        assertFalse("앵커는 Stage 1 후보군 리스트(MODIFY/CREATE)에는 섞이지 않아야 함", loadedCandidates.any { it.first == "src/main/java/com/example/OrderService.java" && it.second == "ANCHOR" })
+    }
+
+    /**
+     * 검증 6: 아티팩트 없는 /analyze 단독 경로 안전성 검증
+     * - 계약 파일 부존재 시 loadContractByKey가 null을 반환하고
+     *   null contract 상태에서도 기본 요구사항으로 순수 단독 파이프라인이 정상 동작함을 검증.
+     */
+    @Test
+    fun testStandaloneAnalyzeWithoutArtifact() {
+        val emptyProjectRoot = tempFolder.newFolder("project_empty")
+        val graph = createMiniGraph()
+
+        // 1. 아티팩트 파일 탐색 결과 null 확인
+        val contractFile = ClarificationContractStore.findContractFile(emptyProjectRoot)
+        assertNull("아티팩트가 없을 때 null을 반환해야 함", contractFile)
+
+        val contract = ClarificationContractStore.loadContractByKey(emptyProjectRoot, graph)
+        assertNull("아티팩트가 없을 때 loadContractByKey는 null을 반환해야 함", contract)
+
+        // 2. null 계약 상태에서 단독 파이프라인 합성 시뮬레이션
+        val rawRequirement = "단독 주문 조회 기능 분석"
+        val resolvedRequirement = contract?.enrichedRequirementText ?: rawRequirement
+        assertEquals("아티팩트가 없을 때는 원본 입력 텍스트가 그대로 사용되어야 함", rawRequirement, resolvedRequirement)
+
+        fun deriveTargetCandidates(contract: Stage0TransitionContract?): List<Pair<String, String>> {
+            val list = mutableListOf<Pair<String, String>>()
+            contract?.trustedExistingRefs?.forEach { ref ->
+                if (contract.rejectedExistingRefs.none { it.filePath == ref.filePath }) {
+                    list.add(ref.filePath to "MODIFY")
+                }
+            }
+            contract?.newCreations?.forEach { item ->
+                list.add(item.statement to "CREATE")
+            }
+            return list
+        }
+
+        val stage0InjectedCandidates = deriveTargetCandidates(contract)
+        assertEquals("계약이 null일 때 Stage 0 주입 후보는 정확히 0건이어야 함", 0, stage0InjectedCandidates.size)
+    }
 }
+

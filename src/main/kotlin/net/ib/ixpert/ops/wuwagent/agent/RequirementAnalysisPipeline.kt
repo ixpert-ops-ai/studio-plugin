@@ -200,8 +200,16 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             }
         }
 
+        // Stage 0 사용자 거부 기존 파일 (rejectedExistingRefs) 배제 필터링 (0건 부활 불변식)
+        val eligibleTargetFiles = if (stage0Contract != null && stage0Contract.rejectedExistingRefs.isNotEmpty()) {
+            val rejectedPaths = stage0Contract.rejectedExistingRefs.map { it.filePath }.toSet()
+            targetFiles.filter { it.path !in rejectedPaths }
+        } else {
+            targetFiles
+        }
+
         onChunk?.invoke("\n> **(Stage 2) Trimming** - 불필요한 파일 경로 보정 및 필터링...\n")
-        val correctedFiles = TargetFileValidator.correctPaths(targetFiles, projectGraph)
+        val correctedFiles = TargetFileValidator.correctPaths(eligibleTargetFiles, projectGraph)
         val mdRoot = Paths.get(project?.basePath ?: "", "docs")
         
         if (targetGt.isNotBlank()) {
@@ -228,8 +236,22 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
 
             val filesToVerify = userSelection ?: correctedFiles
             val verifier = FileRelevanceVerifier(client, projectGraph, mdRoot)
-            val fullRequirement = stage0Contract?.enrichedRequirementText
+            
+            // 앵커 형제(anchorSiblingRefs)는 Stage 1 위상 시드 확장 풀에 섞지 않고 (노이즈 원천 차단),
+            // Stage 2/3 프롬프트 참조 컨텍스트로 주입하여 신규 파일 구조 생성의 참조로만 소비 (방안 B 실측 채택)
+            val baseRequirement = stage0Contract?.enrichedRequirementText
                 ?: if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
+            val fullRequirement = if (stage0Contract != null && stage0Contract.anchorSiblingRefs.isNotEmpty()) {
+                buildString {
+                    appendLine(baseRequirement)
+                    appendLine("\n## 참고 템플릿 컴포넌트 (신규 생성 시 구조 참조용)")
+                    stage0Contract.anchorSiblingRefs.forEach { anchor ->
+                        appendLine("- `${anchor.filePath}`")
+                    }
+                }.trim()
+            } else {
+                baseRequirement
+            }
             val verificationOutput = verifier.verify(fullRequirement, filesToVerify)
 
             // 사용자가 명시적으로 선택한 파일은 verify 결과에서 누락되었더라도 강제 복원 (Union)
