@@ -93,18 +93,27 @@ class Stage0GraphScanner(
         // A. 1차: 입력에서 언급된 클래스/파일로부터 DTO 필드명 및 구조 식별자 추출
         for (token in decomposed.tokens) {
             val tokenLower = token.lowercase()
-            // 1) 클래스명 매칭 확인
+            // 1) 클래스명 또는 파일명 매칭 확인 (Java 파일 + Resource 파일)
             val matchedNode = allFileNodes.find { 
                 it.className.equals(token, ignoreCase = true) || 
-                it.path.substringAfterLast("/").substringBeforeLast(".").equals(token, ignoreCase = true) 
+                it.path.substringAfterLast("/").substringBeforeLast(".").equals(token, ignoreCase = true) ||
+                it.path.substringAfterLast("/").equals(token, ignoreCase = true)
             }
+            val matchedResource = graph.resourceNodes.find {
+                val rFileName = it.path.substringAfterLast("/")
+                rFileName.equals(token, ignoreCase = true) || 
+                rFileName.substringBeforeLast(".").equals(token, ignoreCase = true)
+            }
+
             if (matchedNode != null) {
-                result[matchedNode.className.lowercase()] = SeedToken(matchedNode.className, TokenKind.STRUCTURAL)
+                result[tokenLower] = SeedToken(matchedNode.className, TokenKind.STRUCTURAL)
                 
                 // DTO/Entity인 경우 getter/setter로부터 필드명 파생
                 extractFieldsFromMethods(matchedNode).forEach { fieldName ->
                     result[fieldName.lowercase()] = SeedToken(fieldName, TokenKind.STRUCTURAL)
                 }
+            } else if (matchedResource != null) {
+                result[tokenLower] = SeedToken(token, TokenKind.STRUCTURAL)
             } else {
                 // 그래프에 실재하는 구조 식별자인지 검증 (필드명/메서드명)
                 val isGraphIdentifier = allFileNodes.any { node ->
@@ -369,7 +378,7 @@ class Stage0GraphScanner(
         return false
     }
 
-    private fun extractFieldsFromMethods(node: FileNode): List<String> {
+    internal fun extractFieldsFromMethods(node: FileNode): List<String> {
         val fields = mutableListOf<String>()
         for (m in node.methods) {
             val name = m.name

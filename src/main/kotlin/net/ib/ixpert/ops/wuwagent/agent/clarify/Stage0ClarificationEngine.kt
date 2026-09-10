@@ -86,28 +86,30 @@ class Stage0ClarificationEngine(
             val utteredTokens = scanner.extractTokens(stmt, emptySet())
             newSeedTokens = state.seedSet + utteredTokens
 
-            // Rule-3: 토큰 기반 그래프 조회 및 분기 판정
-            // 그래프 실재 여부 확인 (발화에서 추출된 토큰 중 클래스명, 파일 경로, 리소스 노드 매칭)
-            val structuralTokens = utteredTokens.filter { it.kind == TokenKind.STRUCTURAL }.map { it.value.lowercase() }
+            // Rule-3: 발화 내 단어 식별자(클래스명, 파일명, 식별자) 직접 추출 및 그래프 조회 분기 판정
+            val wordTokens = Regex("[a-zA-Z0-9_.]+").findAll(stmt).map { it.value }.toList()
             val matchedExistingNodes = mutableListOf<Pair<String, String>>() // (filePath, matchedSymbol)
+            val matchedUtteredTokens = mutableSetOf<String>() // 실제 매칭에 성공한 원본 발화 토큰 집합
 
-            for (st in structuralTokens) {
+            for (w in wordTokens) {
                 val matchedFile = graph.files.values.find { 
-                    it.className.equals(st, ignoreCase = true) || 
-                    it.path.substringAfterLast("/").substringBeforeLast(".").equals(st, ignoreCase = true) ||
-                    it.path.substringAfterLast("/").equals(st, ignoreCase = true)
+                    it.className.equals(w, ignoreCase = true) || 
+                    it.path.substringAfterLast("/").substringBeforeLast(".").equals(w, ignoreCase = true) ||
+                    it.path.substringAfterLast("/").equals(w, ignoreCase = true)
                 }
                 if (matchedFile != null) {
                     matchedExistingNodes.add(matchedFile.path to matchedFile.className)
+                    matchedUtteredTokens.add(w.lowercase())
                 }
                 val matchedResource = graph.resourceNodes.find { 
                     val fileName = it.path.substringAfterLast("/")
                     val fileNameWithoutExt = fileName.substringBeforeLast(".")
-                    fileName.equals(st, ignoreCase = true) || fileNameWithoutExt.equals(st, ignoreCase = true)
+                    fileName.equals(w, ignoreCase = true) || fileNameWithoutExt.equals(w, ignoreCase = true)
                 }
                 if (matchedResource != null) {
-                    // 리소스 노드(JSP/JS/XML)는 별도 클래스명이 없으므로 완전 일치한 파일명 식별자(st)를 심볼로 보존
-                    matchedExistingNodes.add(matchedResource.path to st)
+                    // 리소스 노드(JSP/JS/XML)는 별도 클래스명이 없으므로 완전 일치한 파일명 식별자(w)를 심볼로 보존
+                    matchedExistingNodes.add(matchedResource.path to w)
+                    matchedUtteredTokens.add(w.lowercase())
                 }
             }
 
@@ -131,7 +133,43 @@ class Stage0ClarificationEngine(
                         updatedItems.add(newItem)
                     }
                 }
-            } else {
+            }
+
+            // 매칭된 실재 노드들에 속한 멤버(클래스명, 파일명, 필드명, 메서드명, 리소스 메타데이터) 집합 수집
+            val coveredMembers = mutableSetOf<String>()
+            coveredMembers.addAll(matchedUtteredTokens)
+
+            for ((filePath, _) in matchedExistingNodes) {
+                val fileNode = graph.files[filePath]
+                if (fileNode != null) {
+                    coveredMembers.add(fileNode.className.lowercase())
+                    fileNode.methods.forEach { coveredMembers.add(it.name.lowercase()) }
+                    scanner.extractFieldsFromMethods(fileNode).forEach { coveredMembers.add(it.lowercase()) }
+                }
+                val resourceNode = graph.resourceNodes.find { it.path == filePath }
+                if (resourceNode != null) {
+                    val rFileName = resourceNode.path.substringAfterLast("/")
+                    coveredMembers.add(rFileName.lowercase())
+                    coveredMembers.add(rFileName.substringBeforeLast(".").lowercase())
+                    val inputs = (resourceNode.metadata["input_field"] as? List<*>)?.mapNotNull { it?.toString()?.lowercase() } ?: emptyList()
+                    val methods = (resourceNode.metadata["methods"] as? List<*>)?.mapNotNull { it?.toString()?.lowercase() } ?: emptyList()
+                    coveredMembers.addAll(inputs)
+                    coveredMembers.addAll(methods)
+                }
+            }
+
+            // 발화 내 명시된 클래스형(CamelCase) 또는 확장자 포함 파일명 식별자 토큰 추출
+            val utteredClassLikeTokens = wordTokens.filter { 
+                it.matches(Regex("^[A-Z][a-zA-Z0-9]+$")) || (it.contains(".") && it.length > 3)
+            }
+
+            // 분기 B 판정:
+            // 1) 발화 내 실재 노드가 전혀 매칭되지 않은 경우 (신규 개념/요구사항)
+            // 2) 발화 내 명시된 클래스형/파일명 토큰 중 실재 노드/멤버 어디에도 매칭되지 않은 독립 신규 컴포넌트가 존재하는 경우
+            val hasUnmatchedNewCreations = (matchedExistingNodes.isEmpty() && stmt.isNotBlank()) ||
+                    utteredClassLikeTokens.any { it.lowercase() !in coveredMembers }
+
+            if (hasUnmatchedNewCreations) {
                 // 분기 B: 그래프 부존재 / 0-degree (신규 생성 요구) -> NewCreation
                 val hint = LinkHint.NewCreation
                 val newItem = RequirementItem(

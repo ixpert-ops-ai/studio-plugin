@@ -353,5 +353,49 @@ class Stage0RouterAndContractTest {
         assertTrue("그래프에 실재하지 않는 개념 발화는 부분 매칭 오탐 없이 NewCreation(분기 B)이어야 함", brandItem!!.hint is LinkHint.NewCreation)
         val contract4 = engine.transitionToStage1(turn1Case4.state)
         assertFalse("trustedExistingRefs에 브랜드메시지 관련 오탐 노드가 들어가지 않아야 함", contract4.trustedExistingRefs.any { it.filePath.contains("brand") || it.filePath.contains("message") })
+
+        // 5. 케이스 5 검증: 복합 발화 분할 판정 (한 문장에 실재 노드 + 신규 노드 동시 출현)
+        // - "OrderDto의 pay_type을 수정하고 신규 연동 모듈 BizgoApiService를 개발합니다."
+        // - OrderDto -> 분기 A (ExistingRef) + trustedExistingRefs 승격
+        // - BizgoApiService -> 분기 B (NewCreation) + newCreations 독립 분리
+        val turn1Case5 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "OrderDto의 pay_type을 수정하고 신규 연동 모듈 BizgoApiService를 개발합니다."
+            )
+        )
+
+        val mixedOrderDto = turn1Case5.state.items.find { (it.hint as? LinkHint.ExistingRef)?.filePath?.contains("OrderDto.java") == true }
+        val mixedBizgo = turn1Case5.state.items.find { it.hint is LinkHint.NewCreation && it.statement.contains("BizgoApiService") }
+
+        assertNotNull("복합 발화에서 실재 노드 OrderDto가 분기 A(ExistingRef)로 추출되어야 함", mixedOrderDto)
+        assertNotNull("복합 발화에서 신규 노드 BizgoApiService가 분기 B(NewCreation)로 추출되어야 함", mixedBizgo)
+
+        val contract5 = engine.transitionToStage1(turn1Case5.state)
+        assertTrue("trustedExistingRefs에 OrderDto가 포함되어야 함", contract5.trustedExistingRefs.any { it.filePath.contains("OrderDto.java") })
+        assertFalse("trustedExistingRefs에 BizgoApiService가 없어야 함 (시드 격리)", contract5.trustedExistingRefs.any { it.filePath.contains("Bizgo") })
+        assertTrue("newCreations에 BizgoApiService가 포함되어야 함", contract5.newCreations.any { it.statement.contains("BizgoApiService") })
+
+        // 6. 케이스 6 검증: 발화 토큰 != className 실재 노드 단독 발화에서 이중 등록 방지
+        // - 발화: "order_list.jsp 화면의 목록 렌더링을 수정합니다." (리소스 파일명 매칭, className 부재)
+        // - order_list.jsp -> 분기 A (ExistingRef)로만 1건 등록
+        // - 분기 B (NewCreation)가 불필요하게 추가 생성되지 않아야 함 (이중 등록 원천 차단)
+        val turn1Case6 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "order_list.jsp 화면의 목록 렌더링을 수정합니다."
+            )
+        )
+
+        val jspItem = turn1Case6.state.items.find { (it.hint as? LinkHint.ExistingRef)?.filePath?.contains("order_list.jsp") == true }
+        assertNotNull("order_list.jsp가 분기 A(ExistingRef)로 추출되어야 함", jspItem)
+
+        // 이중 등록 방지: 이번 턴 발화로 인한 NewCreation이 추가되지 않아야 함
+        val newCreationsInTurn = turn1Case6.state.items.filter { it.source == HintSource.USER_UTTERED && it.hint is LinkHint.NewCreation }
+        assertTrue("토큰 != className 실재 노드 단독 발화 시 불필요한 NewCreation 이중 등록이 없어야 함 (0건)", newCreationsInTurn.isEmpty())
+
+        val contract6 = engine.transitionToStage1(turn1Case6.state)
+        assertTrue("trustedExistingRefs에 order_list.jsp가 포함되어야 함", contract6.trustedExistingRefs.any { it.filePath.contains("order_list.jsp") })
+        assertTrue("newCreations에는 이 발화로 인한 신규 생성이 없어야 함", contract6.newCreations.none { it.source == HintSource.USER_UTTERED })
     }
 }
