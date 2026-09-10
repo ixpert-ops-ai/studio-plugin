@@ -196,6 +196,8 @@ interface ClarifyItem {
     filePath?: string;
     matchedTokens?: string[];
   };
+  rejectionReason?: 'FILE_MISMATCH' | 'CONCEPT_IRRELEVANT';
+  isReEmergence?: boolean;
 }
 
 interface ClarifyPayload {
@@ -231,17 +233,38 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
     return init;
   });
 
+  // id -> RejectionReason (명시적 선택 항목만 보관)
+  const [rejectionReasons, setRejectionReasons] = useState<Record<string, 'FILE_MISMATCH' | 'CONCEPT_IRRELEVANT'>>(() => {
+    const init: Record<string, 'FILE_MISMATCH' | 'CONCEPT_IRRELEVANT'> = {};
+    payload.items.forEach(item => {
+      if (item.rejectionReason) {
+        init[item.id] = item.rejectionReason;
+      }
+    });
+    return init;
+  });
+
   const [openAnswer, setOpenAnswer] = useState('');
   const [additionalStatement, setAdditionalStatement] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
 
-  // payload 갱신 시 verdicts 동기화 (기존 선택 보존)
+  // payload 갱신 시 verdicts 및 rejectionReasons 동기화
   useEffect(() => {
     setVerdicts(prev => {
       const next = { ...prev };
       payload.items.forEach(item => {
         if (!next[item.id]) {
           next[item.id] = item.verdict || 'PENDING';
+        }
+      });
+      return next;
+    });
+
+    setRejectionReasons(prev => {
+      const next = { ...prev };
+      payload.items.forEach(item => {
+        if (item.rejectionReason && !next[item.id]) {
+          next[item.id] = item.rejectionReason;
         }
       });
       return next;
@@ -256,14 +279,31 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
     }));
   };
 
+  const setReason = (id: string, reason: 'FILE_MISMATCH' | 'CONCEPT_IRRELEVANT') => {
+    if (isSubmitted) return;
+    setRejectionReasons(prev => ({
+      ...prev,
+      [id]: reason
+    }));
+  };
+
   const handleSendResponse = (isCompletionDeclared: boolean) => {
     if (isSubmitted) return;
     setIsSubmitted(true);
 
     const combinedStatement = [openAnswer.trim(), additionalStatement.trim()].filter(Boolean).join(' / ');
 
+    // SSOT 원칙: REJECTED인 항목 중 사용자가 명시적으로 선택한 사유만 전송 (미선택 항목은 키 부재로 백엔드 기본값 위임)
+    const rejectionReasonUpdates: Record<string, 'FILE_MISMATCH' | 'CONCEPT_IRRELEVANT'> = {};
+    Object.entries(verdicts).forEach(([id, v]) => {
+      if (v === 'REJECTED' && rejectionReasons[id]) {
+        rejectionReasonUpdates[id] = rejectionReasons[id];
+      }
+    });
+
     const responsePayload = {
       verdictUpdates: verdicts,
+      rejectionReasonUpdates,
       userStatement: combinedStatement.length > 0 ? combinedStatement : null,
       isCompletionDeclared
     };
@@ -310,62 +350,125 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
                         background: isConfirmed ? 'rgba(16, 185, 129, 0.1)' : isRejected ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255,255,255,0.04)',
                         border: `1px solid ${isConfirmed ? '#10b981' : isRejected ? '#ef4444' : 'rgba(255,255,255,0.1)'}`,
                         display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
+                        flexDirection: 'column',
+                        gap: '6px',
                         transition: 'all 0.15s ease'
                       }}
                     >
-                      <div style={{ flex: 1, marginRight: '10px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 'bold', color: isRejected ? '#888' : '#eee', textDecoration: isRejected ? 'line-through' : 'none' }}>
-                          {item.statement}
-                        </div>
-                        {item.anchorRationale && (
-                          <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px' }}>
-                            💡 {item.anchorRationale}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ flex: 1, marginRight: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                            <span style={{ fontSize: '13px', fontWeight: 'bold', color: isRejected ? '#888' : '#eee', textDecoration: isRejected ? 'line-through' : 'none' }}>
+                              {item.statement}
+                            </span>
+                            {item.isReEmergence && (
+                              <span style={{
+                                padding: '1px 6px',
+                                fontSize: '10px',
+                                borderRadius: '3px',
+                                background: 'rgba(245, 158, 11, 0.2)',
+                                border: '1px solid #f59e0b',
+                                color: '#fbbf24',
+                                fontWeight: 600
+                              }}>
+                                ⚠️ 재확인 필요: 새 문맥에서 재등장
+                              </span>
+                            )}
                           </div>
+                          {item.anchorRationale && (
+                            <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px' }}>
+                              💡 {item.anchorRationale}
+                            </div>
+                          )}
+                        </div>
+
+                        {!isSubmitted && (
+                          <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                            <button
+                              type="button"
+                              onClick={() => toggleVerdict(item.id, 'CONFIRMED')}
+                              style={{
+                                padding: '3px 8px',
+                                fontSize: '11px',
+                                borderRadius: '3px',
+                                border: 'none',
+                                cursor: 'pointer',
+                                background: isConfirmed ? '#10b981' : '#374151',
+                                color: '#fff',
+                                fontWeight: isConfirmed ? 'bold' : 'normal'
+                              }}
+                            >
+                              ✓ 포함
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleVerdict(item.id, 'REJECTED')}
+                              style={{
+                                padding: '3px 8px',
+                                fontSize: '11px',
+                                borderRadius: '3px',
+                                border: 'none',
+                                cursor: 'pointer',
+                                background: isRejected ? '#ef4444' : '#374151',
+                                color: '#fff',
+                                fontWeight: isRejected ? 'bold' : 'normal'
+                              }}
+                            >
+                              ✗ 제외
+                            </button>
+                          </div>
+                        )}
+                        {isSubmitted && (
+                          <span style={{ fontSize: '11px', color: isConfirmed ? '#10b981' : isRejected ? '#ef4444' : '#aaa', fontWeight: 'bold', flexShrink: 0 }}>
+                            {isConfirmed ? '✓ 포함됨' : isRejected ? '✗ 제외됨' : '미판정'}
+                          </span>
                         )}
                       </div>
 
-                      {!isSubmitted && (
-                        <div style={{ display: 'flex', gap: '4px' }}>
-                          <button
-                            type="button"
-                            onClick={() => toggleVerdict(item.id, 'CONFIRMED')}
-                            style={{
-                              padding: '3px 8px',
-                              fontSize: '11px',
-                              borderRadius: '3px',
-                              border: 'none',
-                              cursor: 'pointer',
-                              background: isConfirmed ? '#10b981' : '#374151',
-                              color: '#fff',
-                              fontWeight: isConfirmed ? 'bold' : 'normal'
-                            }}
-                          >
-                            ✓ 포함
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleVerdict(item.id, 'REJECTED')}
-                            style={{
-                              padding: '3px 8px',
-                              fontSize: '11px',
-                              borderRadius: '3px',
-                              border: 'none',
-                              cursor: 'pointer',
-                              background: isRejected ? '#ef4444' : '#374151',
-                              color: '#fff',
-                              fontWeight: isRejected ? 'bold' : 'normal'
-                            }}
-                          >
-                            ✗ 제외
-                          </button>
+                      {/* 제외 상태일 때 2지선다 사유 선택 UI */}
+                      {isRejected && !isSubmitted && (
+                        <div style={{ marginTop: '4px', padding: '6px 8px', background: 'rgba(239, 68, 68, 0.06)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                          <div style={{ fontSize: '11px', color: '#fca5a5', marginBottom: '4px', fontWeight: 600 }}>
+                            제외 사유 선택 (선택 시 맞춤 반영, 미선택 시 기본 '파일 불일치' 적용):
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              onClick={() => setReason(item.id, 'FILE_MISMATCH')}
+                              style={{
+                                padding: '2px 8px',
+                                fontSize: '11px',
+                                borderRadius: '3px',
+                                border: `1px solid ${rejectionReasons[item.id] === 'FILE_MISMATCH' ? '#f87171' : 'rgba(255,255,255,0.2)'}`,
+                                background: rejectionReasons[item.id] === 'FILE_MISMATCH' ? 'rgba(239, 68, 68, 0.3)' : 'transparent',
+                                color: rejectionReasons[item.id] === 'FILE_MISMATCH' ? '#fff' : '#aaa',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              📁 이 파일이 아님 (새 문맥 시 재등장 가능)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setReason(item.id, 'CONCEPT_IRRELEVANT')}
+                              style={{
+                                padding: '2px 8px',
+                                fontSize: '11px',
+                                borderRadius: '3px',
+                                border: `1px solid ${rejectionReasons[item.id] === 'CONCEPT_IRRELEVANT' ? '#f87171' : 'rgba(255,255,255,0.2)'}`,
+                                background: rejectionReasons[item.id] === 'CONCEPT_IRRELEVANT' ? 'rgba(239, 68, 68, 0.3)' : 'transparent',
+                                color: rejectionReasons[item.id] === 'CONCEPT_IRRELEVANT' ? '#fff' : '#aaa',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              🚫 개념/업무 무관 (영구 억제)
+                            </button>
+                          </div>
                         </div>
                       )}
-                      {isSubmitted && (
-                        <span style={{ fontSize: '11px', color: isConfirmed ? '#10b981' : isRejected ? '#ef4444' : '#aaa', fontWeight: 'bold' }}>
-                          {isConfirmed ? '✓ 포함됨' : isRejected ? '✗ 제외됨' : '미판정'}
-                        </span>
+                      {isRejected && isSubmitted && (
+                        <div style={{ fontSize: '11px', color: '#fca5a5' }}>
+                          사유: {rejectionReasons[item.id] === 'CONCEPT_IRRELEVANT' ? '🚫 개념/업무 무관 (영구 억제)' : '📁 파일 불일치 (기본값)'}
+                        </div>
                       )}
                     </div>
                   );
