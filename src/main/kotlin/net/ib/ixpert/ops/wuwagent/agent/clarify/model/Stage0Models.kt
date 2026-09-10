@@ -4,7 +4,7 @@ import java.security.MessageDigest
 
 /**
  * Stage 0 요구사항 구체화 대화 기능의 핵심 데이터 모델.
- * 설계서 (v1.0) 2절 준수.
+ * 설계서 (v1.0) 및 형제 유추 스펙 (v1.1) 준수.
  */
 
 /**
@@ -44,6 +44,36 @@ enum class Verdict {
 }
 
 /**
+ * 신뢰도 버킷 (v1.1 스펙 2단계 & 3단계)
+ * - HIGH_CONFIDENCE: 개별 확인 대상 (구조 식별자, Mapper 체인, 다중 신호 교차)
+ * - LOW_CONFIDENCE: 접힌 묶음 대상 (형제 유추 단독 신호)
+ */
+enum class ConfidenceBucket {
+    HIGH_CONFIDENCE,
+    LOW_CONFIDENCE
+}
+
+/**
+ * 신호 출처 채널 (v1.1 스펙 4대 병렬 신호)
+ */
+enum class ProvenanceSignal {
+    STRUCTURAL_ID,     // 구조 식별자 공유 엣지
+    MAPPER_CHAIN,      // MyBatis Mapper 네임스페이스/테이블 바인딩
+    VIEW_SCRIPT_PAIR,  // JSP/JS URL 페어링
+    SIBLING_ANALOGY,   // 위상 기반 형제 유추
+    USER_UTTERANCE     // 사용자 직접 발화
+}
+
+/**
+ * 3단계 1층: 구조적 슬롯 제안 (Structural Slot Proposal)
+ */
+data class StructuralSlotProposal(
+    val slotType: String,                 // 예: "COHESIVE_SUBGRAPH_CLUSTER", "SERVICE_PAIR"
+    val templateComponents: List<String>, // 형제 컴포넌트 템플릿 파일명 목록
+    val description: String               // 사용자 설명 문구
+)
+
+/**
  * 2.1 요구사항 적립 단위 (RequirementItem)
  */
 data class RequirementItem(
@@ -52,7 +82,10 @@ data class RequirementItem(
     val source: HintSource,            // 출처 태그 (2.2)
     val hint: LinkHint,                // 연결 힌트 (2.3)
     val anchorRationale: String,       // 원 요구사항과의 연결 근거
-    val verdict: Verdict = Verdict.PENDING // 판정 상태 (2.4)
+    val verdict: Verdict = Verdict.PENDING, // 판정 상태 (2.4)
+    val confidence: ConfidenceBucket = ConfidenceBucket.HIGH_CONFIDENCE, // 신뢰도 버킷 (v1.1)
+    val provenanceSignals: Set<ProvenanceSignal> = emptySet(),           // 출처 신호 집합 (v1.1)
+    val structuralSlotProposal: StructuralSlotProposal? = null           // 구조 슬롯 제안 (v1.1)
 ) {
     companion object {
         /**

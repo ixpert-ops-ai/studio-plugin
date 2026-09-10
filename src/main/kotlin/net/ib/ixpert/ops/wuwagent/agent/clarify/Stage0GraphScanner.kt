@@ -6,21 +6,24 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DomainDic
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.*
 
 /**
- * Stage 0 미판정 영역 재탐색 3단 파이프라인.
- * 설계서 (v1.0) 4절 준수.
+ * Stage 0 미판정 영역 재탐색 4단 병렬 파이프라인.
+ * 설계서 (v1.0) 및 형제 유추 스펙 (v1.1) 준수.
  * 
  * 1단: 토큰 추출 (1차 구조 식별자 + 2차 개념 토큰 폴백)
- * 2단: 3대 화이트리스트 엣지 기반 그래프 확장 (구조 식별자 공유, View-Script URL 페어링, Java 관계)
- * 3단: 후보 필터 (저특이성 컷, 제안 예산 제한, Anchor 근거 생성)
+ * 2단: 4대 화이트리스트 엣지 기반 그래프 확장 (구조 식별자 공유, View-Script URL 페어링, Java 관계, 형제 위상 유추)
+ * 3단: 후보 필터 및 신뢰도 버킷팅 (고신뢰 개별 확인 vs 저신뢰 접힌 묶음)
  */
 class Stage0GraphScanner(
     private val graph: ProjectGraph,
     private val minSpecificityScore: Double = 1.0,
     private val proposalBudget: Int = 8,
-    private val localDomainOverrides: Map<String, Set<String>> = emptyMap()
+    private val localDomainOverrides: Map<String, Set<String>> = emptyMap(),
+    private val maxBridgeDegree: Int = 15,
+    private val maxExternalShared: Int = 3
 ) {
     private val domainDictionary = DomainDictionary.load(graph)
     private val keywordDecomposer = KeywordDecomposer(graph, domainDictionary)
+    private val brotherAnalogyScanner = BrotherAnalogyScanner(graph, maxBridgeDegree, maxExternalShared)
 
     // 저특이성 범용 필드 블랙리스트 (단독 매칭 시 컷)
     private val GENERIC_FIELDS = setOf(
@@ -134,7 +137,7 @@ class Stage0GraphScanner(
     }
 
     /**
-     * 4.2~4.3 2단계 & 3단계: 미판정 영역 재탐색 및 후보 필터링
+     * 4.2~4.3 2단계 & 3단계: 미판정 영역 재탐색 및 후보 필터링 (형제 유추 병렬 결합)
      */
     fun rescanUnverified(
         seedSet: Set<SeedToken>,
@@ -153,16 +156,17 @@ class Stage0GraphScanner(
             val inputFields = (rNode.metadata["input_field"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
             val jsFields = (rNode.metadata["field"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
             val methods = (rNode.metadata["methods"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
-            val sqlIds = (rNode.metadata["sql_id"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
             val paramTypes = (rNode.metadata["parameter_type"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
 
             val matchedSymbols = mutableListOf<String>()
+            val signals = mutableSetOf<ProvenanceSignal>()
             var score = 0.0
 
             // A. DTO Parameter Type 직접 바인딩 확인 (MyBatis Mapper)
             for (st in structuralTokens) {
                 if (paramTypes.any { it.contains(st, ignoreCase = true) }) {
                     matchedSymbols.add("parameterType:$st")
+                    signals.add(ProvenanceSignal.MAPPER_CHAIN)
                     score += 5.0
                 }
             }
@@ -176,6 +180,7 @@ class Stage0GraphScanner(
                     if (isGenericOrAuditField(st)) continue
                     if (isTokenBoundaryMatch(fieldLower, st)) {
                         matchedSymbols.add(field)
+                        signals.add(ProvenanceSignal.STRUCTURAL_ID)
                         val isDirectRequirementMatch = st.contains("send") || st.contains("channel") || st.contains("template") || st.contains("message") || st.contains("type")
                         score += if (isDirectRequirementMatch) 5.0 else 2.0
                     }
@@ -184,6 +189,7 @@ class Stage0GraphScanner(
                     if (isGenericOrAuditField(ct)) continue
                     if (isTokenBoundaryMatch(fieldLower, ct)) {
                         matchedSymbols.add(field)
+                        signals.add(ProvenanceSignal.STRUCTURAL_ID)
                         val isDirectRequirementMatch = ct.contains("send") || ct.contains("channel") || ct.contains("message") || ct.contains("발송") || ct.contains("채널")
                         score += if (isDirectRequirementMatch) 3.5 else 1.5
                     }
@@ -199,6 +205,7 @@ class Stage0GraphScanner(
                     if (isGenericOrAuditField(st)) continue
                     if (isTokenBoundaryMatch(fLower, st)) {
                         matchedSymbols.add(f)
+                        signals.add(ProvenanceSignal.STRUCTURAL_ID)
                         val isDirectRequirementMatch = st.contains("send") || st.contains("channel") || st.contains("template") || st.contains("message") || st.contains("type")
                         score += if (isDirectRequirementMatch) 4.0 else 1.5
                     }
@@ -207,6 +214,7 @@ class Stage0GraphScanner(
                     if (isGenericOrAuditField(ct)) continue
                     if (isTokenBoundaryMatch(fLower, ct)) {
                         matchedSymbols.add(f)
+                        signals.add(ProvenanceSignal.STRUCTURAL_ID)
                         val isDirectRequirementMatch = ct.contains("send") || ct.contains("channel") || ct.contains("message") || ct.contains("발송") || ct.contains("채널")
                         score += if (isDirectRequirementMatch) 2.5 else 1.0
                     }
@@ -215,10 +223,11 @@ class Stage0GraphScanner(
 
             if (score > 0) {
                 val acc = candidateMap.getOrPut(rNode.path) {
-                    CandidateAcc(rNode.path, rNode.type.name, mutableListOf(), 0.0, "")
+                    CandidateAcc(rNode.path, rNode.type.name, mutableListOf(), 0.0, "", mutableSetOf())
                 }
                 acc.score += score
                 acc.symbols.addAll(matchedSymbols)
+                acc.signals.addAll(signals)
                 acc.rationale = "구조 식별자(${matchedSymbols.distinct().take(3).joinToString(", ")}) 공유"
             }
         }
@@ -239,12 +248,12 @@ class Stage0GraphScanner(
 
                     if (sharedUrl != null) {
                         val acc = candidateMap.getOrPut(targetResource.path) {
-                            CandidateAcc(targetResource.path, targetResource.type.name, mutableListOf(), 0.0, "")
+                            CandidateAcc(targetResource.path, targetResource.type.name, mutableListOf(), 0.0, "", mutableSetOf())
                         }
-                        // 페어 보너스 점수 부여 (소스 점수의 90%)
                         val inheritedScore = (candidateMap[path]?.score ?: 2.0) * 0.9
                         acc.score = maxOf(acc.score, inheritedScore)
                         acc.symbols.add("pairUrl:$sharedUrl")
+                        acc.signals.add(ProvenanceSignal.VIEW_SCRIPT_PAIR)
                         val sourceFileName = path.substringAfterLast("/")
                         acc.rationale = if (acc.rationale.isBlank()) {
                             "[$sourceFileName]와 동일 URL($sharedUrl) 공유하는 View-Script 페어"
@@ -267,27 +276,29 @@ class Stage0GraphScanner(
                 val tgtNode = graph.files[rel.target]
                 if (tgtNode != null) {
                     val acc = candidateMap.getOrPut(rel.target) {
-                        CandidateAcc(rel.target, tgtNode.fileType.name, mutableListOf(), 0.0, "")
+                        CandidateAcc(rel.target, tgtNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf())
                     }
                     acc.score = maxOf(acc.score, srcMatch.score * 0.7)
                     acc.symbols.add("relation:${rel.type}")
+                    acc.signals.add(ProvenanceSignal.STRUCTURAL_ID)
                     acc.rationale = "[${rel.source.substringAfterLast("/")}]로부터 ${rel.type} 연결"
                 }
             } else if (tgtMatch != null && !candidateMap.containsKey(rel.source)) {
                 val srcNode = graph.files[rel.source]
                 if (srcNode != null) {
                     val acc = candidateMap.getOrPut(rel.source) {
-                        CandidateAcc(rel.source, srcNode.fileType.name, mutableListOf(), 0.0, "")
+                        CandidateAcc(rel.source, srcNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf())
                     }
                     acc.score = maxOf(acc.score, tgtMatch.score * 0.7)
                     acc.symbols.add("relation:${rel.type}")
+                    acc.signals.add(ProvenanceSignal.STRUCTURAL_ID)
                     acc.rationale = "[${rel.target.substringAfterLast("/")}]와 ${rel.type} 연결"
                 }
             }
         }
 
         // ─────────────────────────────────────────────────────────────
-        // 3단계: 후보 필터링 및 RequirementItem 생성
+        // 3단계: 기본 신호 후보 생성 (HIGH_CONFIDENCE 버킷)
         // ─────────────────────────────────────────────────────────────
         val items = mutableListOf<RequirementItem>()
 
@@ -302,7 +313,6 @@ class Stage0GraphScanner(
             val statement = generateStatement(cand.path, cand.type, symbols)
             val id = RequirementItem.deriveId(hint, statement)
 
-            // 이미 동결된 id는 재탐색 결과에서 제외 (동결 보호)
             if (frozenIds.contains(id)) continue
 
             items.add(
@@ -312,9 +322,37 @@ class Stage0GraphScanner(
                     source = HintSource.SYSTEM_UNCONFIRMED,
                     hint = hint,
                     anchorRationale = cand.rationale,
-                    verdict = Verdict.PENDING
+                    verdict = Verdict.PENDING,
+                    confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                    provenanceSignals = cand.signals
                 )
             )
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // 엣지 4: 형제 유추(Brother Analogy) 병렬 결합 (LOW_CONFIDENCE 버킷 & 교차 승격)
+        // ─────────────────────────────────────────────────────────────
+        val seedNodes = graph.files.values.filter { node ->
+            structuralTokens.any { st -> 
+                node.className.equals(st, ignoreCase = true)
+            }
+        }
+
+        val siblingItems = brotherAnalogyScanner.scanSiblings(seedNodes, frozenIds)
+
+        for (sib in siblingItems) {
+            val existingIdx = items.indexOfFirst { it.id == sib.id }
+            if (existingIdx >= 0) {
+                // 다중 채널 교차 확인 -> 신호 결합 및 고신뢰 유지
+                val existing = items[existingIdx]
+                items[existingIdx] = existing.copy(
+                    provenanceSignals = existing.provenanceSignals + ProvenanceSignal.SIBLING_ANALOGY,
+                    confidence = ConfidenceBucket.HIGH_CONFIDENCE
+                )
+            } else {
+                // 형제 유추 단독 신호 -> LOW_CONFIDENCE 버킷으로 추가
+                items.add(sib)
+            }
         }
 
         return items
@@ -324,7 +362,6 @@ class Stage0GraphScanner(
         if (target.isBlank() || token.isBlank()) return false
         if (target.equals(token, ignoreCase = true)) return true
         
-        // 스네이크 케이스 분해 매칭: "test_send_type".split('_') -> ["test", "send", "type"] contains "send_type"
         if (target.contains(token, ignoreCase = true)) {
             val pattern = Regex("(?:^|_|\\b)${Regex.escape(token)}(?:_|$|\\b)", RegexOption.IGNORE_CASE)
             return pattern.containsMatchIn(target)
@@ -361,6 +398,7 @@ class Stage0GraphScanner(
         val type: String,
         val symbols: MutableList<String>,
         var score: Double,
-        var rationale: String
+        var rationale: String,
+        val signals: MutableSet<ProvenanceSignal>
     )
 }
