@@ -122,7 +122,8 @@ class ClarificationContractStoreTest {
     /**
      * 검증 2: 무조건 Fail-Fast 계약 검증 (플래그 없음)
      * - graphHash 불일치 시 ContractValidationException(GRAPH_HASH_MISMATCH) 발생
-     * - contractVersion 불일치 시 ContractValidationException(VERSION_MISMATCH) 발생
+     * - Major 버전 불일치(v2.0, v0.9) 및 최소 지원 버전 미달(v1.0) 시 ContractValidationException(VERSION_MISMATCH) 발생
+     * - 동일 Major 내 마이너 확장(v1.2)은 필드 nullable 하위호환으로 정상 로드
      */
     @Test
     fun testUnconditionalFailFastValidation() {
@@ -131,7 +132,7 @@ class ClarificationContractStoreTest {
         val graphHash = ClarificationContractStore.calculateGraphHash(graph)
 
         val validContract = Stage0TransitionContract(
-            contractVersion = "1.0",
+            contractVersion = "1.1",
             createdAt = java.time.Instant.now().toString(),
             graphHash = graphHash,
             trustedExistingRefs = listOf(LinkHint.ExistingRef("src/main/java/com/example/OrderService.java")),
@@ -141,7 +142,7 @@ class ClarificationContractStoreTest {
         val contractFile = ClarificationContractStore.saveContract(projectRoot, validContract, key = "test1")
         assertTrue("계약 파일이 정상 저장되어야 함", contractFile.exists())
 
-        // 1. 정상 로드 검증
+        // 1. 정상 로드 검증 (v1.1)
         val loaded = ClarificationContractStore.loadContract(contractFile, graph)
         assertEquals("저장된 계약 내용이 일치해야 함", validContract.enrichedRequirementText, loaded.enrichedRequirementText)
 
@@ -165,17 +166,33 @@ class ClarificationContractStoreTest {
             assertTrue("오류 메시지에 해시 불일치 설명이 포함되어야 함", e.message?.contains("그래프 무결성 불일치") == true)
         }
 
-        // 3. 스키마 버전 불일치 시 Fail-Fast 검증
-        val invalidVersionContract = validContract.copy(contractVersion = "2.0")
-        val versionFile = ClarificationContractStore.saveContract(projectRoot, invalidVersionContract, key = "test_ver")
+        // 3. Major 버전 불일치(v2.0) 시 Fail-Fast 검증
+        val invalidMajorContract = validContract.copy(contractVersion = "2.0")
+        val majorFile = ClarificationContractStore.saveContract(projectRoot, invalidMajorContract, key = "test_major")
         try {
-            ClarificationContractStore.loadContract(versionFile, graph)
-            fail("스키마 버전 불일치 시 ContractValidationException이 발생해야 함")
+            ClarificationContractStore.loadContract(majorFile, graph)
+            fail("Major 버전 불일치 시 ContractValidationException이 발생해야 함")
         } catch (e: ContractValidationException) {
             assertEquals("사유는 VERSION_MISMATCH 여야 함", ContractValidationReason.VERSION_MISMATCH, e.reason)
             assertNotNull("오류 메시지가 null이 아니어야 함", e.message)
             assertTrue("오류 메시지에 버전 불일치 설명이 포함되어야 함", e.message?.contains("지원하지 않는 계약 스키마 버전") == true)
         }
+
+        // 4. 최소 지원 버전 미달(v1.0) 시 Fail-Fast 검증
+        val subMinContract = validContract.copy(contractVersion = "1.0")
+        val subMinFile = ClarificationContractStore.saveContract(projectRoot, subMinContract, key = "test_submin")
+        try {
+            ClarificationContractStore.loadContract(subMinFile, graph)
+            fail("최소 지원 버전 미달(v1.0) 시 ContractValidationException이 발생해야 함")
+        } catch (e: ContractValidationException) {
+            assertEquals("사유는 VERSION_MISMATCH 여야 함", ContractValidationReason.VERSION_MISMATCH, e.reason)
+        }
+
+        // 5. 동일 Major 내 마이너 확장 버전(v1.2)은 정상 로드
+        val minorUpgradeContract = validContract.copy(contractVersion = "1.2")
+        val minorFile = ClarificationContractStore.saveContract(projectRoot, minorUpgradeContract, key = "test_minor")
+        val loadedMinor = ClarificationContractStore.loadContract(minorFile, graph)
+        assertEquals("동일 Major 내 마이너 확장은 정상 로드되어야 함", "1.2", loadedMinor.contractVersion)
     }
 
     /**
@@ -194,14 +211,16 @@ class ClarificationContractStoreTest {
             source = HintSource.SYSTEM_UNCONFIRMED,
             hint = LinkHint.NewCreation,
             anchorRationale = "신규 제안",
-            verdict = Verdict.REJECTED
+            verdict = Verdict.REJECTED,
+            rejectionReason = RejectionReason.CONCEPT_IRRELEVANT
         )
 
         val previousContract = Stage0TransitionContract(
-            contractVersion = "1.0",
+            contractVersion = "1.1",
             createdAt = java.time.Instant.now().toString(),
             graphHash = ClarificationContractStore.calculateGraphHash(graph),
-            rejectedNewCreations = listOf(rejectedNewItem)
+            rejectedNewCreations = listOf(rejectedNewItem),
+            rejectedItems = listOf(rejectedNewItem)
         )
 
         // 후속 /clarify 세션 시작 (previousContract 주입)
@@ -210,6 +229,7 @@ class ClarificationContractStoreTest {
         val itemInState = turn0.state.items.find { it.id == rejectedNewItem.id }
         assertNotNull("이전 거부 항목이 세션에 동결 상태로 존재해야 함", itemInState)
         assertEquals("거부 상태(REJECTED)가 유지되어야 함", Verdict.REJECTED, itemInState?.verdict)
+        assertFalse("CONCEPT_IRRELEVANT 항목은 재등장하지 않아야 함", itemInState?.isReEmergence ?: true)
     }
 
     /**
@@ -225,7 +245,7 @@ class ClarificationContractStoreTest {
         val graphHash = ClarificationContractStore.calculateGraphHash(graph)
 
         val contract = Stage0TransitionContract(
-            contractVersion = "1.0",
+            contractVersion = "1.1",
             createdAt = java.time.Instant.now().toString(),
             graphHash = graphHash,
             trustedExistingRefs = listOf(
@@ -298,7 +318,7 @@ class ClarificationContractStoreTest {
         val graphHash = ClarificationContractStore.calculateGraphHash(graph)
 
         val directContract = Stage0TransitionContract(
-            contractVersion = "1.0",
+            contractVersion = "1.1",
             createdAt = java.time.Instant.now().toString(),
             graphHash = graphHash,
             trustedExistingRefs = listOf(
@@ -406,6 +426,93 @@ class ClarificationContractStoreTest {
 
         val stage0InjectedCandidates = deriveTargetCandidates(contract)
         assertEquals("계약이 null일 때 Stage 0 주입 후보는 정확히 0건이어야 함", 0, stage0InjectedCandidates.size)
+    }
+
+    /**
+     * 검증 7: 거부 사유(RejectionReason 2지선다) 분류 및 결정론적 재등장(Re-emergence) 검증
+     * - CONCEPT_IRRELEVANT로 거부된 항목: 새 세션에서 관련 토큰이 인입되어도 100% 영구 억제 (isReEmergence = false, verdict = REJECTED)
+     * - FILE_MISMATCH로 거부된 항목:
+     *     - 무관한 토큰 세션: 동결 억제 유지 (isReEmergence = false, verdict = REJECTED)
+     *     - 새 매칭 토큰 인입 시: 결정론적 재등장 트리거 (isReEmergence = true, verdict = PENDING, [FILE_MISMATCH 거부 후 새 문맥에서 재등장] 배지)
+     * - 멱등성: 동일 조건 3회 실행 시 exact list match 일치
+     */
+    @Test
+    fun testRejectionReasonClassificationAndDeterministicReEmergence() {
+        val graph = createMiniGraph()
+        val scanner = Stage0GraphScanner(graph)
+        val engine = Stage0ClarificationEngine(scanner, graph)
+
+        val conceptIrrelevantItem = RequirementItem(
+            id = "ref:src/main/java/com/example/OrderDto.java",
+            statement = "OrderDto 필드 수정",
+            source = HintSource.SYSTEM_UNCONFIRMED,
+            hint = LinkHint.ExistingRef("src/main/java/com/example/OrderDto.java"),
+            anchorRationale = "개념 무관 거부",
+            verdict = Verdict.REJECTED,
+            rejectionReason = RejectionReason.CONCEPT_IRRELEVANT
+        )
+
+        val fileMismatchItem = RequirementItem(
+            id = "ref:src/main/java/com/example/OrderDao.java",
+            statement = "OrderDao 쿼리 수정",
+            source = HintSource.SYSTEM_UNCONFIRMED,
+            hint = LinkHint.ExistingRef("src/main/java/com/example/OrderDao.java"),
+            anchorRationale = "파일 불일치 거부",
+            verdict = Verdict.REJECTED,
+            rejectionReason = RejectionReason.FILE_MISMATCH
+        )
+
+        val previousContract = Stage0TransitionContract(
+            contractVersion = "1.1",
+            createdAt = java.time.Instant.now().toString(),
+            graphHash = ClarificationContractStore.calculateGraphHash(graph),
+            rejectedItems = listOf(conceptIrrelevantItem, fileMismatchItem),
+            rejectedExistingRefs = listOf(
+                LinkHint.ExistingRef("src/main/java/com/example/OrderDto.java"),
+                LinkHint.ExistingRef("src/main/java/com/example/OrderDao.java")
+            )
+        )
+
+        // Case 1: 무관한 토큰 세션 (두 항목 모두 REJECTED 유지)
+        val session1 = engine.initSession("결제 승인 모듈 추가", previousContract)
+        val s1Dto = session1.state.items.find { it.id == conceptIrrelevantItem.id }
+        val s1Dao = session1.state.items.find { it.id == fileMismatchItem.id }
+        assertEquals(Verdict.REJECTED, s1Dto?.verdict)
+        assertFalse(s1Dto?.isReEmergence ?: true)
+        assertEquals(Verdict.REJECTED, s1Dao?.verdict)
+        assertFalse(s1Dao?.isReEmergence ?: true)
+
+        // Case 2: OrderDto와 OrderDao 토큰이 모두 인입되는 새 세션
+        // - CONCEPT_IRRELEVANT(OrderDto)는 토큰이 있어도 엄격 억제 (REJECTED, isReEmergence = false)
+        // - FILE_MISMATCH(OrderDao)는 토큰 매칭으로 결정론적 재등장 (PENDING, isReEmergence = true)
+        fun runReEmergenceSession(): List<Pair<String, Boolean>> {
+            val session2 = engine.initSession("OrderDao 및 OrderDto 데이터 일괄 처리", previousContract)
+            return session2.state.items
+                .filter { it.id == conceptIrrelevantItem.id || it.id == fileMismatchItem.id }
+                .map { "${it.id}:${it.verdict}" to it.isReEmergence }
+        }
+
+        val run1 = runReEmergenceSession()
+        val run2 = runReEmergenceSession()
+        val run3 = runReEmergenceSession()
+
+        // 멱등성 검증 (3회 exact match)
+        assertEquals("Run 1과 Run 2 재등장 결과는 100% 동일해야 함", run1, run2)
+        assertEquals("Run 1과 Run 3 재등장 결과는 100% 동일해야 함", run1, run3)
+
+        // 세부 판정 assert
+        val dtoResult = run1.find { it.first.contains("OrderDto") }
+        val daoResult = run1.find { it.first.contains("OrderDao") }
+
+        assertEquals("CONCEPT_IRRELEVANT인 OrderDto는 토큰이 있어도 REJECTED 상태여야 함", 
+            "ref:src/main/java/com/example/OrderDto.java:REJECTED", dtoResult?.first)
+        assertEquals("CONCEPT_IRRELEVANT인 OrderDto는 isReEmergence = false 여야 함", 
+            false, dtoResult?.second)
+
+        assertEquals("FILE_MISMATCH인 OrderDao는 새 토큰 매칭 시 PENDING 상태로 재활성화되어야 함", 
+            "ref:src/main/java/com/example/OrderDao.java:PENDING", daoResult?.first)
+        assertEquals("FILE_MISMATCH인 OrderDao는 isReEmergence = true 여야 함", 
+            true, daoResult?.second)
     }
 }
 

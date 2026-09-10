@@ -8,7 +8,7 @@ package net.ib.ixpert.ops.wuwagent.agent.clarify.model
  * - 거부된 항목 분리 보존 (rejectedExistingRefs for Stage 1 filter, rejectedNewCreations for Clarify re-session suppression)
  */
 data class Stage0TransitionContract(
-    val contractVersion: String = "1.0",
+    val contractVersion: String = "1.1",
     val createdAt: String, // ISO-8601
     val graphHash: String,
     val sessionId: String = "default",
@@ -19,5 +19,6 @@ data class Stage0TransitionContract(
     val anchorSiblingRefs: List<LinkHint.ExistingRef> = emptyList(),
     val rejectedExistingRefs: List<LinkHint.ExistingRef> = emptyList(),
     val rejectedNewCreations: List<RequirementItem> = emptyList(),
+    val rejectedItems: List<RequirementItem> = emptyList(), // v1.1: 전체 거부 항목 (rejectionReason 보존)
     val enrichedRequirementText: String = ""
 )

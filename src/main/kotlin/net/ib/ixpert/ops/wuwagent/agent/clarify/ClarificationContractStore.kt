@@ -70,6 +70,27 @@ private class LinkHintTypeAdapter : JsonSerializer<LinkHint>, JsonDeserializer<L
  */
 object ClarificationContractStore {
 
+    const val CURRENT_CONTRACT_VERSION = "1.1"
+    const val MIN_SUPPORTED_VERSION = "1.1"
+    const val SUPPORTED_MAJOR = 1
+
+    /**
+     * 계약 스키마 버전 유효성 검증:
+     * - Major 버전은 반드시 SUPPORTED_MAJOR(1)와 일치해야 함
+     * - Minor 버전은 MIN_SUPPORTED_VERSION(1.1) 이상이어야 함 (v1.0 등 하한 미달은 Fail-Fast)
+     * - 동일 1.x 범위 내에서의 마이너 필드 차이는 nullable 기본값으로 흡수
+     */
+    fun isSupportedVersion(versionStr: String): Boolean {
+        val parts = versionStr.trim().split('.')
+        val major = parts.getOrNull(0)?.toIntOrNull() ?: return false
+        val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        if (major != SUPPORTED_MAJOR) return false
+
+        val minParts = MIN_SUPPORTED_VERSION.split('.')
+        val minMinor = minParts.getOrNull(1)?.toIntOrNull() ?: 0
+        return minor >= minMinor
+    }
+
     private val gson: Gson = GsonBuilder()
         .registerTypeHierarchyAdapter(LinkHint::class.java, LinkHintTypeAdapter())
         .setPrettyPrinting()
@@ -186,10 +207,10 @@ object ClarificationContractStore {
             ContractValidationReason.CORRUPT_JSON
         )
 
-        // 1. 버전 검증 (Fail-Fast)
-        if (contract.contractVersion != "1.0") {
+        // 1. 버전 검증 (Fail-Fast: SemVer [MIN_SUPPORTED_VERSION, (SUPPORTED_MAJOR + 1).0))
+        if (!isSupportedVersion(contract.contractVersion)) {
             throw ContractValidationException(
-                "지원하지 않는 계약 스키마 버전입니다: '${contract.contractVersion}' (기대 버전: '1.0'). /clarify를 다시 실행해주세요.",
+                "지원하지 않는 계약 스키마 버전입니다: '${contract.contractVersion}' (지원 버전 범위: [$MIN_SUPPORTED_VERSION, ${SUPPORTED_MAJOR + 1}.0)). /clarify를 다시 실행해주세요.",
                 ContractValidationReason.VERSION_MISMATCH
             )
         }

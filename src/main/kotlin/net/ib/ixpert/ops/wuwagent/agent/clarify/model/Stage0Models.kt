@@ -74,6 +74,16 @@ data class StructuralSlotProposal(
 )
 
 /**
+ * 2.7 거부 사유 (RejectionReason) - 2지선다
+ * - FILE_MISMATCH: 이 특정 파일이 아님 (대체 후보 필요, 새 엣지/신호로 재등장 가능)
+ * - CONCEPT_IRRELEVANT: 이 업무/개념 자체가 무관함 (완전 억제, 재제안 불가)
+ */
+enum class RejectionReason {
+    FILE_MISMATCH,
+    CONCEPT_IRRELEVANT
+}
+
+/**
  * 2.1 요구사항 적립 단위 (RequirementItem)
  */
 data class RequirementItem(
@@ -85,7 +95,9 @@ data class RequirementItem(
     val verdict: Verdict = Verdict.PENDING, // 판정 상태 (2.4)
     val confidence: ConfidenceBucket = ConfidenceBucket.HIGH_CONFIDENCE, // 신뢰도 버킷 (v1.1)
     val provenanceSignals: Set<ProvenanceSignal> = emptySet(),           // 출처 신호 집합 (v1.1)
-    val structuralSlotProposal: StructuralSlotProposal? = null           // 구조 슬롯 제안 (v1.1)
+    val structuralSlotProposal: StructuralSlotProposal? = null,          // 구조 슬롯 제안 (v1.1)
+    val rejectionReason: RejectionReason? = null,                        // 거부 사유 (v1.1 P1)
+    val isReEmergence: Boolean = false                                   // 새 엣지/신호로 재등장 여부 (v1.1 P1)
 ) {
     companion object {
         /**

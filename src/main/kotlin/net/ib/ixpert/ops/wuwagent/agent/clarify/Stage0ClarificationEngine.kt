@@ -44,21 +44,60 @@ class Stage0ClarificationEngine(
         // 이전 계약의 거부 항목을 frozen 리스트로 구성
         val frozenRejectedItems = mutableListOf<RequirementItem>()
         if (previousContract != null) {
-            for (rejRef in previousContract.rejectedExistingRefs) {
-                val item = RequirementItem(
-                    id = RequirementItem.deriveId(rejRef),
-                    statement = "이전 세션에서 거부된 기존 파일: ${rejRef.filePath}",
-                    source = HintSource.SYSTEM_UNCONFIRMED,
-                    hint = rejRef,
-                    anchorRationale = "이전 세션 REJECTED 이력 보존",
-                    verdict = Verdict.REJECTED,
-                    confidence = ConfidenceBucket.HIGH_CONFIDENCE
-                )
-                frozenRejectedItems.add(item)
+            val priorRejected = if (previousContract.rejectedItems.isNotEmpty()) {
+                previousContract.rejectedItems
+            } else {
+                val list = mutableListOf<RequirementItem>()
+                for (rejRef in previousContract.rejectedExistingRefs) {
+                    list.add(RequirementItem(
+                        id = RequirementItem.deriveId(rejRef),
+                        statement = "이전 세션에서 거부된 기존 파일: ${rejRef.filePath}",
+                        source = HintSource.SYSTEM_UNCONFIRMED,
+                        hint = rejRef,
+                        anchorRationale = "이전 세션 REJECTED 이력 보존",
+                        verdict = Verdict.REJECTED,
+                        confidence = ConfidenceBucket.HIGH_CONFIDENCE
+                    ))
+                }
+                for (rejNew in previousContract.rejectedNewCreations) {
+                    list.add(rejNew.copy(verdict = Verdict.REJECTED))
+                }
+                list
             }
-            for (rejNew in previousContract.rejectedNewCreations) {
-                val item = rejNew.copy(verdict = Verdict.REJECTED)
-                frozenRejectedItems.add(item)
+
+            for (rejItem in priorRejected) {
+                if (rejItem.rejectionReason == RejectionReason.CONCEPT_IRRELEVANT) {
+                    // CONCEPT_IRRELEVANT: 완전 억제 (재등장 불가)
+                    frozenRejectedItems.add(rejItem.copy(verdict = Verdict.REJECTED, isReEmergence = false))
+                } else {
+                    // FILE_MISMATCH 또는 미지정: 결정론적 입력 토큰 매칭 검사
+                    val isMatchedByNewTokens = when (val h = rejItem.hint) {
+                        is LinkHint.ExistingRef -> {
+                            val pathLower = h.filePath.lowercase().replace('\\', '/')
+                            val fileName = pathLower.substringAfterLast('/')
+                            val className = fileName.substringBeforeLast('.')
+                            initialTokens.any { tok -> 
+                                val tv = tok.value.lowercase()
+                                pathLower.contains(tv) || className.contains(tv) || h.symbols.any { it.lowercase().contains(tv) }
+                            }
+                        }
+                        is LinkHint.NewCreation -> {
+                            val stmtLower = rejItem.statement.lowercase()
+                            initialTokens.any { tok -> stmtLower.contains(tok.value.lowercase()) }
+                        }
+                    }
+
+                    if (isMatchedByNewTokens) {
+                        // 결정론적 재등장: 새 토큰 매칭 시 isReEmergence = true 및 PENDING으로 재활성화
+                        frozenRejectedItems.add(rejItem.copy(
+                            verdict = Verdict.PENDING,
+                            isReEmergence = true,
+                            anchorRationale = "${rejItem.anchorRationale} [FILE_MISMATCH 거부 후 새 문맥에서 재등장]"
+                        ))
+                    } else {
+                        frozenRejectedItems.add(rejItem.copy(verdict = Verdict.REJECTED, isReEmergence = false))
+                    }
+                }
             }
         }
 
@@ -339,7 +378,7 @@ class Stage0ClarificationEngine(
         val createdAt = java.time.Instant.now().toString()
 
         return Stage0TransitionContract(
-            contractVersion = "1.0",
+            contractVersion = ClarificationContractStore.CURRENT_CONTRACT_VERSION,
             createdAt = createdAt,
             graphHash = graphHash,
             sessionId = sessionId,
@@ -350,6 +389,7 @@ class Stage0ClarificationEngine(
             anchorSiblingRefs = anchorSiblingRefs,
             rejectedExistingRefs = rejectedExistingRefs,
             rejectedNewCreations = rejectedNewCreations,
+            rejectedItems = rejectedItems,
             enrichedRequirementText = enrichedText
         )
     }
