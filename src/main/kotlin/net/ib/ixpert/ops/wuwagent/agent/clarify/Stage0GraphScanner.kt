@@ -538,7 +538,8 @@ class Stage0GraphScanner(
                     anchorRationale = cand.rationale,
                     verdict = Verdict.PENDING,
                     confidence = confidence,
-                    provenanceSignals = cand.signals
+                    provenanceSignals = cand.signals,
+                    domainPackage = brotherAnalogyScanner.extractDomainPackage(cand.path)
                 )
             )
         }
@@ -661,6 +662,10 @@ class Stage0GraphScanner(
         val cleanSymbols = symbols.filter { !it.contains(":") }.take(2).joinToString(", ")
         val symbolClause = if (cleanSymbols.isNotBlank()) " (관련 필드/기능: $cleanSymbols)" else ""
         return "[$fileName] 파일에서 요구사항 관련 처리$symbolClause 를 수행해야 한다."
+    }
+
+    fun extractDomainPackage(path: String?): String? {
+        return brotherAnalogyScanner.extractDomainPackage(path)
     }
 
     private data class CandidateAcc(

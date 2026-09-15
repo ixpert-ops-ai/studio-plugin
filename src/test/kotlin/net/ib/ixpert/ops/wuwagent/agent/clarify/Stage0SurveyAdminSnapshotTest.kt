@@ -110,10 +110,40 @@ class Stage0SurveyAdminSnapshotTest {
             slotProposal.templateComponents.none { it.contains("IbCenter") || it.contains("ApiService") }
         )
 
-        // 4. 개방형 질문 트리거 확인
+        // 4. 1차 그룹핑 축 (domainPackage) 실측 및 도메인 분리 검증
+        val surveyItemsWithDomain = turn0.state.items.filter { 
+            val p = (it.hint as? LinkHint.ExistingRef)?.filePath ?: ""
+            p.contains("/survey/")
+        }
+        assertTrue("설문 도메인 파일 항목들은 1개 이상 존재해야 함", surveyItemsWithDomain.isNotEmpty())
+        for (item in surveyItemsWithDomain) {
+            val path = (item.hint as LinkHint.ExistingRef).filePath
+            val expectedDomain = scanner.extractDomainPackage(path)
+            assertEquals("domainPackage는 extractDomainPackage와 정확히 일치해야 함", expectedDomain, item.domainPackage)
+            assertTrue("설문 도메인 패키지에는 survey가 포함되어야 함", item.domainPackage?.contains("survey") == true)
+        }
+
+        val batchItemsWithDomain = turn0.state.items.filter { 
+            val p = (it.hint as? LinkHint.ExistingRef)?.filePath ?: ""
+            p.contains("/batch/")
+        }
+        assertTrue("배치 도메인 파일 항목들은 1개 이상 존재해야 함", batchItemsWithDomain.isNotEmpty())
+        for (item in batchItemsWithDomain) {
+            val path = (item.hint as LinkHint.ExistingRef).filePath
+            val expectedDomain = scanner.extractDomainPackage(path)
+            assertEquals("domainPackage는 extractDomainPackage와 정확히 일치해야 함", expectedDomain, item.domainPackage)
+            assertTrue("배치 도메인 패키지에는 batch가 포함되어야 함", item.domainPackage?.contains("batch") == true)
+        }
+
+        // 도메인 분리 불변식: 설문 도메인과 배치 도메인은 서로 다른 domainPackage를 가져야 함
+        val surveyPackages = surveyItemsWithDomain.mapNotNull { it.domainPackage }.toSet()
+        val batchPackages = batchItemsWithDomain.mapNotNull { it.domainPackage }.toSet()
+        assertTrue("설문 패키지와 배치 패키지는 상호 배타적으로 분리되어야 함", surveyPackages.intersect(batchPackages).isEmpty())
+
+        // 5. 개방형 질문 트리거 확인
         assertNotNull("개방형 질문이 트리거되어야 함", turn0.openQuestion)
 
-        // 5. 턴 진행 및 동결 보호 검증
+        // 6. 턴 진행 및 동결 보호 검증
         val surveyListJspItem = turn0.state.items.find { (it.hint as? LinkHint.ExistingRef)?.filePath?.contains("survey_list.jsp") == true }
         val updates = if (surveyListJspItem != null) mapOf(surveyListJspItem.id to Verdict.CONFIRMED) else emptyMap()
 
@@ -125,7 +155,7 @@ class Stage0SurveyAdminSnapshotTest {
             )
         )
 
-        // 6. 전이 계약 검증
+        // 7. 전이 계약 검증
         val contract = engine.transitionToStage1(turn1.state)
         assertTrue(contract.trustedExistingRefs.any { it.filePath.contains("survey_list.jsp") })
         assertTrue(contract.enrichedRequirementText.contains("Bizgo REST API"))

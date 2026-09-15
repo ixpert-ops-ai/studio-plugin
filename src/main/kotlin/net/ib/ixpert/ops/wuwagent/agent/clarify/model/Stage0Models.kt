@@ -98,7 +98,8 @@ data class RequirementItem(
     val provenanceSignals: Set<ProvenanceSignal> = emptySet(),           // 출처 신호 집합 (v1.1)
     val structuralSlotProposal: StructuralSlotProposal? = null,          // 구조 슬롯 제안 (v1.1)
     val rejectionReason: RejectionReason? = null,                        // 거부 사유 (v1.1 P1)
-    val isReEmergence: Boolean = false                                   // 새 엣지/신호로 재등장 여부 (v1.1 P1)
+    val isReEmergence: Boolean = false,                                  // 새 엣지/신호로 재등장 여부 (v1.1 P1)
+    val domainPackage: String? = null                                    // 도메인 패키지 클러스터 (v1.1 P2)
 ) {
     companion object {
         /**

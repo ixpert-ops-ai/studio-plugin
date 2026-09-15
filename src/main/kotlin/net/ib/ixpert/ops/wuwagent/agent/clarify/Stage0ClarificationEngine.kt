@@ -57,7 +57,8 @@ class Stage0ClarificationEngine(
                         hint = rejRef,
                         anchorRationale = "이전 세션 REJECTED 이력 보존",
                         verdict = Verdict.REJECTED,
-                        confidence = ConfidenceBucket.HIGH_CONFIDENCE
+                        confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                        domainPackage = scanner.extractDomainPackage(rejRef.filePath)
                     ))
                 }
                 for (rejNew in previousContract.rejectedNewCreations) {

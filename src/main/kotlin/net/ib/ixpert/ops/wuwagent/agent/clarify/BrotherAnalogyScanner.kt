@@ -73,7 +73,8 @@ class BrotherAnalogyScanner(
                             anchorRationale = "공유 타입 브릿지(${bridge.path.substringAfterLast("/")})를 통한 형제 클러스터 위상 회수",
                             verdict = Verdict.PENDING,
                             confidence = ConfidenceBucket.LOW_CONFIDENCE,
-                            provenanceSignals = setOf(ProvenanceSignal.SIBLING_ANALOGY)
+                            provenanceSignals = setOf(ProvenanceSignal.SIBLING_ANALOGY),
+                            domainPackage = extractDomainPackage(node.path)
                         )
                     )
                 }
@@ -108,7 +109,8 @@ class BrotherAnalogyScanner(
                         verdict = Verdict.PENDING,
                         confidence = ConfidenceBucket.LOW_CONFIDENCE,
                         provenanceSignals = setOf(ProvenanceSignal.SIBLING_ANALOGY),
-                        structuralSlotProposal = slotProposal
+                        structuralSlotProposal = slotProposal,
+                        domainPackage = executableCoreNodes.firstOrNull()?.path?.let { extractDomainPackage(it) }
                     )
                 )
             }
@@ -141,11 +143,11 @@ class BrotherAnalogyScanner(
             val distinctCallers = allIncoming.map { it.source }.distinct()
 
             val seedCallersForDto = distinctCallers.filter { seedPaths.contains(it) }
-            val internalDomainPackages = seedCallersForDto.map { extractDomainPackage(it) }.distinct()
+            val internalDomainPackages = seedCallersForDto.mapNotNull { extractDomainPackage(it) }.distinct()
 
             val externalCallers = distinctCallers.filter { caller ->
                 val callerDomain = extractDomainPackage(caller)
-                !internalDomainPackages.contains(callerDomain)
+                callerDomain != null && !internalDomainPackages.contains(callerDomain)
             }
             val externalPackages = externalCallers.map { extractPackage(it) }.distinct()
 
@@ -165,21 +167,24 @@ class BrotherAnalogyScanner(
         val allIncoming = graph.relationships.filter { it.target == dtoPath }
         val distinctCallers = allIncoming.map { it.source }.distinct()
         val seedCallersForDto = distinctCallers.filter { seedPaths.contains(it) }
-        val internalDomainPackages = seedCallersForDto.map { extractDomainPackage(it) }.distinct()
+        val internalDomainPackages = seedCallersForDto.mapNotNull { extractDomainPackage(it) }.distinct()
 
         return distinctCallers.filter { caller ->
             val callerDomain = extractDomainPackage(caller)
-            !internalDomainPackages.contains(callerDomain)
+            callerDomain != null && !internalDomainPackages.contains(callerDomain)
         }
     }
 
-    private fun extractDomainPackage(path: String): String {
-        val pkg = path.substringBeforeLast("/")
+    fun extractDomainPackage(path: String?): String? {
+        if (path.isNullOrBlank()) return null
+        val normalized = path.replace("\\", "/").trim()
+        val pkg = normalized.substringBeforeLast("/")
+        if (pkg == normalized || pkg.isBlank()) return null
         val segments = pkg.split("/").toMutableList()
         while (segments.isNotEmpty() && LAYER_NAMES.contains(segments.last().lowercase())) {
             segments.removeAt(segments.size - 1)
         }
-        return segments.joinToString("/")
+        return if (segments.isNotEmpty()) segments.joinToString("/") else null
     }
 
     /**
