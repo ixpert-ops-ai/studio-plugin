@@ -82,7 +82,7 @@ class SpringAnnotationResolver {
         var anyframeRole: AnyframeRole? = null
         var fileType = resolveFileType(psiClass, relativePath)
         var layer = LAYER_MAP[fileType] ?: ArchitectureLayer.COMMON
-        var localName: String? = null
+        var localName: String? = getAnnotationStringValue(psiClass, "LocalName")
         var datasource: String? = null
 
         if (isAnyframe) {
@@ -91,8 +91,12 @@ class SpringAnnotationResolver {
                 fileType = mapAnyframeRoleToSpringFileType(anyframeRole)
                 layer = mapAnyframeRoleToLayer(anyframeRole)
             }
-            localName = getAnnotationStringValue(psiClass, "LocalName")
             datasource = getAnnotationStringValue(psiClass, "datasource") ?: getAnnotationStringValue(psiClass, "dataSource")
+        }
+
+        // 2순위 (폴백): @LocalName 부재 시 클래스 상단 Javadoc / 주석에서 30자 이하 정제 어구 추출
+        if (localName.isNullOrBlank()) {
+            localName = extractClassLocalNameFromComments(psiClass)
         }
 
         val annotations = extractAnnotationNames(psiClass)
@@ -468,5 +472,81 @@ class SpringAnnotationResolver {
             }
 
         return injections
+    }
+
+    private fun extractClassLocalNameFromComments(psiClass: PsiClass): String? {
+        // 1. DocComment (/** ... */) - 첫 번째 라인만 엄격히 검사
+        val docComment = psiClass.docComment
+        if (docComment != null) {
+            val text = docComment.text
+            val firstLine = text.lines()
+                .map { it.replace(Regex("""^[\s*\/]+"""), "").trim() }
+                .firstOrNull { line ->
+                    line.isNotBlank() &&
+                    !line.startsWith("@") &&
+                    !line.startsWith("author", ignoreCase = true) &&
+                    !line.startsWith("version", ignoreCase = true) &&
+                    !line.startsWith("since", ignoreCase = true)
+                }
+            if (firstLine != null && firstLine.length <= 40 && !containsCodeSymbols(firstLine)) {
+                val korMatches = Regex("""[가-힣\s]+""").findAll(firstLine).map { it.value.trim() }.filter { it.length >= 2 }.toList()
+                val candidate = korMatches.joinToString(" ").trim()
+                if (candidate.length in 2..30 && isValidLocalNameCandidate(candidate)) {
+                    return candidate
+                }
+            }
+            return null
+        }
+
+        // 2. Preceding single-line comments (// ...) directly before class declaration
+        val commentsToCheck = mutableListOf<PsiComment>()
+        var prev = psiClass.prevSibling
+        while (prev != null) {
+            if (prev is PsiComment) {
+                commentsToCheck.add(prev)
+                break
+            }
+            if (prev !is com.intellij.psi.PsiWhiteSpace) {
+                break
+            }
+            prev = prev.prevSibling
+        }
+        if (commentsToCheck.isEmpty()) {
+            for (child in psiClass.children) {
+                if (child is PsiComment) {
+                    commentsToCheck.add(child)
+                    break
+                }
+                if (child !is com.intellij.psi.PsiWhiteSpace && child !is com.intellij.psi.PsiModifierList) {
+                    break
+                }
+            }
+        }
+
+        for (prevComment in commentsToCheck) {
+            if (prevComment !is com.intellij.psi.javadoc.PsiDocComment) {
+                val clean = prevComment.text.replace(Regex("""^[\s*\/]+"""), "").trim()
+                if (clean.length <= 40 && !containsCodeSymbols(clean)) {
+                    val korMatches = Regex("""[가-힣\s]+""").findAll(clean).map { it.value.trim() }.filter { it.length >= 2 }.toList()
+                    val candidate = korMatches.joinToString(" ").trim()
+                    if (candidate.length in 2..30 && isValidLocalNameCandidate(candidate)) {
+                        return candidate
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun containsCodeSymbols(text: String): Boolean {
+        return text.contains("=") || text.contains(";") || text.contains("{") || text.contains("}") ||
+               text.contains("(") || text.contains(")") || text.contains("-->") || text.contains("SELECT", ignoreCase = true)
+    }
+
+    private fun isValidLocalNameCandidate(candidate: String): Boolean {
+        val lower = candidate.lowercase()
+        if (lower.contains("작성") || lower.contains("수정") || lower.contains("클래스") || lower.contains("copyright") || lower.contains("license")) return false
+        if (lower.startsWith("todo") || lower.startsWith("fixme")) return false
+        return true
     }
 }

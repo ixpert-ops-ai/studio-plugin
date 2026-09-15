@@ -106,6 +106,7 @@ class ResourceScanner(private val projectRoot: Path) {
         }
 
         val relativePath = projectRoot.relativize(file.toPath()).toString().replace("\\", "/")
+        val localName = extractLocalName(file, content, type, relativePath)
 
         return ResourceNode(
             path = relativePath,
@@ -113,8 +114,40 @@ class ResourceScanner(private val projectRoot: Path) {
             layer = classifyLayer(type, relativePath),
             linkedTo = emptyList(),
             linkType = "",
-            metadata = hints.mapValues { it.value.distinct().take(maxHintsPerCategory) }
+            metadata = hints.mapValues { it.value.distinct().take(maxHintsPerCategory) },
+            localName = localName
         )
+    }
+
+    private fun extractLocalName(file: File, content: String, type: ResourceType, relativePath: String): String? {
+        if (type != ResourceType.VIEW) return null
+
+        val lowerPath = relativePath.lowercase().replace("\\", "/")
+        if (lowerPath.contains("/common/") || lowerPath.contains("/layout/") || lowerPath.contains("/auth/") || lowerPath.contains("/login")) {
+            return null
+        }
+
+        // 1순위: 문서 순서상 첫 번째 <h1~3> 헤딩
+        val hMatch = Regex("""<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>""", RegexOption.IGNORE_CASE).find(content)
+        if (hMatch != null) {
+            val text = hMatch.groupValues[1].replace(Regex("""<[^>]+>"""), "").trim()
+            val kor = Regex("""[가-힣\s]+""").findAll(text).map { it.value.trim() }.filter { it.length >= 2 }.joinToString(" ").trim()
+            if (kor.length in 2..30 && !kor.contains("\${")) {
+                return kor
+            }
+        }
+
+        // 2순위 (폴백): <title>
+        val titleMatch = Regex("""<title[^>]*>([\s\S]*?)<\/title>""", RegexOption.IGNORE_CASE).find(content)
+        if (titleMatch != null) {
+            val text = titleMatch.groupValues[1].replace(Regex("""<[^>]+>"""), "").trim()
+            val kor = Regex("""[가-힣\s]+""").findAll(text).map { it.value.trim() }.filter { it.length >= 2 }.joinToString(" ").trim()
+            if (kor.length in 2..30 && !kor.contains("\${") && !kor.contains("Hyundai", ignoreCase = true)) {
+                return kor
+            }
+        }
+
+        return null
     }
 
     private fun classifyType(file: File, content: String): ResourceType {

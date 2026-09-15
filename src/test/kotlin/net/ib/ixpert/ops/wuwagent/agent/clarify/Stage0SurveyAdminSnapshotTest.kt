@@ -26,18 +26,25 @@ class Stage0SurveyAdminSnapshotTest {
             graph = graph,
             minSpecificityScore = 1.0,
             proposalBudget = 10,
-            localDomainOverrides = mapOf("설문" to setOf("survey", "poll")),
+            localDomainOverrides = emptyMap(),
             maxBridgeDegree = 15,
             maxExternalShared = 3
         )
         val engine = Stage0ClarificationEngine(scanner, graph)
 
         val originalReq = "설문 발송 채널에 브랜드메시지 추가"
+        val tokens = scanner.extractTokens(originalReq)
+        println("=== DEBUG: Extracted Tokens (${tokens.size}) ===")
+        tokens.forEach { println(" - ${it.value} (${it.kind})") }
+        
         val turn0 = engine.initSession(originalReq)
 
         // 1. 고신뢰 (HIGH_CONFIDENCE) 후보군 실측 검증 (프론트/매퍼/구조식별자)
         val highConfidenceItems = turn0.state.items.filter { it.confidence == ConfidenceBucket.HIGH_CONFIDENCE }
         val highPaths = highConfidenceItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+        
+        println("=== DEBUG: HIGH_CONFIDENCE paths (${highPaths.size}) ===")
+        highPaths.forEach { println(" [HIGH] $it") }
         
         assertTrue("survey_list.jsp는 HIGH_CONFIDENCE여야 함", highPaths.any { it.contains("survey_list.jsp") })
         assertTrue("survey.list.js는 HIGH_CONFIDENCE여야 함", highPaths.any { it.contains("survey.list.js") })
@@ -136,7 +143,7 @@ class Stage0SurveyAdminSnapshotTest {
             graph = graph,
             minSpecificityScore = 1.0,
             proposalBudget = 10,
-            localDomainOverrides = mapOf("설문" to setOf("survey", "poll")),
+            localDomainOverrides = emptyMap(),
             maxBridgeDegree = 15,
             maxExternalShared = 3
         )
@@ -175,6 +182,9 @@ class Stage0SurveyAdminSnapshotTest {
             "AlimtalkTmplDto.java"
         )
         val matchingDirectSeeds = directTurn0SeedsB.filter { seed -> turn0Paths.any { it.contains(seed) } }
+        println("=== DEBUG: matchingDirectSeeds (${matchingDirectSeeds.size}) ===")
+        matchingDirectSeeds.forEach { println(" - $it") }
+        println("=== DEBUG: missing seeds: ${directTurn0SeedsB - matchingDirectSeeds.toSet()} ===")
         assertEquals("Category B의 7대 진입점/매퍼/DTO 시드가 Turn 0에서 전원 회수되어야 함", 7, matchingDirectSeeds.size)
         val recoveredBCount = gtBFiles.size // 7개 시드로부터 Stage 1 그래프 확장을 통해 12개 전원 도달 가능 (Category B 100% 도달)
 
@@ -273,7 +283,7 @@ class Stage0SurveyAdminSnapshotTest {
             graph = graph,
             minSpecificityScore = 1.0,
             proposalBudget = 10,
-            localDomainOverrides = mapOf("설문" to setOf("survey", "poll")),
+            localDomainOverrides = emptyMap(),
             maxBridgeDegree = 15,
             maxExternalShared = 3
         )
@@ -288,6 +298,8 @@ class Stage0SurveyAdminSnapshotTest {
         val slotItem = lowConfidenceItems.find { it.structuralSlotProposal != null }
         assertNotNull("Turn 0에서 구조 슬롯이 제안되어야 함", slotItem)
         val slotComponents = slotItem!!.structuralSlotProposal!!.templateComponents
+        println("=== DEBUG: slotComponents (${slotComponents.size}) ===")
+        slotComponents.forEach { println(" - $it") }
         assertEquals("슬롯 템플릿 컴포넌트는 코어 배치 3종이어야 함", 3, slotComponents.size)
 
         // Turn 1: 사용자는 "비즈고 연동" 단 1개 토큰만 발화 + Turn 0 슬롯 수락

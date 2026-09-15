@@ -61,7 +61,8 @@ enum class ProvenanceSignal {
     MAPPER_CHAIN,      // MyBatis Mapper 네임스페이스/테이블 바인딩
     VIEW_SCRIPT_PAIR,  // JSP/JS URL 페어링
     SIBLING_ANALOGY,   // 위상 기반 형제 유추
-    USER_UTTERANCE     // 사용자 직접 발화
+    USER_UTTERANCE,    // 사용자 직접 발화
+    LOCAL_NAME_MATCH   // 메타그래프 자연어명(localName) 매칭
 }
 
 /**

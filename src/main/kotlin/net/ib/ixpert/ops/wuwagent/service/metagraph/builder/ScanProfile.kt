@@ -52,7 +52,7 @@ object ScanProfiles {
 
     val JSP_VIEW = listOf(
         ScanPattern("script_src",
-            Regex("""<script[^>]+src\s*=\s*["']([^"']+\.js)["']""")),
+            Regex("""<script[^>]+src\s*=\s*["'](?:<c:out[^>]*>)?([^"'?\s]+\.js)""")),
         ScanPattern("form_action",
             Regex("""<form[^>]+action\s*=\s*["']([^"']+)["']""")),
         ScanPattern("include",

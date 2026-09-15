@@ -4,6 +4,7 @@ import net.ib.ixpert.ops.wuwagent.agent.clarify.model.*
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.RelationshipType
+import net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType
 
 /**
  * 형제 유추(Brother Analogy) 스캐너.
@@ -19,6 +20,14 @@ class BrotherAnalogyScanner(
     private val maxClusterHops: Int = 2
 ) {
 
+    private val LAYER_NAMES = setOf(
+        // Standard Spring MVC / Spring Boot layers
+        "service", "dao", "repository", "dto", "vo", "controller", "impl", "entity", "model", "rest", "api", "mapper",
+        "request", "response",
+        // Period chain AP layers (Anyframe AP / 기간계 AP 표준)
+        "svc", "svo", "biz", "bvo", "dem", "dqm", "dvo", "util", "bizutil"
+    )
+
     /**
      * 시드 노드들로부터 형제 클러스터 및 구조 슬롯을 유추 탐색한다.
      */
@@ -29,10 +38,9 @@ class BrotherAnalogyScanner(
         if (seedNodes.isEmpty()) return emptyList()
 
         val seedPaths = seedNodes.map { it.path }.toSet()
-        val seedPackages = seedPaths.map { extractPackage(it) }.toSet()
 
         // 1단계: 공유 타입 브릿지 DTO 식별
-        val bridgeDtos = identifySharedBridges(seedPaths, seedPackages)
+        val bridgeDtos = identifySharedBridges(seedPaths)
         if (bridgeDtos.isEmpty()) return emptyList()
 
         val items = mutableListOf<RequirementItem>()
@@ -73,9 +81,12 @@ class BrotherAnalogyScanner(
         }
 
         // 3단계: 구조 슬롯 제안 (Category A - 1층 구조 제안)
-        // 외부 리프 노드(IbCenterApiService 등)를 배제하고, 동일 서브시스템 코어 응집 노드로만 템플릿 슬롯 구성
-        if (coreCohesiveNodes.size >= 2) {
-            val templateComponentNames = coreCohesiveNodes.map { it.path.substringAfterLast("/") }
+        // 외부 리프 노드(IbCenterApiService 등)를 배제하고, 동일 서브시스템 코어 응집 노드(비-DTO 실행 컴포넌트)로만 템플릿 슬롯 구성
+        val executableCoreNodes = coreCohesiveNodes.filter { 
+            it.fileType != SpringFileType.DTO && it.fileType != SpringFileType.ENTITY 
+        }
+        if (executableCoreNodes.size >= 2) {
+            val templateComponentNames = executableCoreNodes.map { it.path.substringAfterLast("/") }
             val statement = "기존 형제 클러스터(${templateComponentNames.take(3).joinToString(", ")} 등)와 동일한 신규 컴포넌트 생성이 필요할 수 있습니다."
             val hint = LinkHint.NewCreation
             val id = RequirementItem.deriveId(hint, statement)
@@ -110,7 +121,7 @@ class BrotherAnalogyScanner(
     /**
      * 1단계: 시드 노드가 참조하는 DTO 중 외부 도메인에서 공유되고 허브 필터를 통과하는 브릿지 식별
      */
-    private fun identifySharedBridges(seedPaths: Set<String>, seedPackages: Set<String>): List<FileNode> {
+    private fun identifySharedBridges(seedPaths: Set<String>): List<FileNode> {
         val candidateDtoPaths = mutableSetOf<String>()
 
         for (rel in graph.relationships) {
@@ -129,12 +140,12 @@ class BrotherAnalogyScanner(
             val inDegree = allIncoming.size
             val distinctCallers = allIncoming.map { it.source }.distinct()
 
-            // 해당 DTO를 직접 참조하는 시드 노드들의 패키지 (내부 도메인 패키지)
             val seedCallersForDto = distinctCallers.filter { seedPaths.contains(it) }
-            val internalPackages = seedCallersForDto.map { extractPackage(it) }.distinct()
+            val internalDomainPackages = seedCallersForDto.map { extractDomainPackage(it) }.distinct()
 
             val externalCallers = distinctCallers.filter { caller ->
-                !internalPackages.any { ip -> caller.startsWith(ip) }
+                val callerDomain = extractDomainPackage(caller)
+                !internalDomainPackages.contains(callerDomain)
             }
             val externalPackages = externalCallers.map { extractPackage(it) }.distinct()
 
@@ -154,11 +165,21 @@ class BrotherAnalogyScanner(
         val allIncoming = graph.relationships.filter { it.target == dtoPath }
         val distinctCallers = allIncoming.map { it.source }.distinct()
         val seedCallersForDto = distinctCallers.filter { seedPaths.contains(it) }
-        val internalPackages = seedCallersForDto.map { extractPackage(it) }.distinct()
+        val internalDomainPackages = seedCallersForDto.map { extractDomainPackage(it) }.distinct()
 
         return distinctCallers.filter { caller ->
-            !internalPackages.any { ip -> caller.startsWith(ip) }
+            val callerDomain = extractDomainPackage(caller)
+            !internalDomainPackages.contains(callerDomain)
         }
+    }
+
+    private fun extractDomainPackage(path: String): String {
+        val pkg = path.substringBeforeLast("/")
+        val segments = pkg.split("/").toMutableList()
+        while (segments.isNotEmpty() && LAYER_NAMES.contains(segments.last().lowercase())) {
+            segments.removeAt(segments.size - 1)
+        }
+        return segments.joinToString("/")
     }
 
     /**

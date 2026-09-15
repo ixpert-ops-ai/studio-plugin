@@ -51,4 +51,67 @@ class ResourceScannerTest {
         val scripts = viewNode?.metadata?.get("script_src") as? List<*>
         assertTrue(scripts?.contains("/resources/js/survey/surveyRegist.js") == true)
     }
+
+    @Test
+    fun testViewLocalNameExtractionRules() {
+        val tmpDir = java.nio.file.Files.createTempDirectory("jsp_local_name_test").toFile()
+        try {
+            // 1. Regular View with <h2>
+            val surveyWriteJsp = java.io.File(tmpDir, "views/survey/survey_write.jsp").apply {
+                parentFile.mkdirs()
+                writeText("""
+                    <%@ page contentType="text/html;charset=UTF-8" %>
+                    <h2 class="blind">설문 관리</h2>
+                    <h3 class="title_left">고객 설문 신규등록</h3>
+                    <form action="/survey/save.do" method="post">
+                        <input name="surveyTitle" />
+                    </form>
+                    <script src="/resources/js/survey/survey.write.js"></script>
+                """.trimIndent())
+            }
+
+            // 2. Common Layout View (should be guarded and return null)
+            val commonHeaderJsp = java.io.File(tmpDir, "views/common/header.jsp").apply {
+                parentFile.mkdirs()
+                writeText("""
+                    <%@ page contentType="text/html;charset=UTF-8" %>
+                    <h2>설문조사 서비스</h2>
+                    <script src="/resources/js/common.js"></script>
+                """.trimIndent())
+            }
+
+            // 3. View with dynamic template in title and clean <h3>
+            val surveyResultJsp = java.io.File(tmpDir, "views/survey/survey_result.jsp").apply {
+                parentFile.mkdirs()
+                writeText("""
+                    <%@ page contentType="text/html;charset=UTF-8" %>
+                    <title>${"$"}{HEADER_TITLE}</title>
+                    <h3 class="title">설문 결과 분석</h3>
+                    <script src="/resources/js/survey/survey.result.js"></script>
+                """.trimIndent())
+            }
+
+            val scanner = ResourceScanner(tmpDir.toPath())
+            val nodes = scanner.scan()
+
+            val writeNode = nodes.find { it.path.replace("\\", "/").endsWith("views/survey/survey_write.jsp") }
+            assertNotNull("survey_write.jsp should be scanned", writeNode)
+            assertEquals("First <h2> should be extracted as localName", "설문 관리", writeNode?.localName)
+
+            val headerNode = nodes.find { it.path.replace("\\", "/").endsWith("views/common/header.jsp") }
+            assertNotNull("header.jsp should be scanned", headerNode)
+            assertNull("Common layout should have null localName to prevent noise", headerNode?.localName)
+
+            val resultNode = nodes.find { it.path.replace("\\", "/").endsWith("views/survey/survey_result.jsp") }
+            assertNotNull("survey_result.jsp should be scanned", resultNode)
+            assertEquals("Clean <h3> heading should be extracted when title is template expression", "설문 결과 분석", resultNode?.localName)
+
+            // 4. Determinism Test
+            val secondScanNodes = scanner.scan()
+            val secondWriteNode = secondScanNodes.find { it.path.replace("\\", "/").endsWith("views/survey/survey_write.jsp") }
+            assertEquals("Repeated scan must produce identical localName deterministically", writeNode?.localName, secondWriteNode?.localName)
+        } finally {
+            tmpDir.deleteRecursively()
+        }
+    }
 }

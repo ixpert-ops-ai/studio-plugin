@@ -19,5 +19,6 @@ data class ResourceNode(
     val linkType: String,                // namespace_binding, url_binding, script_include 등
     val metadata: Map<String, Any>,      // 유형별 추가 정보 (유연한 구조)
     // P5-B: 동적 뷰 역추적 결과
-    val dynamicBindings: List<DynamicBinding> = emptyList()
+    val dynamicBindings: List<DynamicBinding> = emptyList(),
+    val localName: String? = null
 )

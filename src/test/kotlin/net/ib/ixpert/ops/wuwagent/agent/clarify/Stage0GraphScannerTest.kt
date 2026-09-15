@@ -223,4 +223,118 @@ class Stage0GraphScannerTest {
         assertEquals(Verdict.CONFIRMED, confirmedItem?.verdict)
         assertEquals(HintSource.USER_CONFIRMED, confirmedItem?.source)
     }
+
+    /**
+     * 불변식 6: localName 결정론적 매칭 및 다채널 교차검증 신뢰도 버킷팅
+     * - localDomainOverrides 없이 순수 localName만으로 진입점 시드 회수
+     * - View-Script 페어링이나 Java 관계 등 그래프 엣지로 교차 검증된 노드는 HIGH_CONFIDENCE
+     * - 그래프 엣지 없이 localName 텍스트 일치만 단독 존재하는 노드는 LOW_CONFIDENCE로 자동 격하
+     */
+    @Test
+    fun testInvariant_LocalNameMatchingAndCrossValidationPromotion() {
+        val files = mapOf(
+            "com/example/OrderService.java" to FileNode(
+                path = "com/example/OrderService.java",
+                packageName = "com.example",
+                className = "OrderService",
+                localName = "주문 서비스",
+                fileType = SpringFileType.SERVICE,
+                layer = ArchitectureLayer.BUSINESS,
+                methods = listOf(MethodSignature("processOrder", "void", emptyList()))
+            ),
+            "com/example/OrderDao.java" to FileNode(
+                path = "com/example/OrderDao.java",
+                packageName = "com.example",
+                className = "OrderDao",
+                fileType = SpringFileType.REPOSITORY,
+                layer = ArchitectureLayer.PERSISTENCE,
+                methods = listOf(MethodSignature("selectOrderList", "List", emptyList()))
+            )
+        )
+
+        val resourceNodes = listOf(
+            // JSP 1: localName "주문 관리", URL /order/list 보유
+            ResourceNode(
+                path = "webapp/views/order_list.jsp",
+                type = ResourceType.VIEW,
+                layer = "PRESENTATION",
+                linkedTo = emptyList(),
+                linkType = "url_binding",
+                metadata = emptyMap(),
+                localName = "주문 관리",
+                dynamicBindings = listOf(
+                    DynamicBinding("webapp/views/order_list.jsp", "com/example/OrderController.java", "/order/list", 80.0)
+                )
+            ),
+            // JS 1: URL /order/list 공유 페어
+            ResourceNode(
+                path = "webapp/js/order.list.js",
+                type = ResourceType.SCRIPT,
+                layer = "PRESENTATION",
+                linkedTo = emptyList(),
+                linkType = "url_binding",
+                metadata = emptyMap(),
+                dynamicBindings = listOf(
+                    DynamicBinding("webapp/js/order.list.js", "com/example/OrderController.java", "/order/list", 80.0)
+                )
+            ),
+            // JSP 2: localName "주문 통계" 단독 보유 (페어링 및 연결 엣지 없음 -> 고립 노이즈 후보)
+            ResourceNode(
+                path = "webapp/views/order_stat.jsp",
+                type = ResourceType.VIEW,
+                layer = "PRESENTATION",
+                linkedTo = emptyList(),
+                linkType = "",
+                metadata = emptyMap(),
+                localName = "주문 통계",
+                dynamicBindings = emptyList()
+            )
+        )
+
+        val relationships = listOf(
+            Relationship(
+                source = "com/example/OrderService.java",
+                target = "com/example/OrderDao.java",
+                type = RelationshipType.INJECTS,
+                strength = RelationshipStrength.DIRECT
+            )
+        )
+
+        val graph = ProjectGraph(
+            generatedAt = Instant.now().toString(),
+            projectRoot = "/test/root",
+            files = files,
+            resourceNodes = resourceNodes,
+            relationships = relationships,
+            statistics = GraphStatistics()
+        )
+
+        // localDomainOverrides가 완전히 비어있는(emptyMap()) 상태로 스캔 실행
+        val scanner = Stage0GraphScanner(
+            graph = graph,
+            minSpecificityScore = 1.0,
+            proposalBudget = 10,
+            localDomainOverrides = emptyMap()
+        )
+
+        val tokens = scanner.extractTokens("주문 관리 통계 기능 추가")
+        val candidates = scanner.rescanUnverified(tokens, emptyList())
+
+        val highConfidenceItems = candidates.filter { it.confidence == ConfidenceBucket.HIGH_CONFIDENCE }
+        val lowConfidenceItems = candidates.filter { it.confidence == ConfidenceBucket.LOW_CONFIDENCE }
+
+        val highPaths = highConfidenceItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+        val lowPaths = lowConfidenceItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+
+        // 1. URL 페어링으로 교차 검증된 order_list.jsp & order.list.js는 HIGH_CONFIDENCE
+        assertTrue("order_list.jsp는 교차검증되어 HIGH_CONFIDENCE여야 함", highPaths.contains("webapp/views/order_list.jsp"))
+        assertTrue("order.list.js는 교차검증되어 HIGH_CONFIDENCE여야 함", highPaths.contains("webapp/js/order.list.js"))
+
+        // 2. INJECTS 관계로 연결된 OrderDao는 HIGH_CONFIDENCE
+        assertTrue("OrderDao.java는 관계 전파로 HIGH_CONFIDENCE여야 함", highPaths.contains("com/example/OrderDao.java"))
+
+        // 3. 엣지 없이 단독 localName("주문 통계")만 매칭된 order_stat.jsp는 LOW_CONFIDENCE로 자동 격하
+        assertTrue("order_stat.jsp는 단독 텍스트 매칭으로 LOW_CONFIDENCE로 격하되어야 함", lowPaths.contains("webapp/views/order_stat.jsp"))
+        assertFalse("order_stat.jsp는 HIGH_CONFIDENCE에 혼입되지 않아야 함", highPaths.contains("webapp/views/order_stat.jsp"))
+    }
 }

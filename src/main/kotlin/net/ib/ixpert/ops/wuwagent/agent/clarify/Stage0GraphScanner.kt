@@ -53,11 +53,12 @@ class Stage0GraphScanner(
 
         val decomposed = keywordDecomposer.decompose(input)
         val allFileNodes = graph.files.values
+        val allResourceNodes = graph.resourceNodes
 
-        // A-0. 로컬 도메인 오버라이드 매칭 (전역 사전 오염 방지)
+        // A-0. 로컬 도메인 오버라이드 매칭 (하위 호환성 유지)
         val localTokens = mutableSetOf<String>()
-        val koreanPattern = Regex("[가-힣]+")
-        koreanPattern.findAll(input).map { it.value }.filter { it.length >= 2 }.forEach { kToken ->
+        val inputKoreanWords = extractKoreanStems(input)
+        for (kToken in inputKoreanWords) {
             val matches = localDomainOverrides[kToken] 
                 ?: localDomainOverrides.entries.find { kToken.contains(it.key) || it.key.contains(kToken) }?.value
             if (matches != null) {
@@ -159,6 +160,48 @@ class Stage0GraphScanner(
         val candidateMap = mutableMapOf<String, CandidateAcc>()
 
         // ─────────────────────────────────────────────────────────────
+        // 엣지 0: 메타그래프 자연어명(localName) 매칭 엣지
+        // ─────────────────────────────────────────────────────────────
+        val koreanConceptualTokens = conceptualTokens.filter { Regex("[가-힣]+").containsMatchIn(it) }
+        
+        for (rNode in graph.resourceNodes) {
+            val lName = rNode.localName ?: (rNode.metadata["localName"] as? String)
+            if (lName != null) {
+                val matches = koreanConceptualTokens.filter { lName.contains(it) || it.contains(lName) }
+                if (matches.isNotEmpty()) {
+                    val acc = candidateMap.getOrPut(rNode.path) {
+                        CandidateAcc(rNode.path, rNode.type.name, mutableListOf(), 0.0, "", mutableSetOf())
+                    }
+                    acc.score += 2.0 * matches.size
+                    acc.symbols.add("localName:$lName")
+                    acc.signals.add(ProvenanceSignal.LOCAL_NAME_MATCH)
+                    acc.rationale = "자연어명(\"$lName\")이 요구사항(${matches.joinToString()})과 일치"
+                }
+            }
+        }
+
+        for ((p, fNode) in graph.files) {
+            val lName = fNode.localName
+            val comments = fNode.koreanComments
+            val matches = koreanConceptualTokens.filter { t ->
+                (lName != null && (lName.contains(t) || t.contains(lName))) ||
+                comments.any { it.contains(t) }
+            }
+            if (matches.isNotEmpty()) {
+                val hasEdges = graph.relationships.any { it.source == p || it.target == p }
+                if (hasEdges) {
+                    val acc = candidateMap.getOrPut(p) {
+                        CandidateAcc(p, fNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf())
+                    }
+                    acc.score += 2.0 * matches.size
+                    if (lName != null) acc.symbols.add("localName:$lName")
+                    acc.signals.add(ProvenanceSignal.LOCAL_NAME_MATCH)
+                    acc.rationale = "자연어명/주석이 요구사항(${matches.joinToString()})과 일치"
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────
         // 엣지 1: 구조 식별자 공유 엣지 (DTO/클래스 필드 ↔ ResourceNode metadata)
         // ─────────────────────────────────────────────────────────────
         for (rNode in graph.resourceNodes) {
@@ -170,6 +213,16 @@ class Stage0GraphScanner(
             val matchedSymbols = mutableListOf<String>()
             val signals = mutableSetOf<ProvenanceSignal>()
             var score = 0.0
+
+            // 0. Resource 파일명과 구조적 토큰 매칭
+            val resFileName = rNode.path.substringAfterLast("/").substringBeforeLast(".")
+            for (st in structuralTokens) {
+                if (isTokenBoundaryMatch(resFileName, st)) {
+                    matchedSymbols.add("fileName:$st")
+                    signals.add(ProvenanceSignal.STRUCTURAL_ID)
+                    score += 4.0
+                }
+            }
 
             // A. DTO Parameter Type 직접 바인딩 확인 (MyBatis Mapper)
             for (st in structuralTokens) {
@@ -242,7 +295,7 @@ class Stage0GraphScanner(
         }
 
         // ─────────────────────────────────────────────────────────────
-        // 엣지 2: View-Script URL 페어 엣지 (JSP ↔ JS 페어링)
+        // 엣지 2: View-Script URL 페어 엣지 (JSP ↔ JS 페어링 및 Dynamic Binding)
         // ─────────────────────────────────────────────────────────────
         val matchedResourcePaths = candidateMap.keys.toList()
         for (path in matchedResourcePaths) {
@@ -250,6 +303,7 @@ class Stage0GraphScanner(
             val sourceUrls = sourceResource.dynamicBindings.map { it.matchedUrl }.filter { it.isNotBlank() }
 
             if (sourceUrls.isNotEmpty()) {
+                // 1) 동일 URL을 공유하는 View-Script 페어링 (상호 가산점 선반영)
                 for (targetResource in graph.resourceNodes) {
                     if (targetResource.path == path) continue
                     val targetUrls = targetResource.dynamicBindings.map { it.matchedUrl }
@@ -259,8 +313,7 @@ class Stage0GraphScanner(
                         val acc = candidateMap.getOrPut(targetResource.path) {
                             CandidateAcc(targetResource.path, targetResource.type.name, mutableListOf(), 0.0, "", mutableSetOf())
                         }
-                        val inheritedScore = (candidateMap[path]?.score ?: 2.0) * 0.9
-                        acc.score = maxOf(acc.score, inheritedScore)
+                        acc.score = maxOf(acc.score, 4.0)
                         acc.symbols.add("pairUrl:$sharedUrl")
                         acc.signals.add(ProvenanceSignal.VIEW_SCRIPT_PAIR)
                         val sourceFileName = path.substringAfterLast("/")
@@ -269,52 +322,198 @@ class Stage0GraphScanner(
                         } else {
                             "${acc.rationale} + [$sourceFileName]와 동일 URL($sharedUrl) 페어"
                         }
+                        candidateMap[path]?.let { srcAcc ->
+                            srcAcc.signals.add(ProvenanceSignal.VIEW_SCRIPT_PAIR)
+                            srcAcc.score = maxOf(srcAcc.score, 4.0)
+                        }
+                    }
+                }
+
+                // 2) Controller 바인딩 (페어링 점수 반영 후 전파)
+                for (db in sourceResource.dynamicBindings) {
+                    if (db.controllerPath.isNotBlank() && graph.files.containsKey(db.controllerPath)) {
+                        val cNode = graph.files[db.controllerPath]!!
+                        val acc = candidateMap.getOrPut(db.controllerPath) {
+                            CandidateAcc(db.controllerPath, cNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf())
+                        }
+                        acc.score = maxOf(acc.score, (candidateMap[path]?.score ?: 2.0) * 0.95)
+                        acc.symbols.add("url:${db.matchedUrl}")
+                        acc.signals.add(ProvenanceSignal.STRUCTURAL_ID)
+                        val sourceFileName = path.substringAfterLast("/")
+                        acc.rationale = "[$sourceFileName]의 URL(${db.matchedUrl})을 처리하는 Controller"
+                        candidateMap[path]?.signals?.add(ProvenanceSignal.STRUCTURAL_ID)
                     }
                 }
             }
         }
 
         // ─────────────────────────────────────────────────────────────
-        // 엣지 3: Java 클래스 관계 엣지 (INJECTS, IMPLEMENTS, CALLS)
+        // 엣지 3: Java 클래스 관계 엣지 (INJECTS, IMPLEMENTS, CALLS 다중 홉 위상 전파 + 의미적 공명 감쇠)
         // ─────────────────────────────────────────────────────────────
+        for (hop in 0 until 3) {
+            for (rel in graph.relationships) {
+                if (rel.type != RelationshipType.INJECTS && rel.type != RelationshipType.CALLS && rel.type != RelationshipType.IMPLEMENTS) continue
+                
+                val srcMatch = candidateMap[rel.source]
+                val tgtMatch = candidateMap[rel.target]
+
+                if (srcMatch != null) {
+                    val tgtNode = graph.files[rel.target]
+                    if (tgtNode != null && tgtNode.fileType != SpringFileType.DTO && tgtNode.fileType != SpringFileType.ENTITY) {
+                        val isResonant = hasSemanticResonance(tgtNode, koreanConceptualTokens, structuralTokens)
+                        val decay = if (isResonant) 0.90 else 0.40
+                        val propScore = srcMatch.score * decay
+                        if (propScore >= 1.0) {
+                            val acc = candidateMap.getOrPut(rel.target) {
+                                CandidateAcc(rel.target, tgtNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf(), srcMatch.hop + 1)
+                            }
+                            if (propScore > acc.score) {
+                                acc.score = propScore
+                                acc.hop = minOf(acc.hop, srcMatch.hop + 1)
+                                acc.symbols.add("relation:${rel.type}")
+                                acc.signals.add(ProvenanceSignal.STRUCTURAL_ID)
+                                acc.rationale = "[${rel.source.substringAfterLast("/")}]로부터 ${rel.type} 연결"
+                            }
+                            srcMatch.signals.add(ProvenanceSignal.STRUCTURAL_ID)
+                        }
+                    }
+                }
+                if (tgtMatch != null) {
+                    val srcNode = graph.files[rel.source]
+                    if (srcNode != null && srcNode.fileType != SpringFileType.DTO && srcNode.fileType != SpringFileType.ENTITY) {
+                        val isResonant = hasSemanticResonance(srcNode, koreanConceptualTokens, structuralTokens)
+                        val decay = if (isResonant) 0.90 else 0.40
+                        val propScore = tgtMatch.score * decay
+                        if (propScore >= 1.0) {
+                            val acc = candidateMap.getOrPut(rel.source) {
+                                CandidateAcc(rel.source, srcNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf(), tgtMatch.hop + 1)
+                            }
+                            if (propScore > acc.score) {
+                                acc.score = propScore
+                                acc.hop = minOf(acc.hop, tgtMatch.hop + 1)
+                                acc.symbols.add("relation:${rel.type}")
+                                acc.signals.add(ProvenanceSignal.STRUCTURAL_ID)
+                                acc.rationale = "[${rel.target.substringAfterLast("/")}]의 ${rel.type} 연결"
+                            }
+                            tgtMatch.signals.add(ProvenanceSignal.STRUCTURAL_ID)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3-B) DTO USES_TYPE 관계 확장 (Dead Node 고립 차단)
         for (rel in graph.relationships) {
-            val srcMatch = candidateMap[rel.source]
-            val tgtMatch = candidateMap[rel.target]
-
-            if (srcMatch != null && !candidateMap.containsKey(rel.target)) {
-                val tgtNode = graph.files[rel.target]
-                if (tgtNode != null) {
-                    val acc = candidateMap.getOrPut(rel.target) {
-                        CandidateAcc(rel.target, tgtNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf())
+            if (rel.type == RelationshipType.USES_TYPE) {
+                val srcMatch = candidateMap[rel.source]
+                if (srcMatch != null && srcMatch.score >= minSpecificityScore) {
+                    val tgtNode = graph.files[rel.target]
+                    if (tgtNode != null && (tgtNode.fileType == SpringFileType.DTO || tgtNode.fileType == SpringFileType.ENTITY)) {
+                        val totalEdges = graph.relationships.count { it.source == rel.target || it.target == rel.target }
+                        if (totalEdges > 0) {
+                            val isResonant = hasSemanticResonance(tgtNode, koreanConceptualTokens, structuralTokens)
+                            val decay = if (isResonant) 0.95 else 0.40
+                            val propScore = srcMatch.score * decay
+                            if (propScore >= minSpecificityScore) {
+                                val acc = candidateMap.getOrPut(rel.target) {
+                                    CandidateAcc(rel.target, tgtNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf(), srcMatch.hop + 1)
+                                }
+                                if (propScore > acc.score) {
+                                    acc.score = propScore
+                                    acc.hop = minOf(acc.hop, srcMatch.hop + 1)
+                                    acc.symbols.add("dto:${rel.source.substringAfterLast("/")}")
+                                    acc.signals.add(ProvenanceSignal.STRUCTURAL_ID)
+                                    acc.rationale = "[${rel.source.substringAfterLast("/")}]에서 사용하는 DTO"
+                                }
+                            }
+                        }
                     }
-                    acc.score = maxOf(acc.score, srcMatch.score * 0.7)
-                    acc.symbols.add("relation:${rel.type}")
-                    acc.signals.add(ProvenanceSignal.STRUCTURAL_ID)
-                    acc.rationale = "[${rel.source.substringAfterLast("/")}]로부터 ${rel.type} 연결"
-                }
-            } else if (tgtMatch != null && !candidateMap.containsKey(rel.source)) {
-                val srcNode = graph.files[rel.source]
-                if (srcNode != null) {
-                    val acc = candidateMap.getOrPut(rel.source) {
-                        CandidateAcc(rel.source, srcNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf())
-                    }
-                    acc.score = maxOf(acc.score, tgtMatch.score * 0.7)
-                    acc.symbols.add("relation:${rel.type}")
-                    acc.signals.add(ProvenanceSignal.STRUCTURAL_ID)
-                    acc.rationale = "[${rel.target.substringAfterLast("/")}]와 ${rel.type} 연결"
                 }
             }
         }
 
         // ─────────────────────────────────────────────────────────────
-        // 3단계: 기본 신호 후보 생성 (HIGH_CONFIDENCE 버킷)
+        // 엣지 4: MyBatis Mapper 바인딩 엣지 (DAO ↔ XML Mapper 앵커 바인딩)
+        // ─────────────────────────────────────────────────────────────
+        for (p in candidateMap.keys.toList()) {
+            val parentAcc = candidateMap[p] ?: continue
+            if (parentAcc.score < minSpecificityScore) continue
+            for (rNode in graph.resourceNodes) {
+                if (rNode.type == ResourceType.MYBATIS_MAPPER && (rNode.linkedTo.contains(p) || rNode.linkedTo.any { p.contains(it) })) {
+                    val mapperScore = parentAcc.score * 0.95
+                    val acc = candidateMap.getOrPut(rNode.path) {
+                        CandidateAcc(rNode.path, rNode.type.name, mutableListOf(), 0.0, "", mutableSetOf(), parentAcc.hop + 1)
+                    }
+                    acc.score = maxOf(acc.score, mapperScore)
+                    acc.hop = minOf(acc.hop, parentAcc.hop + 1)
+                    acc.symbols.add("mapper:${p.substringAfterLast("/")}")
+                    acc.signals.add(ProvenanceSignal.MAPPER_CHAIN)
+                    acc.rationale = "[${p.substringAfterLast("/")}]에 바인딩된 MyBatis 매퍼"
+                    parentAcc.signals.add(ProvenanceSignal.MAPPER_CHAIN)
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // 3단계: 기본 신호 후보 생성 및 다채널 교차검증 신뢰도 버킷팅
         // ─────────────────────────────────────────────────────────────
         val items = mutableListOf<RequirementItem>()
 
-        val sortedCandidates = candidateMap.values
-            .filter { it.score >= minSpecificityScore }
-            .sortedByDescending { it.score }
-            .take(proposalBudget)
+        fun isBatchOrAsync(path: String): Boolean {
+            return path.contains("Batch") || path.contains("Runner") || path.contains("Job")
+        }
+
+        val validCandidates = candidateMap.values
+            .filter { cand -> 
+                cand.score >= minSpecificityScore && !isBatchOrAsync(cand.path) &&
+                (cand.signals.size > 1 || !cand.signals.contains(ProvenanceSignal.LOCAL_NAME_MATCH) || cand.type == "VIEW" || cand.type == "SCRIPT")
+            }
+
+        fun isDataAccessType(type: String, path: String): Boolean {
+            if (type == "DAO" || type == "REPOSITORY" || type == "MYBATIS_MAPPER") return true
+            val lower = path.lowercase()
+            if (lower.contains("/dao/") || lower.contains("/repository/")) return true
+            return false
+        }
+
+        // 계층별 균등 선발 (Stratified Round-Robin Selection: View -> Script -> Business -> DTO -> DataAccess)
+        val viewQueue = ArrayDeque(
+            validCandidates.filter { it.type == "VIEW" }
+                .sortedWith(compareByDescending<CandidateAcc> { it.score + coreActionWeight(it.path) * 10.0 })
+        )
+        val scriptQueue = ArrayDeque(
+            validCandidates.filter { it.type == "SCRIPT" }
+                .sortedWith(compareByDescending<CandidateAcc> { it.score + coreActionWeight(it.path) * 10.0 })
+        )
+        val dataAccessQueue = ArrayDeque(
+            validCandidates.filter { isDataAccessType(it.type, it.path) }
+                .sortedWith(compareByDescending<CandidateAcc> { 
+                    it.score + (if (it.type == "MYBATIS_MAPPER") 5.0 else 0.0)
+                })
+        )
+        val dtoQueue = ArrayDeque(
+            validCandidates.filter { it.type == "DTO" || it.type == "ENTITY" }
+                .sortedByDescending { it.score }
+        )
+        val businessQueue = ArrayDeque(
+            validCandidates.filter { !isDataAccessType(it.type, it.path) && it.type != "DTO" && it.type != "ENTITY" && it.type != "VIEW" && it.type != "SCRIPT" }
+                .sortedByDescending { it.score }
+        )
+
+        val roundRobinList = mutableListOf<CandidateAcc>()
+        while (roundRobinList.size < proposalBudget && (viewQueue.isNotEmpty() || scriptQueue.isNotEmpty() || businessQueue.isNotEmpty() || dtoQueue.isNotEmpty() || dataAccessQueue.isNotEmpty())) {
+            viewQueue.removeFirstOrNull()?.let { roundRobinList.add(it) }
+            if (roundRobinList.size >= proposalBudget) break
+            scriptQueue.removeFirstOrNull()?.let { roundRobinList.add(it) }
+            if (roundRobinList.size >= proposalBudget) break
+            businessQueue.removeFirstOrNull()?.let { roundRobinList.add(it) }
+            if (roundRobinList.size >= proposalBudget) break
+            dtoQueue.removeFirstOrNull()?.let { roundRobinList.add(it) }
+            if (roundRobinList.size >= proposalBudget) break
+            dataAccessQueue.removeFirstOrNull()?.let { roundRobinList.add(it) }
+        }
+
+        val sortedCandidates = roundRobinList.distinctBy { it.path }
 
         for (cand in sortedCandidates) {
             val symbols = cand.symbols.distinct()
@@ -324,6 +523,12 @@ class Stage0GraphScanner(
 
             if (frozenIds.contains(id)) continue
 
+            // 다채널 교차검증 판정:
+            // 2개 이상의 독립 신호로 교차검증되었거나 구조 식별자/페어링을 보유한 경우 HIGH_CONFIDENCE,
+            // 단독 localName 텍스트 매칭인 경우 LOW_CONFIDENCE로 격하.
+            val isSoloLocalName = cand.signals.size == 1 && cand.signals.contains(ProvenanceSignal.LOCAL_NAME_MATCH)
+            val confidence = if (isSoloLocalName) ConfidenceBucket.LOW_CONFIDENCE else ConfidenceBucket.HIGH_CONFIDENCE
+
             items.add(
                 RequirementItem(
                     id = id,
@@ -332,20 +537,27 @@ class Stage0GraphScanner(
                     hint = hint,
                     anchorRationale = cand.rationale,
                     verdict = Verdict.PENDING,
-                    confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                    confidence = confidence,
                     provenanceSignals = cand.signals
                 )
             )
         }
 
         // ─────────────────────────────────────────────────────────────
-        // 엣지 4: 형제 유추(Brother Analogy) 병렬 결합 (LOW_CONFIDENCE 버킷 & 교차 승격)
+        // 엣지 5: 형제 유추(Brother Analogy) 병렬 결합 (LOW_CONFIDENCE 버킷 & 교차 승격)
         // ─────────────────────────────────────────────────────────────
-        val seedNodes = graph.files.values.filter { node ->
+        // 유효 점수(score >= 1.5)를 획득한 코어 노드들을 시드로 사용 (비-배치 노드로 엄격 한정)
+        val internalSeedNodes = candidateMap.values
+            .filter { it.score >= 1.5 && !isBatchOrAsync(it.path) }
+            .mapNotNull { graph.files[it.path] }
+
+        val tokenMatchedNodes = graph.files.values.filter { node ->
+            !isBatchOrAsync(node.path) &&
             structuralTokens.any { st -> 
                 node.className.equals(st, ignoreCase = true)
             }
         }
+        val seedNodes = (tokenMatchedNodes + internalSeedNodes).distinctBy { it.path }
 
         val siblingItems = brotherAnalogyScanner.scanSiblings(seedNodes, frozenIds)
 
@@ -367,15 +579,37 @@ class Stage0GraphScanner(
         return items
     }
 
+    private fun extractKoreanStems(input: String): List<String> {
+        val koreanPattern = Regex("[가-힣]+")
+        val words = koreanPattern.findAll(input).map { it.value }.filter { it.length >= 2 }.toList()
+        val particles = listOf("에서", "으로", "에는", "에", "을", "를", "의", "은", "는", "이", "가", "과", "와", "로", "도")
+        val results = mutableSetOf<String>()
+        for (w in words) {
+            results.add(w)
+            for (p in particles) {
+                if (w.endsWith(p) && (w.length - p.length) >= 2) {
+                    results.add(w.dropLast(p.length))
+                }
+            }
+        }
+        return results.toList()
+    }
+
     private fun isTokenBoundaryMatch(target: String, token: String): Boolean {
         if (target.isBlank() || token.isBlank()) return false
         if (target.equals(token, ignoreCase = true)) return true
         
         if (target.contains(token, ignoreCase = true)) {
-            val pattern = Regex("(?:^|_|\\b)${Regex.escape(token)}(?:_|$|\\b)", RegexOption.IGNORE_CASE)
-            return pattern.containsMatchIn(target)
+            val idx = target.indexOf(token, ignoreCase = true)
+            val beforeOk = idx == 0 || !target[idx - 1].isLetterOrDigit() || target[idx - 1] == '_'
+            val afterIdx = idx + token.length
+            val afterOk = afterIdx == target.length || !target[afterIdx].isLetterOrDigit() || target[afterIdx] == '_'
+            if (beforeOk && afterOk) return true
         }
-        return false
+        
+        val segments = target.split(Regex("(?<=[a-z])(?=[A-Z])|_|-|\\.")).map { it.lowercase() }
+        val tokenLower = token.lowercase()
+        return segments.any { it == tokenLower }
     }
 
     internal fun extractFieldsFromMethods(node: FileNode): List<String> {
@@ -395,6 +629,33 @@ class Stage0GraphScanner(
         return fields.distinct()
     }
 
+    private fun hasSemanticResonance(node: FileNode, conceptualTokens: List<String>, structuralTokens: List<String>): Boolean {
+        val lName = node.localName ?: ""
+        val cName = node.className.lowercase()
+        val comments = node.koreanComments.joinToString(" ")
+        
+        for (ct in conceptualTokens) {
+            if (ct.length >= 2) {
+                if (lName.contains(ct, ignoreCase = true) || cName.contains(ct, ignoreCase = true) || comments.contains(ct, ignoreCase = true)) return true
+            }
+        }
+        for (st in structuralTokens) {
+            if (st.length >= 3) {
+                if (cName.contains(st, ignoreCase = true) || lName.contains(st, ignoreCase = true)) return true
+                val segs = st.split(Regex("(?<=[a-z])(?=[A-Z])|_|-|\\.")).map { it.lowercase() }.filter { it.length >= 3 && !isGenericOrAuditField(it) }
+                if (segs.any { cName.contains(it) || comments.contains(it) }) return true
+            }
+        }
+        return false
+    }
+
+    private fun coreActionWeight(path: String): Int {
+        val lower = path.lowercase()
+        if (lower.contains("list") || lower.contains("write") || lower.contains("regist")) return 2
+        if (lower.contains("result") || lower.contains("preview") || lower.contains("detail")) return 1
+        return 0
+    }
+
     private fun generateStatement(path: String, type: String, symbols: List<String>): String {
         val fileName = path.substringAfterLast("/")
         val cleanSymbols = symbols.filter { !it.contains(":") }.take(2).joinToString(", ")
@@ -408,6 +669,7 @@ class Stage0GraphScanner(
         val symbols: MutableList<String>,
         var score: Double,
         var rationale: String,
-        val signals: MutableSet<ProvenanceSignal>
+        val signals: MutableSet<ProvenanceSignal>,
+        var hop: Int = 0
     )
 }
