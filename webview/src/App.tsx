@@ -222,9 +222,12 @@ interface DomainGroup {
 const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
   const payload: ClarifyPayload = useMemo(() => {
     try {
-      if (msg.content) return JSON.parse(msg.content);
+      if ((msg as any).clarifyData) return (msg as any).clarifyData;
+      if (msg.content) {
+        return typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
+      }
     } catch (e) {
-      // ignore
+      console.error("Failed to parse ClarifyPayload:", e, msg.content);
     }
     return {
       originalRequirement: '',
@@ -233,7 +236,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
       isExhausted: false,
       isReadyForStage1: false
     };
-  }, [msg.content]);
+  }, [msg.content, (msg as any).clarifyData]);
 
   // id -> Verdict
   const [verdicts, setVerdicts] = useState<Record<string, 'CONFIRMED' | 'REJECTED' | 'PENDING'>>(() => {
@@ -1590,6 +1593,18 @@ function App() {
                 newContent += (newContent ? '\n\n' : '') + data.content;
                 break;
 
+              case 'analyze_clarify':
+                if (data.content) {
+                  newContent = data.content;
+                }
+                if (data.clarifyData) {
+                  (updated[index] as any).clarifyData = data.clarifyData;
+                }
+                isLoading = false;
+                isStreaming = false;
+                currentStatus = undefined;
+                break;
+
               case 'chat_chunk':
                 // /chat, /explain 전용 스트리밍
                 newContent += data.content;
@@ -1608,7 +1623,7 @@ function App() {
                 break;
             }
 
-            const isCompletionEvent = ['task_step', 'task_success', 'error', 'task_cancelled', 'chat', 'explain'].includes(data.subType);
+            const isCompletionEvent = ['task_step', 'task_success', 'error', 'task_cancelled', 'chat', 'explain', 'analyze_clarify'].includes(data.subType);
             updated[index] = {
               ...existing,
               content:         newContent,
@@ -1646,7 +1661,22 @@ function App() {
             return [...prev, codeMsg];
           }
 
-          // 구조: _start 또는 task_code 신호에만 신규 메시지 생성 허용
+          if (data.subType === 'analyze_clarify') {
+            const clarifyMsg: Message = {
+              id: messageId,
+              role: 'ai',
+              subType: 'analyze_clarify',
+              content: data.content || '',
+              isLoading: false,
+              isSuccess: true,
+            };
+            if (data.clarifyData) {
+              (clarifyMsg as any).clarifyData = data.clarifyData;
+            }
+            return [...prev, clarifyMsg];
+          }
+
+          // 구조: _start 또는 task_code 또는 analyze_clarify 신호에만 신규 메시지 생성 허용
           // 그 외 모든 신호(task_success, task_step, explain, error 등)는
           // matching messageId가 없어도 새 말풍선 생성 금지 → 빈 말풍선 방지
           const isStartSubType = data.subType.endsWith('_start');
