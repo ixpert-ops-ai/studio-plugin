@@ -148,7 +148,12 @@ class WebviewActionRouter(private val project: Project) {
                             }
 
                             val scanner = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0GraphScanner(projectGraph)
-                            val engine = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine(scanner, projectGraph)
+                            val llmClient = try {
+                                net.ib.ixpert.ops.wuwagent.service.WuwLlmService.getClient()
+                            } catch (e: Exception) {
+                                null
+                            }
+                            val engine = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine(scanner, projectGraph, llmClient)
                             val turnResult = engine.initSession(initialRequirement, previousContract)
 
                             net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.saveSession(
@@ -164,7 +169,8 @@ class WebviewActionRouter(private val project: Project) {
                                 "items" to turnResult.state.items,
                                 "openQuestion" to turnResult.openQuestion,
                                 "isExhausted" to turnResult.isExhausted,
-                                "isReadyForStage1" to turnResult.isReadyForStage1
+                                "isReadyForStage1" to turnResult.isReadyForStage1,
+                                "taskSummary" to turnResult.taskSummary
                             )
                             val jsonPayload = com.google.gson.Gson().toJson(payload)
                             ApplicationManager.getApplication().invokeLater {
@@ -334,7 +340,8 @@ class WebviewActionRouter(private val project: Project) {
                             "items" to turnResult.state.items,
                             "openQuestion" to turnResult.openQuestion,
                             "isExhausted" to turnResult.isExhausted,
-                            "isReadyForStage1" to turnResult.isReadyForStage1
+                            "isReadyForStage1" to turnResult.isReadyForStage1,
+                            "taskSummary" to turnResult.taskSummary
                         )
                         ApplicationManager.getApplication().invokeLater {
                             bridge.sendMessage("analyze_clarify", gson.toJson(nextPayload), messageId)

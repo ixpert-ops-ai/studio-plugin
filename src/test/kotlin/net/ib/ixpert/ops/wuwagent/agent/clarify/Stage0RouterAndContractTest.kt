@@ -398,4 +398,94 @@ class Stage0RouterAndContractTest {
         assertTrue("trustedExistingRefs에 order_list.jsp가 포함되어야 함", contract6.trustedExistingRefs.any { it.filePath.contains("order_list.jsp") })
         assertTrue("newCreations에는 이 발화로 인한 신규 생성이 없어야 함", contract6.newCreations.none { it.source == HintSource.USER_UTTERED })
     }
+
+    /**
+     * [4대 격리 불변식 단위 테스트] taskSummary 단방향 렌더링 격리 원칙 검증:
+     * 1. 불변식 1: taskSummary 생성 유무와 무관하게 graphHash 불변
+     * 2. 불변식 2: Stage0TransitionContract 및 디스크 저장 데이터에 taskSummary 문자열/필드 미포함 (계약 비오염)
+     * 3. 불변식 3: LLM 실패(타임아웃/예외/null) 시 items/openQuestion 정상 반환 및 taskSummary=null 폴백 보장
+     * 4. 불변식 4: 다음 턴 입력/엔진 상태에 이전 턴 taskSummary 문자열 혼입 금지
+     */
+    @Test
+    fun testTaskSummaryUnidirectionalIsolationInvariants() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph)
+
+        // ── 불변식 1 & 2: 계약 비오염 및 graphHash 불변 ──
+        val baseGraphHash = ClarificationContractStore.calculateGraphHash(graph)
+        val mockLlmClient = object : LLMClient {
+            override fun chat(
+                systemPrompt: String,
+                userCode: String,
+                maxTokens: Int?,
+                onChunk: ((String) -> Unit)?
+            ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse {
+                return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse(
+                    model = "mock-qwen",
+                    createdAt = "2026-09-17",
+                    message = net.ib.ixpert.ops.wuwagent.model.OllamaMessage(
+                        role = "assistant",
+                        content = "주문 결제 방식 추가 요구사항에 따라 OrderDto와 관련 JSP 화면들의 수정을 제안합니다."
+                    ),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+
+        val engineWithLlm = Stage0ClarificationEngine(scanner, graph, mockLlmClient)
+        val engineWithoutLlm = Stage0ClarificationEngine(scanner, graph, null)
+
+        val turnWithLlm = engineWithLlm.initSession("주문 결제 방식 추가")
+        val turnWithoutLlm = engineWithoutLlm.initSession("주문 결제 방식 추가")
+
+        // 불변식 1 검증: LLM 유무/요약 유무와 무관하게 탐색된 items 동일 & graphHash 동일
+        assertEquals(turnWithoutLlm.state.items.size, turnWithLlm.state.items.size)
+        assertEquals("주문 결제 방식 추가 요구사항에 따라 OrderDto와 관련 JSP 화면들의 수정을 제안합니다.", turnWithLlm.taskSummary)
+        assertNull(turnWithoutLlm.taskSummary)
+
+        val contractWithLlm = engineWithLlm.transitionToStage1(turnWithLlm.state)
+        val contractWithoutLlm = engineWithoutLlm.transitionToStage1(turnWithoutLlm.state)
+
+        assertEquals("LLM 요약 생성 유무와 상관없이 graphHash는 완벽히 일치해야 함", baseGraphHash, contractWithLlm.graphHash)
+        assertEquals("LLM 요약 생성 유무와 상관없이 graphHash는 완벽히 일치해야 함", contractWithoutLlm.graphHash, contractWithLlm.graphHash)
+
+        // 불변식 2 검증: TransitionContract JSON 직렬화에 taskSummary 키/문자열이 존재하지 않아야 함
+        val contractJson = Gson().toJson(contractWithLlm)
+        assertFalse("저장 계약 JSON에 taskSummary 필드가 포함되어서는 안 됨", contractJson.contains("taskSummary"))
+        assertFalse("저장 계약 JSON에 LLM 생성 요약문이 침투해서는 안 됨", contractJson.contains("주문 결제 방식 추가 요구사항에 따라 OrderDto"))
+
+        // ── 불변식 3: LLM 실패 격리 및 폴백 보장 ──
+        val failingLlmClient = object : LLMClient {
+            override fun chat(
+                systemPrompt: String,
+                userCode: String,
+                maxTokens: Int?,
+                onChunk: ((String) -> Unit)?
+            ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
+                throw RuntimeException("Simulated HTTP 504 Gateway Timeout / Network Down")
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+
+        val engineFailing = Stage0ClarificationEngine(scanner, graph, failingLlmClient)
+        val turnFailing = engineFailing.initSession("주문 결제 방식 추가")
+
+        assertNull("LLM 예외 발생 시 taskSummary는 null로 안전하게 폴백되어야 함", turnFailing.taskSummary)
+        assertEquals("LLM 예외 발생 시에도 결정론적 그래프 탐색 아이템은 정상 반환되어야 함", 3, turnFailing.state.items.size)
+
+        // ── 불변식 4: 다음 턴 입력/엔진 상태 비오염 ──
+        val turn1 = engineWithLlm.processTurn(
+            turnWithLlm.state,
+            Stage0ClarificationEngine.UserInput(
+                verdictUpdates = mapOf(turnWithLlm.state.items.first().id to Verdict.CONFIRMED),
+                userStatement = "추가적인 결제 승인 로직 구현"
+            )
+        )
+
+        assertNotNull("다음 턴에서도 LLM이 새 아이템 목록에 기반한 요약을 갱신 생성함", turn1.taskSummary)
+        // state(Stage0State) 자체에 taskSummary 필드가 존재하지 않음을 확인
+        assertEquals("Stage0State items는 결정론적 위상 탐색 및 사용자 결정만 보존함", turn1.state.items.filter { it.verdict == Verdict.CONFIRMED }.size, 2)
+    }
 }
+

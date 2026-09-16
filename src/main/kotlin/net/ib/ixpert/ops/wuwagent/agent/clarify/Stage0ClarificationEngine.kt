@@ -9,7 +9,8 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
  */
 class Stage0ClarificationEngine(
     private val scanner: Stage0GraphScanner,
-    private val graph: ProjectGraph
+    private val graph: ProjectGraph,
+    private val llmClient: net.ib.ixpert.ops.wuwagent.client.LLMClient? = null
 ) {
     /**
      * 사용자 입력 데이터 구조
@@ -28,7 +29,8 @@ class Stage0ClarificationEngine(
         val state: Stage0State,
         val openQuestion: String? = null,
         val isExhausted: Boolean = false,
-        val isReadyForStage1: Boolean = false
+        val isReadyForStage1: Boolean = false,
+        val taskSummary: String? = null
     )
 
     /**
@@ -115,11 +117,14 @@ class Stage0ClarificationEngine(
             seedSet = initialTokens
         )
 
+        val taskSummary = generateTaskSummary(originalRequirement, combinedItems)
+
         return Stage0TurnResult(
             state = state,
             openQuestion = openQ,
             isExhausted = initialCandidates.isEmpty(),
-            isReadyForStage1 = false
+            isReadyForStage1 = false,
+            taskSummary = taskSummary
         )
     }
 
@@ -278,12 +283,62 @@ class Stage0ClarificationEngine(
             seedSet = newSeedTokens
         )
 
+        val taskSummary = generateTaskSummary(state.originalRequirement, mergedItems)
+
         return Stage0TurnResult(
             state = nextState,
             openQuestion = openQ,
             isExhausted = isExhausted,
-            isReadyForStage1 = false
+            isReadyForStage1 = false,
+            taskSummary = taskSummary
         )
+    }
+
+    /**
+     * 후보 목록 확정 후 사용자 친화적인 한국어 자연어 작업 요약 문장 생성 (단방향 렌더링 전용)
+     * - 실패/예외 발생 시 null 반환하여 탐색 결과 렌더링에 영향 주지 않도록 완벽 격리 (폴백 보장)
+     * - 후보군을 재판단/평가/필터링하지 않고 오직 요약/설명만 하도록 규율 프롬프트 적용
+     */
+    private fun generateTaskSummary(
+        originalRequirement: String,
+        items: List<RequirementItem>
+    ): String? {
+        val client = llmClient ?: return null
+        return try {
+            val systemPrompt = """
+                당신은 엔터프라이즈 시스템 분석 어시스턴트입니다.
+                사용자의 요구사항(SR)과 정밀 탐색된 후보 파일 목록을 바탕으로, 전체 작업의 핵심 목표와 각 컴포넌트의 변경 맥락을 간결한 한국어 자연어 문장(2~4줄)으로 요약하여 설명하세요.
+
+                [엄격한 규율]
+                1. 주어진 후보 파일 목록을 절대로 재판단, 평가, 추가, 또는 삭제하지 마십시오.
+                2. 탐색된 후보들이 왜 관련되어 있으며 어떤 역할을 하는지 사용자에게 친절하게 요약/설명하는 용도로만 작성하십시오.
+                3. 불필요한 인사말(예: 안녕하세요 등) 없이 요약 본문만 작성하십시오.
+            """.trimIndent()
+
+            val candidateDescriptions = items.joinToString("\n") { item ->
+                val path = (item.hint as? LinkHint.ExistingRef)?.filePath ?: item.statement
+                val rationale = item.anchorRationale ?: ""
+                "- $path ($rationale)"
+            }
+
+            val userPrompt = """
+                [요구사항]
+                $originalRequirement
+
+                [탐색된 후보 컴포넌트 목록]
+                $candidateDescriptions
+            """.trimIndent()
+
+            val response = client.chat(
+                systemPrompt = systemPrompt,
+                userCode = userPrompt,
+                maxTokens = 500
+            )
+            response?.message?.content?.trim()?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            // LLM 호출 실패/타임아웃 시 후보군 반환에 영향을 주지 않도록 안전하게 null 반환
+            null
+        }
     }
 
     /**
