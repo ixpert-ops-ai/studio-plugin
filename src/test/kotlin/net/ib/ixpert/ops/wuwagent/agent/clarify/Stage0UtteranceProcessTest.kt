@@ -357,4 +357,133 @@ class Stage0UtteranceProcessTest {
         assertEquals("두 번째 발화입니다.", turn3.state.userStatements[1])
         assertEquals("세 번째 발화입니다.", turn3.state.userStatements[2])
     }
+
+    /**
+     * [Phase 3-3 핵심 관문]
+     * 1. 실환경 3종 발화 (가: 정확 매핑, 나: 닫힌 선택 강제 No-Op, 다: 모호 발화 No-Op) 시나리오 E2E 실증
+     * 2. 완료 후 인텐트 계약 저장 시 echoBackMessage가 디스크(intent.json / clarification-contract.json)에 단 1글자도 침투/저장되지 않음을 디스크 grep 실측
+     */
+    @Test
+    fun testPhase33_ThreeLiveUtteranceTypesAndContractNonPersistenceDiskGrep() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph)
+
+        val targetPath = "webapp/views/order_write.jsp"
+        val ref = LinkHint.ExistingRef(targetPath, listOf("pay_type"))
+        val targetId = RequirementItem.deriveId(ref)
+
+        val marker1 = "ECHO_BACK_MARKER_EXCLUDE_ORDER_WRITE"
+        val marker2 = "ECHO_BACK_MARKER_NOT_IN_CANDIDATES_PAYMENT"
+        val marker3 = "ECHO_BACK_MARKER_UNKNOWN_AMBIGUOUS"
+        val marker4 = "ECHO_BACK_MARKER_COMPLETE_START_ANALYZE"
+
+        val mockLlm = object : LLMClient {
+            override fun chat(
+                systemPrompt: String,
+                userCode: String,
+                maxTokens: Int?,
+                onChunk: ((String) -> Unit)?
+            ): OllamaChatResponse {
+                val responseJson = when {
+                    systemPrompt.contains("5가지 액션") || systemPrompt.contains("발화 번역") -> {
+                        when {
+                            userCode.contains("order_write.jsp 빼줘") ->
+                                """{"action": "EXCLUDE", "targetId": "$targetId", "message": "$marker1: order_write.jsp를 제외했습니다."}"""
+                            userCode.contains("결제 모듈 빼줘") ->
+                                """{"action": "EXCLUDE", "targetId": "req_payment_fake_id", "notInCandidates": true, "message": "$marker2: 결제 모듈은 후보 목록에 없습니다."}"""
+                            userCode.contains("음... 글쎄요") ->
+                                """{"action": "UNKNOWN", "message": "$marker3: 무슨 말씀인지 이해하지 못했습니다."}"""
+                            userCode.contains("분석 시작해줘") ->
+                                """{"action": "COMPLETE", "message": "$marker4: 분석을 시작합니다."}"""
+                            else ->
+                                """{"action": "UNKNOWN", "message": "알 수 없는 발화입니다."}"""
+                        }
+                    }
+                    systemPrompt.contains("정제 전문가") ->
+                        "OrderDto 결제 방식 추가 (order_write.jsp 제외)"
+                    systemPrompt.contains("ConstraintKind") || systemPrompt.contains("제약 조건") ->
+                        """[{"kind": "SCOPE_LIMIT", "value": "order_write.jsp 제외", "rawStatement": "order_write.jsp 빼줘"}]"""
+                    systemPrompt.contains("앵커 토큰") || systemPrompt.contains("토큰") ->
+                        """["OrderDto", "pay_type"]"""
+                    systemPrompt.contains("도메인") || systemPrompt.contains("Domain") ->
+                        """{"domainPackage": "order"}"""
+                    systemPrompt.contains("요약") || systemPrompt.contains("Summary") ->
+                        """{"summary": "작업 요약"}"""
+                    else ->
+                        """{}"""
+                }
+                return OllamaChatResponse(
+                    model = "mock-llm",
+                    createdAt = "",
+                    message = OllamaMessage("assistant", responseJson),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+
+        val engine = Stage0ClarificationEngine(scanner, graph, mockLlm)
+        val turn0 = engine.initSession("OrderDto 결제 방식 추가")
+        val initialItemsCount = turn0.state.items.size
+
+        // (가) 정확 매핑: "order_write.jsp 빼줘"
+        val turn1 = engine.processUtterance(turn0.state, "order_write.jsp 빼줘")
+        val rejectedItem = turn1.state.items.find { it.id == targetId }
+        assertNotNull(rejectedItem)
+        assertEquals(Verdict.REJECTED, rejectedItem?.verdict)
+        assertTrue(turn1.echoBackMessage!!.contains(marker1))
+
+        // (나) 닫힌 선택 강제: "결제 모듈 빼줘" (목록 외 대상) -> No-Op 0건 훼손
+        val turn2 = engine.processUtterance(turn1.state, "결제 모듈 빼줘")
+        assertEquals("후보 외 지목 시 아이템 개수 불변 (No-Op)", initialItemsCount, turn2.state.items.size)
+        assertEquals(Verdict.REJECTED, turn2.state.items.find { it.id == targetId }?.verdict)
+        assertTrue(turn2.echoBackMessage!!.contains(marker2))
+
+        // (다) 모호 발화: "음... 글쎄요" -> No-Op 0건 훼손
+        val turn3 = engine.processUtterance(turn2.state, "음... 글쎄요")
+        assertEquals("모호 발화 시 아이템 개수 불변 (No-Op)", initialItemsCount, turn3.state.items.size)
+        assertTrue(turn3.echoBackMessage!!.contains(marker3))
+
+        // 대화 완결: "분석 시작해줘" -> COMPLETE (규칙 기반 빠른 확정)
+        val turn4 = engine.processUtterance(turn3.state, "분석 시작해줘")
+        assertTrue("COMPLETE 발화 시 isReadyForStage1 == true", turn4.isReadyForStage1)
+        assertNotNull(turn4.echoBackMessage)
+        assertTrue(turn4.echoBackMessage!!.contains("완료"))
+
+        // 인텐트 및 계약 생성
+        val clarifyIntent = engine.buildClarifyIntent(turn4.state)
+        assertTrue("ClarifyIntent.excludedFiles에 제외 대상 포함", clarifyIntent.excludedFiles.contains(targetPath))
+
+        // 디스크 저장 (임시 디렉토리)
+        val tempDir = java.nio.file.Files.createTempDirectory("clarify_purity_test").toFile()
+        try {
+            val savedIntentFile = ClarifyIntentStore.saveIntent(tempDir, clarifyIntent)
+            val contract = engine.transitionToStage1(turn4.state)
+            val savedContractFile = ClarificationContractStore.saveContract(tempDir, contract)
+
+            assertTrue("intent.json 파일이 존재해야 함", savedIntentFile.exists())
+            assertTrue("clarification-contract.json 파일이 존재해야 함", savedContractFile.exists())
+
+            val intentContent = savedIntentFile.readText()
+            val contractContent = savedContractFile.readText()
+
+            // 1. 제외 파일 정상 영속화 검증
+            assertTrue("intent.json에 excludedFiles에 order_write.jsp가 기록되어야 함", intentContent.contains("order_write.jsp"))
+
+            // 2. 계약 비저장 불변성 디스크 grep 실측: echoBackMessage 및 모든 마커/문구가 0건(단 1글자도 침투하지 않음)
+            assertFalse("intent.json에 echoBackMessage 필드가 없어야 함", intentContent.contains("echoBackMessage"))
+            assertFalse("intent.json에 마커 1이 침투하지 않아야 함", intentContent.contains(marker1))
+            assertFalse("intent.json에 마커 2가 침투하지 않아야 함", intentContent.contains(marker2))
+            assertFalse("intent.json에 마커 3이 침투하지 않아야 함", intentContent.contains(marker3))
+            assertFalse("intent.json에 완료 안내 문구가 침투하지 않아야 함", intentContent.contains("요구사항 구체화를 완료하고"))
+
+            assertFalse("clarification-contract.json에 echoBackMessage 필드가 없어야 함", contractContent.contains("echoBackMessage"))
+            assertFalse("clarification-contract.json에 마커 1이 침투하지 않아야 함", contractContent.contains(marker1))
+            assertFalse("clarification-contract.json에 마커 2가 침투하지 않아야 함", contractContent.contains(marker2))
+            assertFalse("clarification-contract.json에 마커 3이 침투하지 않아야 함", contractContent.contains(marker3))
+            assertFalse("clarification-contract.json에 완료 안내 문구가 침투하지 않아야 함", contractContent.contains("요구사항 구체화를 완료하고"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
 }

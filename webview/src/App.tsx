@@ -210,6 +210,7 @@ interface ClarifyPayload {
   isExhausted?: boolean;
   isReadyForStage1?: boolean;
   taskSummary?: string | null;
+  echoBackMessage?: string | null;
 }
 
 interface DomainGroup {
@@ -236,7 +237,8 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
       openQuestion: null,
       isExhausted: false,
       isReadyForStage1: false,
-      taskSummary: null
+      taskSummary: null,
+      echoBackMessage: null
     };
   }, [msg.content, (msg as any).clarifyData]);
 
@@ -353,30 +355,44 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
 
   const [openAnswer, setOpenAnswer] = useState('');
   const [additionalStatement, setAdditionalStatement] = useState('');
+  const [naturalUtterance, setNaturalUtterance] = useState('');
+  const [isSendingUtterance, setIsSendingUtterance] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
-  // payload 갱신 시 verdicts 및 rejectionReasons 동기화
+  // payload 갱신 시 verdicts 및 rejectionReasons 무조건 덮어쓰기 (SSOT)
   useEffect(() => {
-    setVerdicts(prev => {
-      const next = { ...prev };
+    setVerdicts(() => {
+      const next: Record<string, 'CONFIRMED' | 'REJECTED' | 'PENDING'> = {};
       payload.items.forEach(item => {
-        if (!next[item.id]) {
-          next[item.id] = item.verdict || 'PENDING';
-        }
+        next[item.id] = item.verdict || 'PENDING';
       });
       return next;
     });
 
-    setRejectionReasons(prev => {
-      const next = { ...prev };
+    setRejectionReasons(() => {
+      const next: Record<string, 'FILE_MISMATCH' | 'CONCEPT_IRRELEVANT'> = {};
       payload.items.forEach(item => {
-        if (item.rejectionReason && !next[item.id]) {
+        if (item.rejectionReason) {
           next[item.id] = item.rejectionReason;
         }
       });
       return next;
     });
-  }, [payload.items]);
+  }, [payload.items.map(i => `${i.id}:${i.verdict}:${i.rejectionReason || ''}`).join(',')]);
+
+  const handleSendUtterance = () => {
+    const text = naturalUtterance.trim();
+    if (!text || isSendingUtterance || isSubmitted) return;
+    if (window.sendToIde) {
+      setIsSendingUtterance(true);
+      window.sendToIde(JSON.stringify({
+        command: '/clarify-utterance',
+        text
+      }));
+      setNaturalUtterance('');
+      setTimeout(() => setIsSendingUtterance(false), 600);
+    }
+  };
 
   const toggleVerdict = (id: string, targetVerdict: 'CONFIRMED' | 'REJECTED') => {
     if (isSubmitted) return;
@@ -590,6 +606,25 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
             </div>
           )}
 
+          {payload.echoBackMessage && (
+            <div style={{
+              fontSize: '12px',
+              lineHeight: '1.6',
+              color: '#93c5fd',
+              padding: '10px 12px',
+              background: 'rgba(59, 130, 246, 0.12)',
+              borderRadius: '6px',
+              marginBottom: '12px',
+              borderLeft: '3px solid #3b82f6',
+              whiteSpace: 'pre-wrap'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', fontWeight: 600, color: '#60a5fa' }}>
+                <span>💬 어시스턴트 응답 / 되비추기</span>
+              </div>
+              {payload.echoBackMessage}
+            </div>
+          )}
+
           {payload.taskSummary && (
             <div style={{
               fontSize: '12px',
@@ -775,7 +810,64 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
             </div>
           )}
 
-          {/* 3. 추가 발화 / 요구사항 입력란 */}
+          {/* 3. 자연어 대화형 발화 입력란 (Stage 0: /clarify-utterance) */}
+          {!isSubmitted && (
+            <div style={{
+              marginTop: '14px',
+              padding: '10px 12px',
+              background: 'rgba(59, 130, 246, 0.06)',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              borderRadius: '6px'
+            }}>
+              <label style={{ fontSize: '11px', color: '#93c5fd', display: 'block', marginBottom: '6px', fontWeight: 600 }}>
+                💬 대화로 지시하기 (파일 제외/추가, 요구사항 수정, 분석 시작 등)
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  placeholder='예: "주소 매퍼 빼줘", "결제 모듈도 포함해줘", "분석 시작해줘"'
+                  value={naturalUtterance}
+                  onChange={e => setNaturalUtterance(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendUtterance();
+                    }
+                  }}
+                  disabled={isSendingUtterance}
+                  style={{
+                    flex: 1,
+                    padding: '6px 10px',
+                    fontSize: '12px',
+                    background: 'rgba(0,0,0,0.3)',
+                    border: '1px solid #4b5563',
+                    borderRadius: '4px',
+                    color: '#fff'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleSendUtterance}
+                  disabled={!naturalUtterance.trim() || isSendingUtterance}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    background: naturalUtterance.trim() ? '#3b82f6' : '#374151',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: naturalUtterance.trim() ? 'pointer' : 'default',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {isSendingUtterance ? '반영 중...' : '지시 전송 ↵'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 4. 추가 발화 / 요구사항 입력란 */}
           {!isSubmitted && (
             <div style={{ marginTop: '12px' }}>
               <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>
@@ -799,7 +891,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
             </div>
           )}
 
-          {/* 4. 액션 버튼 영역 */}
+          {/* 5. 액션 버튼 영역 */}
           <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
             {!isSubmitted && (
               <>
