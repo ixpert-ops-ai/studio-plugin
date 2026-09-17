@@ -256,10 +256,20 @@ class Stage0ClarificationEngine(
             }
         }
 
+        val updatedStatements = if (!userInput.userStatement.isNullOrBlank()) {
+            state.userStatements + userInput.userStatement.trim()
+        } else {
+            state.userStatements
+        }
+
         // 사용자가 완결을 선언한 경우
         if (userInput.isCompletionDeclared) {
             return Stage0TurnResult(
-                state = state.copy(items = updatedItems, seedSet = newSeedTokens),
+                state = state.copy(
+                    items = updatedItems,
+                    seedSet = newSeedTokens,
+                    userStatements = updatedStatements
+                ),
                 isExhausted = true,
                 isReadyForStage1 = true
             )
@@ -280,7 +290,8 @@ class Stage0ClarificationEngine(
 
         val nextState = state.copy(
             items = mergedItems,
-            seedSet = newSeedTokens
+            seedSet = newSeedTokens,
+            userStatements = updatedStatements
         )
 
         val taskSummary = generateTaskSummary(state.originalRequirement, mergedItems)
@@ -457,4 +468,149 @@ class Stage0ClarificationEngine(
             enrichedRequirementText = enrichedText
         )
     }
+
+    /**
+     * Clarify 대화 상태로부터 구조화된 인텐트 계약(ClarifyIntent) 생성.
+     * - 대화 표면(로그, 파일 목록, taskSummary)은 완전히 배제하고 오직 구조화된 의도만 전송.
+     * - LLM 실패 시 originalRequirement 및 ConstraintKind.OTHER + rawStatement로 완전 격리 폴백 보장.
+     */
+    fun buildClarifyIntent(state: Stage0State): ClarifyIntent {
+        val graphHash = ClarificationContractStore.calculateGraphHash(graph)
+        val anchorTokens = state.seedSet.map { it.value }.distinct()
+        val constraints = extractConstraints(state.userStatements)
+        val refinedRequirement = refineRequirement(state.originalRequirement, state.userStatements, constraints)
+
+        return ClarifyIntent(
+            originalRequirement = state.originalRequirement,
+            refinedRequirement = refinedRequirement,
+            anchorTokens = anchorTokens,
+            constraints = constraints,
+            graphHash = graphHash,
+            contractVersion = "1.0"
+        )
+    }
+
+    private fun refineRequirement(
+        original: String,
+        userStatements: List<String>,
+        constraints: List<IntentConstraint>
+    ): String {
+        if (userStatements.isEmpty()) return original
+        val client = llmClient ?: return original
+        return try {
+            val systemPrompt = """
+                당신은 소프트웨어 요구사항 정제 전문가입니다.
+                최초 요구사항과 대화 중 사용자가 제공한 추가 발화/답변을 종합하여, 명확하고 구체화된 단일 요구사항 정제문(1~2문장)을 작성하세요.
+
+                [규율]
+                1. 원 요구사항의 핵심 목표와 사용자의 세부 의도/제약사항을 자연스럽게 결합하세요.
+                2. 불필요한 서론/결론/인사말 없이 오직 정제된 요구사항 본문만 출력하세요.
+            """.trimIndent()
+
+            val userPrompt = """
+                [최초 요구사항]
+                $original
+
+                [사용자 추가 발화 및 답변]
+                ${userStatements.joinToString("\n") { "- $it" }}
+            """.trimIndent()
+
+            val response = client.chat(
+                systemPrompt = systemPrompt,
+                userCode = userPrompt,
+                maxTokens = 300
+            )
+            val content = response?.message?.content?.trim()
+            if (content.isNullOrBlank() || content.startsWith("[Error]")) {
+                original
+            } else {
+                content
+            }
+        } catch (e: Exception) {
+            original
+        }
+    }
+
+    private fun extractConstraints(userStatements: List<String>): List<IntentConstraint> {
+        if (userStatements.isEmpty()) return emptyList()
+
+        val defaultConstraints = userStatements.map { stmt ->
+            IntentConstraint(kind = ConstraintKind.OTHER, value = stmt, rawStatement = stmt)
+        }
+
+        val client = llmClient ?: return defaultConstraints
+
+        return try {
+            val systemPrompt = """
+                당신은 요구사항 분석 전문가입니다. 사용자의 발화 목록에서 시스템 분석 및 파일 필터링에 사용할 제약 조건(Constraints)을 분류하세요.
+
+                [ConstraintKind 분류 기준]
+                - INCLUDE_CHANNEL: 특정 발송 채널/경로 포함 (예: 알림톡 채널 활용, SMS 발송 등)
+                - EXCLUDE_EXTERNAL: 외부 연동/외부 API 배제 (예: 외부 API 연동 안 함, 내부 DB만 사용 등)
+                - NEW_MODULE: 신규 모듈/컴포넌트 개발 필요 (예: Bizgo 연동 모듈 신규 개발 등)
+                - SCOPE_LIMIT: 변경 범위 한정 (예: 어드민 화면만 수정, 발송 로직만 수정 등)
+                - OTHER: 위 항목으로 명확히 분류되지 않는 일반 제약/발화
+
+                [출력 형식]
+                반드시 아래 JSON 배열 형식으로만 응답하세요:
+                [
+                  {
+                    "kind": "INCLUDE_CHANNEL | EXCLUDE_EXTERNAL | NEW_MODULE | SCOPE_LIMIT | OTHER",
+                    "value": "제약의 핵심 내용 요약",
+                    "rawStatement": "원본 발화 문장"
+                  }
+                ]
+            """.trimIndent()
+
+            val userPrompt = userStatements.joinToString("\n") { "- $it" }
+
+            val response = client.chat(
+                systemPrompt = systemPrompt,
+                userCode = userPrompt,
+                maxTokens = 500
+            )
+            val content = response?.message?.content?.trim()
+            if (content.isNullOrBlank() || content.startsWith("[Error]")) {
+                return defaultConstraints
+            }
+
+            // JSON 파싱 시도 (코드 블록 방어)
+            val cleanJson = if (content.contains("```json")) {
+                content.substringAfter("```json").substringBefore("```").trim()
+            } else if (content.contains("```")) {
+                content.substringAfter("```").substringBefore("```").trim()
+            } else {
+                content
+            }
+
+            val listType = object : com.google.gson.reflect.TypeToken<List<Map<String, String>>>() {}.type
+            val parsedList: List<Map<String, String>>? = com.google.gson.Gson().fromJson(cleanJson, listType)
+            if (parsedList == null || parsedList.isEmpty()) {
+                return defaultConstraints
+            }
+
+            parsedList.mapIndexed { index, map ->
+                val kindStr = map["kind"]?.trim()?.uppercase()
+                val kind = try {
+                    ConstraintKind.valueOf(kindStr ?: "OTHER")
+                } catch (e: Exception) {
+                    ConstraintKind.OTHER
+                }
+                val rawStmt = map["rawStatement"]?.takeIf { it.isNotBlank() }
+                    ?: userStatements.getOrNull(index)
+                    ?: map["value"]
+                    ?: ""
+                val value = map["value"]?.takeIf { it.isNotBlank() } ?: rawStmt
+
+                IntentConstraint(
+                    kind = kind,
+                    value = value,
+                    rawStatement = rawStmt
+                )
+            }
+        } catch (e: Exception) {
+            defaultConstraints
+        }
+    }
 }
+

@@ -512,5 +512,147 @@ class Stage0RouterAndContractTest {
         // state(Stage0State) 자체에 taskSummary 필드가 존재하지 않음을 확인
         assertEquals("Stage0State items는 결정론적 위상 탐색 및 사용자 결정만 보존함", turn1.state.items.filter { it.verdict == Verdict.CONFIRMED }.size, 2)
     }
+
+    /**
+     * [ClarifyIntent 4대 불변식 단위 테스트]
+     * (a) 정제문/원문 분리 보존: originalRequirement(불변 원문)과 refinedRequirement(대화 정제문) 독립 분리 검증
+     * (b) constraints 분류 실패 시 OTHER + rawStatement 안전 폴백 (예외 및 [Error] 응답 양방향 검증)
+     * (c) 계약 순수성: ClarifyIntent에 대화 로그, 후보 파일 목록, taskSummary 등 표면 데이터 비혼입 검증
+     * (d) 정제문 LLM 실패 시 originalRequirement 안전 폴백 + intent 생산 100% 성공 보장
+     */
+    @Test
+    fun testClarifyIntentProductionAnd4Invariants() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph)
+
+        // 1. 정상 작동 케이스: LLM이 정제문과 JSON 제약 목록을 올바르게 반환
+        val mockSuccessLlm = object : LLMClient {
+            override fun chat(
+                systemPrompt: String,
+                userCode: String,
+                maxTokens: Int?,
+                onChunk: ((String) -> Unit)?
+            ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse {
+                val content = if (systemPrompt.contains("요구사항 정제")) {
+                    "기존 알림톡 채널을 활용하여 설문 발송 시 브랜드메시지 옵션을 추가하고, 외부 연동 API는 사용하지 않는다."
+                } else if (systemPrompt.contains("제약 조건")) {
+                    """
+                    [
+                      {
+                        "kind": "INCLUDE_CHANNEL",
+                        "value": "기존 알림톡 채널 활용",
+                        "rawStatement": "기존 알림톡 채널을 그대로 활용합니다."
+                      },
+                      {
+                        "kind": "EXCLUDE_EXTERNAL",
+                        "value": "외부 연동 API 미사용",
+                        "rawStatement": "외부 API 연동은 하지 않고 내부 모듈만 씁니다."
+                      }
+                    ]
+                    """.trimIndent()
+                } else {
+                    "요약문"
+                }
+                return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse(
+                    model = "test-model",
+                    createdAt = "",
+                    message = net.ib.ixpert.ops.wuwagent.model.OllamaMessage("assistant", content),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+
+        val engineSuccess = Stage0ClarificationEngine(scanner, graph, mockSuccessLlm)
+        val turn0 = engineSuccess.initSession("설문 발송 채널에 브랜드메시지 추가")
+        val turn1 = engineSuccess.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "기존 알림톡 채널을 그대로 활용합니다."
+            )
+        )
+        val turn2 = engineSuccess.processTurn(
+            turn1.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "외부 API 연동은 하지 않고 내부 모듈만 씁니다."
+            )
+        )
+
+        // userStatements 누적 확인
+        assertEquals(2, turn2.state.userStatements.size)
+
+        val intentSuccess = engineSuccess.buildClarifyIntent(turn2.state)
+
+        // 불변식 (a) 검증: originalRequirement와 refinedRequirement가 독립 분리 보존됨
+        assertEquals("설문 발송 채널에 브랜드메시지 추가", intentSuccess.originalRequirement)
+        assertEquals("기존 알림톡 채널을 활용하여 설문 발송 시 브랜드메시지 옵션을 추가하고, 외부 연동 API는 사용하지 않는다.", intentSuccess.refinedRequirement)
+        assertTrue(intentSuccess.anchorTokens.isNotEmpty())
+        assertEquals(2, intentSuccess.constraints.size)
+        assertEquals(ConstraintKind.INCLUDE_CHANNEL, intentSuccess.constraints[0].kind)
+        assertEquals("기존 알림톡 채널을 그대로 활용합니다.", intentSuccess.constraints[0].rawStatement)
+        assertEquals(ConstraintKind.EXCLUDE_EXTERNAL, intentSuccess.constraints[1].kind)
+        assertEquals("외부 API 연동은 하지 않고 내부 모듈만 씁니다.", intentSuccess.constraints[1].rawStatement)
+
+        // 불변식 (c) 검증: ClarifyIntent 계약 순수성 (JSON 직렬화 시 items, taskSummary, 파일 경로 부재)
+        val json = Gson().toJson(intentSuccess)
+        assertFalse("ClarifyIntent에 taskSummary가 포함되어서는 안 됨", json.contains("taskSummary"))
+        assertFalse("ClarifyIntent에 items 후보 목록이 포함되어서는 안 됨", json.contains("OrderDto"))
+        assertFalse("ClarifyIntent에 trustedExistingRefs가 포함되어서는 안 됨", json.contains("trustedExistingRefs"))
+
+        // 2. LLM 실패 케이스 A: 실제 예외(타임아웃/네트워크 오류) 발생
+        val mockFailingLlm = object : LLMClient {
+            override fun chat(
+                systemPrompt: String,
+                userCode: String,
+                maxTokens: Int?,
+                onChunk: ((String) -> Unit)?
+            ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
+                throw RuntimeException("Simulated Network Timeout")
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+        val engineFailing = Stage0ClarificationEngine(scanner, graph, mockFailingLlm)
+        val intentFailing = engineFailing.buildClarifyIntent(turn2.state)
+
+        // 불변식 (d) 검증: LLM 예외 시 refinedRequirement는 originalRequirement로 안전 폴백
+        assertEquals("설문 발송 채널에 브랜드메시지 추가", intentFailing.refinedRequirement)
+        assertEquals("설문 발송 채널에 브랜드메시지 추가", intentFailing.originalRequirement)
+
+        // 불변식 (b) 검증: constraints 파싱 실패 시 OTHER + rawStatement로 안전 폴백
+        assertEquals(2, intentFailing.constraints.size)
+        assertTrue(intentFailing.constraints.all { it.kind == ConstraintKind.OTHER })
+        assertEquals("기존 알림톡 채널을 그대로 활용합니다.", intentFailing.constraints[0].rawStatement)
+        assertEquals("외부 API 연동은 하지 않고 내부 모듈만 씁니다.", intentFailing.constraints[1].rawStatement)
+
+        // 3. LLM 실패 케이스 B: 실제 [Error] 접두어 에러 응답 객체 반환
+        val mockErrorMsgLlm = object : LLMClient {
+            override fun chat(
+                systemPrompt: String,
+                userCode: String,
+                maxTokens: Int?,
+                onChunk: ((String) -> Unit)?
+            ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse {
+                return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse(
+                    model = null,
+                    createdAt = null,
+                    message = net.ib.ixpert.ops.wuwagent.model.OllamaMessage(
+                        role = "assistant",
+                        content = "[Error] OpenAI 서버 통신 실패: 504 Gateway Timeout"
+                    ),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+        val engineErrorMsg = Stage0ClarificationEngine(scanner, graph, mockErrorMsgLlm)
+        val intentErrorMsg = engineErrorMsg.buildClarifyIntent(turn2.state)
+
+        // [Error] 응답 객체 시에도 (d)와 (b) 안전 폴백 검증
+        assertEquals("설문 발송 채널에 브랜드메시지 추가", intentErrorMsg.refinedRequirement)
+        assertEquals(2, intentErrorMsg.constraints.size)
+        assertTrue(intentErrorMsg.constraints.all { it.kind == ConstraintKind.OTHER })
+        assertEquals("기존 알림톡 채널을 그대로 활용합니다.", intentErrorMsg.constraints[0].rawStatement)
+    }
 }
+
 

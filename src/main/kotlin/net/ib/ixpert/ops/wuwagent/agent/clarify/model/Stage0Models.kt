@@ -154,7 +154,8 @@ data class SeedToken(
  * 2.5 Stage0State (압축된 대화 상태)
  */
 data class Stage0State(
-    val originalRequirement: String,          // 원 요구 (앵커)
-    val items: List<RequirementItem> = emptyList(), // 확정 + 미판정 단위 전체
-    val seedSet: Set<SeedToken> = emptySet()        // 누적 seed·개념 토큰 (2.6)
+    val originalRequirement: String,                // 원 요구 (앵커)
+    val items: List<RequirementItem> = emptyList(),       // 확정 + 미판정 단위 전체
+    val seedSet: Set<SeedToken> = emptySet(),             // 누적 seed·개념 토큰 (2.6)
+    val userStatements: List<String> = emptyList()        // 사용자 추가 발화/답변 누적 목록
 )
