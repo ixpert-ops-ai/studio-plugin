@@ -209,6 +209,7 @@ interface ClarifyPayload {
   openQuestion?: string | null;
   isExhausted?: boolean;
   isReadyForStage1?: boolean;
+  taskSummary?: string | null;
 }
 
 interface DomainGroup {
@@ -234,7 +235,8 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
       items: [],
       openQuestion: null,
       isExhausted: false,
-      isReadyForStage1: false
+      isReadyForStage1: false,
+      taskSummary: null
     };
   }, [msg.content, (msg as any).clarifyData]);
 
@@ -585,6 +587,25 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
           {payload.originalRequirement && (
             <div style={{ fontSize: '12px', color: '#aaa', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', marginBottom: '12px', borderLeft: '2px solid #3b82f6' }}>
               <strong>요구사항:</strong> {payload.originalRequirement}
+            </div>
+          )}
+
+          {payload.taskSummary && (
+            <div style={{
+              fontSize: '12px',
+              lineHeight: '1.6',
+              color: '#d1d5db',
+              padding: '10px 12px',
+              background: 'rgba(59, 130, 246, 0.08)',
+              borderRadius: '6px',
+              marginBottom: '12px',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              whiteSpace: 'pre-wrap'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', fontWeight: 600, color: '#93c5fd' }}>
+                <span>💡 작업 분석 요약</span>
+              </div>
+              {payload.taskSummary}
             </div>
           )}
 
