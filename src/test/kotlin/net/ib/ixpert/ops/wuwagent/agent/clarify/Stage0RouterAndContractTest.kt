@@ -474,6 +474,31 @@ class Stage0RouterAndContractTest {
         assertNull("LLM 예외 발생 시 taskSummary는 null로 안전하게 폴백되어야 함", turnFailing.taskSummary)
         assertEquals("LLM 예외 발생 시에도 결정론적 그래프 탐색 아이템은 정상 반환되어야 함", 3, turnFailing.state.items.size)
 
+        // 3-B. LLM 클라이언트가 [Error] 접두어 에러 메시지를 반환하는 경우의 폴백 검증
+        val errorMsgLlmClient = object : LLMClient {
+            override fun chat(
+                systemPrompt: String,
+                userCode: String,
+                maxTokens: Int?,
+                onChunk: ((String) -> Unit)?
+            ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse {
+                return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse(
+                    model = null,
+                    createdAt = null,
+                    message = net.ib.ixpert.ops.wuwagent.model.OllamaMessage(
+                        role = "assistant",
+                        content = "[Error] OpenAI 서버 통신 실패: Request failed with status code 524"
+                    ),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+        val engineErrorMsg = Stage0ClarificationEngine(scanner, graph, errorMsgLlmClient)
+        val turnErrorMsg = engineErrorMsg.initSession("주문 결제 방식 추가")
+        assertNull("LLM 클라이언트가 [Error] 메시지를 반환할 때도 taskSummary는 null로 안전하게 폴백되어야 함", turnErrorMsg.taskSummary)
+        assertEquals(3, turnErrorMsg.state.items.size)
+
         // ── 불변식 4: 다음 턴 입력/엔진 상태 비오염 ──
         val turn1 = engineWithLlm.processTurn(
             turnWithLlm.state,

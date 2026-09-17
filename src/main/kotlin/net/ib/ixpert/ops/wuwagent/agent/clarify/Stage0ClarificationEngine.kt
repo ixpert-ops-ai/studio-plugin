@@ -334,7 +334,12 @@ class Stage0ClarificationEngine(
                 userCode = userPrompt,
                 maxTokens = 500
             )
-            response?.message?.content?.trim()?.takeIf { it.isNotBlank() }
+            val content = response?.message?.content?.trim()
+            if (content.isNullOrBlank() || content.startsWith("[Error]")) {
+                null
+            } else {
+                content
+            }
         } catch (e: Exception) {
             // LLM 호출 실패/타임아웃 시 후보군 반환에 영향을 주지 않도록 안전하게 null 반환
             null
