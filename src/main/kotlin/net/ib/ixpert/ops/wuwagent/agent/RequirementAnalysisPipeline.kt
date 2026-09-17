@@ -34,14 +34,22 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
 
     suspend fun analyze(
         primaryReq: String, 
-        secondaryReq: String, 
+        secondaryReq: String = "", 
         projectGraph: ProjectGraph, 
         enhancedRequirements: List<String> = emptyList(),
         stage0Contract: net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract? = null,
+        clarifyIntent: net.ib.ixpert.ops.wuwagent.agent.clarify.model.ClarifyIntent? = null,
+        previousContract: net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract? = null,
+        projectRoot: java.io.File? = null,
         onChunk: ((String) -> Unit)? = null
     ): RequirementAnalysisResult {
         val fwType = projectGraph.frameworkDetection?.userOverride ?: projectGraph.frameworkType
         logger.info("Starting RequirementAnalysisPipeline. Resolved Framework Type: ${fwType.name}")
+        
+        val effectiveContract = stage0Contract ?: previousContract
+        val effectiveReq = clarifyIntent?.refinedRequirement?.ifBlank { null }
+            ?: effectiveContract?.enrichedRequirementText?.ifBlank { null }
+            ?: primaryReq
         
         // --- Stage 0.5: Scope Selection ---
         val threshold = 50 // Configuration threshold
@@ -134,12 +142,12 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         }
 
         val discoveryResult = AdaptiveFileDiscovery.filter(
-            primaryReq = primaryReq,
+            primaryReq = effectiveReq,
             secondaryReq = secondaryReq,
             graph = workingMetaGraph,
             client = client,
             project = project,
-            projectBasePath = project?.basePath,
+            projectBasePath = project?.basePath ?: projectRoot?.absolutePath,
             enhancedRequirements = enhancedRequirements
         ) { progress ->
             onChunk?.invoke("> $progress\n")
@@ -177,7 +185,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         }
 
         // Stage 0 사용자 확정 기존 파일 (trustedExistingRefs) 합성
-        stage0Contract?.trustedExistingRefs?.forEach { ref ->
+        effectiveContract?.trustedExistingRefs?.forEach { ref ->
             if (targetFiles.none { it.path == ref.filePath }) {
                 targetFiles.add(TargetFileSpec(
                     order = targetFiles.size + 1,
@@ -189,7 +197,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         }
 
         // Stage 0 사용자 명시 신규 생성 항목 (newCreations) 독립 합성 (그래프 탐색 seed 배제)
-        stage0Contract?.newCreations?.forEach { item ->
+        effectiveContract?.newCreations?.forEach { item ->
             if (targetFiles.none { it.path == item.statement }) {
                 targetFiles.add(TargetFileSpec(
                     order = targetFiles.size + 1,
@@ -201,8 +209,8 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         }
 
         // Stage 0 사용자 거부 기존 파일 (rejectedExistingRefs) 배제 필터링 (0건 부활 불변식)
-        val eligibleTargetFiles = if (stage0Contract != null && stage0Contract.rejectedExistingRefs.isNotEmpty()) {
-            val rejectedPaths = stage0Contract.rejectedExistingRefs.map { it.filePath }.toSet()
+        val eligibleTargetFiles = if (effectiveContract != null && effectiveContract.rejectedExistingRefs.isNotEmpty()) {
+            val rejectedPaths = effectiveContract.rejectedExistingRefs.map { it.filePath }.toSet()
             targetFiles.filter { it.path !in rejectedPaths }
         } else {
             targetFiles
@@ -210,7 +218,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
 
         onChunk?.invoke("\n> **(Stage 2) Trimming** - 불필요한 파일 경로 보정 및 필터링...\n")
         val correctedFiles = TargetFileValidator.correctPaths(eligibleTargetFiles, projectGraph)
-        val mdRoot = Paths.get(project?.basePath ?: "", "docs")
+        val mdRoot = Paths.get(project?.basePath ?: projectRoot?.absolutePath ?: "", "docs")
         
         if (targetGt.isNotBlank()) {
             val stage2Rank = correctedFiles.indexOfFirst { it.path.contains(targetGt, ignoreCase = true) } + 1
@@ -239,13 +247,13 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             
             // 앵커 형제(anchorSiblingRefs)는 Stage 1 위상 시드 확장 풀에 섞지 않고 (노이즈 원천 차단),
             // Stage 2/3 프롬프트 참조 컨텍스트로 주입하여 신규 파일 구조 생성의 참조로만 소비 (방안 B 실측 채택)
-            val baseRequirement = stage0Contract?.enrichedRequirementText
-                ?: if (secondaryReq.isNotBlank()) "$primaryReq\n$secondaryReq" else primaryReq
-            val fullRequirement = if (stage0Contract != null && stage0Contract.anchorSiblingRefs.isNotEmpty()) {
+            val baseRequirement = effectiveContract?.enrichedRequirementText
+                ?: if (secondaryReq.isNotBlank()) "$effectiveReq\n$secondaryReq" else effectiveReq
+            val fullRequirement = if (effectiveContract != null && effectiveContract.anchorSiblingRefs.isNotEmpty()) {
                 buildString {
                     appendLine(baseRequirement)
                     appendLine("\n## 참고 템플릿 컴포넌트 (신규 생성 시 구조 참조용)")
-                    stage0Contract.anchorSiblingRefs.forEach { anchor ->
+                    effectiveContract.anchorSiblingRefs.forEach { anchor ->
                         appendLine("- `${anchor.filePath}`")
                     }
                 }.trim()
@@ -378,6 +386,59 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             rawResponse = "그래프 탐색 결과 처리 완료",
             suggestedNewFiles = verifiedSuggestedNewFiles
         )
+
+        // --- ClarificationContract 생산 및 디스크 저장 (Analyze 산출물 계약 단독 생산) ---
+        val rootDir = projectRoot 
+            ?: project?.basePath?.let { java.io.File(it) } 
+            ?: if (projectGraph.projectRoot.isNotBlank()) java.io.File(projectGraph.projectRoot) else null
+
+        if (rootDir != null) {
+            try {
+                val confirmedExistingRefs = validatedTargetFiles
+                    .filter { it.type == "MODIFY" || it.type == "수정" }
+                    .map { net.ib.ixpert.ops.wuwagent.agent.clarify.model.LinkHint.ExistingRef(filePath = it.path, symbols = emptyList()) }
+                
+                val newCreationItems = validatedTargetFiles
+                    .filter { it.type == "CREATE" || it.type == "신규" }
+                    .map { file ->
+                        net.ib.ixpert.ops.wuwagent.agent.clarify.model.RequirementItem(
+                            id = "req_new_${file.path.hashCode()}",
+                            statement = file.path,
+                            source = net.ib.ixpert.ops.wuwagent.agent.clarify.model.HintSource.SYSTEM_UNCONFIRMED,
+                            hint = net.ib.ixpert.ops.wuwagent.agent.clarify.model.LinkHint.NewCreation,
+                            anchorRationale = file.description,
+                            verdict = net.ib.ixpert.ops.wuwagent.agent.clarify.model.Verdict.CONFIRMED,
+                            confidence = net.ib.ixpert.ops.wuwagent.agent.clarify.model.ConfidenceBucket.HIGH_CONFIDENCE
+                        )
+                    }
+
+                // 이전 계약의 거부 이력 누적 보존 (0-재출현 라운드트립 불변식 보존)
+                val accumulatedRejectedExistingRefs = (effectiveContract?.rejectedExistingRefs ?: emptyList())
+                val accumulatedRejectedNewCreations = (effectiveContract?.rejectedNewCreations ?: emptyList())
+                val accumulatedRejectedItems = (effectiveContract?.rejectedItems ?: emptyList())
+
+                val finalContract = net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract(
+                    contractVersion = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.CURRENT_CONTRACT_VERSION,
+                    createdAt = java.time.Instant.now().toString(),
+                    graphHash = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.calculateGraphHash(projectGraph),
+                    sessionId = "analyze_${System.currentTimeMillis()}",
+                    srId = "",
+                    confirmedItems = newCreationItems,
+                    trustedExistingRefs = confirmedExistingRefs,
+                    newCreations = newCreationItems,
+                    anchorSiblingRefs = effectiveContract?.anchorSiblingRefs ?: emptyList(),
+                    rejectedExistingRefs = accumulatedRejectedExistingRefs,
+                    rejectedNewCreations = accumulatedRejectedNewCreations,
+                    rejectedItems = accumulatedRejectedItems,
+                    enrichedRequirementText = effectiveReq
+                )
+
+                net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.saveContract(rootDir, finalContract)
+                logger.info("ClarificationContract produced and saved by Analyze pipeline to: ${rootDir.absolutePath}")
+            } catch (e: Exception) {
+                logger.warn("Failed to persist ClarificationContract after analyze", e)
+            }
+        }
         
         lastResult = result
         return result

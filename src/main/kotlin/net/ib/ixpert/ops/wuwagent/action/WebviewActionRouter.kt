@@ -199,16 +199,16 @@ class WebviewActionRouter(private val project: Project) {
                             val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
 
                             val projectBase = java.io.File(project.basePath ?: "")
-                            val contractFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.findContractFile(projectBase)
 
-                            // 아티팩트 존재 시 Fail-Fast 검증 로드
-                            val stage0Contract = if (contractFile != null) {
+                            // 1. ClarifyIntent 로드 (있으면 소비, 없으면 null 자립 분해)
+                            val intentFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.findIntentFile(projectBase)
+                            val clarifyIntent = if (intentFile != null) {
                                 try {
-                                    net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.loadContract(contractFile, projectGraph)
+                                    net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.loadIntent(intentFile, projectGraph)
                                 } catch (e: net.ib.ixpert.ops.wuwagent.agent.clarify.ContractValidationException) {
-                                    logger.error("Contract validation failed", e)
+                                    logger.error("Clarify intent validation failed", e)
                                     ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("error", "❌ 전이 계약 검증 실패: ${e.message}", messageId)
+                                        bridge.sendMessage("error", "❌ 요구사항 인텐트 계약 검증 실패: ${e.message}", messageId)
                                     }
                                     return@executeOnPooledThread
                                 }
@@ -216,16 +216,31 @@ class WebviewActionRouter(private val project: Project) {
                                 null
                             }
 
+                            // 2. 이전 ClarificationContract 로드 (거부 이력 / 0-재출현 억제용)
+                            val contractFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.findContractFile(projectBase)
+                            val previousContract = if (contractFile != null) {
+                                try {
+                                    net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.loadContract(contractFile, projectGraph)
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            } else {
+                                null
+                            }
+
                             val client = WuwLlmService.getClient()
                             val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
-                            val initialRequirement = stage0Contract?.enrichedRequirementText ?: rawInput
+                            val initialRequirement = clarifyIntent?.refinedRequirement?.ifBlank { null }
+                                ?: rawInput.ifBlank { clarifyIntent?.originalRequirement ?: "" }
 
                             val result = kotlinx.coroutines.runBlocking {
                                 pipeline.analyze(
                                     primaryReq = initialRequirement, 
                                     secondaryReq = "", 
                                     projectGraph = projectGraph,
-                                    stage0Contract = stage0Contract
+                                    clarifyIntent = clarifyIntent,
+                                    previousContract = previousContract,
+                                    projectRoot = projectBase
                                 ) { chunk ->
                                     ApplicationManager.getApplication().invokeLater {
                                         bridge.sendMessageChunk(messageId, chunk)
@@ -249,9 +264,9 @@ class WebviewActionRouter(private val project: Project) {
                                     }
 
                                     // 거부 항목 요약 노출
-                                    if (stage0Contract != null && stage0Contract.rejectedExistingRefs.isNotEmpty()) {
-                                        extraText += "\n\n> 🚫 **사용자 거부로 배제된 파일 (${stage0Contract.rejectedExistingRefs.size}건)**\n"
-                                        stage0Contract.rejectedExistingRefs.forEach { rej ->
+                                    if (previousContract != null && previousContract.rejectedExistingRefs.isNotEmpty()) {
+                                        extraText += "\n\n> 🚫 **사용자 거부로 배제된 파일 (${previousContract.rejectedExistingRefs.size}건)**\n"
+                                        previousContract.rejectedExistingRefs.forEach { rej ->
                                             extraText += "> - `${rej.filePath}`\n"
                                         }
                                     }
@@ -349,20 +364,24 @@ class WebviewActionRouter(private val project: Project) {
                         return@invokeLater
                     }
 
-                    // Stage 1 전이 계약 저장
-                    val contract = session.engine.transitionToStage1(turnResult.state)
+                    // Stage 1 전이용 ClarifyIntent 생성 및 저장 (ClarificationContract는 Analyze에서 생산)
+                    val clarifyIntent = session.engine.buildClarifyIntent(turnResult.state)
                     net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
                     
                     val projectBase = java.io.File(project.basePath ?: "")
-                    val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.saveContract(projectBase, contract)
-                    logger.info("Clarification contract saved to: ${savedFile.absolutePath}")
+                    val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
+                    logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
 
                     val completeMsg = buildString {
                         appendLine("✅ **요구사항 구체화(Clarification)가 완료되었습니다.**")
-                        appendLine("- 확정된 기존 파일: **${contract.trustedExistingRefs.size}개**")
-                        appendLine("- 확정된 신규 생성: **${contract.newCreations.size}개**")
-                        appendLine("- 거부된 파일 (배제): **${contract.rejectedExistingRefs.size}개**")
-                        appendLine("- 저장된 계약 아티팩트: `${savedFile.name}`")
+                        appendLine("- 정제된 요구사항: **${clarifyIntent.refinedRequirement}**")
+                        if (clarifyIntent.anchorTokens.isNotEmpty()) {
+                            appendLine("- 추출된 앵커 토큰: **${clarifyIntent.anchorTokens.joinToString()}**")
+                        }
+                        if (clarifyIntent.constraints.isNotEmpty()) {
+                            appendLine("- 파악된 제약 조건: **${clarifyIntent.constraints.size}개**")
+                        }
+                        appendLine("- 저장된 인텐트 계약: `${savedFile.name}`")
                         appendLine()
                         appendLine("👉 영향도 분석 및 대상 파일 확정을 진행하려면 `/analyze`를 실행하세요.")
                     }
