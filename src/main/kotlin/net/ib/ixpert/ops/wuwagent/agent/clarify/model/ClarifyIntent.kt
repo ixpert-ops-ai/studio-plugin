@@ -1,4 +1,4 @@
-﻿package net.ib.ixpert.ops.wuwagent.agent.clarify.model
+package net.ib.ixpert.ops.wuwagent.agent.clarify.model
 
 /**
  * clarify -> analyze 인수인계 계약 (단방향 불변 인텐트).
@@ -16,6 +16,9 @@ data class ClarifyIntent(
 
     // 대화에서 추출된 구조화 제약 조건 (오탐 사전 차단용)
     val constraints: List<IntentConstraint> = emptyList(),
+
+    // 대화 중 명시적으로 배제된 파일 경로 목록 (1급 결정 이양용)
+    val excludedFiles: List<String> = emptyList(),
 
     // 결정론 앵커 (그래프 정합성 검증)
     val graphHash: String,

@@ -392,6 +392,83 @@ class WebviewActionRouter(private val project: Project) {
                     }
                 }
 
+                // ── 요구사항 대화형 발화 처리 (Stage 0: /clarify-utterance) ────────
+                "/clarify-utterance" -> {
+                    logger.info("Router: /clarify-utterance 분기")
+                    val messageId = "clarify_utt_${System.currentTimeMillis()}"
+                    val utterance = textBody.trim()
+
+                    val session = net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.getSession(project)
+                    if (session == null) {
+                        bridge.sendMessage("error", "분석 세션이 만료되었거나 유효하지 않습니다. `/clarify`를 다시 실행해주세요.", messageId)
+                        return@invokeLater
+                    }
+
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            val turnResult = session.engine.processUtterance(session.currentState, utterance)
+                            session.currentState = turnResult.state
+                            session.lastTurnResult = turnResult
+
+                            if (!turnResult.isReadyForStage1) {
+                                val nextPayload = mapOf(
+                                    "originalRequirement" to session.initialRequirement,
+                                    "items" to turnResult.state.items,
+                                    "openQuestion" to turnResult.openQuestion,
+                                    "isExhausted" to turnResult.isExhausted,
+                                    "isReadyForStage1" to turnResult.isReadyForStage1,
+                                    "taskSummary" to turnResult.taskSummary,
+                                    "echoBackMessage" to turnResult.echoBackMessage
+                                )
+                                val gson = com.google.gson.Gson()
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("analyze_clarify", gson.toJson(nextPayload), messageId)
+                                }
+                                return@executeOnPooledThread
+                            }
+
+                            // COMPLETE 상태 전이: ClarifyIntent 생성 및 저장
+                            val clarifyIntent = session.engine.buildClarifyIntent(turnResult.state)
+                            net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
+
+                            val projectBase = java.io.File(project.basePath ?: "")
+                            val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
+                            logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
+
+                            val completeMsg = buildString {
+                                appendLine("✅ **요구사항 구체화(Clarification)가 완료되었습니다.**")
+                                if (!turnResult.echoBackMessage.isNullOrBlank()) {
+                                    appendLine("> 💬 ${turnResult.echoBackMessage}")
+                                    appendLine()
+                                }
+                                appendLine("- 정제된 요구사항: **${clarifyIntent.refinedRequirement}**")
+                                if (clarifyIntent.anchorTokens.isNotEmpty()) {
+                                    appendLine("- 추출된 앵커 토큰: **${clarifyIntent.anchorTokens.joinToString()}**")
+                                }
+                                if (clarifyIntent.constraints.isNotEmpty()) {
+                                    appendLine("- 파악된 제약 조건: **${clarifyIntent.constraints.size}개**")
+                                }
+                                if (clarifyIntent.excludedFiles.isNotEmpty()) {
+                                    appendLine("- 명시적 배제 대상 파일: **${clarifyIntent.excludedFiles.size}개**")
+                                }
+                                appendLine("- 저장된 인텐트 계약: `${savedFile.name}`")
+                                appendLine()
+                                appendLine("👉 영향도 분석 및 대상 파일 확정을 진행하려면 `/analyze`를 실행하세요.")
+                            }
+
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("explain", completeMsg, messageId)
+                                bridge.sendMessage("chat", "", messageId)
+                            }
+                        } catch (e: Exception) {
+                            logger.error("Clarify utterance error", e)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", "발화 처리 중 오류가 발생했습니다: ${e.message}", messageId)
+                            }
+                        }
+                    }
+                }
+
                 // ── Scope Selection Events ────────
                 "scopeSelection/submit" -> {
                     val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)

@@ -208,10 +208,13 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             }
         }
 
-        // Stage 0 사용자 거부 기존 파일 (rejectedExistingRefs) 배제 필터링 (0건 부활 불변식)
-        val eligibleTargetFiles = if (effectiveContract != null && effectiveContract.rejectedExistingRefs.isNotEmpty()) {
-            val rejectedPaths = effectiveContract.rejectedExistingRefs.map { it.filePath }.toSet()
-            targetFiles.filter { it.path !in rejectedPaths }
+        // Stage 0 / ClarifyIntent 사용자 거부 기존 파일 (rejectedExistingRefs + excludedFiles) 배제 필터링 (0건 부활 불변식)
+        val contractRejectedPaths = effectiveContract?.rejectedExistingRefs?.map { it.filePath }?.toSet() ?: emptySet()
+        val intentExcludedPaths = clarifyIntent?.excludedFiles?.toSet() ?: emptySet()
+        val allExcludedPaths = contractRejectedPaths + intentExcludedPaths
+
+        val eligibleTargetFiles = if (allExcludedPaths.isNotEmpty()) {
+            targetFiles.filter { it.path !in allExcludedPaths }
         } else {
             targetFiles
         }
@@ -412,8 +415,12 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                         )
                     }
 
-                // 이전 계약의 거부 이력 누적 보존 (0-재출현 라운드트립 불변식 보존)
-                val accumulatedRejectedExistingRefs = (effectiveContract?.rejectedExistingRefs ?: emptyList())
+                // 이전 계약 및 ClarifyIntent의 거부 이력 누적 보존 (0-재출현 라운드트립 불변식 보존)
+                val previousContractRejected = (effectiveContract?.rejectedExistingRefs ?: emptyList())
+                val intentExcludedRefs = (clarifyIntent?.excludedFiles ?: emptyList()).map { 
+                    net.ib.ixpert.ops.wuwagent.agent.clarify.model.LinkHint.ExistingRef(filePath = it, symbols = emptyList()) 
+                }
+                val accumulatedRejectedExistingRefs = (previousContractRejected + intentExcludedRefs).distinctBy { it.filePath }
                 val accumulatedRejectedNewCreations = (effectiveContract?.rejectedNewCreations ?: emptyList())
                 val accumulatedRejectedItems = (effectiveContract?.rejectedItems ?: emptyList())
 

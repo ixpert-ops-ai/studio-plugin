@@ -30,7 +30,8 @@ class Stage0ClarificationEngine(
         val openQuestion: String? = null,
         val isExhausted: Boolean = false,
         val isReadyForStage1: Boolean = false,
-        val taskSummary: String? = null
+        val taskSummary: String? = null,
+        val echoBackMessage: String? = null
     )
 
     /**
@@ -470,8 +471,90 @@ class Stage0ClarificationEngine(
     }
 
     /**
+     * 3-2단계: 사용자 자연어 발화 처리 (번역 + 되비추기 echo-back + 상태 반영).
+     * - ClarifyUtteranceTranslator를 호출하여 6대 불변식(a~f)에 따라 상태 갱신
+     * - (a) EXCLUDE: 해당 targetId / targetFilePath 아이템을 REJECTED로 전환
+     * - (b) INCLUDE_TOKEN: seedSet에 토큰 누적 및 rescanUnverified 재탐색 병합
+     * - (c) ADD_CONSTRAINT: userStatements에 누적
+     * - (d) COMPLETE: isReadyForStage1 = true 및 isExhausted = true 전이
+     * - (e) NOT_IN_CANDIDATES & UNKNOWN: items No-Op (0건 훼손) 및 안내 되비추기
+     * - (f) userStatements 추적 보존
+     */
+    fun processUtterance(state: Stage0State, utterance: String): Stage0TurnResult {
+        val trimmed = utterance.trim()
+        val translated = ClarifyUtteranceTranslator.translate(trimmed, state.items, llmClient)
+        val updatedStatements = if (trimmed.isNotBlank()) state.userStatements + trimmed else state.userStatements
+
+        var updatedItems = state.items
+        var updatedSeedSet = state.seedSet
+        var isReady = false
+        val echoMsg = translated.clarificationMessage
+
+        when (translated.kind) {
+            UserActionKind.EXCLUDE -> {
+                val targetId = translated.targetId
+                val targetPath = translated.targetFilePath
+                updatedItems = state.items.map { item ->
+                    val isMatch = (targetId != null && item.id == targetId) ||
+                            (targetPath != null && (item.hint as? LinkHint.ExistingRef)?.filePath == targetPath)
+                    if (isMatch) {
+                        item.copy(
+                            verdict = Verdict.REJECTED,
+                            source = HintSource.USER_CONFIRMED,
+                            rejectionReason = RejectionReason.FILE_MISMATCH
+                        )
+                    } else {
+                        item
+                    }
+                }
+            }
+            UserActionKind.INCLUDE_TOKEN -> {
+                val tokenVal = translated.tokenValue ?: trimmed
+                if (tokenVal.isNotBlank()) {
+                    val extracted = scanner.extractTokens(tokenVal, emptySet())
+                    val tokenDirect = SeedToken(tokenVal, TokenKind.CONCEPTUAL)
+                    val newSeedTokens = state.seedSet + extracted + tokenDirect
+                    updatedSeedSet = newSeedTokens
+                    val frozenItems = state.items.filter { it.verdict != Verdict.PENDING }
+                    val newCandidates = scanner.rescanUnverified(updatedSeedSet, frozenItems)
+                    updatedItems = mergeCandidates(state.items, newCandidates)
+                }
+            }
+            UserActionKind.ADD_CONSTRAINT -> {
+                // 제약 조건은 updatedStatements에 누적되어 buildClarifyIntent 시 IntentConstraint로 자동 수렴됨
+            }
+            UserActionKind.COMPLETE -> {
+                isReady = true
+            }
+            UserActionKind.UNKNOWN -> {
+                // Invariant (e): No-Op on items
+            }
+        }
+
+        val nextState = state.copy(
+            items = updatedItems,
+            seedSet = updatedSeedSet,
+            userStatements = updatedStatements
+        )
+
+        val isExhausted = isReady || (translated.kind == UserActionKind.INCLUDE_TOKEN && updatedItems.none { it.verdict == Verdict.PENDING })
+        val openQ = if (isReady) null else checkOpenQuestionTrigger(updatedSeedSet, updatedItems)
+        val taskSummary = generateTaskSummary(state.originalRequirement, updatedItems)
+
+        return Stage0TurnResult(
+            state = nextState,
+            openQuestion = openQ,
+            isExhausted = isExhausted,
+            isReadyForStage1 = isReady,
+            taskSummary = taskSummary,
+            echoBackMessage = echoMsg
+        )
+    }
+
+    /**
      * Clarify 대화 상태로부터 구조화된 인텐트 계약(ClarifyIntent) 생성.
      * - 대화 표면(로그, 파일 목록, taskSummary)은 완전히 배제하고 오직 구조화된 의도만 전송.
+     * - 대화 중 REJECTED된 파일 목록을 excludedFiles(1급 결정)로 추출하여 analyze에 원천 배제 인계.
      * - LLM 실패 시 originalRequirement 및 ConstraintKind.OTHER + rawStatement로 완전 격리 폴백 보장.
      */
     fun buildClarifyIntent(state: Stage0State): ClarifyIntent {
@@ -479,12 +562,17 @@ class Stage0ClarificationEngine(
         val anchorTokens = state.seedSet.map { it.value }.distinct()
         val constraints = extractConstraints(state.userStatements)
         val refinedRequirement = refineRequirement(state.originalRequirement, state.userStatements, constraints)
+        val excludedFiles = state.items
+            .filter { it.verdict == Verdict.REJECTED }
+            .mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+            .distinct()
 
         return ClarifyIntent(
             originalRequirement = state.originalRequirement,
             refinedRequirement = refinedRequirement,
             anchorTokens = anchorTokens,
             constraints = constraints,
+            excludedFiles = excludedFiles,
             graphHash = graphHash,
             contractVersion = "1.0"
         )

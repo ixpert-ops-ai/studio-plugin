@@ -453,4 +453,131 @@ class RequirementAnalysisPipelineIntegrationTest {
         println("총 산출 파일 수: ${standalonePaths.size}개")
         standalonePaths.forEachIndexed { i, p -> println(" [${i + 1}] $p") }
     }
+
+    /**
+     * [Phase 3-2 불변식 a 실증 테스트]
+     * ClarifyIntent.excludedFiles (1급 결정) 주입 시:
+     * 1) [Before 실증]: excludedFiles = emptyList()일 때 ObsoleteService.java가 targetFiles에 존재함을 먼저 확인
+     * 2) [After 실증]: excludedFiles = listOf(ObsoleteService.java) 주입 시 targetFiles에서 0건으로 완전히 사라짐을 대조 확인
+     * 3) [디스크 라운드트립 & 영속 보존]: Analyze 완주 후 저장된 ClarificationContract의 rejectedExistingRefs에 excludedFiles가 영속화되고, 재로드 시에도 0건 부활이 보존됨을 확인
+     */
+    @Test
+    fun testPhase32_ClarifyIntentExcludedFiles_BeforeAfterContrastAndDiskRoundtripZeroRevival() = kotlinx.coroutines.runBlocking {
+        val projectRoot = tempFolder.newFolder("phase32_excluded_files_contrast")
+        val dummyClient = object : net.ib.ixpert.ops.wuwagent.client.LLMClient {
+            override fun chat(
+                systemPrompt: String,
+                userCode: String,
+                maxTokens: Int?,
+                onChunk: ((String) -> Unit)?
+            ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
+                return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse(
+                    model = "test",
+                    createdAt = "",
+                    message = net.ib.ixpert.ops.wuwagent.model.OllamaMessage("assistant", "{}"),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+
+        val graph = ProjectGraph(
+            generatedAt = Instant.now().toString(),
+            projectRoot = projectRoot.absolutePath,
+            frameworkType = FrameworkType.SPRING_MVC_MYBATIS,
+            files = mapOf(
+                "com/example/ExistingService.java" to FileNode(
+                    path = "com/example/ExistingService.java",
+                    packageName = "com.example",
+                    className = "ExistingService",
+                    fileType = SpringFileType.SERVICE,
+                    layer = ArchitectureLayer.SERVICE
+                ),
+                "com/example/ObsoleteService.java" to FileNode(
+                    path = "com/example/ObsoleteService.java",
+                    packageName = "com.example",
+                    className = "ObsoleteService",
+                    fileType = SpringFileType.SERVICE,
+                    layer = ArchitectureLayer.SERVICE
+                )
+            ),
+            relationships = emptyList(),
+            statistics = GraphStatistics()
+        )
+
+        val graphHash = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.calculateGraphHash(graph)
+        val pipeline = RequirementAnalysisPipeline(dummyClient)
+        val requirement = "ExistingService 및 ObsoleteService 서비스 로직 수정"
+
+        // 1. [Before 실증] excludedFiles가 없을 때 (emptyList)
+        val intentBefore = net.ib.ixpert.ops.wuwagent.agent.clarify.model.ClarifyIntent(
+            originalRequirement = requirement,
+            refinedRequirement = requirement,
+            anchorTokens = listOf("ExistingService", "ObsoleteService"),
+            constraints = emptyList(),
+            excludedFiles = emptyList(), // 배제 없음
+            graphHash = graphHash,
+            contractVersion = "1.0"
+        )
+        val resultBefore = pipeline.analyze(
+            primaryReq = requirement,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intentBefore,
+            previousContract = null,
+            projectRoot = projectRoot
+        )
+
+        // Before 대조 확인: ObsoleteService.java가 targetFiles에 존재해야 함
+        assertTrue(
+            "Before 실증: excludedFiles가 비어있을 때 ObsoleteService.java는 targetFiles에 반드시 존재해야 함",
+            resultBefore.targetFiles.any { it.path == "com/example/ObsoleteService.java" }
+        )
+        val beforeCount = resultBefore.targetFiles.size
+        println("=== [Phase 3-2 Before 실증] ===")
+        println("excludedFiles = emptyList() 시 후보 수: $beforeCount, ObsoleteService 포함 여부: true")
+
+        // 2. [After 실증] excludedFiles에 ObsoleteService.java를 명시적으로 주입
+        val intentAfter = intentBefore.copy(
+            excludedFiles = listOf("com/example/ObsoleteService.java")
+        )
+        val resultAfter = pipeline.analyze(
+            primaryReq = requirement,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intentAfter,
+            previousContract = null,
+            projectRoot = projectRoot
+        )
+
+        // After 대조 확인: ObsoleteService.java가 targetFiles에서 완전히 사라져야 함 (0건 부활)
+        assertFalse(
+            "After 실증: excludedFiles에 ObsoleteService.java가 주입되면 targetFiles에서 0건으로 완전히 사라져야 함",
+            resultAfter.targetFiles.any { it.path == "com/example/ObsoleteService.java" }
+        )
+        assertTrue(
+            "After 실증: ExistingService.java는 정상 유지되어야 함",
+            resultAfter.targetFiles.any { it.path == "com/example/ExistingService.java" }
+        )
+        assertEquals(
+            "After 실증: 대상 파일 수가 Before 대비 정확히 1건 감소해야 함",
+            beforeCount - 1,
+            resultAfter.targetFiles.size
+        )
+        println("=== [Phase 3-2 After 실증] ===")
+        println("excludedFiles = ['com/example/ObsoleteService.java'] 시 후보 수: ${resultAfter.targetFiles.size}, ObsoleteService 포함 여부: false (0건 배제 확인)")
+
+        // 3. [디스크 라운드트립 & 누적 보존 검증]
+        // Analyze 완주 후 저장된 ClarificationContract 파일 확인
+        val contractFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.findContractFile(projectRoot)
+        assertNotNull("Analyze 실행 후 ClarificationContract가 디스크에 생성되어야 함", contractFile)
+        val loadedContract = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.loadContract(contractFile!!, graph)
+
+        assertTrue(
+            "ClarifyIntent의 excludedFiles가 최종 ClarificationContract의 rejectedExistingRefs에 누적 영속화되어야 함",
+            loadedContract.rejectedExistingRefs.any { it.filePath == "com/example/ObsoleteService.java" }
+        )
+        println("=== [Phase 3-2 디스크 영속화 검증] ===")
+        println("디스크 계약 아티팩트 rejectedExistingRefs: ${loadedContract.rejectedExistingRefs.map { it.filePath }}")
+    }
 }
