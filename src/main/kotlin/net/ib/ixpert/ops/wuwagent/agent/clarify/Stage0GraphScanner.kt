@@ -190,7 +190,7 @@ class Stage0GraphScanner(
                     val acc = candidateMap.getOrPut(p) {
                         CandidateAcc(p, fNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf())
                     }
-                    acc.score += 2.0 * matches.size
+                    acc.score += minOf(6.0, 2.0 * matches.size)
                     if (lName != null) acc.symbols.add("localName:$lName")
                     acc.signals.add(ProvenanceSignal.LOCAL_NAME_MATCH)
                     acc.rationale = "자연어명/주석이 요구사항(${matches.joinToString()})과 일치"
@@ -219,8 +219,11 @@ class Stage0GraphScanner(
                 DomainDictionary.tokenizeCamelCase(ep.path.substringAfterLast("/")) + 
                 DomainDictionary.tokenizeCamelCase(ep.handlerMethod)
             }.map { it.lowercase() }
+            val methodTokens = (fNode.methods.map { it.name } + (fNode.demMethods?.map { it.methodName } ?: emptyList()))
+                .flatMap { DomainDictionary.tokenizeCamelCase(it) }
+                .map { it.lowercase() }
 
-            val fileDistinctTokens = (classTokens + epTokens).filter { it !in genericTokenStopwords }.distinct()
+            val fileDistinctTokens = (classTokens + epTokens + methodTokens).filter { it !in genericTokenStopwords }.distinct()
             
             val matchedDomainTokens = queryDomainTokens.filter { qToken ->
                 fileDistinctTokens.any { nToken ->
@@ -239,13 +242,13 @@ class Stage0GraphScanner(
                 val acc = candidateMap.getOrPut(p) {
                     CandidateAcc(p, fNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf())
                 }
-                val directScore = 4.0 + (matchCount * 2.5) + (if (isExactClassMatch) 3.0 else 0.0)
+                val directScore = (if (isExactClassMatch) 20.0 else 4.0) + (matchCount * 2.5)
                 acc.score += directScore
                 acc.symbols.addAll(matchedDomainTokens.map { "token:$it" })
                 acc.signals.add(ProvenanceSignal.STRUCTURAL_ID)
                 val summaryTokens = matchedDomainTokens.take(3).joinToString(", ")
                 acc.rationale = if (acc.rationale.isBlank()) {
-                    "클래스명/엔드포인트가 요구사항 토큰($summaryTokens)과 다중 일치"
+                    "클래스명/엔드포인트가 요구사항 토큰($summaryTokens)과 일치"
                 } else {
                     "${acc.rationale} + 요구사항 토큰($summaryTokens) 일치"
                 }
@@ -521,9 +524,9 @@ class Stage0GraphScanner(
             }
 
         fun isDataAccessType(type: String, path: String): Boolean {
-            if (type == "DAO" || type == "REPOSITORY" || type == "MYBATIS_MAPPER") return true
+            if (type == "DAO" || type == "REPOSITORY" || type == "MYBATIS_MAPPER" || type == "DATA_ACCESS") return true
             val lower = path.lowercase()
-            if (lower.contains("/dao/") || lower.contains("/repository/")) return true
+            if (lower.contains("/dao/") || lower.contains("/repository/") || lower.contains("/dem/") || lower.contains("/dqm/")) return true
             return false
         }
 

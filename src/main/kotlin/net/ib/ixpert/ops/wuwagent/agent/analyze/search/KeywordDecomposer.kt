@@ -83,13 +83,16 @@ class KeywordDecomposer(
 
     private fun tokenize(input: String): List<String> {
         val results = mutableListOf<String>()
-        // 한글 단어, 영문 단어, 숫자를 각각 분리
-        val pattern = Regex("[가-힣]+|[a-zA-Z]+|[0-9]+")
-        results += pattern.findAll(input).map { it.value }.toList()
+        // 한글 단어 및 영숫자 복합 식별자 분리 (Stage 1의 [a-zA-Z0-9]+ 규칙과 일치)
+        val pattern = Regex("[가-힣]+|[a-zA-Z0-9]+")
+        results += pattern.findAll(input)
+            .map { it.value }
+            .filter { it.length >= 2 }
+            .toList()
         
-        // 영문 CamelCase 추가 분리
+        // 영숫자 CamelCase/ALL_CAPS 추가 분리
         val additionalTokens = mutableListOf<String>()
-        results.filter { it.isNotEmpty() && it[0].isLetter() && it.length > 3 && it.matches(Regex("[a-zA-Z]+")) }
+        results.filter { it.isNotEmpty() && it.any { c -> c.isLetter() } && it.length > 3 }
             .forEach { additionalTokens += splitCamelCase(it) }
             
         results.addAll(additionalTokens)
@@ -97,7 +100,7 @@ class KeywordDecomposer(
     }
 
     private fun splitCamelCase(name: String): List<String> {
-        return Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+        return Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[a-zA-Z])(?=[0-9])|(?<=[0-9])(?=[a-zA-Z])")
             .split(name).filter { it.isNotEmpty() }
     }
 }

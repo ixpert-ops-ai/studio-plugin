@@ -530,6 +530,44 @@ class Stage0SurveyAdminSnapshotTest {
         }
     }
 
+    /**
+     * P1 정규식 토크나이저 수정 검증:
+     * - SR에 SVO/SVC 없이 영숫자 복합 DEM('aCMBTBAPC024DEM')만 단독으로 언급된 가혹 조건
+     * - Stage 0에서 ACMBTBAPC024DEM이 즉시 STRUCTURAL 시드로 식별되어 HIGH 후보로 진입하는지 검증
+     */
+    @Test
+    fun testApcIsolatedDemMentionSimulation() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json"
+        val file = File(graphPath)
+        if (!file.exists()) return@runBlocking
+
+        val graph = Gson().fromJson(file.readText(Charsets.UTF_8), ProjectGraph::class.java).normalizeLegacyCollections()
+        val scanner = Stage0GraphScanner(
+            graph = graph,
+            minSpecificityScore = 1.0,
+            proposalBudget = 10,
+            localDomainOverrides = emptyMap(),
+            maxBridgeDegree = 15,
+            maxExternalShared = 3
+        )
+        val engine = Stage0ClarificationEngine(scanner, graph)
+
+        val isolatedSr = "aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회"
+        val turn0 = engine.initSession(isolatedSr)
+        val items = turn0.state.items
+
+        val highPaths = items.filter { it.confidence == ConfidenceBucket.HIGH_CONFIDENCE }
+            .mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+
+        println("=== P1 검증: aCMBTBAPC024DEM 단독 언급 시뮬레이션 ===")
+        println("SR: \"$isolatedSr\"")
+        println("Stage 0 전체 아이템 수: ${items.size}")
+        println("Stage 0 HIGH Paths: $highPaths")
+
+        val demRecovered = highPaths.any { it.contains("ACMBTBAPC024DEM", ignoreCase = true) }
+        assertTrue("SVO가 없는 단독 언급 조건에서도 ACMBTBAPC024DEM이 Stage 0 HIGH 시드로 즉시 회수되어야 함", demRecovered)
+    }
+
     @Test
     fun testDiagnoseGtScoreAndRankInCandidatePoolAndStage1() {
         println("=========================================================================")

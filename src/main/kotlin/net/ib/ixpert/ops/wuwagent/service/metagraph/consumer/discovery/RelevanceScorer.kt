@@ -162,8 +162,8 @@ class RelevanceScorer(
                                              && !isGodServiceSource
                                              && isUnderCap
 
-                if (isSeedDirectDependency && fromClassName != null) {
-                    seedDepCounts[fromClassName] = curCount + 1
+                if (isSeedDirectDependency) {
+                    seedDepCounts[fromClassName!!] = curCount + 1
                 }
 
                 // LLM이 명시적으로 지목한 파일 판별 (submit_seeds 결과 + Judge pick + Frontend hint + Seed 직접 하향 의존)
@@ -320,22 +320,25 @@ class RelevanceScorer(
             }
         }
 
-        // 1.5 DAO/Mapper 인터페이스-구현체 계약 쌍(Contract Pair) 보장
-        // 보호 확정된(isProtected == true) DAO/Mapper 구현체 또는 인터페이스의 짝꿍을 찾아 Tier 2로 동반 승급/추가
-        val protectedDaoNodes = scoredFiles.filter { sf ->
+        // 1.5 DAO/Mapper 및 Anyframe AP 서비스 체인(SVC ↔ SVCImpl ↔ BIZ ↔ DEM/DQM) 계약 쌍(Contract Pair) 보장
+        // 보호 확정된(isProtected == true) 노드의 구조적 계약 짝꿍을 찾아 Tier 2로 동반 승급/추가
+        val protectedContractNodes = scoredFiles.filter { sf ->
             sf.isProtected && (
-                sf.fileType == "REPOSITORY" || sf.fileType == "DATA_ACCESS" ||
+                sf.fileType == "REPOSITORY" || sf.fileType == "DATA_ACCESS" || sf.fileType == "BIZ" ||
                 sf.className.endsWith("Dao") || sf.className.endsWith("DaoImpl") ||
-                sf.className.endsWith("Mapper") || sf.className.endsWith("DEM") || sf.className.endsWith("DQM")
+                sf.className.endsWith("Mapper") || sf.className.endsWith("DEM") || sf.className.endsWith("DQM") ||
+                sf.className.endsWith("SVC") || sf.className.endsWith("SVCImpl") ||
+                sf.className.endsWith("Service") || sf.className.endsWith("ServiceImpl") ||
+                sf.className.endsWith("BIZ")
             )
         }
 
         val contractPairAdditions = mutableListOf<ScoredFile>()
 
-        for (item in protectedDaoNodes) {
+        for (item in protectedContractNodes) {
             val node = graph.files[item.path] ?: continue
             
-            // A. 구현체 -> 인터페이스 방향 탐색
+            // A. 구현체 -> 인터페이스 방향 탐색 (DaoImpl -> Dao, SVCImpl -> SVC, ServiceImpl -> Service)
             if (!node.isInterface) {
                 val targetInterfaceNames = node.implementedInterfaces.ifEmpty {
                     if (node.className.endsWith("Impl")) listOf(node.className.removeSuffix("Impl")) else emptyList()
@@ -379,7 +382,7 @@ class RelevanceScorer(
                     }
                 }
             }
-            // B. 인터페이스 -> 구현체 방향 탐색 (역방향)
+            // B. 인터페이스 -> 구현체 방향 탐색 (역방향: Dao -> DaoImpl, SVC -> SVCImpl, Service -> ServiceImpl)
             else {
                 val implEntries = graph.files.entries.filter { (_, f) ->
                     !f.isInterface && (
@@ -414,6 +417,62 @@ class RelevanceScorer(
                                 isProtected = true,
                                 protectionReason = "Seed Direct Dependency"
                             )
+                        }
+                    }
+                }
+            }
+
+            // C. Anyframe AP 서비스 체인 (SVCImpl ↔ BIZ ↔ DEM/DQM) 직접 의존/호출 체인 보장
+            // 1) DEM/DQM -> 호출하는 BIZ 승급 (DEM이 보호된 경우 직접 호출하는 BIZ를 Tier 2로 동반 승급)
+            if (node.className.endsWith("DEM") || node.className.endsWith("DQM")) {
+                for (callerPath in node.dependedBy) {
+                    if (callerPath.endsWith("BIZ.java")) {
+                        val existing = scoredFiles.find { it.path == callerPath }
+                        if (existing != null && existing.protectionReason == null) {
+                            val index = scoredFiles.indexOf(existing)
+                            if (index != -1) {
+                                println("[RelevanceScorer] CONTRACT PAIR: Promoted caller BIZ ${existing.className} to Tier 2 for protected DEM ${node.className}")
+                                scoredFiles[index] = existing.copy(
+                                    isProtected = true,
+                                    protectionReason = "Seed Direct Dependency"
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            // 2) BIZ -> 호출하는 DEM/DQM 또는 호출자인 SVCImpl 승급
+            if (node.className.endsWith("BIZ")) {
+                for (depPath in node.dependsOn) {
+                    if (depPath.endsWith("DEM.java") || depPath.endsWith("DQM.java")) {
+                        val existing = scoredFiles.find { it.path == depPath }
+                        if (existing != null && existing.protectionReason == null) {
+                            val index = scoredFiles.indexOf(existing)
+                            if (index != -1) {
+                                println("[RelevanceScorer] CONTRACT PAIR: Promoted callee DEM/DQM ${existing.className} to Tier 2 for protected BIZ ${node.className}")
+                                scoredFiles[index] = existing.copy(
+                                    isProtected = true,
+                                    protectionReason = "Seed Direct Dependency"
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            // 3) SVCImpl -> 호출하는 BIZ 승급
+            if (node.className.endsWith("SVCImpl")) {
+                for (depPath in node.dependsOn) {
+                    if (depPath.endsWith("BIZ.java")) {
+                        val existing = scoredFiles.find { it.path == depPath }
+                        if (existing != null && existing.protectionReason == null) {
+                            val index = scoredFiles.indexOf(existing)
+                            if (index != -1) {
+                                println("[RelevanceScorer] CONTRACT PAIR: Promoted callee BIZ ${existing.className} to Tier 2 for protected SVCImpl ${node.className}")
+                                scoredFiles[index] = existing.copy(
+                                    isProtected = true,
+                                    protectionReason = "Seed Direct Dependency"
+                                )
+                            }
                         }
                     }
                 }
