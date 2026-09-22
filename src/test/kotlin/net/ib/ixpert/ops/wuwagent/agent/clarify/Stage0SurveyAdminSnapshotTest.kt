@@ -386,5 +386,283 @@ class Stage0SurveyAdminSnapshotTest {
         println("단일 토큰 기준 실측 증폭률 (Amplification): $singleTokenAmplification")
         println("시스템 실측 Recall (단일 토큰 기준): ${String.format("%.1f", systemRecallSingleToken)}% (16 / 19)")
     }
+
+    @Test
+    fun testMeasureThreeProjectsPureBaseline() {
+        println("=========================================================================")
+        println("=== 3개 프로젝트 순수 Baseline 및 최종 선정(Final Output) GT 생존 실측 ===")
+        println("=========================================================================\n")
+
+        data class BenchmarkCase(
+            val name: String,
+            val graphPath: String,
+            val sr: String,
+            val gtFiles: List<String>
+        )
+
+        val testCases = listOf(
+            BenchmarkCase(
+                name = "survey_admin (Case B)",
+                graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json",
+                sr = "설문 발송 채널에 브랜드메시지 추가",
+                gtFiles = listOf(
+                    "survey_list.jsp", "survey_write.jsp", "survey.list.js", "survey.write.js",
+                    "SurveyServiceImpl.java", "sql_survey.xml", "AlimtalkChnlDto.java", "AlimtalkTmplDto.java"
+                )
+            ),
+            BenchmarkCase(
+                name = "ISM (Point Usage - HeldOut)",
+                graphPath = "C:/Workspace/graph/project-graph-i/project-graph.json",
+                sr = "개인별 포인트유형별 사용내역 조회 화면 및 엑셀 다운로드 개발",
+                gtFiles = listOf("PDsbUseController", "PDsbUseServiceImpl", "ECSITBISM015Mapper", "ECSITBISM015Mapper.xml")
+            ),
+            BenchmarkCase(
+                name = "ISM (Care Member - Core)",
+                graphPath = "C:/Workspace/graph/project-graph-i/project-graph.json",
+                sr = "케어회원 관리 화면 조회",
+                gtFiles = listOf("CareMemberMgmtController", "CareMemberMgmtServiceImpl", "ECMBTBISM006Mapper", "ECMBTBISM006Mapper.xml")
+            ),
+            BenchmarkCase(
+                name = "apc (Trcd Is Inf - Transit Card)",
+                graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json",
+                sr = "교통카드 발급업체 변경 후, 이전 모바일교통카드 이용회원 체크 및 재발급 안내를 위한 신규서비스 개발 건. 교통카드 구 발급정보 조회 신규서비스 개발 (SAPACMM0802S01 기존서비스 참고). APCMMTrcdIsInfSVO 수정, APCMMTrcdIsSVC.java 신규서비스 추가, aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회",
+                gtFiles = listOf("APCMMTrcdIsInfSVO", "APCMMTrcdIsSVC", "APCMMTrcdIsSVCImpl", "APCMMTrcdIsBIZ", "ACMBTBAPC024DEM")
+            ),
+            BenchmarkCase(
+                name = "apc (Samsung Pay OTC)",
+                graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json",
+                sr = "삼성페이 OTC 서명 검증 로직 추가",
+                gtFiles = listOf("APCSPSspySignRgChBIZ", "APCSPSspyOfflOtcIsBIZ")
+            )
+        )
+
+        for (tc in testCases) {
+            val file = File(tc.graphPath)
+            if (!file.exists()) {
+                println("[${tc.name}] 메타그래프 파일을 찾을 수 없음: ${tc.graphPath}")
+                continue
+            }
+            val graph = Gson().fromJson(file.readText(Charsets.UTF_8), ProjectGraph::class.java).normalizeLegacyCollections()
+
+            // 1. Stage 0 Scan
+            val scanner = Stage0GraphScanner(
+                graph = graph,
+                minSpecificityScore = 1.0,
+                proposalBudget = 10,
+                localDomainOverrides = emptyMap(),
+                maxBridgeDegree = 15,
+                maxExternalShared = 3
+            )
+            val engine = Stage0ClarificationEngine(scanner, graph)
+            val turn0 = engine.initSession(tc.sr)
+
+            val totalItems = turn0.state.items
+            val highItems = totalItems.filter { it.confidence == ConfidenceBucket.HIGH_CONFIDENCE }
+            val lowItems = totalItems.filter { it.confidence == ConfidenceBucket.LOW_CONFIDENCE }
+
+            val highPaths = highItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+            val lowPaths = lowItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+            val allTurn0Paths = totalItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+
+            println("==================================================")
+            println("▶ Case: ${tc.name} (전체 노드: ${graph.totalFileCount}개)")
+            println("  SR: \"${tc.sr}\"")
+            println("  - Stage 0 후보 풀: 총 ${totalItems.size}개 (HIGH: ${highItems.size}, LOW: ${lowItems.size})")
+
+            // Stage 0 GT 매칭 분석
+            val stage0GtMatched = tc.gtFiles.filter { gt -> allTurn0Paths.any { it.contains(gt, ignoreCase = true) } }
+            val stage0HighGtMatched = tc.gtFiles.filter { gt -> highPaths.any { it.contains(gt, ignoreCase = true) } }
+            val stage0LowGtMatched = tc.gtFiles.filter { gt -> lowPaths.any { it.contains(gt, ignoreCase = true) } }
+
+            println("  - Stage 0 GT 회수: ${stage0GtMatched.size}/${tc.gtFiles.size} (${stage0GtMatched.joinToString(", ")})")
+            println("    * HIGH(Top-10) 내 GT: ${stage0HighGtMatched.size}/${tc.gtFiles.size} -> ${stage0HighGtMatched}")
+            println("    * HIGH(Top-10) Paths: $highPaths")
+            println("    * LOW 내 GT: ${stage0LowGtMatched.size}/${tc.gtFiles.size} -> ${stage0LowGtMatched}")
+            val stage0Missing = tc.gtFiles - stage0GtMatched.toSet()
+            if (stage0Missing.isNotEmpty()) {
+                println("    * Stage 0 미발견 GT: $stage0Missing")
+            }
+
+            // 2. Stage 1 Discovery & 2-Tier Gating (RelevanceScorer fileLimit=30, minScore=55)
+            val domainExtractor = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DomainExtractor(graph.files)
+            val config = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DiscoveryConfig(maxHop = 3)
+            val expander = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.GraphExpander(graph, domainExtractor, config)
+
+            // SeedSelectionResult 구성 (Stage 0의 HIGH 시드 기반)
+            val seedClasses = highPaths.map { it.substringAfterLast("/").substringBeforeLast(".") }
+            val seedResult = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.SeedSelectionResult(
+                seedClasses = seedClasses,
+                changeIntent = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ChangeIntent.MODIFY,
+                layerHint = listOf("SERVICE", "BIZ", "PRESENTATION", "DAO", "MAPPER", "VIEW"),
+                frontendRelevant = highPaths.any { it.endsWith(".jsp") || it.endsWith(".js") || it.endsWith(".html") },
+                reasoning = "Stage 0 Seeded",
+                judgePicks = seedClasses.take(5),
+                rawCandidates = seedClasses,
+                frontendFileHints = highPaths.filter { it.endsWith(".jsp") || it.endsWith(".js") }.map { it.substringAfterLast("/").substringBeforeLast(".") }
+            )
+
+            val expandedFiles = expander.expand(seedResult, tc.sr)
+            val scorer = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.RelevanceScorer(graph, fileLimit = 30, minScore = 55)
+            val finalFiltered = scorer.scoreAndFilter(tc.sr, expandedFiles, seedResult).take(30)
+
+            println("  - Stage 1 확장 대상: ${expandedFiles.size}개 -> 2-Tier Gating 최종 선정: ${finalFiltered.size}개")
+
+            val finalPaths = finalFiltered.map { it.path }
+            val finalGtMatched = tc.gtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
+            val finalMissing = tc.gtFiles - finalGtMatched.toSet()
+
+            println("  - [최종 선정 목록 (Top-${finalFiltered.size}) GT 생존]: ${finalGtMatched.size}/${tc.gtFiles.size} (${finalGtMatched.joinToString(", ")})")
+            if (finalMissing.isNotEmpty()) {
+                println("    * 최종 목록에서 탈락/미회수된 GT: $finalMissing")
+            }
+
+            println("  - [최종 선정 상위 10개 파일 및 점수]:")
+            finalFiltered.take(10).forEachIndexed { idx, sf ->
+                val isGt = tc.gtFiles.any { sf.path.contains(it, ignoreCase = true) }
+                val tag = if (isGt) "★[GT]" else "  [FP]"
+                println("    $tag ${idx + 1}. Score: ${sf.score} | ${sf.path}")
+            }
+            if (finalFiltered.size > 10) {
+                val fpCount = finalFiltered.count { sf -> tc.gtFiles.none { sf.path.contains(it, ignoreCase = true) } }
+                println("    ... (총 ${finalFiltered.size}개 중 GT: ${finalGtMatched.size}개, 비GT/FP: ${fpCount}개)")
+            }
+            println()
+        }
+    }
+
+    @Test
+    fun testDiagnoseGtScoreAndRankInCandidatePoolAndStage1() {
+        println("=========================================================================")
+        println("=== GT 정밀 진단: 후보 풀 내 점수/순위 vs 시드 식별 실패 여부 판별 ===")
+        println("=========================================================================\n")
+
+        data class TestCase(
+            val name: String,
+            val graphPath: String,
+            val sr: String,
+            val gtQueries: List<String>
+        )
+
+        val cases = listOf(
+            TestCase(
+                name = "ISM (Point Usage - HeldOut)",
+                graphPath = "C:/Workspace/graph/project-graph-i/project-graph.json",
+                sr = "개인별 포인트유형별 사용내역 조회 화면 및 엑셀 다운로드 개발",
+                gtQueries = listOf("PDsbUseController", "PDsbUseServiceImpl", "ECSITBISM015", "ECOPTBISM015")
+            ),
+            TestCase(
+                name = "ISM (Care Member - Core)",
+                graphPath = "C:/Workspace/graph/project-graph-i/project-graph.json",
+                sr = "케어회원 관리 화면 조회",
+                gtQueries = listOf("CareMemberMgmtController", "CareMemberMgmtServiceImpl", "ECMBTBISM006")
+            ),
+            TestCase(
+                name = "apc (Transit Card)",
+                graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json",
+                sr = "교통카드 발급업체 변경 후, 이전 모바일교통카드 이용회원 체크 및 재발급 안내를 위한 신규서비스 개발 건. 교통카드 구 발급정보 조회 신규서비스 개발 (SAPACMM0802S01 기존서비스 참고). APCMMTrcdIsInfSVO 수정, APCMMTrcdIsSVC.java 신규서비스 추가, aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회",
+                gtQueries = listOf("APCMMTrcdIsInfSVO", "APCMMTrcdIsSVC", "APCMMTrcdIsSVCImpl", "APCMMTrcdIsBIZ", "ACMBTBAPC024DEM")
+            )
+        )
+
+        for (tc in cases) {
+            val file = File(tc.graphPath)
+            if (!file.exists()) continue
+            val graph = Gson().fromJson(file.readText(Charsets.UTF_8), ProjectGraph::class.java).normalizeLegacyCollections()
+            val scanner = Stage0GraphScanner(
+                graph = graph,
+                minSpecificityScore = 1.0,
+                proposalBudget = 10,
+                localDomainOverrides = emptyMap(),
+                maxBridgeDegree = 15,
+                maxExternalShared = 3
+            )
+
+            println("-------------------------------------------------------------------------")
+            println("▶ Case: ${tc.name}")
+            println("  SR: \"${tc.sr}\"")
+            println("-------------------------------------------------------------------------")
+
+            // 1. Graph Node Search
+            println("  [1. 메타그래프 내 노드 존재 여부]")
+            for (query in tc.gtQueries) {
+                val matchedFiles = graph.files.values.filter { it.className.contains(query, ignoreCase = true) || it.path.contains(query, ignoreCase = true) }
+                val matchedResources = graph.resourceNodes.filter { it.path.contains(query, ignoreCase = true) }
+                val totalFound = matchedFiles.size + matchedResources.size
+                println("  • GT 검색어: '$query' -> 총 $totalFound 건 발견")
+                matchedFiles.forEach { f ->
+                    println("    - [FileNode] className: ${f.className}, path: ${f.path}, localName: ${f.localName ?: "없음"}, layer: ${f.layer}")
+                }
+                matchedResources.forEach { r ->
+                    println("    - [ResourceNode] type: ${r.type}, path: ${r.path}")
+                }
+                if (totalFound == 0) {
+                    println("    ❌ 메타그래프에 노드 자체가 존재하지 않음!")
+                }
+            }
+
+            // 2. Stage 0 Scan & Candidate Pool Ranking
+            val engine = Stage0ClarificationEngine(scanner, graph)
+            val turn0 = engine.initSession(tc.sr)
+            val allItems = turn0.state.items
+            val highItems = allItems.filter { it.confidence == ConfidenceBucket.HIGH_CONFIDENCE }
+            val lowItems = allItems.filter { it.confidence == ConfidenceBucket.LOW_CONFIDENCE }
+
+            println("\n  [2. Stage 0 후보 풀(총 ${allItems.size}개) 내 GT 위치 및 순위]")
+            for (query in tc.gtQueries) {
+                val itemMatches = allItems.filter { item ->
+                    val path = (item.hint as? LinkHint.ExistingRef)?.filePath ?: ""
+                    path.contains(query, ignoreCase = true)
+                }
+                if (itemMatches.isNotEmpty()) {
+                    itemMatches.forEach { item ->
+                        val path = (item.hint as? LinkHint.ExistingRef)?.filePath ?: ""
+                        val overallRank = allItems.indexOf(item) + 1
+                        val bucket = item.confidence
+                        println("    ★ [후보 진입] '$query' | Rank: #$overallRank / ${allItems.size} | Bucket: $bucket | Signals: ${item.provenanceSignals} | Path: $path")
+                        println("       -> Anchor Rationale: ${item.anchorRationale}")
+                    }
+                } else {
+                    println("    ❌ [후보 미진입] '$query' -> Stage 0 후보 풀(700+개)에 전혀 들어가지 못함 (점수 < 1.0 또는 엣지 미도달)")
+                }
+            }
+
+            // 3. Stage 1 Graph Expansion & RelevanceScorer
+            val domainExtractor = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DomainExtractor(graph.files)
+            val config = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DiscoveryConfig(maxHop = 3)
+            val expander = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.GraphExpander(graph, domainExtractor, config)
+
+            val highPaths = highItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+            val seedClasses = highPaths.map { it.substringAfterLast("/").substringBeforeLast(".") }
+            val seedResult = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.SeedSelectionResult(
+                seedClasses = seedClasses,
+                changeIntent = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.ChangeIntent.MODIFY,
+                layerHint = listOf("SERVICE", "DAO", "MAPPER", "VIEW"),
+                frontendRelevant = highPaths.any { it.endsWith(".jsp") || it.endsWith(".js") || it.endsWith(".html") },
+                reasoning = "Stage 0 Seeded",
+                judgePicks = seedClasses.take(5),
+                rawCandidates = seedClasses,
+                frontendFileHints = highPaths.filter { it.endsWith(".jsp") || it.endsWith(".js") }.map { it.substringAfterLast("/").substringBeforeLast(".") }
+            )
+
+            val expandedFiles = expander.expand(seedResult, tc.sr)
+            val scorer = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.RelevanceScorer(graph, fileLimit = 1000, minScore = 0)
+            val allScored = scorer.scoreAndFilter(tc.sr, expandedFiles, seedResult)
+
+            println("\n  [3. Stage 1 확장(${expandedFiles.size}개) 및 점수(총 ${allScored.size}개) 내 GT 위치]")
+            for (query in tc.gtQueries) {
+                val expandedMatch = expandedFiles.entries.find { it.key.contains(query, ignoreCase = true) }
+                val scoredMatch = allScored.find { it.path.contains(query, ignoreCase = true) }
+                if (scoredMatch != null) {
+                    val rank = allScored.indexOf(scoredMatch) + 1
+                    println("    ★ [Stage 1 발견] '$query' | 점수: ${scoredMatch.score}점 | 순위: #$rank / ${allScored.size} | Via: ${scoredMatch.discoveryReason} | Path: ${scoredMatch.path}")
+                } else if (expandedMatch != null) {
+                    println("    ⚠️ [Stage 1 확장됨 but 점수 탈락] '$query' | Hop: ${expandedMatch.value.hop}, Via: ${expandedMatch.value.via}")
+                } else {
+                    println("    ❌ [Stage 1 미확장] '$query' -> Stage 0 시드로부터 3-Hop 내에 도달하지 못함")
+                }
+            }
+            println()
+        }
+    }
 }
 

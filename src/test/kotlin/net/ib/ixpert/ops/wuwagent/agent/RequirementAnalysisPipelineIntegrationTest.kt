@@ -193,6 +193,127 @@ class RequirementAnalysisPipelineIntegrationTest {
     }
 
     /**
+     * [회귀 방어 테스트] 디스크에 과거 세션 계약(previousContract)이 남아있는 상태에서
+     * 새 세션(stage0Contract = null, 신규 ClarifyIntent) 실행 시 과거 trustedExistingRefs나 newCreations가 침투하지 않음을 검증.
+     * - 과거의 trustedExistingRefs, newCreations는 절대 합성되지 않아야 함 (유령 오염 0건)
+     * - 과거의 rejectedExistingRefs는 배제 필터로서 정상 동작해야 함
+     */
+    @Test
+    fun testStaleContractDoesNotContaminateNewSession() = kotlinx.coroutines.runBlocking {
+        val dummyClient = object : net.ib.ixpert.ops.wuwagent.client.LLMClient {
+            override fun chat(
+                systemPrompt: String,
+                userCode: String,
+                maxTokens: Int?,
+                onChunk: ((String) -> Unit)?
+            ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
+                return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse(
+                    model = "test",
+                    createdAt = "",
+                    message = net.ib.ixpert.ops.wuwagent.model.OllamaMessage("assistant", "{}"),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+
+        val graph = ProjectGraph(
+            generatedAt = Instant.now().toString(),
+            projectRoot = "/test/root",
+            frameworkType = FrameworkType.SPRING_MVC_MYBATIS,
+            files = mapOf(
+                "com/example/ExistingService.java" to FileNode(
+                    path = "com/example/ExistingService.java",
+                    packageName = "com.example",
+                    className = "ExistingService",
+                    fileType = SpringFileType.SERVICE,
+                    layer = ArchitectureLayer.SERVICE
+                ),
+                "com/example/OldBrandMessageService.java" to FileNode(
+                    path = "com/example/OldBrandMessageService.java",
+                    packageName = "com.example",
+                    className = "OldBrandMessageService",
+                    fileType = SpringFileType.SERVICE,
+                    layer = ArchitectureLayer.SERVICE
+                ),
+                "com/example/RejectedStaleFile.java" to FileNode(
+                    path = "com/example/RejectedStaleFile.java",
+                    packageName = "com.example",
+                    className = "RejectedStaleFile",
+                    fileType = SpringFileType.SERVICE,
+                    layer = ArchitectureLayer.SERVICE
+                )
+            ),
+            relationships = emptyList(),
+            statistics = GraphStatistics()
+        )
+
+        // 과거 세션에서 남겨진 디스크 계약 시뮬레이션
+        val staleTrusted = net.ib.ixpert.ops.wuwagent.agent.clarify.model.LinkHint.ExistingRef("com/example/OldBrandMessageService.java")
+        val staleNew = net.ib.ixpert.ops.wuwagent.agent.clarify.model.RequirementItem(
+            id = "stale_new",
+            statement = "com/example/StaleBizgoClient.java",
+            source = net.ib.ixpert.ops.wuwagent.agent.clarify.model.HintSource.USER_UTTERED,
+            hint = net.ib.ixpert.ops.wuwagent.agent.clarify.model.LinkHint.NewCreation,
+            anchorRationale = "과거 신규 생성",
+            verdict = net.ib.ixpert.ops.wuwagent.agent.clarify.model.Verdict.CONFIRMED
+        )
+        val staleRejected = net.ib.ixpert.ops.wuwagent.agent.clarify.model.LinkHint.ExistingRef("com/example/RejectedStaleFile.java")
+
+        val previousStaleContract = net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract(
+            createdAt = java.time.Instant.now().toString(),
+            graphHash = "staleHash",
+            trustedExistingRefs = listOf(staleTrusted),
+            newCreations = listOf(staleNew),
+            rejectedExistingRefs = listOf(staleRejected),
+            enrichedRequirementText = "과거 브랜드메시지 요구사항"
+        )
+
+        // 신규 세션의 ClarifyIntent (설문 마감일 검색)
+        val newIntent = net.ib.ixpert.ops.wuwagent.agent.clarify.model.ClarifyIntent(
+            originalRequirement = "설문 마감일 검색 추가",
+            refinedRequirement = "설문조사 목록 화면에 '설문 마감일' 검색 조건을 추가한다.",
+            anchorTokens = listOf("ExistingService"),
+            constraints = emptyList(),
+            excludedFiles = emptyList(),
+            graphHash = "currentHash",
+            contractVersion = "1.0"
+        )
+
+        val pipeline = RequirementAnalysisPipeline(dummyClient)
+        val result = pipeline.analyze(
+            primaryReq = "설문 마감일 검색 추가",
+            secondaryReq = "",
+            projectGraph = graph,
+            stage0Contract = null, // 신규 세션이므로 stage0Contract는 없음
+            clarifyIntent = newIntent,
+            previousContract = previousStaleContract // 디스크에서 로드된 과거 계약 주입
+        )
+
+        // 1. 과거 trustedExistingRefs가 현재 TargetFiles에 침투하지 않았음을 검증 (핵심)
+        assertFalse(
+            "과거 계약의 trustedExistingRefs(OldBrandMessageService)는 신규 세션 targetFiles에 침투하지 않아야 함",
+            result.targetFiles.any { it.path == "com/example/OldBrandMessageService.java" && it.description.contains("Stage 0") }
+        )
+
+        // 2. 과거 newCreations가 현재 TargetFiles에 침투하지 않았음을 검증 (핵심)
+        assertFalse(
+            "과거 계약의 newCreations(StaleBizgoClient)는 신규 세션 targetFiles에 침투하지 않아야 함",
+            result.targetFiles.any { it.path == "com/example/StaleBizgoClient.java" }
+        )
+
+        // 3. Stage 0 합성 흔적 부재 검증
+        val stage0SynthesizedCount = result.targetFiles.count { it.description.contains("Stage 0 확정 기존 파일") || it.description.contains("Stage 0 사용자 신규 생성 지정") }
+        assertEquals("previousContract에서 유래한 Stage 0 합성 항목은 정확히 0건이어야 함", 0, stage0SynthesizedCount)
+
+        // 4. 과거 rejectedExistingRefs는 배제 필터로서 정상 동작하여 결과에 없어야 함
+        assertFalse(
+            "previousContract의 rejectedExistingRefs(RejectedStaleFile)는 결과에서 완전히 배제되어야 함",
+            result.targetFiles.any { it.path == "com/example/RejectedStaleFile.java" }
+        )
+    }
+
+    /**
      * [Phase 2 6대 불변식 전주기 통합 테스트]
      * (a) Intent 수신 및 파이프라인 완주 (refinedRequirement 정상 소비)
      * (b) 단독 실행 하위 호환성 (ClarifyIntent = null 시에도 자립 완주)

@@ -203,6 +203,11 @@ interface ClarifyItem {
   isReEmergence?: boolean;
 }
 
+interface DialogueTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 interface ClarifyPayload {
   originalRequirement: string;
   items: ClarifyItem[];
@@ -211,14 +216,7 @@ interface ClarifyPayload {
   isReadyForStage1?: boolean;
   taskSummary?: string | null;
   echoBackMessage?: string | null;
-}
-
-interface DomainGroup {
-  domain: string;
-  isFallback: boolean;
-  highItems: ClarifyItem[];
-  lowItems: ClarifyItem[];
-  totalItems: ClarifyItem[];
+  dialogueHistory?: DialogueTurn[];
 }
 
 const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
@@ -238,7 +236,8 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
       isExhausted: false,
       isReadyForStage1: false,
       taskSummary: null,
-      echoBackMessage: null
+      echoBackMessage: null,
+      dialogueHistory: []
     };
   }, [msg.content, (msg as any).clarifyData]);
 
@@ -262,99 +261,6 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
     return init;
   });
 
-  // 1차 도메인 그룹핑 & 결정론적 정렬 (HIGH 수 내림차순 -> 총 파일수 내림차순 -> 도메인 사전순 -> 기타 맨 아래)
-  const domainGroups = useMemo<DomainGroup[]>(() => {
-    const map = new Map<string, ClarifyItem[]>();
-    payload.items.forEach(item => {
-      const key = item.domainPackage?.trim() || '__OTHER__';
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(item);
-    });
-
-    const groups: DomainGroup[] = [];
-    map.forEach((items, key) => {
-      const isFallback = key === '__OTHER__';
-      const highItems = items.filter(it => it.confidence !== 'LOW_CONFIDENCE');
-      const lowItems = items.filter(it => it.confidence === 'LOW_CONFIDENCE');
-      groups.push({
-        domain: isFallback ? '기타 / 미분류' : key,
-        isFallback,
-        highItems,
-        lowItems,
-        totalItems: items
-      });
-    });
-
-    groups.sort((a, b) => {
-      if (a.isFallback !== b.isFallback) return a.isFallback ? 1 : -1;
-      if (a.highItems.length !== b.highItems.length) return b.highItems.length - a.highItems.length;
-      if (a.totalItems.length !== b.totalItems.length) return b.totalItems.length - a.totalItems.length;
-      return a.domain.localeCompare(b.domain);
-    });
-
-    return groups;
-  }, [payload.items]);
-
-  // LOW_CONFIDENCE 섹션 접기/펼치기 상태 (도메인별, 기본 false: 접힘)
-  const [expandedLowSections, setExpandedLowSections] = useState<Record<string, boolean>>({});
-
-  const toggleLowSection = (domain: string) => {
-    setExpandedLowSections(prev => ({
-      ...prev,
-      [domain]: !prev[domain]
-    }));
-  };
-
-  // 그룹 내 전체 제외 여부 확인
-  const isGroupAllRejected = (group: DomainGroup): boolean => {
-    if (group.totalItems.length === 0) return false;
-    return group.totalItems.every(it => (verdicts[it.id] || it.verdict) === 'REJECTED');
-  };
-
-  // 그룹 일괄 액션 (SSOT 정규화: 자식 파일들의 FILE_MISMATCH 일괄 매핑)
-  const toggleGroupVerdict = (group: DomainGroup) => {
-    if (isSubmitted) return;
-    const allRejected = isGroupAllRejected(group);
-
-    if (allRejected) {
-      // [전체 복원] -> PENDING으로 되돌리기
-      setVerdicts(prev => {
-        const next = { ...prev };
-        group.totalItems.forEach(it => {
-          next[it.id] = 'PENDING';
-        });
-        return next;
-      });
-      setRejectionReasons(prev => {
-        const next = { ...prev };
-        group.totalItems.forEach(it => {
-          delete next[it.id];
-        });
-        return next;
-      });
-    } else {
-      // [전체 제외] -> 모든 자식 파일 verdicts=REJECTED, rejectionReasons=FILE_MISMATCH (복구 가능)
-      setVerdicts(prev => {
-        const next = { ...prev };
-        group.totalItems.forEach(it => {
-          next[it.id] = 'REJECTED';
-        });
-        return next;
-      });
-      setRejectionReasons(prev => {
-        const next = { ...prev };
-        group.totalItems.forEach(it => {
-          if (next[it.id] !== 'CONCEPT_IRRELEVANT') {
-            next[it.id] = 'FILE_MISMATCH';
-          }
-        });
-        return next;
-      });
-    }
-  };
-
-  const [openAnswer, setOpenAnswer] = useState('');
-  const [additionalStatement, setAdditionalStatement] = useState('');
   const [naturalUtterance, setNaturalUtterance] = useState('');
   const [isSendingUtterance, setIsSendingUtterance] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -394,27 +300,9 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
     }
   };
 
-  const toggleVerdict = (id: string, targetVerdict: 'CONFIRMED' | 'REJECTED') => {
-    if (isSubmitted) return;
-    setVerdicts(prev => ({
-      ...prev,
-      [id]: prev[id] === targetVerdict ? 'PENDING' : targetVerdict
-    }));
-  };
-
-  const setReason = (id: string, reason: 'FILE_MISMATCH' | 'CONCEPT_IRRELEVANT') => {
-    if (isSubmitted) return;
-    setRejectionReasons(prev => ({
-      ...prev,
-      [id]: reason
-    }));
-  };
-
-  const handleSendResponse = (isCompletionDeclared: boolean) => {
+  const handleSendResponse = (isCompletionDeclared: boolean = true) => {
     if (isSubmitted) return;
     setIsSubmitted(true);
-
-    const combinedStatement = [openAnswer.trim(), additionalStatement.trim()].filter(Boolean).join(' / ');
 
     // SSOT 원칙: REJECTED인 항목 중 사용자가 명시적으로 선택한 사유만 전송 (미선택 항목은 키 부재로 백엔드 기본값 위임)
     const rejectionReasonUpdates: Record<string, 'FILE_MISMATCH' | 'CONCEPT_IRRELEVANT'> = {};
@@ -427,7 +315,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
     const responsePayload = {
       verdictUpdates: verdicts,
       rejectionReasonUpdates,
-      userStatement: combinedStatement.length > 0 ? combinedStatement : null,
+      userStatement: null,
       isCompletionDeclared
     };
 
@@ -437,158 +325,6 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
         text: JSON.stringify(responsePayload)
       }));
     }
-  };
-
-  const renderItemCard = (item: ClarifyItem) => {
-    const currentVerdict = verdicts[item.id] || item.verdict || 'PENDING';
-    const isConfirmed = currentVerdict === 'CONFIRMED';
-    const isRejected = currentVerdict === 'REJECTED';
-    const isLowConfidence = item.confidence === 'LOW_CONFIDENCE';
-
-    return (
-      <div 
-        key={item.id}
-        style={{
-          padding: '8px 10px',
-          borderRadius: '4px',
-          background: isConfirmed ? 'rgba(16, 185, 129, 0.1)' : isRejected ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255,255,255,0.04)',
-          border: `1px solid ${isConfirmed ? '#10b981' : isRejected ? '#ef4444' : 'rgba(255,255,255,0.1)'}`,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-          transition: 'all 0.15s ease'
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ flex: 1, marginRight: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 'bold', color: isRejected ? '#888' : '#eee', textDecoration: isRejected ? 'line-through' : 'none' }}>
-                {item.statement}
-              </span>
-              {isLowConfidence && (
-                <span style={{
-                  padding: '1px 6px',
-                  fontSize: '10px',
-                  borderRadius: '3px',
-                  background: 'rgba(168, 85, 247, 0.15)',
-                  border: '1px solid #a855f7',
-                  color: '#c084fc',
-                  fontWeight: 600
-                }}>
-                  🔍 형제 유추 후보
-                </span>
-              )}
-              {item.isReEmergence && (
-                <span style={{
-                  padding: '1px 6px',
-                  fontSize: '10px',
-                  borderRadius: '3px',
-                  background: 'rgba(245, 158, 11, 0.2)',
-                  border: '1px solid #f59e0b',
-                  color: '#fbbf24',
-                  fontWeight: 600
-                }}>
-                  ⚠️ 재확인 필요: 새 문맥에서 재등장
-                </span>
-              )}
-            </div>
-            {item.anchorRationale && (
-              <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px' }}>
-                💡 {item.anchorRationale}
-              </div>
-            )}
-          </div>
-
-          {!isSubmitted && (
-            <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-              <button
-                type="button"
-                onClick={() => toggleVerdict(item.id, 'CONFIRMED')}
-                style={{
-                  padding: '3px 8px',
-                  fontSize: '11px',
-                  borderRadius: '3px',
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: isConfirmed ? '#10b981' : '#374151',
-                  color: '#fff',
-                  fontWeight: isConfirmed ? 'bold' : 'normal'
-                }}
-              >
-                ✓ 포함
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleVerdict(item.id, 'REJECTED')}
-                style={{
-                  padding: '3px 8px',
-                  fontSize: '11px',
-                  borderRadius: '3px',
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: isRejected ? '#ef4444' : '#374151',
-                  color: '#fff',
-                  fontWeight: isRejected ? 'bold' : 'normal'
-                }}
-              >
-                ✗ 제외
-              </button>
-            </div>
-          )}
-          {isSubmitted && (
-            <span style={{ fontSize: '11px', color: isConfirmed ? '#10b981' : isRejected ? '#ef4444' : '#aaa', fontWeight: 'bold', flexShrink: 0 }}>
-              {isConfirmed ? '✓ 포함됨' : isRejected ? '✗ 제외됨' : '미판정'}
-            </span>
-          )}
-        </div>
-
-        {/* 제외 상태일 때 2지선다 사유 선택 UI */}
-        {isRejected && !isSubmitted && (
-          <div style={{ marginTop: '4px', padding: '6px 8px', background: 'rgba(239, 68, 68, 0.06)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-            <div style={{ fontSize: '11px', color: '#fca5a5', marginBottom: '4px', fontWeight: 600 }}>
-              제외 사유 선택 (선택 시 맞춤 반영, 미선택 시 기본 '파일 불일치' 적용):
-            </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={() => setReason(item.id, 'FILE_MISMATCH')}
-                style={{
-                  padding: '2px 8px',
-                  fontSize: '11px',
-                  borderRadius: '3px',
-                  border: `1px solid ${rejectionReasons[item.id] === 'FILE_MISMATCH' ? '#f87171' : 'rgba(255,255,255,0.2)'}`,
-                  background: rejectionReasons[item.id] === 'FILE_MISMATCH' ? 'rgba(239, 68, 68, 0.3)' : 'transparent',
-                  color: rejectionReasons[item.id] === 'FILE_MISMATCH' ? '#fff' : '#aaa',
-                  cursor: 'pointer'
-                }}
-              >
-                📁 이 파일이 아님 (새 문맥 시 재등장 가능)
-              </button>
-              <button
-                type="button"
-                onClick={() => setReason(item.id, 'CONCEPT_IRRELEVANT')}
-                style={{
-                  padding: '2px 8px',
-                  fontSize: '11px',
-                  borderRadius: '3px',
-                  border: `1px solid ${rejectionReasons[item.id] === 'CONCEPT_IRRELEVANT' ? '#f87171' : 'rgba(255,255,255,0.2)'}`,
-                  background: rejectionReasons[item.id] === 'CONCEPT_IRRELEVANT' ? 'rgba(239, 68, 68, 0.3)' : 'transparent',
-                  color: rejectionReasons[item.id] === 'CONCEPT_IRRELEVANT' ? '#fff' : '#aaa',
-                  cursor: 'pointer'
-                }}
-              >
-                🚫 개념/업무 무관 (영구 억제)
-              </button>
-            </div>
-          </div>
-        )}
-        {isRejected && isSubmitted && (
-          <div style={{ fontSize: '11px', color: '#fca5a5' }}>
-            사유: {rejectionReasons[item.id] === 'CONCEPT_IRRELEVANT' ? '🚫 개념/업무 무관 (영구 억제)' : '📁 파일 불일치 (기본값)'}
-          </div>
-        )}
-      </div>
-    );
   };
 
   return (
@@ -606,23 +342,76 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
             </div>
           )}
 
-          {payload.echoBackMessage && (
+          {/* 대화 타임라인 (사용자 발화 ↔ 어시스턴트 피드백 히스토리) */}
+          {payload.dialogueHistory && payload.dialogueHistory.length > 0 ? (
             <div style={{
-              fontSize: '12px',
-              lineHeight: '1.6',
-              color: '#93c5fd',
-              padding: '10px 12px',
-              background: 'rgba(59, 130, 246, 0.12)',
-              borderRadius: '6px',
-              marginBottom: '12px',
-              borderLeft: '3px solid #3b82f6',
-              whiteSpace: 'pre-wrap'
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              marginBottom: '14px',
+              padding: '10px',
+              background: 'rgba(0, 0, 0, 0.2)',
+              borderRadius: '8px',
+              border: '1px solid rgba(255, 255, 255, 0.08)'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', fontWeight: 600, color: '#60a5fa' }}>
-                <span>💬 어시스턴트 응답 / 되비추기</span>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: '#9ca3af', marginBottom: '2px' }}>
+                💬 대화 기록
               </div>
-              {payload.echoBackMessage}
+              {payload.dialogueHistory.map((turn, idx) => {
+                const isUser = turn.role === 'user';
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      alignSelf: isUser ? 'flex-end' : 'flex-start',
+                      maxWidth: '90%',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      lineHeight: '1.5',
+                      whiteSpace: 'pre-wrap',
+                      background: isUser ? '#2563eb' : 'rgba(59, 130, 246, 0.15)',
+                      color: isUser ? '#ffffff' : '#93c5fd',
+                      borderLeft: isUser ? 'none' : '3px solid #3b82f6',
+                      border: isUser ? '1px solid #3b82f6' : '1px solid rgba(59, 130, 246, 0.3)'
+                    }}
+                  >
+                    <div style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      marginBottom: '3px',
+                      color: isUser ? '#bfdbfe' : '#60a5fa',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <span>{isUser ? '👤 사용자' : '🤖 어시스턴트'}</span>
+                    </div>
+                    {turn.content}
+                  </div>
+                );
+              })}
             </div>
+          ) : (
+            // dialogueHistory가 없는 초기 Turn 0 단독 echoBackMessage (구버전 호환)
+            payload.echoBackMessage && (
+              <div style={{
+                fontSize: '12px',
+                lineHeight: '1.6',
+                color: '#93c5fd',
+                padding: '10px 12px',
+                background: 'rgba(59, 130, 246, 0.12)',
+                borderRadius: '6px',
+                marginBottom: '12px',
+                borderLeft: '3px solid #3b82f6',
+                whiteSpace: 'pre-wrap'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', fontWeight: 600, color: '#60a5fa' }}>
+                  <span>💬 어시스턴트 응답 / 되비추기</span>
+                </div>
+                {payload.echoBackMessage}
+              </div>
+            )
           )}
 
           {payload.taskSummary && (
@@ -638,179 +427,28 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
               whiteSpace: 'pre-wrap'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', fontWeight: 600, color: '#93c5fd' }}>
-                <span>💡 작업 분석 요약</span>
+                <span>💡 실시간 작업 분석 요약</span>
               </div>
               {payload.taskSummary}
             </div>
           )}
 
-          {/* 1. 감지된 변경 대상 및 연관 파일 후보 (1차 도메인 + 2차 확신도 2단 그룹핑) */}
-          <div style={{ marginTop: '12px' }}>
-            <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#60a5fa' }}>📋 감지된 변경 대상 & 도메인 그룹</h4>
-            {domainGroups.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {domainGroups.map(group => {
-                  const allRejected = isGroupAllRejected(group);
-                  const isExpanded = expandedLowSections[group.domain] ?? false;
-
-                  return (
-                    <div 
-                      key={group.domain}
-                      style={{
-                        padding: '10px 12px',
-                        background: 'rgba(255, 255, 255, 0.02)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        borderRadius: '6px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '8px'
-                      }}
-                    >
-                      {/* 도메인 그룹 헤더 */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#38bdf8' }}>
-                            📁 {group.domain}
-                          </span>
-                          <span style={{
-                            padding: '1px 6px',
-                            fontSize: '11px',
-                            borderRadius: '10px',
-                            background: 'rgba(56, 189, 248, 0.15)',
-                            color: '#7dd3fc',
-                            fontWeight: 600
-                          }}>
-                            {group.totalItems.length}개 파일
-                          </span>
-                          {group.highItems.length > 0 && (
-                            <span style={{
-                              padding: '1px 6px',
-                              fontSize: '10px',
-                              borderRadius: '10px',
-                              background: 'rgba(16, 185, 129, 0.15)',
-                              color: '#34d399',
-                              fontWeight: 600
-                            }}>
-                              확정 제안 {group.highItems.length}
-                            </span>
-                          )}
-                          {group.lowItems.length > 0 && (
-                            <span style={{
-                              padding: '1px 6px',
-                              fontSize: '10px',
-                              borderRadius: '10px',
-                              background: 'rgba(168, 85, 247, 0.15)',
-                              color: '#c084fc',
-                              fontWeight: 600
-                            }}>
-                              형제 유추 {group.lowItems.length}
-                            </span>
-                          )}
-                        </div>
-
-                        {!isSubmitted && (
-                          <button
-                            type="button"
-                            onClick={() => toggleGroupVerdict(group)}
-                            style={{
-                              padding: '3px 8px',
-                              fontSize: '11px',
-                              borderRadius: '3px',
-                              border: allRejected ? '1px solid #10b981' : '1px solid rgba(239, 68, 68, 0.4)',
-                              background: allRejected ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.1)',
-                              color: allRejected ? '#34d399' : '#fca5a5',
-                              cursor: 'pointer',
-                              fontWeight: 600
-                            }}
-                            title={allRejected ? "그룹 내 모든 파일 상태를 원복합니다." : "그룹 내 모든 파일을 제외(FILE_MISMATCH)합니다."}
-                          >
-                            {allRejected ? "↺ 그룹 전체 복원" : "✗ 그룹 전체 제외"}
-                          </button>
-                        )}
-                      </div>
-
-                      {/* 1) HIGH_CONFIDENCE 항목들 (기본 펼침) */}
-                      {group.highItems.length > 0 && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          {group.highItems.map(renderItemCard)}
-                        </div>
-                      )}
-
-                      {/* 2) LOW_CONFIDENCE 항목들 (기본 접힘, Accordion) */}
-                      {group.lowItems.length > 0 && (
-                        <div style={{ marginTop: group.highItems.length > 0 ? '4px' : '0' }}>
-                          <button
-                            type="button"
-                            onClick={() => toggleLowSection(group.domain)}
-                            style={{
-                              width: '100%',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              padding: '6px 8px',
-                              fontSize: '11px',
-                              borderRadius: '4px',
-                              background: 'rgba(168, 85, 247, 0.08)',
-                              border: '1px dashed rgba(168, 85, 247, 0.3)',
-                              color: '#c084fc',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            <span>
-                              🔍 추가 연관 후보 (형제 유추 {group.lowItems.length}개) {isExpanded ? '접기' : '펼쳐보기'}
-                            </span>
-                            <span>{isExpanded ? '▲' : '▼'}</span>
-                          </button>
-
-                          {isExpanded && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px', paddingLeft: '8px', borderLeft: '2px solid rgba(168, 85, 247, 0.3)' }}>
-                              {group.lowItems.map(renderItemCard)}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p style={{ fontSize: '12px', color: '#888', padding: '8px', background: 'rgba(255,255,255,0.02)', borderRadius: '4px' }}>
-                구조적으로 즉시 감지된 후보가 없습니다.
-              </p>
-            )}
-          </div>
-
-          {/* 2. 개방형 질문 영역 */}
+          {/* 1. 추가 확인 가이드 (개방형 질문) */}
           {payload.openQuestion && (
-            <div style={{ marginTop: '16px', padding: '10px 12px', background: 'rgba(245, 158, 11, 0.08)', borderLeft: '3px solid #f59e0b', borderRadius: '4px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#fbbf24', marginBottom: '6px' }}>
-                ❓ 추가 확인 필요 (개방형 질문)
+            <div style={{ marginTop: '14px', padding: '10px 12px', background: 'rgba(245, 158, 11, 0.08)', borderLeft: '3px solid #f59e0b', borderRadius: '4px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#fbbf24', marginBottom: '4px' }}>
+                ❓ 추가 확인 필요 (가이드 질문)
               </div>
-              <div style={{ fontSize: '12px', color: '#e5e7eb', marginBottom: '8px', lineHeight: '1.4' }}>
+              <div style={{ fontSize: '12px', color: '#e5e7eb', lineHeight: '1.4' }}>
                 {payload.openQuestion}
               </div>
-              {!isSubmitted && (
-                <textarea
-                  placeholder="예: 외부 Bizgo API 연동 모듈을 호출하여 발송합니다."
-                  value={openAnswer}
-                  onChange={e => setOpenAnswer(e.target.value)}
-                  style={{
-                    width: '100%',
-                    minHeight: '50px',
-                    padding: '6px 8px',
-                    fontSize: '12px',
-                    background: 'rgba(0,0,0,0.3)',
-                    border: '1px solid #4b5563',
-                    borderRadius: '4px',
-                    color: '#fff',
-                    resize: 'vertical'
-                  }}
-                />
-              )}
+              <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '6px' }}>
+                💡 아래 대화 입력창에 답변을 편하게 말씀해주시면 요구사항에 반영됩니다.
+              </div>
             </div>
           )}
 
-          {/* 3. 자연어 대화형 발화 입력란 (Stage 0: /clarify-utterance) */}
+          {/* 2. 단일 통합 자연어 대화 입력란 (/clarify-utterance) */}
           {!isSubmitted && (
             <div style={{
               marginTop: '14px',
@@ -820,12 +458,12 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
               borderRadius: '6px'
             }}>
               <label style={{ fontSize: '11px', color: '#93c5fd', display: 'block', marginBottom: '6px', fontWeight: 600 }}>
-                💬 대화로 지시하기 (파일 제외/추가, 요구사항 수정, 분석 시작 등)
+                💬 대화로 지시하기 (파일 제외/추가, 요구사항 수정, 답변 입력, 분석 시작 등)
               </label>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <input
                   type="text"
-                  placeholder='예: "주소 매퍼 빼줘", "결제 모듈도 포함해줘", "분석 시작해줘"'
+                  placeholder='예: "주소 매퍼 빼줘", "Bizgo API 써", "분석 시작해줘"'
                   value={naturalUtterance}
                   onChange={e => setNaturalUtterance(e.target.value)}
                   onKeyDown={e => {
@@ -867,67 +505,25 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
             </div>
           )}
 
-          {/* 4. 추가 발화 / 요구사항 입력란 */}
-          {!isSubmitted && (
-            <div style={{ marginTop: '12px' }}>
-              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>
-                ✍️ 추가 요구사항 또는 변경 지시사항 (선택사항)
-              </label>
-              <input
-                type="text"
-                placeholder="추가로 고려할 도메인/화면이 있다면 입력..."
-                value={additionalStatement}
-                onChange={e => setAdditionalStatement(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '6px 8px',
-                  fontSize: '12px',
-                  background: 'rgba(0,0,0,0.2)',
-                  border: '1px solid #4b5563',
-                  borderRadius: '4px',
-                  color: '#fff'
-                }}
-              />
-            </div>
-          )}
-
-          {/* 5. 액션 버튼 영역 */}
+          {/* 3. 단일 분석 시작 버튼 */}
           <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
             {!isSubmitted && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => handleSendResponse(false)}
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: '12px',
-                    background: '#374151',
-                    color: '#e5e7eb',
-                    border: '1px solid #4b5563',
-                    borderRadius: '4px',
-                    cursor: 'pointer'
-                  }}
-                  title="새로운 추가 정보를 반영하여 미판정 영역을 다시 스캔합니다."
-                >
-                  ↻ 추가 턴 반영
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSendResponse(true)}
-                  style={{
-                    padding: '6px 14px',
-                    fontSize: '12px',
-                    background: '#10b981',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  확인 완료 및 분석 시작 →
-                </button>
-              </>
+              <button
+                type="button"
+                onClick={() => handleSendResponse(true)}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: '12px',
+                  background: '#10b981',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                확인 완료 및 분석 시작 →
+              </button>
             )}
             {isSubmitted && (
               <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 'bold' }}>

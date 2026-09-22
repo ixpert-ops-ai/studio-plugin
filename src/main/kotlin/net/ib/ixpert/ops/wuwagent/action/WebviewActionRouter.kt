@@ -170,7 +170,8 @@ class WebviewActionRouter(private val project: Project) {
                                 "openQuestion" to turnResult.openQuestion,
                                 "isExhausted" to turnResult.isExhausted,
                                 "isReadyForStage1" to turnResult.isReadyForStage1,
-                                "taskSummary" to turnResult.taskSummary
+                                "taskSummary" to turnResult.taskSummary,
+                                "dialogueHistory" to turnResult.state.dialogueHistory
                             )
                             val jsonPayload = com.google.gson.Gson().toJson(payload)
                             ApplicationManager.getApplication().invokeLater {
@@ -190,99 +191,7 @@ class WebviewActionRouter(private val project: Project) {
                     logger.info("Router: /analyze 분기")
                     val messageId = "analyze_${System.currentTimeMillis()}"
                     val rawInput = textBody.trim()
-
-                    bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프 영향도 분석을 시작합니다...", messageId)
-
-                    ApplicationManager.getApplication().executeOnPooledThread {
-                        try {
-                            val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
-                            val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
-
-                            val projectBase = java.io.File(project.basePath ?: "")
-
-                            // 1. ClarifyIntent 로드 (있으면 소비, 없으면 null 자립 분해)
-                            val intentFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.findIntentFile(projectBase)
-                            val clarifyIntent = if (intentFile != null) {
-                                try {
-                                    net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.loadIntent(intentFile, projectGraph)
-                                } catch (e: net.ib.ixpert.ops.wuwagent.agent.clarify.ContractValidationException) {
-                                    logger.error("Clarify intent validation failed", e)
-                                    ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessage("error", "❌ 요구사항 인텐트 계약 검증 실패: ${e.message}", messageId)
-                                    }
-                                    return@executeOnPooledThread
-                                }
-                            } else {
-                                null
-                            }
-
-                            // 2. 이전 ClarificationContract 로드 (거부 이력 / 0-재출현 억제용)
-                            val contractFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.findContractFile(projectBase)
-                            val previousContract = if (contractFile != null) {
-                                try {
-                                    net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.loadContract(contractFile, projectGraph)
-                                } catch (e: Exception) {
-                                    null
-                                }
-                            } else {
-                                null
-                            }
-
-                            val client = WuwLlmService.getClient()
-                            val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
-                            val initialRequirement = clarifyIntent?.refinedRequirement?.ifBlank { null }
-                                ?: rawInput.ifBlank { clarifyIntent?.originalRequirement ?: "" }
-
-                            val result = kotlinx.coroutines.runBlocking {
-                                pipeline.analyze(
-                                    primaryReq = initialRequirement, 
-                                    secondaryReq = "", 
-                                    projectGraph = projectGraph,
-                                    clarifyIntent = clarifyIntent,
-                                    previousContract = previousContract,
-                                    projectRoot = projectBase
-                                ) { chunk ->
-                                    ApplicationManager.getApplication().invokeLater {
-                                        bridge.sendMessageChunk(messageId, chunk)
-                                    }
-                                }
-                            }
-
-                            ApplicationManager.getApplication().invokeLater {
-                                if (result.targetFiles.isNotEmpty()) {
-                                    var extraText = ""
-                                    
-                                    val hasCorrections = result.targetFiles.any { it.description.contains("[AI 교정") || it.description.contains("[경고") }
-                                    if (hasCorrections) {
-                                        extraText += "\n\n> 🤖 **TargetFileValidator 자동 교정 결과**\n"
-                                        extraText += "> LLM의 환각이 감지되어 실제 프로젝트 메타그래프 기반으로 아래와 같이 안전하게 교정되었습니다.\n\n"
-                                        extraText += "| 순서 | 파일 경로 | 유형 | 작업 내용 |\n"
-                                        extraText += "|:---:|:---|:---:|:---|\n"
-                                        result.targetFiles.forEach { file ->
-                                            extraText += "| ${file.order} | ${file.path} | **${file.type}** | ${file.description} |\n"
-                                        }
-                                    }
-
-                                    // 거부 항목 요약 노출
-                                    if (previousContract != null && previousContract.rejectedExistingRefs.isNotEmpty()) {
-                                        extraText += "\n\n> 🚫 **사용자 거부로 배제된 파일 (${previousContract.rejectedExistingRefs.size}건)**\n"
-                                        previousContract.rejectedExistingRefs.forEach { rej ->
-                                            extraText += "> - `${rej.filePath}`\n"
-                                        }
-                                    }
-
-                                    extraText += "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
-                                    bridge.sendMessageChunk(messageId, extraText)
-                                }
-                                bridge.sendMessage("chat", "", messageId) // 스트리밍 종료 신호
-                            }
-                        } catch (e: Exception) {
-                            logger.error("RequirementAnalysisPipeline Error", e)
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("error", "요구사항 분석 중 오류가 발생했습니다: ${e.message}", messageId)
-                            }
-                        }
-                    }
+                    executeAnalyzePipeline(project, bridge, rawInput, messageId)
                 }
 
                 // ── 요구사항 구체화 확인 (Stage 0 -> Stage 1) ────────
@@ -300,42 +209,22 @@ class WebviewActionRouter(private val project: Project) {
                     val jsonPayload = textBody.trim()
                     val gson = com.google.gson.Gson()
                     val payloadMap = try {
-                        gson.fromJson(jsonPayload, Map::class.java)
+                        gson.fromJson(jsonPayload, Map::class.java) as? Map<String, Any> ?: emptyMap()
                     } catch (e: Exception) {
-                        null
-                    }
-                    
-                    if (payloadMap == null) {
-                        bridge.sendMessage("error", "잘못된 응답 형식입니다. 다시 제출해주세요.", messageId)
-                        return@invokeLater
+                        emptyMap<String, Any>()
                     }
 
-                    // verdictUpdates 매핑: Map<String, String> -> Map<String, Verdict>
-                    val rawVerdictMap = payloadMap["verdictUpdates"] as? Map<*, *> ?: emptyMap<Any, Any>()
-                    val verdictUpdates = rawVerdictMap.mapNotNull { (k, v) ->
-                        val id = k?.toString() ?: return@mapNotNull null
-                        val verdict = when (v?.toString()?.uppercase()) {
-                            "CONFIRMED" -> net.ib.ixpert.ops.wuwagent.agent.clarify.model.Verdict.CONFIRMED
-                            "REJECTED" -> net.ib.ixpert.ops.wuwagent.agent.clarify.model.Verdict.REJECTED
-                            else -> net.ib.ixpert.ops.wuwagent.agent.clarify.model.Verdict.PENDING
-                        }
-                        id to verdict
-                    }.toMap()
-
-                    // rejectionReasonUpdates 매핑: Map<String, String> -> Map<String, RejectionReason>
-                    val rawRejectionMap = payloadMap["rejectionReasonUpdates"] as? Map<*, *> ?: emptyMap<Any, Any>()
-                    val rejectionReasonUpdates = rawRejectionMap.mapNotNull { (k, v) ->
-                        val id = k?.toString() ?: return@mapNotNull null
-                        val reason = when (v?.toString()?.uppercase()?.trim()) {
-                            "CONCEPT_IRRELEVANT" -> net.ib.ixpert.ops.wuwagent.agent.clarify.model.RejectionReason.CONCEPT_IRRELEVANT
-                            "FILE_MISMATCH" -> net.ib.ixpert.ops.wuwagent.agent.clarify.model.RejectionReason.FILE_MISMATCH
-                            else -> null
-                        }
-                        if (reason != null) id to reason else null
-                    }.toMap()
-
+                    val rawVerdicts = payloadMap["verdictUpdates"] as? Map<String, String> ?: emptyMap()
+                    val rawReasons = payloadMap["rejectionReasonUpdates"] as? Map<String, String> ?: emptyMap()
                     val userStatement = payloadMap["userStatement"] as? String
-                    val isCompletionDeclared = (payloadMap["isCompletionDeclared"] as? Boolean) ?: true
+                    val isCompletionDeclared = payloadMap["isCompletionDeclared"] as? Boolean ?: false
+
+                    val verdictUpdates = rawVerdicts.mapValues { (_, v) ->
+                        try { net.ib.ixpert.ops.wuwagent.agent.clarify.model.Verdict.valueOf(v) } catch (e: Exception) { net.ib.ixpert.ops.wuwagent.agent.clarify.model.Verdict.PENDING }
+                    }
+                    val rejectionReasonUpdates = rawReasons.mapValues { (_, r) ->
+                        try { net.ib.ixpert.ops.wuwagent.agent.clarify.model.RejectionReason.valueOf(r) } catch (e: Exception) { net.ib.ixpert.ops.wuwagent.agent.clarify.model.RejectionReason.FILE_MISMATCH }
+                    }
 
                     val userInput = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine.UserInput(
                         verdictUpdates = verdictUpdates,
@@ -356,7 +245,8 @@ class WebviewActionRouter(private val project: Project) {
                             "openQuestion" to turnResult.openQuestion,
                             "isExhausted" to turnResult.isExhausted,
                             "isReadyForStage1" to turnResult.isReadyForStage1,
-                            "taskSummary" to turnResult.taskSummary
+                            "taskSummary" to turnResult.taskSummary,
+                            "dialogueHistory" to turnResult.state.dialogueHistory
                         )
                         ApplicationManager.getApplication().invokeLater {
                             bridge.sendMessage("analyze_clarify", gson.toJson(nextPayload), messageId)
@@ -372,24 +262,8 @@ class WebviewActionRouter(private val project: Project) {
                     val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
                     logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
 
-                    val completeMsg = buildString {
-                        appendLine("✅ **요구사항 구체화(Clarification)가 완료되었습니다.**")
-                        appendLine("- 정제된 요구사항: **${clarifyIntent.refinedRequirement}**")
-                        if (clarifyIntent.anchorTokens.isNotEmpty()) {
-                            appendLine("- 추출된 앵커 토큰: **${clarifyIntent.anchorTokens.joinToString()}**")
-                        }
-                        if (clarifyIntent.constraints.isNotEmpty()) {
-                            appendLine("- 파악된 제약 조건: **${clarifyIntent.constraints.size}개**")
-                        }
-                        appendLine("- 저장된 인텐트 계약: `${savedFile.name}`")
-                        appendLine()
-                        appendLine("👉 영향도 분석 및 대상 파일 확정을 진행하려면 `/analyze`를 실행하세요.")
-                    }
-
-                    ApplicationManager.getApplication().invokeLater {
-                        bridge.sendMessage("explain", completeMsg, messageId)
-                        bridge.sendMessage("chat", "", messageId)
-                    }
+                    // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행
+                    executeAnalyzePipeline(project, bridge, clarifyIntent.refinedRequirement, messageId)
                 }
 
                 // ── 요구사항 대화형 발화 처리 (Stage 0: /clarify-utterance) ────────
@@ -418,7 +292,8 @@ class WebviewActionRouter(private val project: Project) {
                                     "isExhausted" to turnResult.isExhausted,
                                     "isReadyForStage1" to turnResult.isReadyForStage1,
                                     "taskSummary" to turnResult.taskSummary,
-                                    "echoBackMessage" to turnResult.echoBackMessage
+                                    "echoBackMessage" to turnResult.echoBackMessage,
+                                    "dialogueHistory" to turnResult.state.dialogueHistory
                                 )
                                 val gson = com.google.gson.Gson()
                                 ApplicationManager.getApplication().invokeLater {
@@ -435,31 +310,8 @@ class WebviewActionRouter(private val project: Project) {
                             val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
                             logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
 
-                            val completeMsg = buildString {
-                                appendLine("✅ **요구사항 구체화(Clarification)가 완료되었습니다.**")
-                                if (!turnResult.echoBackMessage.isNullOrBlank()) {
-                                    appendLine("> 💬 ${turnResult.echoBackMessage}")
-                                    appendLine()
-                                }
-                                appendLine("- 정제된 요구사항: **${clarifyIntent.refinedRequirement}**")
-                                if (clarifyIntent.anchorTokens.isNotEmpty()) {
-                                    appendLine("- 추출된 앵커 토큰: **${clarifyIntent.anchorTokens.joinToString()}**")
-                                }
-                                if (clarifyIntent.constraints.isNotEmpty()) {
-                                    appendLine("- 파악된 제약 조건: **${clarifyIntent.constraints.size}개**")
-                                }
-                                if (clarifyIntent.excludedFiles.isNotEmpty()) {
-                                    appendLine("- 명시적 배제 대상 파일: **${clarifyIntent.excludedFiles.size}개**")
-                                }
-                                appendLine("- 저장된 인텐트 계약: `${savedFile.name}`")
-                                appendLine()
-                                appendLine("👉 영향도 분석 및 대상 파일 확정을 진행하려면 `/analyze`를 실행하세요.")
-                            }
-
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("explain", completeMsg, messageId)
-                                bridge.sendMessage("chat", "", messageId)
-                            }
+                            // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행
+                            executeAnalyzePipeline(project, bridge, clarifyIntent.refinedRequirement, messageId)
                         } catch (e: Exception) {
                             logger.error("Clarify utterance error", e)
                             ApplicationManager.getApplication().invokeLater {
@@ -1619,6 +1471,106 @@ class WebviewActionRouter(private val project: Project) {
                 else -> {
                     logger.warn("Router: 정의되지 않은 명령어 수신 → $command")
                     bridge.sendMessage("error", "알 수 없는 명령어: $command")
+                }
+            }
+        }
+    }
+
+    private fun executeAnalyzePipeline(
+        project: Project,
+        bridge: JcefBridge,
+        rawInput: String,
+        messageId: String
+    ) {
+        bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프 영향도 분석을 시작합니다...", messageId)
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            try {
+                val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
+                val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
+
+                val projectBase = java.io.File(project.basePath ?: "")
+
+                // 1. ClarifyIntent 로드 (있으면 소비, 없으면 null 자립 분해)
+                val intentFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.findIntentFile(projectBase)
+                val clarifyIntent = if (intentFile != null) {
+                    try {
+                        net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.loadIntent(intentFile, projectGraph)
+                    } catch (e: net.ib.ixpert.ops.wuwagent.agent.clarify.ContractValidationException) {
+                        logger.error("Clarify intent validation failed", e)
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessage("error", "❌ 요구사항 인텐트 계약 검증 실패: ${e.message}", messageId)
+                        }
+                        return@executeOnPooledThread
+                    }
+                } else {
+                    null
+                }
+
+                // 2. 이전 ClarificationContract 로드 (거부 이력 / 0-재출현 억제용)
+                val contractFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.findContractFile(projectBase)
+                val previousContract = if (contractFile != null) {
+                    try {
+                        net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.loadContract(contractFile, projectGraph)
+                    } catch (e: Exception) {
+                        null
+                    }
+                } else {
+                    null
+                }
+
+                val client = net.ib.ixpert.ops.wuwagent.service.WuwLlmService.getClient()
+                val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
+                val initialRequirement = clarifyIntent?.refinedRequirement?.ifBlank { null }
+                    ?: rawInput.ifBlank { clarifyIntent?.originalRequirement ?: "" }
+
+                val result = kotlinx.coroutines.runBlocking {
+                    pipeline.analyze(
+                        primaryReq = initialRequirement, 
+                        secondaryReq = "", 
+                        projectGraph = projectGraph,
+                        clarifyIntent = clarifyIntent,
+                        previousContract = previousContract,
+                        projectRoot = projectBase
+                    ) { chunk ->
+                        ApplicationManager.getApplication().invokeLater {
+                            bridge.sendMessageChunk(messageId, chunk)
+                        }
+                    }
+                }
+
+                ApplicationManager.getApplication().invokeLater {
+                    if (result.targetFiles.isNotEmpty()) {
+                        var extraText = ""
+                        
+                        val hasCorrections = result.targetFiles.any { it.description.contains("[AI 교정") || it.description.contains("[경고") }
+                        if (hasCorrections) {
+                            extraText += "\n\n> 🤖 **TargetFileValidator 자동 교정 결과**\n"
+                            extraText += "> LLM의 환각이 감지되어 실제 프로젝트 메타그래프 기반으로 아래와 같이 안전하게 교정되었습니다.\n\n"
+                            extraText += "| 순서 | 파일 경로 | 유형 | 작업 내용 |\n"
+                            extraText += "|:---:|:---|:---:|:---|\n"
+                            result.targetFiles.forEach { file ->
+                                extraText += "| ${file.order} | ${file.path} | **${file.type}** | ${file.description} |\n"
+                            }
+                        }
+
+                        // 거부 항목 요약 노출
+                        if (previousContract != null && previousContract.rejectedExistingRefs.isNotEmpty()) {
+                            extraText += "\n\n> 🚫 **사용자 거부로 배제된 파일 (${previousContract.rejectedExistingRefs.size}건)**\n"
+                            previousContract.rejectedExistingRefs.forEach { rej ->
+                                extraText += "> - `${rej.filePath}`\n"
+                            }
+                        }
+
+                        extraText += "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
+                        bridge.sendMessageChunk(messageId, extraText)
+                    }
+                    bridge.sendMessage("chat", "", messageId) // 스트리밍 종료 신호
+                }
+            } catch (e: Exception) {
+                logger.error("RequirementAnalysisPipeline Error", e)
+                ApplicationManager.getApplication().invokeLater {
+                    bridge.sendMessage("error", "요구사항 분석 중 오류가 발생했습니다: ${e.message}", messageId)
                 }
             }
         }

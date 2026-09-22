@@ -295,7 +295,7 @@ class Stage0ClarificationEngine(
             userStatements = updatedStatements
         )
 
-        val taskSummary = generateTaskSummary(state.originalRequirement, mergedItems)
+        val taskSummary = generateTaskSummary(state.originalRequirement, mergedItems, updatedStatements)
 
         return Stage0TurnResult(
             state = nextState,
@@ -310,16 +310,18 @@ class Stage0ClarificationEngine(
      * 후보 목록 확정 후 사용자 친화적인 한국어 자연어 작업 요약 문장 생성 (단방향 렌더링 전용)
      * - 실패/예외 발생 시 null 반환하여 탐색 결과 렌더링에 영향 주지 않도록 완벽 격리 (폴백 보장)
      * - 후보군을 재판단/평가/필터링하지 않고 오직 요약/설명만 하도록 규율 프롬프트 적용
+     * - 사용자 추가 지시/제약사항(userStatements) 및 현재 유효(REJECTED 제외) 후보군을 반영하여 매 턴 갱신
      */
     private fun generateTaskSummary(
         originalRequirement: String,
-        items: List<RequirementItem>
+        items: List<RequirementItem>,
+        userStatements: List<String> = emptyList()
     ): String? {
         val client = llmClient ?: return null
         return try {
             val systemPrompt = """
                 당신은 엔터프라이즈 시스템 분석 어시스턴트입니다.
-                사용자의 요구사항(SR)과 정밀 탐색된 후보 파일 목록을 바탕으로, 전체 작업의 핵심 목표와 각 컴포넌트의 변경 맥락을 간결한 한국어 자연어 문장(2~4줄)으로 요약하여 설명하세요.
+                사용자의 원 요구사항(SR), 대화로 추가된 지시/제약사항, 그리고 현재 유효한 후보 파일 목록을 바탕으로, 전체 작업의 핵심 목표와 각 컴포넌트의 변경 맥락을 간결한 한국어 자연어 문장(2~4줄)으로 요약하여 설명하세요.
 
                 [엄격한 규율]
                 1. 주어진 후보 파일 목록을 절대로 재판단, 평가, 추가, 또는 삭제하지 마십시오.
@@ -327,17 +329,22 @@ class Stage0ClarificationEngine(
                 3. 불필요한 인사말(예: 안녕하세요 등) 없이 요약 본문만 작성하십시오.
             """.trimIndent()
 
-            val candidateDescriptions = items.joinToString("\n") { item ->
+            val activeItems = items.filter { it.verdict != Verdict.REJECTED }
+            val candidateDescriptions = activeItems.joinToString("\n") { item ->
                 val path = (item.hint as? LinkHint.ExistingRef)?.filePath ?: item.statement
                 val rationale = item.anchorRationale ?: ""
                 "- $path ($rationale)"
             }
 
-            val userPrompt = """
-                [요구사항]
-                $originalRequirement
+            val statementsSection = if (userStatements.isNotEmpty()) {
+                "\n\n[사용자 추가 지시 및 제약사항]\n" + userStatements.joinToString("\n") { "- $it" }
+            } else ""
 
-                [탐색된 후보 컴포넌트 목록]
+            val userPrompt = """
+                [원 요구사항]
+                $originalRequirement$statementsSection
+
+                [현재 유효 분석 대상 컴포넌트 목록]
                 $candidateDescriptions
             """.trimIndent()
 
@@ -531,15 +538,24 @@ class Stage0ClarificationEngine(
             }
         }
 
+        val newDialogueHistory = state.dialogueHistory.toMutableList()
+        if (trimmed.isNotBlank()) {
+            newDialogueHistory.add(DialogueHistoryItem(role = "user", content = trimmed))
+        }
+        if (!echoMsg.isNullOrBlank()) {
+            newDialogueHistory.add(DialogueHistoryItem(role = "assistant", content = echoMsg))
+        }
+
         val nextState = state.copy(
             items = updatedItems,
             seedSet = updatedSeedSet,
-            userStatements = updatedStatements
+            userStatements = updatedStatements,
+            dialogueHistory = newDialogueHistory
         )
 
         val isExhausted = isReady || (translated.kind == UserActionKind.INCLUDE_TOKEN && updatedItems.none { it.verdict == Verdict.PENDING })
         val openQ = if (isReady) null else checkOpenQuestionTrigger(updatedSeedSet, updatedItems)
-        val taskSummary = generateTaskSummary(state.originalRequirement, updatedItems)
+        val taskSummary = generateTaskSummary(state.originalRequirement, updatedItems, updatedStatements)
 
         return Stage0TurnResult(
             state = nextState,

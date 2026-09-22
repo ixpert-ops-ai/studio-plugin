@@ -80,17 +80,6 @@ class Stage0GraphScanner(
             }
         }
 
-        // A-1. 1차: 사용자 입력 쿼리로부터 식별된 핵심 클래스들(matchedClassNames)에서 DTO 필드명 추출
-        for (className in decomposed.matchedClassNames) {
-            val matchedNode = allFileNodes.find { it.className.equals(className, ignoreCase = true) }
-            if (matchedNode != null) {
-                result[matchedNode.className.lowercase()] = SeedToken(matchedNode.className, TokenKind.STRUCTURAL)
-                extractFieldsFromMethods(matchedNode).forEach { fieldName ->
-                    result[fieldName.lowercase()] = SeedToken(fieldName, TokenKind.STRUCTURAL)
-                }
-            }
-        }
-
         // A. 1차: 입력에서 언급된 클래스/파일로부터 DTO 필드명 및 구조 식별자 추출
         for (token in decomposed.tokens) {
             val tokenLower = token.lowercase()
@@ -162,7 +151,15 @@ class Stage0GraphScanner(
         // ─────────────────────────────────────────────────────────────
         // 엣지 0: 메타그래프 자연어명(localName) 매칭 엣지
         // ─────────────────────────────────────────────────────────────
-        val koreanConceptualTokens = conceptualTokens.filter { Regex("[가-힣]+").containsMatchIn(it) }
+        val koreanStopwords = setOf(
+            "검사", "등록", "유효성", "조회", "수정", "삭제", "목록", "상세", "추가", "변경",
+            "저장", "처리", "검색", "전송", "취소", "오류", "실패", "성공", "에러", "여부",
+            "결과", "코드", "상태", "일시", "시간", "번호", "내용", "설정", "권한", "화면",
+            "이력", "기능", "관리", "요청", "응답", "개발", "팝업", "제공", "다운로드", "업로드"
+        )
+        val koreanConceptualTokens = conceptualTokens.filter { 
+            Regex("[가-힣]+").containsMatchIn(it) && it !in koreanStopwords && it.length >= 2 
+        }
         
         for (rNode in graph.resourceNodes) {
             val lName = rNode.localName ?: (rNode.metadata["localName"] as? String)
@@ -197,6 +194,60 @@ class Stage0GraphScanner(
                     if (lName != null) acc.symbols.add("localName:$lName")
                     acc.signals.add(ProvenanceSignal.LOCAL_NAME_MATCH)
                     acc.rationale = "자연어명/주석이 요구사항(${matches.joinToString()})과 일치"
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // 엣지 0-B: Java 소스코드 클래스명 및 API 엔드포인트 직접 앵커 매칭 엣지 (FileNode Direct Anchor Scorer)
+        // ─────────────────────────────────────────────────────────────
+        val genericTokenStopwords = setOf(
+            "controller", "service", "impl", "dao", "mapper", "dto", "vo", "response", "request",
+            "entity", "repository", "base", "util", "helper", "common", "config", "job", "batch",
+            "list", "get", "set", "save", "update", "delete", "insert", "select", "find", "search", "read",
+            "view", "page", "screen", "manage", "management", "mgr", "mgmt", "admin", "main", "detail", "info", "data",
+            "handle", "process", "execute", "deal", "query"
+        )
+        
+        val queryDomainTokens = (structuralTokens + conceptualTokens)
+            .filter { it.length >= 2 && it !in genericTokenStopwords && !Regex("[가-힣]+").containsMatchIn(it) }
+            .distinct()
+
+        for ((p, fNode) in graph.files) {
+            val classTokens = DomainDictionary.tokenizeCamelCase(fNode.className).map { it.lowercase() }
+            val epTokens = fNode.apiEndpoints.flatMap { ep ->
+                DomainDictionary.tokenizeCamelCase(ep.path.substringAfterLast("/")) + 
+                DomainDictionary.tokenizeCamelCase(ep.handlerMethod)
+            }.map { it.lowercase() }
+
+            val fileDistinctTokens = (classTokens + epTokens).filter { it !in genericTokenStopwords }.distinct()
+            
+            val matchedDomainTokens = queryDomainTokens.filter { qToken ->
+                fileDistinctTokens.any { nToken ->
+                    nToken == qToken || isTokenBoundaryMatch(nToken, qToken) || (qToken.length >= 4 && (nToken.contains(qToken) || qToken.contains(nToken)))
+                }
+            }
+
+            val isExactClassMatch = structuralTokens.contains(fNode.className.lowercase())
+            val matchCount = matchedDomainTokens.size
+
+            // 다중 토큰 정밀도 판정:
+            // 1) 2개 이상의 도메인 토큰이 일치하거나,
+            // 2) 1개 이상의 도메인 토큰 + 정확한 클래스명 매칭이거나,
+            // 3) 도메인 토큰이 1개만 존재하는 쿼리에서 해당 도메인 토큰이 클래스명에 포함된 경우
+            if (matchCount >= 2 || (matchCount >= 1 && (isExactClassMatch || queryDomainTokens.size == 1))) {
+                val acc = candidateMap.getOrPut(p) {
+                    CandidateAcc(p, fNode.fileType.name, mutableListOf(), 0.0, "", mutableSetOf())
+                }
+                val directScore = 4.0 + (matchCount * 2.5) + (if (isExactClassMatch) 3.0 else 0.0)
+                acc.score += directScore
+                acc.symbols.addAll(matchedDomainTokens.map { "token:$it" })
+                acc.signals.add(ProvenanceSignal.STRUCTURAL_ID)
+                val summaryTokens = matchedDomainTokens.take(3).joinToString(", ")
+                acc.rationale = if (acc.rationale.isBlank()) {
+                    "클래스명/엔드포인트가 요구사항 토큰($summaryTokens)과 다중 일치"
+                } else {
+                    "${acc.rationale} + 요구사항 토큰($summaryTokens) 일치"
                 }
             }
         }

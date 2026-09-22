@@ -46,9 +46,8 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         val fwType = projectGraph.frameworkDetection?.userOverride ?: projectGraph.frameworkType
         logger.info("Starting RequirementAnalysisPipeline. Resolved Framework Type: ${fwType.name}")
         
-        val effectiveContract = stage0Contract ?: previousContract
         val effectiveReq = clarifyIntent?.refinedRequirement?.ifBlank { null }
-            ?: effectiveContract?.enrichedRequirementText?.ifBlank { null }
+            ?: stage0Contract?.enrichedRequirementText?.ifBlank { null }
             ?: primaryReq
         
         // --- Stage 0.5: Scope Selection ---
@@ -184,8 +183,8 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             ))
         }
 
-        // Stage 0 사용자 확정 기존 파일 (trustedExistingRefs) 합성
-        effectiveContract?.trustedExistingRefs?.forEach { ref ->
+        // Stage 0 사용자 확정 기존 파일 (trustedExistingRefs) 합성 — 오직 명시적 stage0Contract가 있을 때만
+        stage0Contract?.trustedExistingRefs?.forEach { ref ->
             if (targetFiles.none { it.path == ref.filePath }) {
                 targetFiles.add(TargetFileSpec(
                     order = targetFiles.size + 1,
@@ -196,8 +195,8 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             }
         }
 
-        // Stage 0 사용자 명시 신규 생성 항목 (newCreations) 독립 합성 (그래프 탐색 seed 배제)
-        effectiveContract?.newCreations?.forEach { item ->
+        // Stage 0 사용자 명시 신규 생성 항목 (newCreations) 독립 합성 — 오직 명시적 stage0Contract가 있을 때만
+        stage0Contract?.newCreations?.forEach { item ->
             if (targetFiles.none { it.path == item.statement }) {
                 targetFiles.add(TargetFileSpec(
                     order = targetFiles.size + 1,
@@ -208,10 +207,11 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             }
         }
 
-        // Stage 0 / ClarifyIntent 사용자 거부 기존 파일 (rejectedExistingRefs + excludedFiles) 배제 필터링 (0건 부활 불변식)
-        val contractRejectedPaths = effectiveContract?.rejectedExistingRefs?.map { it.filePath }?.toSet() ?: emptySet()
+        // Stage 0 / ClarifyIntent 사용자 거부 기존 파일 (stage0Contract + previousContract + clarifyIntent) 배제 필터링 (0건 부활 불변식)
+        val stage0RejectedPaths = stage0Contract?.rejectedExistingRefs?.map { it.filePath }?.toSet() ?: emptySet()
+        val previousRejectedPaths = previousContract?.rejectedExistingRefs?.map { it.filePath }?.toSet() ?: emptySet()
         val intentExcludedPaths = clarifyIntent?.excludedFiles?.toSet() ?: emptySet()
-        val allExcludedPaths = contractRejectedPaths + intentExcludedPaths
+        val allExcludedPaths = stage0RejectedPaths + previousRejectedPaths + intentExcludedPaths
 
         val eligibleTargetFiles = if (allExcludedPaths.isNotEmpty()) {
             targetFiles.filter { it.path !in allExcludedPaths }
@@ -250,13 +250,13 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             
             // 앵커 형제(anchorSiblingRefs)는 Stage 1 위상 시드 확장 풀에 섞지 않고 (노이즈 원천 차단),
             // Stage 2/3 프롬프트 참조 컨텍스트로 주입하여 신규 파일 구조 생성의 참조로만 소비 (방안 B 실측 채택)
-            val baseRequirement = effectiveContract?.enrichedRequirementText
+            val baseRequirement = stage0Contract?.enrichedRequirementText
                 ?: if (secondaryReq.isNotBlank()) "$effectiveReq\n$secondaryReq" else effectiveReq
-            val fullRequirement = if (effectiveContract != null && effectiveContract.anchorSiblingRefs.isNotEmpty()) {
+            val fullRequirement = if (stage0Contract != null && stage0Contract.anchorSiblingRefs.isNotEmpty()) {
                 buildString {
                     appendLine(baseRequirement)
                     appendLine("\n## 참고 템플릿 컴포넌트 (신규 생성 시 구조 참조용)")
-                    effectiveContract.anchorSiblingRefs.forEach { anchor ->
+                    stage0Contract.anchorSiblingRefs.forEach { anchor ->
                         appendLine("- `${anchor.filePath}`")
                     }
                 }.trim()
@@ -416,13 +416,14 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                     }
 
                 // 이전 계약 및 ClarifyIntent의 거부 이력 누적 보존 (0-재출현 라운드트립 불변식 보존)
-                val previousContractRejected = (effectiveContract?.rejectedExistingRefs ?: emptyList())
+                val stage0ContractRejected = (stage0Contract?.rejectedExistingRefs ?: emptyList())
+                val previousContractRejected = (previousContract?.rejectedExistingRefs ?: emptyList())
                 val intentExcludedRefs = (clarifyIntent?.excludedFiles ?: emptyList()).map { 
                     net.ib.ixpert.ops.wuwagent.agent.clarify.model.LinkHint.ExistingRef(filePath = it, symbols = emptyList()) 
                 }
-                val accumulatedRejectedExistingRefs = (previousContractRejected + intentExcludedRefs).distinctBy { it.filePath }
-                val accumulatedRejectedNewCreations = (effectiveContract?.rejectedNewCreations ?: emptyList())
-                val accumulatedRejectedItems = (effectiveContract?.rejectedItems ?: emptyList())
+                val accumulatedRejectedExistingRefs = (stage0ContractRejected + previousContractRejected + intentExcludedRefs).distinctBy { it.filePath }
+                val accumulatedRejectedNewCreations = (stage0Contract?.rejectedNewCreations ?: previousContract?.rejectedNewCreations ?: emptyList())
+                val accumulatedRejectedItems = (stage0Contract?.rejectedItems ?: previousContract?.rejectedItems ?: emptyList())
 
                 val finalContract = net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract(
                     contractVersion = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.CURRENT_CONTRACT_VERSION,
@@ -433,7 +434,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                     confirmedItems = newCreationItems,
                     trustedExistingRefs = confirmedExistingRefs,
                     newCreations = newCreationItems,
-                    anchorSiblingRefs = effectiveContract?.anchorSiblingRefs ?: emptyList(),
+                    anchorSiblingRefs = stage0Contract?.anchorSiblingRefs ?: emptyList(),
                     rejectedExistingRefs = accumulatedRejectedExistingRefs,
                     rejectedNewCreations = accumulatedRejectedNewCreations,
                     rejectedItems = accumulatedRejectedItems,
