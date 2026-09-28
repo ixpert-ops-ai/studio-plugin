@@ -87,6 +87,11 @@ class Stage0SurveyAdminLiveLlmVerificationTest {
 
     @Test
     fun testPhase33_LiveLlmSurveyAdminThreeUtteranceTypes() {
+        org.junit.Assume.assumeTrue(
+            "Live vLLM 테스트 실행은 -DrunLiveLlmTests=true 명시 시에만 활성화됩니다.",
+            System.getProperty("runLiveLlmTests") == "true"
+        )
+
         val graph = loadSurveyAdminGraph()
         assertNotNull("survey_admin 메타그래프 로드 성공", graph)
 

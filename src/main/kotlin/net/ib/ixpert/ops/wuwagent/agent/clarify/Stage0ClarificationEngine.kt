@@ -577,20 +577,42 @@ class Stage0ClarificationEngine(
         val graphHash = ClarificationContractStore.calculateGraphHash(graph)
         val anchorTokens = state.seedSet.map { it.value }.distinct()
         val constraints = extractConstraints(state.userStatements)
-        val refinedRequirement = refineRequirement(state.originalRequirement, state.userStatements, constraints)
+        val rawRefined = refineRequirement(state.originalRequirement, state.userStatements, constraints)
+        val retentionResult = IdentifierRetentionChecker.checkRetention(
+            refinedRequirement = rawRefined,
+            originalRequirement = state.originalRequirement,
+            userStatements = state.userStatements
+        )
+        val refinedRequirement = retentionResult.effectiveRefinedRequirement
         val excludedFiles = state.items
             .filter { it.verdict == Verdict.REJECTED }
             .mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
             .distinct()
 
+        val allStatements = listOf(state.originalRequirement) + state.userStatements
+        val classNames = graph.files.values.map { it.className }
+        val auxiliaryIdentifiers = IdentifierRetentionChecker.extractAuxiliaryIdentifiers(
+            texts = allStatements,
+            classNames = classNames,
+            knownExpected = retentionResult.expectedIdentifiers
+        )
+
         return ClarifyIntent(
             originalRequirement = state.originalRequirement,
             refinedRequirement = refinedRequirement,
+            userStatements = state.userStatements,
             anchorTokens = anchorTokens,
             constraints = constraints,
             excludedFiles = excludedFiles,
             graphHash = graphHash,
-            contractVersion = "1.0"
+            retentionAudit = RetentionAudit(
+                rawRefinedRequirement = retentionResult.rawRefinedRequirement,
+                expectedIdentifiers = retentionResult.expectedIdentifiers.toList().sorted(),
+                missingBeforeFix = retentionResult.missingIdentifiers,
+                auxiliaryIdentifiers = auxiliaryIdentifiers,
+                wasRetainedWithoutModification = retentionResult.wasRetainedWithoutModification
+            ),
+            contractVersion = "1.1"
         )
     }
 

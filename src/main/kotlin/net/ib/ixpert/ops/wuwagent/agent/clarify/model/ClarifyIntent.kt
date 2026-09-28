@@ -11,6 +11,9 @@ data class ClarifyIntent(
     // 대화로 정제된 최종 요구사항 (Analyze 방향타)
     val refinedRequirement: String,
 
+    // 사용자 추가 발화 원문 목록 (Analyze는 refinedRequirement를 소비하고, userStatements는 무손실 원본 기록 및 후속 Implement 단계용)
+    val userStatements: List<String> = emptyList(),
+
     // 대화 중 검증/확정된 핵심 앵커 토큰 (Analyze Seed 우선 부여용)
     val anchorTokens: List<String> = emptyList(),
 
@@ -23,8 +26,22 @@ data class ClarifyIntent(
     // 결정론 앵커 (그래프 정합성 검증)
     val graphHash: String,
 
+    // 식별자 보존 검사 및 안전판 보정 감사 기록 (지표 왜곡 방지 및 품질 모니터링용)
+    val retentionAudit: RetentionAudit? = null,
+
     // 계약 버전
-    val contractVersion: String = "1.0"
+    val contractVersion: String = "1.1"
+)
+
+/**
+ * 식별자 보존 검사 감사 기록
+ */
+data class RetentionAudit(
+    val rawRefinedRequirement: String,
+    val expectedIdentifiers: List<String> = emptyList(),
+    val missingBeforeFix: List<String> = emptyList(),
+    val auxiliaryIdentifiers: List<String> = emptyList(), // 그래프 클래스명 구성단어와 일치하는 보조 식별자 (정제문 강제병기 없이 기록/모니터링)
+    val wasRetainedWithoutModification: Boolean = true
 )
 
 /**
