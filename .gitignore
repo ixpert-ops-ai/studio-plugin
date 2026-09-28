@@ -24,3 +24,15 @@ node_modules
 .graphify/
 bin/
 .claude/
+.kotlin/
+
+# Test artifacts and caches
+.wuwagent/
+.meta/
+build.old/
+build2/
+*_output*.txt
+clarify_analyze_baseline_raw.json
+clarify_analyze_baseline_report.md
+integration_test_raw.json
+integration_test_report.txt

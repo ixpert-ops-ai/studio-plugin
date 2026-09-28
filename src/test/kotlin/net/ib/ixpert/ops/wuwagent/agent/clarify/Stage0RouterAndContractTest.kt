@@ -583,6 +583,12 @@ class Stage0RouterAndContractTest {
 
         val intentSuccess = engineSuccess.buildClarifyIntent(turn2.state)
 
+        // userStatements 무손실 인계 및 불변식 검증
+        assertEquals(2, intentSuccess.userStatements.size)
+        assertEquals("기존 알림톡 채널을 그대로 활용합니다.", intentSuccess.userStatements[0])
+        assertEquals("외부 API 연동은 하지 않고 내부 모듈만 씁니다.", intentSuccess.userStatements[1])
+        assertFalse("userStatements에 originalRequirement가 중복 포함되지 않아야 함", intentSuccess.userStatements.contains("설문 발송 채널에 브랜드메시지 추가"))
+
         // 불변식 (a) 검증: originalRequirement와 refinedRequirement가 독립 분리 보존됨
         assertEquals("설문 발송 채널에 브랜드메시지 추가", intentSuccess.originalRequirement)
         assertEquals("기존 알림톡 채널을 활용하여 설문 발송 시 브랜드메시지 옵션을 추가하고, 외부 연동 API는 사용하지 않는다.", intentSuccess.refinedRequirement)
