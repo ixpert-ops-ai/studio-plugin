@@ -157,4 +157,38 @@ class ClarifyIntentStoreTest {
             assertEquals(ContractValidationReason.FILE_NOT_FOUND, e.reason)
         }
     }
+
+    /**
+     * [회귀 테스트] 세션 격리 안전판 검증:
+     * - 동일 프로젝트에서 SR_1(결제 모듈)의 디스크 기록용 파일이 남아있더라도,
+     * - 새로운 SR_2(회원 탈퇴)가 단독 /analyze로 실행될 때 AnalyzeInputResolver가
+     *   사용자 입력을 100% 보장하고 이전 세션의 stale intent/excludedFiles를 일절 소비하지 않음을 검증.
+     */
+    @Test
+    fun testStaleIntentDoesNotContaminateNewStandaloneAnalyzeSession() {
+        val projectRoot = tempFolder.newFolder("stale_intent_project")
+        val graph = createMiniGraph()
+        val graphHash = ClarificationContractStore.calculateGraphHash(graph)
+
+        // 1. 이전 세션 SR_1 인텐트 저장 (디스크 잔존 기록)
+        val staleIntent = ClarifyIntent(
+            originalRequirement = "SR_1: 결제 모듈 연동 및 카드사 연계",
+            refinedRequirement = "SR_1 정제문: 카드사 PG 연동",
+            excludedFiles = listOf("src/main/java/com/example/OrderService.java"),
+            graphHash = graphHash,
+            contractVersion = "1.0"
+        )
+        ClarifyIntentStore.saveIntent(projectRoot, staleIntent, key = "default")
+
+        // 2. 새 세션 SR_2 단독 /analyze 실행: inMemoryIntent = null
+        val newRequirement = "SR_2: 회원 탈퇴 및 개인정보 파기 처리"
+        val resolved = AnalyzeInputResolver.resolve(
+            rawInput = newRequirement,
+            inMemoryIntent = null
+        )
+
+        // 3. 단언 (Green): 새 입력 100% 보존 및 이전 intent/excludedFiles 완벽 차단
+        assertEquals("새 세션의 사용자 입력이 100% 보존되어야 함", newRequirement, resolved.effectiveRequirement)
+        assertNull("단독 /analyze 시 이전 세션 인텐트 계약이 주입되지 않아야 함", resolved.effectiveIntent)
+    }
 }

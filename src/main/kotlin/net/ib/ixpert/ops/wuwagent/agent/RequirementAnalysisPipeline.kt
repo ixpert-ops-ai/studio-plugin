@@ -32,6 +32,12 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
 
     private val logger = Logger.getInstance(RequirementAnalysisPipeline::class.java)
 
+    /**
+     * @param previousContract 과거 세션 간 디스크 계약 로드를 위해 설계되었으나,
+     *                         세션 간 유령 오염(Ghost Contamination) 방지를 위해 라우터 수준에서 항상 null로 격리됩니다.
+     *                         동일 세션 내 거절 정보는 clarifyIntent.excludedFiles를 통해 메모리로만 안전하게 인계됩니다.
+     *                         (명시적 단위 테스트 및 하위 호환성을 위해 파라미터는 유지하되 디스크 로드는 전면 차단됨)
+     */
     suspend fun analyze(
         primaryReq: String, 
         secondaryReq: String = "", 

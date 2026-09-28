@@ -23,7 +23,7 @@ import java.io.InputStreamReader
 
 data class TestCase(val type: String, val srText: String, val targetGtClass: String)
 
-class PipelineE2ETestVllmClient : LLMClient {
+class PipelineE2ETestVllmClient(val temperature: Double = 0.0) : LLMClient {
     private val gson = Gson()
     private val serverUrl = "http://vllm.ixpertops.cloud/v1/chat/completions"
     private val modelName = "Qwen/Qwen3.8-27B-FP8"
@@ -42,7 +42,7 @@ class PipelineE2ETestVllmClient : LLMClient {
             "model" to modelName,
             "messages" to messagesList,
             "stream" to false,
-            "temperature" to 0.0,
+            "temperature" to temperature,
             "max_tokens" to (maxTokens ?: 300)
         )
         

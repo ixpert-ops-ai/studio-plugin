@@ -139,13 +139,8 @@ class WebviewActionRouter(private val project: Project) {
                             val graphLoader = project.getService(net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.GraphLoader::class.java)
                             val projectGraph = graphLoader.loadGraph(level1Only = true) ?: throw IllegalStateException("메타그래프를 찾을 수 없습니다. 먼저 /metagraph 명령어로 그래프를 생성해주세요.")
 
-                            val projectBase = java.io.File(project.basePath ?: "")
-                            // 이전 계약 아티팩트가 존재하는 경우, 거부 항목 억제를 위해 로드 시도
-                            val previousContract = try {
-                                net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.loadContractByKey(projectBase, projectGraph)
-                            } catch (e: Exception) {
-                                null // 이전 계약이 깨졌거나 없으면 신규 세션으로 진행
-                            }
+                            // 신규 /clarify 세션 시작 시 이전 세션 오염 방지를 위해 previousContract 격리 (null)
+                            val previousContract: net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract? = null
 
                             val scanner = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0GraphScanner(projectGraph)
                             val llmClient = try {
@@ -191,7 +186,7 @@ class WebviewActionRouter(private val project: Project) {
                     logger.info("Router: /analyze 분기")
                     val messageId = "analyze_${System.currentTimeMillis()}"
                     val rawInput = textBody.trim()
-                    executeAnalyzePipeline(project, bridge, rawInput, messageId)
+                    executeAnalyzePipeline(project, bridge, rawInput, messageId, null)
                 }
 
                 // ── 요구사항 구체화 확인 (Stage 0 -> Stage 1) ────────
@@ -259,11 +254,15 @@ class WebviewActionRouter(private val project: Project) {
                     net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
                     
                     val projectBase = java.io.File(project.basePath ?: "")
-                    val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
-                    logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
+                    try {
+                        val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
+                        logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
+                    } catch (e: Exception) {
+                        logger.warn("Clarify intent save failed (recording only): ${e.message}")
+                    }
 
                     // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행
-                    executeAnalyzePipeline(project, bridge, clarifyIntent.refinedRequirement, messageId)
+                    executeAnalyzePipeline(project, bridge, clarifyIntent.refinedRequirement, messageId, clarifyIntent)
                 }
 
                 // ── 요구사항 대화형 발화 처리 (Stage 0: /clarify-utterance) ────────
@@ -307,11 +306,15 @@ class WebviewActionRouter(private val project: Project) {
                             net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
 
                             val projectBase = java.io.File(project.basePath ?: "")
-                            val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
-                            logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
+                            try {
+                                val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
+                                logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
+                            } catch (e: Exception) {
+                                logger.warn("Clarify intent save failed (recording only): ${e.message}")
+                            }
 
                             // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행
-                            executeAnalyzePipeline(project, bridge, clarifyIntent.refinedRequirement, messageId)
+                            executeAnalyzePipeline(project, bridge, clarifyIntent.refinedRequirement, messageId, clarifyIntent)
                         } catch (e: Exception) {
                             logger.error("Clarify utterance error", e)
                             ApplicationManager.getApplication().invokeLater {
@@ -1480,7 +1483,8 @@ class WebviewActionRouter(private val project: Project) {
         project: Project,
         bridge: JcefBridge,
         rawInput: String,
-        messageId: String
+        messageId: String,
+        inMemoryClarifyIntent: net.ib.ixpert.ops.wuwagent.agent.clarify.model.ClarifyIntent?
     ) {
         bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프 영향도 분석을 시작합니다...", messageId)
 
@@ -1491,38 +1495,19 @@ class WebviewActionRouter(private val project: Project) {
 
                 val projectBase = java.io.File(project.basePath ?: "")
 
-                // 1. ClarifyIntent 로드 (있으면 소비, 없으면 null 자립 분해)
-                val intentFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.findIntentFile(projectBase)
-                val clarifyIntent = if (intentFile != null) {
-                    try {
-                        net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.loadIntent(intentFile, projectGraph)
-                    } catch (e: net.ib.ixpert.ops.wuwagent.agent.clarify.ContractValidationException) {
-                        logger.error("Clarify intent validation failed", e)
-                        ApplicationManager.getApplication().invokeLater {
-                            bridge.sendMessage("error", "❌ 요구사항 인텐트 계약 검증 실패: ${e.message}", messageId)
-                        }
-                        return@executeOnPooledThread
-                    }
-                } else {
-                    null
-                }
+                // 1. 입력 및 인텐트 계약 확정 (Clarify 메모리 인계 시에만 소비, 단독 /analyze 시 사용자 입력 100% 최우선 보장 및 디스크 stale intent 무시)
+                val resolvedInput = net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeInputResolver.resolve(
+                    rawInput = rawInput,
+                    inMemoryIntent = inMemoryClarifyIntent
+                )
+                val clarifyIntent = resolvedInput.effectiveIntent
+                val initialRequirement = resolvedInput.effectiveRequirement
 
-                // 2. 이전 ClarificationContract 로드 (거부 이력 / 0-재출현 억제용)
-                val contractFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.findContractFile(projectBase)
-                val previousContract = if (contractFile != null) {
-                    try {
-                        net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.loadContract(contractFile, projectGraph)
-                    } catch (e: Exception) {
-                        null
-                    }
-                } else {
-                    null
-                }
+                // 2. 단독 실행 시 stale contract 무차별 유입 방지 (previousContract = null 격리)
+                val previousContract: net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract? = null
 
                 val client = net.ib.ixpert.ops.wuwagent.service.WuwLlmService.getClient()
                 val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(project, client)
-                val initialRequirement = clarifyIntent?.refinedRequirement?.ifBlank { null }
-                    ?: rawInput.ifBlank { clarifyIntent?.originalRequirement ?: "" }
 
                 val result = kotlinx.coroutines.runBlocking {
                     pipeline.analyze(
