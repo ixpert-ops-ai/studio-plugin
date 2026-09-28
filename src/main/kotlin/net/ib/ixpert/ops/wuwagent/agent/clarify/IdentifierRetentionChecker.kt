@@ -20,8 +20,19 @@ object IdentifierRetentionChecker {
         val rawRefinedRequirement: String,
         val expectedIdentifiers: Set<String>,
         val missingIdentifiers: List<String>,
-        val wasRetainedWithoutModification: Boolean
+        val wasRetainedWithoutModification: Boolean,
+        val scopeModifierDropped: Boolean = false
     )
+
+    /**
+     * 특정 식별자에 '만' 한정 조사가 붙어 있는지 여부를 엄격한 경계로 검사.
+     * (예: 'SurveyServiceImpl만', 'SurveyServiceImpl.java만' -> true, '만약', '만들다' -> false)
+     */
+    fun hasScopeModifier(texts: List<String>, identifier: String): Boolean {
+        val baseName = identifier.substringBeforeLast(".")
+        val pattern = Regex("""(?<![A-Za-z0-9_])(?:""" + Regex.escape(identifier) + """|""" + Regex.escape(baseName) + """(\.java)?)만(?![A-Za-z0-9_])""", RegexOption.IGNORE_CASE)
+        return texts.any { pattern.containsMatchIn(it) }
+    }
 
     /**
      * 원문 텍스트들로부터 고유 식별자(클래스명, 파일명, 메서드명, 전문명 등)를 결정론적으로 추출.
@@ -151,6 +162,17 @@ object IdentifierRetentionChecker {
             )
         }
 
+        val inputTexts = listOf(originalRequirement) + userStatements
+        val hasAnyScopeMod = expectedIdentifiers.any { hasScopeModifier(inputTexts, it) }
+        val scopeModifierDropped = if (hasAnyScopeMod) {
+            val keptScopeMod = expectedIdentifiers.any { id ->
+                hasScopeModifier(inputTexts, id) && hasScopeModifier(listOf(refinedRequirement), id)
+            }
+            !keptScopeMod
+        } else {
+            false
+        }
+
         val missing = expectedIdentifiers.filter { id ->
             !containsIdentifier(refinedRequirement, id)
         }.sorted()
@@ -168,7 +190,8 @@ object IdentifierRetentionChecker {
                 rawRefinedRequirement = refinedRequirement,
                 expectedIdentifiers = expectedIdentifiers,
                 missingIdentifiers = missing,
-                wasRetainedWithoutModification = false
+                wasRetainedWithoutModification = false,
+                scopeModifierDropped = scopeModifierDropped
             )
         }
 
@@ -177,7 +200,8 @@ object IdentifierRetentionChecker {
             rawRefinedRequirement = refinedRequirement,
             expectedIdentifiers = expectedIdentifiers,
             missingIdentifiers = emptyList(),
-            wasRetainedWithoutModification = true
+            wasRetainedWithoutModification = true,
+            scopeModifierDropped = scopeModifierDropped
         )
     }
 

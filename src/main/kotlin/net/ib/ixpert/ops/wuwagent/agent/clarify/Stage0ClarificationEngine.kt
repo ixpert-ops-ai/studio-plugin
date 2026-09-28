@@ -610,7 +610,8 @@ class Stage0ClarificationEngine(
                 expectedIdentifiers = retentionResult.expectedIdentifiers.toList().sorted(),
                 missingBeforeFix = retentionResult.missingIdentifiers,
                 auxiliaryIdentifiers = auxiliaryIdentifiers,
-                wasRetainedWithoutModification = retentionResult.wasRetainedWithoutModification
+                wasRetainedWithoutModification = retentionResult.wasRetainedWithoutModification,
+                scopeModifierDropped = retentionResult.scopeModifierDropped
             ),
             contractVersion = "1.1"
         )
@@ -630,7 +631,9 @@ class Stage0ClarificationEngine(
 
                 [규율]
                 1. 원 요구사항의 핵심 목표와 사용자의 세부 의도/제약사항을 자연스럽게 결합하세요.
-                2. 불필요한 서론/결론/인사말 없이 오직 정제된 요구사항 본문만 출력하세요.
+                2. 사용자가 언급한 특정 클래스/파일명(예: SurveyServiceImpl, SAPACMM0802S01, selTrcdIsInf 등) 및 식별자는 누락 없이 온전히 포함하세요.
+                3. 특정 대상을 한정하는 표현(예: '~만 수정', '~단독', '~위주로')이 있다면 이를 흐리거나 일반화('~내에서', '~를 수정')하지 말고 'SurveyServiceImpl만 수정'과 같이 한정 의미('만')를 분명하게 유지하세요.
+                4. 불필요한 서론/결론/인사말 없이 오직 정제된 요구사항 본문만 출력하세요.
             """.trimIndent()
 
             val userPrompt = """
@@ -661,7 +664,12 @@ class Stage0ClarificationEngine(
         if (userStatements.isEmpty()) return emptyList()
 
         val defaultConstraints = userStatements.map { stmt ->
-            IntentConstraint(kind = ConstraintKind.OTHER, value = stmt, rawStatement = stmt)
+            IntentConstraint(
+                kind = ConstraintKind.OTHER,
+                value = stmt,
+                rawStatement = stmt,
+                evidence = stmt
+            )
         }
 
         val client = llmClient ?: return defaultConstraints
@@ -672,18 +680,23 @@ class Stage0ClarificationEngine(
 
                 [ConstraintKind 분류 기준]
                 - INCLUDE_CHANNEL: 특정 발송 채널/경로 포함 (예: 알림톡 채널 활용, SMS 발송 등)
+                - EXCLUDE_COMPONENT: 특정 컴포넌트/배치/기능 수정 제외 (예: 알림톡 배치는 건드리지 마라 등)
                 - EXCLUDE_EXTERNAL: 외부 연동/외부 API 배제 (예: 외부 API 연동 안 함, 내부 DB만 사용 등)
-                - NEW_MODULE: 신규 모듈/컴포넌트 개발 필요 (예: Bizgo 연동 모듈 신규 개발 등)
-                - SCOPE_LIMIT: 변경 범위 한정 (예: 어드민 화면만 수정, 발송 로직만 수정 등)
+                - NEW_MODULE: 신규 모듈/컴포넌트 개발 필요 (사용자가 '신규 모듈/컴포넌트 개발'을 명시적으로 요구한 경우만 분류. 단순히 외부 API를 호출/연동하는 것은 NEW_MODULE이 아닙니다)
+                - SCOPE_LIMIT: 변경 범위 한정 (예: 특정 클래스/파일만 수정, 특정 기능 위주로 작업 등)
                 - OTHER: 위 항목으로 명확히 분류되지 않는 일반 제약/발화
+
+                [복합 발화 분리 원칙]
+                - 하나의 발화에 배제와 한정이 공존하는 경우(예: '알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야')에는 반드시 각각 EXCLUDE_COMPONENT와 SCOPE_LIMIT 2개의 객체로 분리하여 추출하세요.
 
                 [출력 형식]
                 반드시 아래 JSON 배열 형식으로만 응답하세요:
                 [
                   {
-                    "kind": "INCLUDE_CHANNEL | EXCLUDE_EXTERNAL | NEW_MODULE | SCOPE_LIMIT | OTHER",
+                    "kind": "INCLUDE_CHANNEL | EXCLUDE_COMPONENT | EXCLUDE_EXTERNAL | NEW_MODULE | SCOPE_LIMIT | OTHER",
                     "value": "제약의 핵심 내용 요약",
-                    "rawStatement": "원본 발화 문장"
+                    "rawStatement": "원본 발화 문장",
+                    "evidence": "해당 제약의 근거가 되는 사용자 발화 속 정확한 단어/구문"
                   }
                 ]
             """.trimIndent()
@@ -715,10 +728,12 @@ class Stage0ClarificationEngine(
                 return defaultConstraints
             }
 
+            val combinedUserText = userStatements.joinToString(" ")
+
             parsedList.mapIndexed { index, map ->
-                val kindStr = map["kind"]?.trim()?.uppercase()
-                val kind = try {
-                    ConstraintKind.valueOf(kindStr ?: "OTHER")
+                val rawKindStr = map["kind"]?.trim()?.uppercase()
+                var kind = try {
+                    ConstraintKind.valueOf(rawKindStr ?: "OTHER")
                 } catch (e: Exception) {
                     ConstraintKind.OTHER
                 }
@@ -727,11 +742,29 @@ class Stage0ClarificationEngine(
                     ?: map["value"]
                     ?: ""
                 val value = map["value"]?.takeIf { it.isNotBlank() } ?: rawStmt
+                val evidence = map["evidence"]?.trim()?.takeIf { it.isNotBlank() }
+
+                // 사후 결정론적 환각 가드 (Hallucination Guard)
+                // 1) evidence가 사용자 발화에 전혀 존재하지 않는 가공된 텍스트인 경우 OTHER로 강등
+                val isEvidenceGrounded = evidence != null && combinedUserText.contains(evidence, ignoreCase = true)
+                if (!isEvidenceGrounded && evidence != null) {
+                    kind = ConstraintKind.OTHER
+                }
+
+                // 2) NEW_MODULE 분류 시 사용자 발화에 신규 생성 관련 키워드가 전혀 없으면 OTHER로 안전 강등
+                if (kind == ConstraintKind.NEW_MODULE) {
+                    val hasCreationKeywords = listOf("신규", "새로", "모듈", "생성", "만들", "new", "module")
+                        .any { combinedUserText.contains(it, ignoreCase = true) }
+                    if (!hasCreationKeywords) {
+                        kind = ConstraintKind.OTHER
+                    }
+                }
 
                 IntentConstraint(
                     kind = kind,
                     value = value,
-                    rawStatement = rawStmt
+                    rawStatement = rawStmt,
+                    evidence = evidence ?: rawStmt
                 )
             }
         } catch (e: Exception) {

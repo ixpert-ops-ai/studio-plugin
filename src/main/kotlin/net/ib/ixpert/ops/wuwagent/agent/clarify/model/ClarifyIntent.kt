@@ -41,7 +41,8 @@ data class RetentionAudit(
     val expectedIdentifiers: List<String> = emptyList(),
     val missingBeforeFix: List<String> = emptyList(),
     val auxiliaryIdentifiers: List<String> = emptyList(), // 그래프 클래스명 구성단어와 일치하는 보조 식별자 (정제문 강제병기 없이 기록/모니터링)
-    val wasRetainedWithoutModification: Boolean = true
+    val wasRetainedWithoutModification: Boolean = true,
+    val scopeModifierDropped: Boolean = false // '만' 등 범위 한정 조사가 LLM 정제문에서 누락되었는지 감사 기록
 )
 
 /**
@@ -50,7 +51,8 @@ data class RetentionAudit(
 data class IntentConstraint(
     val kind: ConstraintKind = ConstraintKind.OTHER,
     val value: String,
-    val rawStatement: String? = null // 원본 발화 보존용 (디버깅/추적 안전판)
+    val rawStatement: String? = null, // 원본 발화 보존용 (디버깅/추적 안전판)
+    val evidence: String? = null      // 발화 원문 내 직접적 근거 구문 (환각 검증 및 100% 사실 기반성 보장용)
 )
 
 /**
@@ -58,8 +60,9 @@ data class IntentConstraint(
  */
 enum class ConstraintKind {
     INCLUDE_CHANNEL,    // 특정 채널/경로 포함 (예: 알림톡 채널)
+    EXCLUDE_COMPONENT,  // 특정 컴포넌트/배치/기능 배제 (예: 알림톡 배치 수정 제외)
     EXCLUDE_EXTERNAL,   // 외부 연동 배제 (예: 외부 API 미사용)
-    NEW_MODULE,         // 신규 모듈 생성 필요 (예: 신규 연동 어댑터)
-    SCOPE_LIMIT,        // 범위 한정 (예: 발송 화면만 수정)
+    NEW_MODULE,         // 신규 모듈 생성 필요 (사용자가 신규 개발/생성을 명시한 경우만)
+    SCOPE_LIMIT,        // 범위 한정 (예: 특정 파일/클래스만 수정)
     OTHER               // 분류 불능 자유 제약 (안전판 폴백)
 }

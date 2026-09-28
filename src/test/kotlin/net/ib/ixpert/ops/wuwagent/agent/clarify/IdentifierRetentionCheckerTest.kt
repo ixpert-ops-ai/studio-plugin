@@ -206,5 +206,29 @@ class IdentifierRetentionCheckerTest {
         // 4. Address는 AddressDao의 분절('Address')과 일치하므로 추출
         assertTrue("Address는 클래스명 분절 단어와 일치하여 추출되어야 함", aux.contains("Address"))
     }
+
+    @Test
+    fun testScopeModifierRetentionAndDropDetection() {
+        val userStmts = listOf("SurveyServiceImpl만 수정하면 돼")
+        val original = "설문 일괄 등록 개발"
+
+        // 1. 정제문에서 'SurveyServiceImpl만'이 보존된 경우 -> scopeModifierDropped = false
+        val refinedRetained = "SurveyServiceImpl만 수정하여 설문 일괄 등록 기능을 개발한다."
+        val resultRetained = IdentifierRetentionChecker.checkRetention(refinedRetained, original, userStmts)
+        assertFalse("한정 조사 '만'이 보존된 경우 scopeModifierDropped는 false여야 함", resultRetained.scopeModifierDropped)
+        assertTrue("식별자 자체도 보존됨", resultRetained.wasRetainedWithoutModification)
+
+        // 2. 정제문에서 'SurveyServiceImpl 파일 내에서'로 희석되어 '만'이 누락된 경우 -> scopeModifierDropped = true
+        val refinedDropped = "SurveyServiceImpl 파일 내에서 설문 일괄 등록 기능을 구현하도록 수정한다."
+        val resultDropped = IdentifierRetentionChecker.checkRetention(refinedDropped, original, userStmts)
+        assertTrue("한정 조사 '만'이 누락된 경우 scopeModifierDropped는 true여야 함", resultDropped.scopeModifierDropped)
+        assertTrue("식별자 이름 자체는 존재함", resultDropped.wasRetainedWithoutModification)
+
+        // 3. '만약', '만들다' 등 일반 단어는 scopeModifier로 오인하지 않음
+        val plainStmts = listOf("새로운 서비스를 만들면 돼. 만약 에러나면 처리해줘.")
+        val plainRefined = "새로운 서비스를 개발한다."
+        val resultPlain = IdentifierRetentionChecker.checkRetention(plainRefined, original, plainStmts)
+        assertFalse("일반 단어 '만들다', '만약'은 scopeModifier로 오탐되지 않아야 함", resultPlain.scopeModifierDropped)
+    }
 }
 

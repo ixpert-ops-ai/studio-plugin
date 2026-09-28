@@ -105,4 +105,8 @@ tasks {
     named("build") {
         finalizedBy(copyToRelease)
     }
+
+    named<Test>("test") {
+        systemProperties(System.getProperties().mapKeys { it.key.toString() })
+    }
 }
