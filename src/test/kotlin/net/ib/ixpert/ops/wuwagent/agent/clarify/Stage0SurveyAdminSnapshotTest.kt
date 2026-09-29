@@ -21,9 +21,10 @@ class Stage0SurveyAdminSnapshotTest {
 
     @Test
     fun testStage0OnSurveyAdmin() {
-        val graph = loadSurveyAdminGraph() ?: return
+        val graph = loadSurveyAdminGraph()
+        org.junit.Assume.assumeNotNull("survey_admin metagraph must exist", graph)
         val scanner = Stage0GraphScanner(
-            graph = graph,
+            graph = graph!!,
             minSpecificityScore = 1.0,
             proposalBudget = 10,
             localDomainOverrides = emptyMap(),
@@ -539,7 +540,7 @@ class Stage0SurveyAdminSnapshotTest {
     fun testApcIsolatedDemMentionSimulation() = kotlinx.coroutines.runBlocking {
         val graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json"
         val file = File(graphPath)
-        if (!file.exists()) return@runBlocking
+        org.junit.Assume.assumeTrue("apc project-graph.json must exist", file.exists())
 
         val graph = Gson().fromJson(file.readText(Charsets.UTF_8), ProjectGraph::class.java).normalizeLegacyCollections()
         val scanner = Stage0GraphScanner(
