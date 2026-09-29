@@ -49,21 +49,25 @@ class Stage0ClarificationEngine(
      * 2) 사용자 발화 O + 그래프 실재 X: 신규 파일 생성 여부 1회 확인 질의 생성 및 NewCreation 보존
      * 3) 사용자 발화 X 인접 식별자: PENDING 유지 (rescanUnverified에서 처리)
      */
-    fun resolveUserUtteredIdentifiers(text: String): UserUtteranceResolution {
+    fun resolveUserUtteredIdentifiers(
+        text: String,
+        existingConstraints: List<IntentConstraint>? = null
+    ): UserUtteranceResolution {
         if (text.isBlank()) {
             return UserUtteranceResolution(emptyList(), null, null, emptyList())
         }
 
         // EXCLUDE_COMPONENT 제약의 evidence 범위에 포함된 식별자는 분기 1(CONFIRMED)에서 제외
-        val constraints = extractConstraints(listOf(text))
+        // evidence가 null인 경우 근거 없음으로 처리하여 배제 문맥에 무분별하게 포함시키지 않음
+        val constraints = existingConstraints ?: extractConstraints(listOf(text))
         val excludeEvidences = constraints
             .filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT }
-            .mapNotNull { it.evidence ?: it.rawStatement }
+            .mapNotNull { it.evidence }
 
         val extractedIds = IdentifierRetentionChecker.extractIdentifiers(listOf(text))
         val targetIds = extractedIds.filter { idToken ->
             excludeEvidences.none { ev -> 
-                IdentifierRetentionChecker.containsIdentifier(ev, idToken) || ev.contains(idToken, ignoreCase = true) 
+                IdentifierRetentionChecker.containsIdentifier(ev, idToken)
             }
         }
 
@@ -381,8 +385,8 @@ class Stage0ClarificationEngine(
             val utteredTokens = scanner.extractTokens(stmt, emptySet())
             newSeedTokens = state.seedSet + utteredTokens
 
-            // B-12: 사용자 추가 발화 식별자 3분기 분해
-            val userResolution = resolveUserUtteredIdentifiers(stmt)
+            // B-12: 사용자 추가 발화 식별자 3분기 분해 (추출된 constraints 재사용으로 중복 LLM 호출 차단)
+            val userResolution = resolveUserUtteredIdentifiers(stmt, currentConstraints)
             for (item in userResolution.confirmedItems) {
                 val itemPath = (item.hint as? LinkHint.ExistingRef)?.filePath
                 val existingIndex = updatedItems.indexOfFirst {

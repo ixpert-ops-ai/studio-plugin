@@ -155,6 +155,67 @@ class Stage0UserIdentifierDisambiguationTest {
     }
 
     @Test
+    fun testExclusionContext_SubstringBoundary_SurveyServiceIsNotExcludedWhenSurveyServiceImplIsExcluded() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlmJson = """
+            [
+              {
+                "kind": "EXCLUDE_COMPONENT",
+                "value": "SurveyServiceImpl 수정 제외",
+                "rawStatement": "SurveyServiceImpl은 건드리지 말고 SurveyService만 고쳐 줘",
+                "evidence": "SurveyServiceImpl은 건드리지 말고"
+              },
+              {
+                "kind": "SCOPE_LIMIT",
+                "value": "SurveyService만 수정",
+                "rawStatement": "SurveyServiceImpl은 건드리지 말고 SurveyService만 고쳐 줘",
+                "evidence": "SurveyService만 고쳐 줘"
+              }
+            ]
+        """.trimIndent()
+        val mockLlm = createMockLlm(mockLlmJson)
+        val engine = Stage0ClarificationEngine(scanner, graph, mockLlm)
+
+        val turn0 = engine.initSession("SurveyServiceImpl은 건드리지 말고 SurveyService만 고쳐 줘")
+
+        val confirmedItems = turn0.state.items.filter { it.verdict == Verdict.CONFIRMED }
+        val confirmedPaths = confirmedItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+
+        // 배제 문맥인 SurveyServiceImpl은 CONFIRMED 제외
+        assertFalse("배제 대상인 SurveyServiceImpl은 CONFIRMED 상태가 아니어야 함", confirmedPaths.any { it.endsWith("SurveyServiceImpl.java") })
+
+        // 한정/수정 대상인 SurveyService는 substring 오탐에 의해 배제되지 않고 CONFIRMED여야 함
+        assertTrue("수정 대상인 SurveyService는 CONFIRMED 상태여야 함", confirmedPaths.any { it.endsWith("SurveyService.java") })
+    }
+
+    @Test
+    fun testExclusionContext_NullEvidence_DoesNotExcludeAllIdentifiers() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlmJson = """
+            [
+              {
+                "kind": "EXCLUDE_COMPONENT",
+                "value": "기타 제외",
+                "rawStatement": "OrderController를 수정할 건데 다른건 건드리지마",
+                "evidence": null
+              }
+            ]
+        """.trimIndent()
+        val mockLlm = createMockLlm(mockLlmJson)
+        val engine = Stage0ClarificationEngine(scanner, graph, mockLlm)
+
+        val turn0 = engine.initSession("OrderController를 수정할 건데 다른건 건드리지마")
+
+        val confirmedItems = turn0.state.items.filter { it.verdict == Verdict.CONFIRMED }
+        val confirmedPaths = confirmedItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+
+        // evidence가 null인 EXCLUDE_COMPONENT 제약으로 인해 발화 내 유효 식별자인 OrderController가 배제되어서는 안 됨
+        assertTrue("evidence가 null일 때 OrderController는 배제되지 않고 CONFIRMED여야 함", confirmedPaths.any { it.contains("OrderController.java") })
+    }
+
+    @Test
     fun testBranch2_UtteredAndGraphNotExists_AsksConfirmationQuestion() {
         val graph = createSyntheticGraph()
         val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
