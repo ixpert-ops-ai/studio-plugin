@@ -150,21 +150,39 @@ class Stage0ClarificationEngine(
             null
         }
 
-        val hasNewCreation = (matchedTokens.isEmpty() && text.isNotBlank()) || unmatched.isNotEmpty()
-        val newCreationItem = if (hasNewCreation) {
-            val hint = LinkHint.NewCreation
-            RequirementItem(
-                id = RequirementItem.deriveId(hint, text),
-                statement = text,
-                source = HintSource.USER_UTTERED,
-                hint = hint,
-                anchorRationale = "사용자 직접 발화 신규 컴포넌트 생성 요구사항",
-                verdict = Verdict.CONFIRMED,
-                confidence = ConfidenceBucket.HIGH_CONFIDENCE,
-                provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
-            )
-        } else {
-            null
+        // Branch 2: unmatched 식별자가 있는 경우
+        // 사용자가 명시적으로 '신규/새로/추가/생성' 지시를 하지 않은 경우 확인 전까지 PENDING(미해결) 유지
+        // 명시적 신규 생성 지시인 경우에만 CONFIRMED 신규 생성으로 등록
+        val isExplicitNew = text.contains("신규") || text.contains("새로") || text.contains("추가") || text.contains("생성")
+
+        val newCreationItem = when {
+            unmatched.isNotEmpty() && !isExplicitNew -> {
+                val hint = LinkHint.NewCreation
+                RequirementItem(
+                    id = RequirementItem.deriveId(hint, text),
+                    statement = text,
+                    source = HintSource.SYSTEM_UNCONFIRMED,
+                    hint = hint,
+                    anchorRationale = "사용자 발화 미확인 부존재 식별자 (${unmatched.joinToString()})",
+                    verdict = Verdict.PENDING, // 사용자 확인 전까지는 미해결(PENDING) 유지
+                    confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+                )
+            }
+            (matchedTokens.isEmpty() && text.isNotBlank()) || unmatched.isNotEmpty() -> {
+                val hint = LinkHint.NewCreation
+                RequirementItem(
+                    id = RequirementItem.deriveId(hint, text),
+                    statement = text,
+                    source = HintSource.USER_UTTERED,
+                    hint = hint,
+                    anchorRationale = "사용자 직접 발화 신규 컴포넌트 생성 요구사항",
+                    verdict = Verdict.CONFIRMED,
+                    confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+                )
+            }
+            else -> null
         }
 
         return UserUtteranceResolution(
@@ -257,10 +275,15 @@ class Stage0ClarificationEngine(
                 val p = (cand.hint as? LinkHint.ExistingRef)?.filePath
                 p == null || p !in userConfirmedPaths
             }
+        val userUnconfirmed = if (userResolution.newCreationItem?.verdict == Verdict.PENDING) {
+            listOf(userResolution.newCreationItem)
+        } else {
+            emptyList()
+        }
         val openQ = userResolution.unconfirmedQuestion ?: checkOpenQuestionTrigger(initialTokens, initialCandidates)
 
-        // 초기 items = 사용자 확정 항목 + 새로 발견된 후보군 + 이전 세션 거부 동결 항목
-        val combinedItems = userConfirmedItems + initialCandidates + frozenRejectedItems
+        // 초기 items = 사용자 확정 항목 + 미확인 참조 항목 + 새로 발견된 후보군 + 이전 세션 거부 동결 항목
+        val combinedItems = userConfirmedItems + userUnconfirmed + initialCandidates + frozenRejectedItems
 
         val state = Stage0State(
             originalRequirement = originalRequirement,

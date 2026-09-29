@@ -221,19 +221,47 @@ class Stage0UserIdentifierDisambiguationTest {
         val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
         val engine = Stage0ClarificationEngine(scanner, graph)
 
-        val turn0 = engine.initSession("NonExistentCustomService를 연동해서 처리해줘")
+        val turn0 = engine.initSession("기존 기능 개선")
+        val turn1 = engine.processTurn(turn0.state, Stage0ClarificationEngine.UserInput(userStatement = "NonExistentCustomService를 연동해서 처리해줘"))
 
-        // 1. 그래프에 없는 식별자는 임의로 CONFIRMED로 자동 확정되지 않아야 함
-        val confirmedItems = turn0.state.items.filter { it.verdict == Verdict.CONFIRMED }
+        // 1. 그래프에 없는 식별자는 확인 없이 CONFIRMED로 자동 확정되지 않아야 함 (hint와 verdict 동시 검증)
+        val confirmedItems = turn1.state.items.filter { it.verdict == Verdict.CONFIRMED }
         val confirmedStatements = confirmedItems.map { it.statement }
-        assertFalse("부존재 식별자는 확인 없이 자동 CONFIRMED되지 않아야 함", confirmedStatements.any { it.contains("NonExistentCustomService") })
+        val confirmedHints = confirmedItems.map { it.hint }
+        assertFalse("부존재 식별자는 확인 없이 자동 CONFIRMED되지 않아야 함", 
+            confirmedStatements.any { it.contains("NonExistentCustomService") } || confirmedHints.any { (it as? LinkHint.ExistingRef)?.filePath?.contains("NonExistentCustomService") == true })
 
-        // 2. 신규 생성 여부 확인 질문이 openQuestion 또는 제안으로 1회 발생해야 함
-        val openQ = turn0.openQuestion ?: ""
+        // 2. 신규 생성 여부 확인 질문이 openQuestion으로 1회 발생해야 함
+        val openQ = turn1.openQuestion ?: ""
         assertTrue(
             "신규 생성 여부 확인 질문이 생성되어야 함 (실제 openQ: '$openQ')",
             openQ.contains("NonExistentCustomService") && (openQ.contains("새로") || openQ.contains("신규") || openQ.contains("존재하지 않"))
         )
+
+        // 3. NewCreation hint라도 미확인 상태에서는 PENDING이어야 함
+        val pendingItems = turn1.state.items.filter { it.verdict == Verdict.PENDING }
+        assertTrue("미확인 부존재 식별자는 PENDING 상태로 유지되어야 함", pendingItems.any { it.statement.contains("NonExistentCustomService") })
+    }
+
+    @Test
+    fun testBranch2_TwoTurns_UnansweredUnmatchedIdentifier_RemainsPending() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph)
+
+        val turn0 = engine.initSession("SAPACMM0802S01을 참고하여 OrderController 수정")
+        val turn1 = engine.processTurn(turn0.state, Stage0ClarificationEngine.UserInput(userStatement = "OrderController만 고쳐줘"))
+
+        // 1. OrderController는 실재 노드이며 CONFIRMED
+        val confirmedPaths = turn1.state.items.filter { it.verdict == Verdict.CONFIRMED }.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+        assertTrue("OrderController는 CONFIRMED여야 함", confirmedPaths.any { it.contains("OrderController.java") })
+
+        // 2. 답변되지 않은 부존재 식별자 SAPACMM0802S01은 2턴 후에도 CONFIRMED가 아닌 PENDING으로 보존되어야 함
+        val confirmedItems = turn1.state.items.filter { it.verdict == Verdict.CONFIRMED }
+        assertFalse("답변되지 않은 SAPACMM0802S01은 절대 CONFIRMED가 아니어야 함", confirmedItems.any { it.statement.contains("SAPACMM0802S01") })
+
+        val pendingItems = turn1.state.items.filter { it.verdict == Verdict.PENDING }
+        assertTrue("답변되지 않은 SAPACMM0802S01은 PENDING으로 무손실 보존되어야 함", pendingItems.any { it.statement.contains("SAPACMM0802S01") })
     }
 
     @Test
