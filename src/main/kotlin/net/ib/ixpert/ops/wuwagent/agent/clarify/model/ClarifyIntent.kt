@@ -52,7 +52,8 @@ data class IntentConstraint(
     val kind: ConstraintKind = ConstraintKind.OTHER,
     val value: String,
     val rawStatement: String? = null, // 원본 발화 보존용 (디버깅/추적 안전판)
-    val evidence: String? = null      // 발화 원문 내 직접적 근거 구문 (환각 검증 및 100% 사실 기반성 보장용)
+    val evidence: String? = null,     // 발화 원문 내 직접적 근거 구문 (환각 검증 및 100% 사실 기반성 보장용)
+    val rawKind: ConstraintKind? = null // 가드 개입 전 LLM의 원본 분류 (가드 개입 여부 및 품질 감사용)
 )
 
 /**

@@ -171,7 +171,8 @@ class Stage0ThreeScenarioLiveLlmObservationTest {
                 println("  - userStatements (${intent.userStatements.size}건): ${intent.userStatements}")
                 println("  - constraints (${intent.constraints.size}건):")
                 for (c in intent.constraints) {
-                    println("      * [${c.kind}] value=\"${c.value}\", evidence=\"${c.evidence}\", raw=\"${c.rawStatement}\"")
+                    val intervened = c.rawKind != null && c.rawKind != c.kind
+                    println("      * [${c.kind}] (rawKind=${c.rawKind}, guardIntervened=$intervened) value=\"${c.value}\", evidence=\"${c.evidence}\", raw=\"${c.rawStatement}\"")
                 }
             }
         }

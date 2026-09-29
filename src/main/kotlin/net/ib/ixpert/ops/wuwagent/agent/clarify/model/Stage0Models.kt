@@ -13,7 +13,8 @@ import java.security.MessageDigest
 enum class HintSource {
     USER_CONFIRMED,        // 시스템 제안을 사용자가 확인
     USER_UTTERED,          // 사용자가 직접 발화한 요구
-    SYSTEM_UNCONFIRMED     // 시스템 제안, 미확인 상태
+    SYSTEM_UNCONFIRMED,    // 시스템 제안, 미확인 상태
+    PROPOSED_EXCLUSION     // 사용자 배제 제약에 기반한 시스템 제외 후보 제안
 }
 
 /**

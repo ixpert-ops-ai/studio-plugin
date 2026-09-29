@@ -1,6 +1,8 @@
 package net.ib.ixpert.ops.wuwagent.agent.clarify
 
 import net.ib.ixpert.ops.wuwagent.agent.clarify.model.*
+import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DomainDictionary
+import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 
 /**
@@ -150,8 +152,87 @@ class Stage0ClarificationEngine(
 
         // 2. 사용자 추가 발화 처리 (개방형 질문 답변 또는 신규 요구)
         var newSeedTokens = state.seedSet
+        var exclusionQuestion: String? = null
+        var echoMsg: String? = null
+
         if (!userInput.userStatement.isNullOrBlank()) {
             val stmt = userInput.userStatement.trim()
+            val lowerStmt = stmt.lowercase()
+
+            // 2-0. 이전 턴에서 제안된 배제 후보(PROPOSED_EXCLUSION)에 대한 긍정/부정 답변 확인
+            val pendingExclusions = updatedItems.filter { it.source == HintSource.PROPOSED_EXCLUSION && it.verdict == Verdict.PENDING }
+            if (pendingExclusions.isNotEmpty()) {
+                val isAffirmative = listOf("응", "네", "맞아", "제외해", "제외해줘", "빼줘", "yes", "y", "확인", "그래", "오케이", "ok", "제외").any { lowerStmt.contains(it) }
+                val isNegative = listOf("아니", "아니요", "포함해", "건드려", "no", "n", "취소", "유지").any { lowerStmt.contains(it) }
+
+                if (isAffirmative) {
+                    // 모든 토큰이 정확히 번역/매칭된 고신뢰(HIGH_CONFIDENCE) 후보만 "응"으로 일괄 제외 확정
+                    val highConfidenceExclusions = pendingExclusions.filter { it.confidence == ConfidenceBucket.HIGH_CONFIDENCE }
+                    if (highConfidenceExclusions.isNotEmpty()) {
+                        for (i in updatedItems.indices) {
+                            if (updatedItems[i].source == HintSource.PROPOSED_EXCLUSION && 
+                                updatedItems[i].verdict == Verdict.PENDING &&
+                                updatedItems[i].confidence == ConfidenceBucket.HIGH_CONFIDENCE) {
+                                updatedItems[i] = updatedItems[i].copy(
+                                    verdict = Verdict.REJECTED,
+                                    source = HintSource.USER_CONFIRMED,
+                                    rejectionReason = RejectionReason.FILE_MISMATCH
+                                )
+                            }
+                        }
+                        echoMsg = "배제 요청하신 파일 목록을 분석 대상에서 제외(REJECTED) 확정했습니다."
+                    } else {
+                        // 부분 번역(LOW_CONFIDENCE)인 경우 일반 "응"으로 일괄 제외하지 않고 세부 선택 요구
+                        echoMsg = "모호한 배제 후보가 포함되어 있어 일괄 제외되지 않았습니다. 특정 파일을 지정하거나 체크박스로 선택해 주세요."
+                    }
+                } else if (isNegative) {
+                    // "아니요"/취소 시: 제안된 배제 후보 항목을 state.items에서 완전히 제거하여 계약(CONFIRMED/REJECTED)에 0 흔적 보장
+                    for (i in updatedItems.indices.reversed()) {
+                        if (updatedItems[i].source == HintSource.PROPOSED_EXCLUSION && updatedItems[i].verdict == Verdict.PENDING) {
+                            updatedItems.removeAt(i)
+                        }
+                    }
+                    echoMsg = "배제 요청을 취소하고 분석 대상을 그대로 유지합니다."
+                }
+            }
+
+            // 2-1. 발화로부터 EXCLUDE_COMPONENT 제약 추출 및 배제 후보 탐색
+            val currentConstraints = extractConstraints(listOf(stmt))
+            val excludeConstraints = currentConstraints.filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT }
+            for (ec in excludeConstraints) {
+                val evidence = ec.evidence ?: stmt
+                val resolution = resolveExclusionCandidates(evidence)
+                val confidence = if (resolution.isAllTokensTranslated) ConfidenceBucket.HIGH_CONFIDENCE else ConfidenceBucket.LOW_CONFIDENCE
+
+                for (file in resolution.candidates) {
+                    val fileName = file.path.substringAfterLast("/")
+                    val hint = LinkHint.ExistingRef(file.path, listOf(file.className))
+                    val item = RequirementItem(
+                        id = RequirementItem.deriveId(hint, "exclude:${file.path}"),
+                        statement = "배제 후보: $fileName (${ec.value})",
+                        source = HintSource.PROPOSED_EXCLUSION,
+                        hint = hint,
+                        anchorRationale = "사용자 배제 발화('${evidence}') 매칭 제외 후보",
+                        verdict = Verdict.PENDING,
+                        confidence = confidence,
+                        provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+                    )
+                    val existingIndex = updatedItems.indexOfFirst { 
+                        it.id == item.id || (it.hint as? LinkHint.ExistingRef)?.filePath == file.path 
+                    }
+                    if (existingIndex >= 0) {
+                        if (updatedItems[existingIndex].verdict == Verdict.PENDING) {
+                            updatedItems[existingIndex] = item
+                        }
+                    } else {
+                        updatedItems.add(item)
+                    }
+                }
+                if (resolution.question != null) {
+                    exclusionQuestion = resolution.question
+                }
+            }
+
             val utteredTokens = scanner.extractTokens(stmt, emptySet())
             newSeedTokens = state.seedSet + utteredTokens
 
@@ -272,7 +353,8 @@ class Stage0ClarificationEngine(
                     userStatements = updatedStatements
                 ),
                 isExhausted = true,
-                isReadyForStage1 = true
+                isReadyForStage1 = true,
+                echoBackMessage = echoMsg
             )
         }
 
@@ -287,7 +369,7 @@ class Stage0ClarificationEngine(
 
         // 6. 소진 신호 및 5절 개방형 질문 트리거 평가
         val isExhausted = newCandidates.isEmpty()
-        val openQ = if (!isExhausted) null else checkOpenQuestionTrigger(newSeedTokens, mergedItems)
+        val openQ = exclusionQuestion ?: if (!isExhausted) null else checkOpenQuestionTrigger(newSeedTokens, mergedItems)
 
         val nextState = state.copy(
             items = mergedItems,
@@ -302,8 +384,107 @@ class Stage0ClarificationEngine(
             openQuestion = openQ,
             isExhausted = isExhausted,
             isReadyForStage1 = false,
-            taskSummary = taskSummary
+            taskSummary = taskSummary,
+            echoBackMessage = echoMsg
         )
+    }
+
+    /**
+     * 배제 후보 탐색 및 대화 질문 생성 결과
+     */
+    data class ExclusionCandidateResolution(
+        val evidence: String,
+        val candidates: List<FileNode>,
+        val isAllTokensTranslated: Boolean,
+        val question: String?
+    )
+
+    /**
+     * 한글 evidence로부터 도메인 사전 번역 및 메타데이터 매칭을 시도하고 3가지 상황(완전 매칭, 부분 매칭, 매칭 실패)에 맞추어 배제 후보 및 질문 생성.
+     * - Case A (모든 토큰 매칭 성공): All-Token Matching 후보 도출 및 일괄 확인 질문 생성
+     * - Case B (일부 토큰만 매칭 성공): 매칭된 토큰 기반 광범위 후보 도출 및 항목별 선택 질문 생성 (일반 '응'으로 일괄 제외 방지)
+     * - Case C (매칭 실패): 추측하지 않고 클래스/패키지명 직접 질의 질문 생성
+     */
+    fun resolveExclusionCandidates(evidence: String): ExclusionCandidateResolution {
+        val dict = DomainDictionary.load(graph)
+        val stopwords = setOf(
+            "는", "은", "이", "가", "을", "를", "에", "도", "말고", "만", "건드리지", "마라", "마",
+            "제외", "제외해", "제외해줘", "수정", "하지", "않", "제외하고", "말아줘", "말고는", "빼고",
+            "안", "함", "수정할", "거야", "할거야", "위주로", "파일", "클래스", "관련", "쪽"
+        )
+        val rawTokens = Regex("[가-힣A-Za-z0-9_]+").findAll(evidence).map { it.value }.toList()
+        val particles = listOf("에서", "으로", "까지", "부터", "하고", "에는", "는", "은", "이", "가", "을", "를", "에", "도", "만", "의", "로")
+        val words = rawTokens.map { raw ->
+            var cleaned = raw
+            for (p in particles) {
+                if (cleaned.endsWith(p) && cleaned.length > p.length + 1) {
+                    cleaned = cleaned.removeSuffix(p)
+                    break
+                }
+            }
+            cleaned
+        }.filter { it.length >= 2 && it !in stopwords }.distinct()
+
+        if (words.isEmpty()) {
+            return ExclusionCandidateResolution(evidence, emptyList(), false, null)
+        }
+
+        // 각 단어별로 매칭되는 그래프 파일 집합 탐색 (메타데이터 localName/주석 또는 도메인 사전 번역 토큰 매칭)
+        fun findFilesForWord(word: String): Set<FileNode> {
+            val translations = dict.translate(word)
+            return graph.files.values.filter { fileNode ->
+                val matchesKorean = (fileNode.localName?.contains(word, ignoreCase = true) == true) ||
+                        fileNode.koreanComments.any { it.contains(word, ignoreCase = true) }
+                val fileTokens = (DomainDictionary.tokenizeCamelCase(fileNode.className) +
+                        fileNode.path.split('/', '.', '_').map { it.lowercase() }
+                ).toSet()
+                val matchesTranslation = translations.isNotEmpty() && translations.any { trans ->
+                    fileTokens.contains(trans.lowercase())
+                }
+                matchesKorean || matchesTranslation
+            }.toSet()
+        }
+
+        val wordToMatchedFiles = words.associateWith { findFilesForWord(it) }
+        val resolvedWords = wordToMatchedFiles.filter { it.value.isNotEmpty() }
+        val unresolvedWords = wordToMatchedFiles.filter { it.value.isEmpty() }.keys.toList()
+
+        // Case C: 어떤 단어도 그래프 파일/사전과 매칭되지 않은 경우
+        if (resolvedWords.isEmpty()) {
+            val question = "배제 요청하신 '${evidence}'에 해당하는 클래스나 패키지명을 알려주세요."
+            return ExclusionCandidateResolution(evidence, emptyList(), false, question)
+        }
+
+        // Case A: 모든 단어가 매칭되고, 교집합(All-Token Match)이 존재하는 경우
+        if (unresolvedWords.isEmpty()) {
+            var intersection = resolvedWords.values.first()
+            for (fileSet in resolvedWords.values.drop(1)) {
+                intersection = intersection.intersect(fileSet)
+            }
+            val candidates = intersection.toList()
+
+            val question = if (candidates.isNotEmpty()) {
+                "배제 요청하신 '${evidence}' 관련 파일(${candidates.joinToString { it.className + ".java" }})을 분석 대상에서 제외할까요?"
+            } else {
+                "배제 요청하신 '${evidence}' 관련 파일을 그래프에서 찾지 못했습니다. 관련 클래스나 패키지명을 알려주세요."
+            }
+            return ExclusionCandidateResolution(evidence, candidates, true, question)
+        }
+
+        // Case B: 일부 단어만 매칭된 경우 (Partial Translation/Resolution)
+        // 매칭된 단어들의 파일 합집합을 후보로 제시하고, 미매칭 단어에 대해 세부 선택 요구
+        val unionCandidates = resolvedWords.values.flatten().distinct()
+        val transNames = resolvedWords.keys.joinToString(", ")
+        val untransNames = unresolvedWords.joinToString(", ")
+        val candidateNames = unionCandidates.take(5).joinToString(", ") { it.className + ".java" } + (if (unionCandidates.size > 5) " 등" else "")
+
+        val question = "배제 요청하신 '${evidence}' 중 '${untransNames}'에 해당하는 정확한 클래스를 특정하지 못했습니다. 다음 '${transNames}' 관련 후보($candidateNames) 중 제외할 대상을 선택하시거나, 정확한 클래스/패키지명을 알려주세요."
+
+        return ExclusionCandidateResolution(evidence, unionCandidates, false, question)
+    }
+
+    fun findExclusionCandidates(evidence: String): List<FileNode> {
+        return resolveExclusionCandidates(evidence).candidates
     }
 
     /**
@@ -387,6 +568,13 @@ class Stage0ClarificationEngine(
         for (cand in newCandidates) {
             if (!resultMap.containsKey(cand.id)) {
                 resultMap[cand.id] = cand
+            }
+        }
+
+        // 3) 기존 미판정 아이템(배제 제안 등) 중 아직 resultMap에 없는 항목 보존
+        for (item in currentItems) {
+            if (!resultMap.containsKey(item.id)) {
+                resultMap[item.id] = item
             }
         }
 
@@ -631,8 +819,8 @@ class Stage0ClarificationEngine(
 
                 [규율]
                 1. 원 요구사항의 핵심 목표와 사용자의 세부 의도/제약사항을 자연스럽게 결합하세요.
-                2. 사용자가 언급한 특정 클래스/파일명(예: SurveyServiceImpl, SAPACMM0802S01, selTrcdIsInf 등) 및 식별자는 누락 없이 온전히 포함하세요.
-                3. 특정 대상을 한정하는 표현(예: '~만 수정', '~단독', '~위주로')이 있다면 이를 흐리거나 일반화('~내에서', '~를 수정')하지 말고 'SurveyServiceImpl만 수정'과 같이 한정 의미('만')를 분명하게 유지하세요.
+                2. 사용자가 언급한 특정 클래스/파일명(예: OrderServiceImpl, SAPACMM0802S01, selTrcdIsInf 등) 및 식별자는 누락 없이 온전히 포함하세요.
+                3. 사용자가 배타적 한정 표현('~만 수정', '~단독 수정')을 사용한 경우 이를 흐리거나 일반화('~내에서', '~를 수정')하지 말고 'OrderServiceImpl만 수정'과 같이 '만'을 분명하게 유지하세요. (단, '~위주로'와 같은 우선순위 표현은 배타적 한정으로 왜곡하지 말고 원문 맥락을 유지하세요.)
                 4. 불필요한 서론/결론/인사말 없이 오직 정제된 요구사항 본문만 출력하세요.
             """.trimIndent()
 
@@ -679,15 +867,17 @@ class Stage0ClarificationEngine(
                 당신은 요구사항 분석 전문가입니다. 사용자의 발화 목록에서 시스템 분석 및 파일 필터링에 사용할 제약 조건(Constraints)을 분류하세요.
 
                 [ConstraintKind 분류 기준]
-                - INCLUDE_CHANNEL: 특정 발송 채널/경로 포함 (예: 알림톡 채널 활용, SMS 발송 등)
-                - EXCLUDE_COMPONENT: 특정 컴포넌트/배치/기능 수정 제외 (예: 알림톡 배치는 건드리지 마라 등)
-                - EXCLUDE_EXTERNAL: 외부 연동/외부 API 배제 (예: 외부 API 연동 안 함, 내부 DB만 사용 등)
-                - NEW_MODULE: 신규 모듈/컴포넌트 개발 필요 (사용자가 '신규 모듈/컴포넌트 개발'을 명시적으로 요구한 경우만 분류. 단순히 외부 API를 호출/연동하는 것은 NEW_MODULE이 아닙니다)
-                - SCOPE_LIMIT: 변경 범위 한정 (예: 특정 클래스/파일만 수정, 특정 기능 위주로 작업 등)
+                - INCLUDE_CHANNEL: 특정 발송 채널/경로 포함 요구 (예: 모바일 푸시 알림 활용, SMS 발송 등)
+                - EXCLUDE_COMPONENT: 특정 컴포넌트/배치/기능 수정 제외 요구 (예: 정산 배치는 건드리지 마라 등)
+                - EXCLUDE_EXTERNAL: 외부 연동/외부 API 배제 요구 (예: 외부 결제 연동 미사용, 내부 DB만 사용 등)
+                - NEW_MODULE: 신규 모듈/컴포넌트 생성 필요 (사용자가 신규 개발/생성을 명시적으로 요구한 경우만)
+                - SCOPE_LIMIT: 특정 파일/클래스에 대한 배타적 수정 범위 한정 (예: OrderServiceImpl만 수정 등)
                 - OTHER: 위 항목으로 명확히 분류되지 않는 일반 제약/발화
 
-                [복합 발화 분리 원칙]
-                - 하나의 발화에 배제와 한정이 공존하는 경우(예: '알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야')에는 반드시 각각 EXCLUDE_COMPONENT와 SCOPE_LIMIT 2개의 객체로 분리하여 추출하세요.
+                [분류 원칙]
+                1. 모든 분류는 사용자의 발화에 명시적으로 표현된 내용에만 근거해야 하며, 언급되지 않은 의도를 임의로 추측하거나 과도하게 분류하지 마세요.
+                2. 하나의 발화에 배제와 한정이 공존하는 경우(예: '주문 배치는 두고 OrderController만 고쳐 줘')에는 반드시 각각 EXCLUDE_COMPONENT와 SCOPE_LIMIT 2개의 객체로 분리하여 추출하세요.
+                3. 각 제약의 근거가 되는 사용자 발화 속 정확한 단어/구문(evidence)을 반드시 기재하세요.
 
                 [출력 형식]
                 반드시 아래 JSON 배열 형식으로만 응답하세요:
@@ -745,26 +935,20 @@ class Stage0ClarificationEngine(
                 val evidence = map["evidence"]?.trim()?.takeIf { it.isNotBlank() }
 
                 // 사후 결정론적 환각 가드 (Hallucination Guard)
-                // 1) evidence가 사용자 발화에 전혀 존재하지 않는 가공된 텍스트인 경우 OTHER로 강등
-                val isEvidenceGrounded = evidence != null && combinedUserText.contains(evidence, ignoreCase = true)
-                if (!isEvidenceGrounded && evidence != null) {
-                    kind = ConstraintKind.OTHER
-                }
-
-                // 2) NEW_MODULE 분류 시 사용자 발화에 신규 생성 관련 키워드가 전혀 없으면 OTHER로 안전 강등
-                if (kind == ConstraintKind.NEW_MODULE) {
-                    val hasCreationKeywords = listOf("신규", "새로", "모듈", "생성", "만들", "new", "module")
-                        .any { combinedUserText.contains(it, ignoreCase = true) }
-                    if (!hasCreationKeywords) {
-                        kind = ConstraintKind.OTHER
-                    }
+                // evidence가 누락되었거나 사용자 발화에 전혀 존재하지 않는 가공 텍스트인 경우 OTHER로 안전 강등
+                val isEvidenceGrounded = !evidence.isNullOrBlank() && combinedUserText.contains(evidence, ignoreCase = true)
+                val effectiveKind = if (isEvidenceGrounded) {
+                    kind
+                } else {
+                    ConstraintKind.OTHER
                 }
 
                 IntentConstraint(
-                    kind = kind,
+                    kind = effectiveKind,
                     value = value,
                     rawStatement = rawStmt,
-                    evidence = evidence ?: rawStmt
+                    evidence = evidence ?: rawStmt,
+                    rawKind = kind
                 )
             }
         } catch (e: Exception) {

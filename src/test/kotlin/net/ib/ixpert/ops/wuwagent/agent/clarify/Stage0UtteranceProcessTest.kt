@@ -210,7 +210,8 @@ class Stage0UtteranceProcessTest {
               {
                 "kind": "EXCLUDE_EXTERNAL",
                 "value": "외부 API 연동 배제",
-                "rawStatement": "외부 API는 일절 사용하지 마세요"
+                "rawStatement": "외부 API는 일절 사용하지 마세요",
+                "evidence": "외부 API"
               }
             ]
         """.trimIndent()

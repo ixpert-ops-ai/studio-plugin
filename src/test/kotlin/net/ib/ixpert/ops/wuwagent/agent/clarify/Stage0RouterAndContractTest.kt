@@ -541,12 +541,14 @@ class Stage0RouterAndContractTest {
                       {
                         "kind": "INCLUDE_CHANNEL",
                         "value": "기존 알림톡 채널 활용",
-                        "rawStatement": "기존 알림톡 채널을 그대로 활용합니다."
+                        "rawStatement": "기존 알림톡 채널을 그대로 활용합니다.",
+                        "evidence": "알림톡 채널"
                       },
                       {
                         "kind": "EXCLUDE_EXTERNAL",
                         "value": "외부 연동 API 미사용",
-                        "rawStatement": "외부 API 연동은 하지 않고 내부 모듈만 씁니다."
+                        "rawStatement": "외부 API 연동은 하지 않고 내부 모듈만 씁니다.",
+                        "evidence": "외부 API"
                       }
                     ]
                     """.trimIndent()
