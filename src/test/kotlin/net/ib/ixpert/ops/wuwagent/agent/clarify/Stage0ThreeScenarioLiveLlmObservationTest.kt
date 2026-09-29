@@ -167,12 +167,28 @@ class Stage0ThreeScenarioLiveLlmObservationTest {
                 println("  - missingBeforeFix: ${audit?.missingBeforeFix}")
                 println("  - wasRetainedWithoutModification: ${audit?.wasRetainedWithoutModification}")
                 println("  - scopeModifierDropped: ${audit?.scopeModifierDropped}")
-                println("  - auxiliaryIdentifiers: ${audit?.auxiliaryIdentifiers}")
-                println("  - userStatements (${intent.userStatements.size}건): ${intent.userStatements}")
-                println("  - constraints (${intent.constraints.size}건):")
-                for (c in intent.constraints) {
-                    val intervened = c.rawKind != null && c.rawKind != c.kind
-                    println("      * [${c.kind}] (rawKind=${c.rawKind}, guardIntervened=$intervened) value=\"${c.value}\", evidence=\"${c.evidence}\", raw=\"${c.rawStatement}\"")
+                // 실측 단언 검증 (기준 불변성)
+                val allUserText = userStmts.joinToString(" ")
+                when {
+                    scName.contains("시나리오 1") -> {
+                        org.junit.Assert.assertTrue("시나리오 1 식별자 무손실 보존", audit?.wasRetainedWithoutModification == true)
+                        org.junit.Assert.assertTrue("시나리오 1 SCOPE_LIMIT 분류", intent.constraints.any { it.kind == ConstraintKind.SCOPE_LIMIT })
+                    }
+                    scName.contains("시나리오 2") -> {
+                        org.junit.Assert.assertTrue("시나리오 2 EXCLUDE_COMPONENT 분류", intent.constraints.any { it.kind == ConstraintKind.EXCLUDE_COMPONENT })
+                        org.junit.Assert.assertTrue("시나리오 2 SCOPE_LIMIT 분류", intent.constraints.any { it.kind == ConstraintKind.SCOPE_LIMIT })
+                        org.junit.Assert.assertTrue("시나리오 2 가드 개입 0건", intent.constraints.all { it.rawKind == it.kind })
+                        org.junit.Assert.assertTrue("시나리오 2 evidence 발화 일치", intent.constraints.all { !it.evidence.isNullOrBlank() && allUserText.contains(it.evidence!!, ignoreCase = true) })
+                    }
+                    scName.contains("시나리오 3") -> {
+                        org.junit.Assert.assertTrue("시나리오 3 NEW_MODULE 0건", intent.constraints.none { it.kind == ConstraintKind.NEW_MODULE })
+                        org.junit.Assert.assertTrue("시나리오 3 가드 개입 0건", intent.constraints.all { it.rawKind == it.kind })
+                        org.junit.Assert.assertTrue("시나리오 3 evidence 발화 부분문자열", intent.constraints.all { !it.evidence.isNullOrBlank() && allUserText.contains(it.evidence!!, ignoreCase = true) })
+                    }
+                    scName.contains("시나리오 4") -> {
+                        org.junit.Assert.assertTrue("시나리오 4 식별자 4종 무손실 보존", audit?.missingBeforeFix?.isEmpty() == true)
+                        org.junit.Assert.assertTrue("시나리오 4 원문 무수정 보존", audit?.wasRetainedWithoutModification == true)
+                    }
                 }
             }
         }
