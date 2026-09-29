@@ -36,6 +36,141 @@ class Stage0ClarificationEngine(
         val echoBackMessage: String? = null
     )
 
+    data class UserUtteranceResolution(
+        val confirmedItems: List<RequirementItem>,
+        val newCreationItem: RequirementItem?,
+        val unconfirmedQuestion: String?,
+        val unmatchedIdentifiers: List<String>
+    )
+
+    /**
+     * [B-12] 사용자 발화 내 식별자 3분기 분석 및 자동 확정 / 확인 질의 결정
+     * 1) 사용자 발화 O + 그래프 실재 O: 즉시 USER_UTTERED / CONFIRMED 확정 (재질의 0건)
+     * 2) 사용자 발화 O + 그래프 실재 X: 신규 파일 생성 여부 1회 확인 질의 생성 및 NewCreation 보존
+     * 3) 사용자 발화 X 인접 식별자: PENDING 유지 (rescanUnverified에서 처리)
+     */
+    fun resolveUserUtteredIdentifiers(text: String): UserUtteranceResolution {
+        if (text.isBlank()) {
+            return UserUtteranceResolution(emptyList(), null, null, emptyList())
+        }
+
+        // EXCLUDE_COMPONENT 제약의 evidence 범위에 포함된 식별자는 분기 1(CONFIRMED)에서 제외
+        val constraints = extractConstraints(listOf(text))
+        val excludeEvidences = constraints
+            .filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT }
+            .mapNotNull { it.evidence ?: it.rawStatement }
+
+        val extractedIds = IdentifierRetentionChecker.extractIdentifiers(listOf(text))
+        val targetIds = extractedIds.filter { idToken ->
+            excludeEvidences.none { ev -> 
+                IdentifierRetentionChecker.containsIdentifier(ev, idToken) || ev.contains(idToken, ignoreCase = true) 
+            }
+        }
+
+        val confirmedList = mutableListOf<RequirementItem>()
+        val matchedTokens = mutableSetOf<String>()
+
+        for (idToken in targetIds) {
+            val baseName = idToken.substringBeforeLast(".")
+
+            // 1. files 검색 (클래스명 및 파일명 완전/경계 일치)
+            val matchedFile = graph.files.values.find { fileNode ->
+                val fName = fileNode.path.substringAfterLast("/")
+                val fBase = fName.substringBeforeLast(".")
+                fileNode.className.equals(idToken, ignoreCase = true) ||
+                fileNode.className.equals(baseName, ignoreCase = true) ||
+                fName.equals(idToken, ignoreCase = true) ||
+                fBase.equals(idToken, ignoreCase = true) ||
+                fBase.equals(baseName, ignoreCase = true)
+            }
+
+            if (matchedFile != null) {
+                val fileName = matchedFile.path.substringAfterLast("/")
+                val statement = "$text (관련 파일: $fileName)"
+                val hint = LinkHint.ExistingRef(matchedFile.path, listOf(matchedFile.className))
+                val item = RequirementItem(
+                    id = RequirementItem.deriveId(hint, statement),
+                    statement = statement,
+                    source = HintSource.USER_UTTERED,
+                    hint = hint,
+                    anchorRationale = "사용자 발화 명시 식별자 ($idToken)",
+                    verdict = Verdict.CONFIRMED,
+                    confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
+                    domainPackage = scanner.extractDomainPackage(matchedFile.path)
+                )
+                if (confirmedList.none { (it.hint as? LinkHint.ExistingRef)?.filePath == matchedFile.path }) {
+                    confirmedList.add(item)
+                }
+                matchedTokens.add(idToken)
+                continue
+            }
+
+            // 2. resourceNodes 검색 (JSP, JS, XML 등 리소스 파일명 완전/경계 일치)
+            val matchedResource = graph.resourceNodes.find { rNode ->
+                val rName = rNode.path.substringAfterLast("/")
+                val rBase = rName.substringBeforeLast(".")
+                rName.equals(idToken, ignoreCase = true) ||
+                rBase.equals(idToken, ignoreCase = true) ||
+                rBase.equals(baseName, ignoreCase = true)
+            }
+
+            if (matchedResource != null) {
+                val rFileName = matchedResource.path.substringAfterLast("/")
+                val statement = "$text (관련 파일: $rFileName)"
+                val hint = LinkHint.ExistingRef(matchedResource.path, listOf(idToken))
+                val item = RequirementItem(
+                    id = RequirementItem.deriveId(hint, statement),
+                    statement = statement,
+                    source = HintSource.USER_UTTERED,
+                    hint = hint,
+                    anchorRationale = "사용자 발화 명시 리소스 ($idToken)",
+                    verdict = Verdict.CONFIRMED,
+                    confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+                )
+                if (confirmedList.none { (it.hint as? LinkHint.ExistingRef)?.filePath == matchedResource.path }) {
+                    confirmedList.add(item)
+                }
+                matchedTokens.add(idToken)
+                continue
+            }
+        }
+
+        // Branch 2: Graph에 실재하지 않는 식별자 (UpperCamelCase 또는 확장자 포함 파일명 등 독립 컴포넌트 식별자)
+        val unmatched = targetIds.filter { it !in matchedTokens && (it.matches(Regex("^[A-Z][a-zA-Z0-9]+$")) || it.contains(".")) }
+        val question = if (unmatched.isNotEmpty()) {
+            val names = unmatched.joinToString(", ")
+            "요구사항에 명시된 '$names'은(는) 프로젝트에 존재하지 않습니다. 새로 생성할 파일(신규 컴포넌트)인가요?"
+        } else {
+            null
+        }
+
+        val hasNewCreation = (matchedTokens.isEmpty() && text.isNotBlank()) || unmatched.isNotEmpty()
+        val newCreationItem = if (hasNewCreation) {
+            val hint = LinkHint.NewCreation
+            RequirementItem(
+                id = RequirementItem.deriveId(hint, text),
+                statement = text,
+                source = HintSource.USER_UTTERED,
+                hint = hint,
+                anchorRationale = "사용자 직접 발화 신규 컴포넌트 생성 요구사항",
+                verdict = Verdict.CONFIRMED,
+                confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+            )
+        } else {
+            null
+        }
+
+        return UserUtteranceResolution(
+            confirmedItems = confirmedList,
+            newCreationItem = newCreationItem,
+            unconfirmedQuestion = question,
+            unmatchedIdentifiers = unmatched
+        )
+    }
+
     /**
      * 초기 세션 생성 (Turn 0)
      * - previousContract가 전달된 경우, 이전 세션에서 거부된 항목(rejectedNewCreations, rejectedExistingRefs)을
@@ -108,11 +243,20 @@ class Stage0ClarificationEngine(
             }
         }
 
-        val initialCandidates = scanner.rescanUnverified(initialTokens, frozenRejectedItems)
-        val openQ = checkOpenQuestionTrigger(initialTokens, initialCandidates)
+        // B-12: 사용자 초기 발화 식별자 3분기 분해
+        val userResolution = resolveUserUtteredIdentifiers(originalRequirement)
+        val userConfirmedItems = userResolution.confirmedItems
+        val userConfirmedPaths = userConfirmedItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }.toSet()
 
-        // 초기 items = 새로 발견된 후보군 + 이전 세션 거부 동결 항목
-        val combinedItems = initialCandidates + frozenRejectedItems
+        val initialCandidates = scanner.rescanUnverified(initialTokens, frozenRejectedItems)
+            .filter { cand ->
+                val p = (cand.hint as? LinkHint.ExistingRef)?.filePath
+                p == null || p !in userConfirmedPaths
+            }
+        val openQ = userResolution.unconfirmedQuestion ?: checkOpenQuestionTrigger(initialTokens, initialCandidates)
+
+        // 초기 items = 사용자 확정 항목 + 새로 발견된 후보군 + 이전 세션 거부 동결 항목
+        val combinedItems = userConfirmedItems + initialCandidates + frozenRejectedItems
 
         val state = Stage0State(
             originalRequirement = originalRequirement,
@@ -125,7 +269,7 @@ class Stage0ClarificationEngine(
         return Stage0TurnResult(
             state = state,
             openQuestion = openQ,
-            isExhausted = initialCandidates.isEmpty(),
+            isExhausted = initialCandidates.isEmpty() && userConfirmedItems.isEmpty(),
             isReadyForStage1 = false,
             taskSummary = taskSummary
         )
@@ -153,6 +297,7 @@ class Stage0ClarificationEngine(
         // 2. 사용자 추가 발화 처리 (개방형 질문 답변 또는 신규 요구)
         var newSeedTokens = state.seedSet
         var exclusionQuestion: String? = null
+        var unmatchedQuestion: String? = null
         var echoMsg: String? = null
 
         if (!userInput.userStatement.isNullOrBlank()) {
@@ -236,105 +381,26 @@ class Stage0ClarificationEngine(
             val utteredTokens = scanner.extractTokens(stmt, emptySet())
             newSeedTokens = state.seedSet + utteredTokens
 
-            // Rule-3: 발화 내 단어 식별자(클래스명, 파일명, 식별자) 직접 추출 및 그래프 조회 분기 판정
-            val wordTokens = Regex("[a-zA-Z0-9_.]+").findAll(stmt).map { it.value }.toList()
-            val matchedExistingNodes = mutableListOf<Pair<String, String>>() // (filePath, matchedSymbol)
-            val matchedUtteredTokens = mutableSetOf<String>() // 실제 매칭에 성공한 원본 발화 토큰 집합
-
-            for (w in wordTokens) {
-                val matchedFile = graph.files.values.find { 
-                    it.className.equals(w, ignoreCase = true) || 
-                    it.path.substringAfterLast("/").substringBeforeLast(".").equals(w, ignoreCase = true) ||
-                    it.path.substringAfterLast("/").equals(w, ignoreCase = true)
+            // B-12: 사용자 추가 발화 식별자 3분기 분해
+            val userResolution = resolveUserUtteredIdentifiers(stmt)
+            for (item in userResolution.confirmedItems) {
+                val itemPath = (item.hint as? LinkHint.ExistingRef)?.filePath
+                val existingIndex = updatedItems.indexOfFirst {
+                    (it.hint as? LinkHint.ExistingRef)?.filePath == itemPath
                 }
-                if (matchedFile != null) {
-                    matchedExistingNodes.add(matchedFile.path to matchedFile.className)
-                    matchedUtteredTokens.add(w.lowercase())
-                }
-                val matchedResource = graph.resourceNodes.find { 
-                    val fileName = it.path.substringAfterLast("/")
-                    val fileNameWithoutExt = fileName.substringBeforeLast(".")
-                    fileName.equals(w, ignoreCase = true) || fileNameWithoutExt.equals(w, ignoreCase = true)
-                }
-                if (matchedResource != null) {
-                    // 리소스 노드(JSP/JS/XML)는 별도 클래스명이 없으므로 완전 일치한 파일명 식별자(w)를 심볼로 보존
-                    matchedExistingNodes.add(matchedResource.path to w)
-                    matchedUtteredTokens.add(w.lowercase())
+                if (existingIndex >= 0) {
+                    updatedItems[existingIndex] = item
+                } else {
+                    updatedItems.add(item)
                 }
             }
-
-            if (matchedExistingNodes.isNotEmpty()) {
-                // 분기 A: 그래프 실재 노드 (엣지 보유 / 실존 파일) -> ExistingRef + USER_UTTERANCE 출처
-                for ((filePath, symbol) in matchedExistingNodes.distinctBy { it.first }) {
-                    val fileName = filePath.substringAfterLast("/")
-                    val statement = "$stmt (관련 파일: $fileName)"
-                    val hint = LinkHint.ExistingRef(filePath, listOf(symbol))
-                    val newItem = RequirementItem(
-                        id = RequirementItem.deriveId(hint, statement),
-                        statement = statement,
-                        source = HintSource.USER_UTTERED,
-                        hint = hint,
-                        anchorRationale = "사용자 발화 기반 그래프 실재 노드 식별 ($stmt)",
-                        verdict = Verdict.CONFIRMED, // 사용자 발화는 즉시 동결
-                        confidence = ConfidenceBucket.HIGH_CONFIDENCE,
-                        provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
-                    )
-                    if (updatedItems.none { it.id == newItem.id }) {
-                        updatedItems.add(newItem)
-                    }
-                }
-            }
-
-            // 매칭된 실재 노드들에 속한 멤버(클래스명, 파일명, 필드명, 메서드명, 리소스 메타데이터) 집합 수집
-            val coveredMembers = mutableSetOf<String>()
-            coveredMembers.addAll(matchedUtteredTokens)
-
-            for ((filePath, _) in matchedExistingNodes) {
-                val fileNode = graph.files[filePath]
-                if (fileNode != null) {
-                    coveredMembers.add(fileNode.className.lowercase())
-                    fileNode.methods.forEach { coveredMembers.add(it.name.lowercase()) }
-                    scanner.extractFieldsFromMethods(fileNode).forEach { coveredMembers.add(it.lowercase()) }
-                }
-                val resourceNode = graph.resourceNodes.find { it.path == filePath }
-                if (resourceNode != null) {
-                    val rFileName = resourceNode.path.substringAfterLast("/")
-                    coveredMembers.add(rFileName.lowercase())
-                    coveredMembers.add(rFileName.substringBeforeLast(".").lowercase())
-                    val inputs = (resourceNode.metadata["input_field"] as? List<*>)?.mapNotNull { it?.toString()?.lowercase() } ?: emptyList()
-                    val methods = (resourceNode.metadata["methods"] as? List<*>)?.mapNotNull { it?.toString()?.lowercase() } ?: emptyList()
-                    coveredMembers.addAll(inputs)
-                    coveredMembers.addAll(methods)
-                }
-            }
-
-            // 발화 내 명시된 클래스형(CamelCase) 또는 확장자 포함 파일명 식별자 토큰 추출
-            val utteredClassLikeTokens = wordTokens.filter { 
-                it.matches(Regex("^[A-Z][a-zA-Z0-9]+$")) || (it.contains(".") && it.length > 3)
-            }
-
-            // 분기 B 판정:
-            // 1) 발화 내 실재 노드가 전혀 매칭되지 않은 경우 (신규 개념/요구사항)
-            // 2) 발화 내 명시된 클래스형/파일명 토큰 중 실재 노드/멤버 어디에도 매칭되지 않은 독립 신규 컴포넌트가 존재하는 경우
-            val hasUnmatchedNewCreations = (matchedExistingNodes.isEmpty() && stmt.isNotBlank()) ||
-                    utteredClassLikeTokens.any { it.lowercase() !in coveredMembers }
-
-            if (hasUnmatchedNewCreations) {
-                // 분기 B: 그래프 부존재 / 0-degree (신규 생성 요구) -> NewCreation
-                val hint = LinkHint.NewCreation
-                val newItem = RequirementItem(
-                    id = RequirementItem.deriveId(hint, stmt),
-                    statement = stmt,
-                    source = HintSource.USER_UTTERED,
-                    hint = hint,
-                    anchorRationale = "사용자 직접 발화 신규 컴포넌트 생성 요구사항",
-                    verdict = Verdict.CONFIRMED, // 사용자 발화는 즉시 동결
-                    confidence = ConfidenceBucket.HIGH_CONFIDENCE,
-                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
-                )
+            userResolution.newCreationItem?.let { newItem ->
                 if (updatedItems.none { it.id == newItem.id }) {
                     updatedItems.add(newItem)
                 }
+            }
+            if (userResolution.unconfirmedQuestion != null) {
+                unmatchedQuestion = userResolution.unconfirmedQuestion
             }
         }
 
@@ -369,7 +435,7 @@ class Stage0ClarificationEngine(
 
         // 6. 소진 신호 및 5절 개방형 질문 트리거 평가
         val isExhausted = newCandidates.isEmpty()
-        val openQ = exclusionQuestion ?: if (!isExhausted) null else checkOpenQuestionTrigger(newSeedTokens, mergedItems)
+        val openQ = exclusionQuestion ?: unmatchedQuestion ?: if (!isExhausted) null else checkOpenQuestionTrigger(newSeedTokens, mergedItems)
 
         val nextState = state.copy(
             items = mergedItems,
@@ -556,24 +622,28 @@ class Stage0ClarificationEngine(
         newCandidates: List<RequirementItem>
     ): List<RequirementItem> {
         val resultMap = mutableMapOf<String, RequirementItem>()
+        val frozenPaths = mutableSetOf<String>()
 
         // 1) 기존 동결된 아이템 우선 보존
         for (item in currentItems) {
             if (item.verdict != Verdict.PENDING) {
                 resultMap[item.id] = item
+                (item.hint as? LinkHint.ExistingRef)?.filePath?.let { frozenPaths.add(it) }
             }
         }
 
-        // 2) 신규 재탐색 결과 추가 (동결된 ID는 건드리지 않음)
+        // 2) 신규 재탐색 결과 추가 (동결된 ID 및 동결된 filePath는 건드리지 않음)
         for (cand in newCandidates) {
-            if (!resultMap.containsKey(cand.id)) {
+            val candPath = (cand.hint as? LinkHint.ExistingRef)?.filePath
+            if (!resultMap.containsKey(cand.id) && (candPath == null || !frozenPaths.contains(candPath))) {
                 resultMap[cand.id] = cand
             }
         }
 
         // 3) 기존 미판정 아이템(배제 제안 등) 중 아직 resultMap에 없는 항목 보존
         for (item in currentItems) {
-            if (!resultMap.containsKey(item.id)) {
+            val itemPath = (item.hint as? LinkHint.ExistingRef)?.filePath
+            if (!resultMap.containsKey(item.id) && (itemPath == null || !frozenPaths.contains(itemPath))) {
                 resultMap[item.id] = item
             }
         }
