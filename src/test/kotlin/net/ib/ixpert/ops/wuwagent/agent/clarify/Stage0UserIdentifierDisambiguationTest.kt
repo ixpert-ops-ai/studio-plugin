@@ -190,7 +190,7 @@ class Stage0UserIdentifierDisambiguationTest {
     }
 
     @Test
-    fun testExclusionContext_NullEvidence_DoesNotExcludeAllIdentifiers() {
+    fun testHallucinationGuard_NullEvidenceDowngradedToOther() {
         val graph = createSyntheticGraph()
         val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
         val mockLlmJson = """
@@ -213,6 +213,71 @@ class Stage0UserIdentifierDisambiguationTest {
 
         // evidence가 null인 EXCLUDE_COMPONENT 제약으로 인해 발화 내 유효 식별자인 OrderController가 배제되어서는 안 됨
         assertTrue("evidence가 null일 때 OrderController는 배제되지 않고 CONFIRMED여야 함", confirmedPaths.any { it.contains("OrderController.java") })
+    }
+
+    @Test
+    fun testScenario4_NaturalSr_SAPACMM0802S01_RemainsPendingEvenWithNewKeywordInStatement() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlmJson = """
+            [
+              {
+                "kind": "NEW_MODULE",
+                "value": "APCMMTrcdIsSVC 신규 추가",
+                "rawStatement": "교통카드 발급정보 신규서비스 개발 건 (SAPACMM0802S01 참고). APCMMTrcdIsSVC 신규 추가",
+                "evidence": "APCMMTrcdIsSVC 신규 추가"
+              }
+            ]
+        """.trimIndent()
+        val mockLlm = createMockLlm(mockLlmJson)
+        val engine = Stage0ClarificationEngine(scanner, graph, mockLlm)
+
+        val text = "교통카드 발급정보 신규서비스 개발 건 (SAPACMM0802S01 참고). APCMMTrcdIsSVC 신규 추가"
+        val turn0 = engine.initSession(text)
+
+        // 1. APCMMTrcdIsSVC는 NEW_MODULE evidence에 포함되어 있으므로 CONFIRMED 신규 생성이어야 함
+        val confirmedItems = turn0.state.items.filter { it.verdict == Verdict.CONFIRMED }
+        assertTrue("APCMMTrcdIsSVC는 CONFIRMED 상태여야 함", confirmedItems.any { it.statement.contains("APCMMTrcdIsSVC") && it.hint is LinkHint.NewCreation })
+
+        // 2. 문장에 '신규' 단어가 있더라도, SAPACMM0802S01은 NEW_MODULE evidence에 없으므로 CONFIRMED가 아니어야 함
+        assertFalse("단순 참고 식별자 SAPACMM0802S01은 CONFIRMED가 아니어야 함", confirmedItems.any { it.statement.contains("SAPACMM0802S01") })
+
+        // 3. SAPACMM0802S01은 PENDING 상태로 보존되어야 함
+        val pendingItems = turn0.state.items.filter { it.verdict == Verdict.PENDING }
+        assertTrue("SAPACMM0802S01은 PENDING 상태로 유지되어야 함", pendingItems.any { it.statement.contains("SAPACMM0802S01") })
+
+        // 4. openQuestion은 SAPACMM0802S01에 대해서만 묻고, APCMMTrcdIsSVC는 묻지 않아야 함
+        val openQ = turn0.openQuestion ?: ""
+        assertTrue("openQuestion에 SAPACMM0802S01 확인 질의가 포함되어야 함", openQ.contains("SAPACMM0802S01"))
+        assertFalse("이미 확정된 APCMMTrcdIsSVC에 대해서는 질의가 없어야 함", openQ.contains("APCMMTrcdIsSVC"))
+    }
+
+    @Test
+    fun testNewModule_EvidenceContainingIdentifier_BecomesConfirmed() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlmJson = """
+            [
+              {
+                "kind": "NEW_MODULE",
+                "value": "NewPaymentProcessor 신규 생성",
+                "rawStatement": "새로운 결제 처리기 NewPaymentProcessor 추가 필요",
+                "evidence": "NewPaymentProcessor 추가 필요"
+              }
+            ]
+        """.trimIndent()
+        val mockLlm = createMockLlm(mockLlmJson)
+        val engine = Stage0ClarificationEngine(scanner, graph, mockLlm)
+
+        val turn0 = engine.initSession("새로운 결제 처리기 NewPaymentProcessor 추가 필요")
+
+        // 1. NewPaymentProcessor는 NEW_MODULE evidence와 일치하므로 즉시 CONFIRMED여야 함
+        val confirmedItems = turn0.state.items.filter { it.verdict == Verdict.CONFIRMED }
+        assertTrue("NewPaymentProcessor는 CONFIRMED 상태여야 함", confirmedItems.any { it.statement.contains("NewPaymentProcessor") && it.hint is LinkHint.NewCreation })
+
+        // 2. 미확인 질문이 없어야 함
+        val openQ = turn0.openQuestion ?: ""
+        assertFalse("NewPaymentProcessor에 대한 재확인 질문은 없어야 함", openQ.contains("NewPaymentProcessor"))
     }
 
     @Test

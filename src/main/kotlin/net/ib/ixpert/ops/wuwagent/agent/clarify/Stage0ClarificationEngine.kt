@@ -64,6 +64,10 @@ class Stage0ClarificationEngine(
             .filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT }
             .mapNotNull { it.evidence }
 
+        val newModuleEvidences = constraints
+            .filter { it.kind == ConstraintKind.NEW_MODULE }
+            .mapNotNull { it.evidence }
+
         val extractedIds = IdentifierRetentionChecker.extractIdentifiers(listOf(text))
         val targetIds = extractedIds.filter { idToken ->
             excludeEvidences.none { ev -> 
@@ -90,7 +94,7 @@ class Stage0ClarificationEngine(
 
             if (matchedFile != null) {
                 val fileName = matchedFile.path.substringAfterLast("/")
-                val statement = "$text (관련 파일: $fileName)"
+                val statement = "사용자 명시 파일: $fileName ($idToken)"
                 val hint = LinkHint.ExistingRef(matchedFile.path, listOf(matchedFile.className))
                 val item = RequirementItem(
                     id = RequirementItem.deriveId(hint, statement),
@@ -121,7 +125,7 @@ class Stage0ClarificationEngine(
 
             if (matchedResource != null) {
                 val rFileName = matchedResource.path.substringAfterLast("/")
-                val statement = "$text (관련 파일: $rFileName)"
+                val statement = "사용자 명시 리소스: $rFileName ($idToken)"
                 val hint = LinkHint.ExistingRef(matchedResource.path, listOf(idToken))
                 val item = RequirementItem(
                     id = RequirementItem.deriveId(hint, statement),
@@ -143,40 +147,70 @@ class Stage0ClarificationEngine(
 
         // Branch 2: Graph에 실재하지 않는 식별자 (UpperCamelCase 또는 확장자 포함 파일명 등 독립 컴포넌트 식별자)
         val unmatched = targetIds.filter { it !in matchedTokens && (it.matches(Regex("^[A-Z][a-zA-Z0-9]+$")) || it.contains(".")) }
-        val question = if (unmatched.isNotEmpty()) {
-            val names = unmatched.joinToString(", ")
+
+        // NEW_MODULE 제약의 evidence에 포함된 식별자는 명시적 신규 생성(CONFIRMED)으로 분류
+        val confirmedNewModuleIds = unmatched.filter { idToken ->
+            newModuleEvidences.any { ev ->
+                IdentifierRetentionChecker.containsIdentifier(ev, idToken)
+            }
+        }
+        val unconfirmedUnmatched = unmatched.filter { idToken ->
+            newModuleEvidences.none { ev ->
+                IdentifierRetentionChecker.containsIdentifier(ev, idToken)
+            }
+        }
+
+        // 확인 질문은 NEW_MODULE로 확정되지 않은 미확인 식별자에 대해서만 발생
+        val question = if (unconfirmedUnmatched.isNotEmpty()) {
+            val names = unconfirmedUnmatched.joinToString(", ")
             "요구사항에 명시된 '$names'은(는) 프로젝트에 존재하지 않습니다. 새로 생성할 파일(신규 컴포넌트)인가요?"
         } else {
             null
         }
 
-        // Branch 2: unmatched 식별자가 있는 경우
-        // 사용자가 명시적으로 '신규/새로/추가/생성' 지시를 하지 않은 경우 확인 전까지 PENDING(미해결) 유지
-        // 명시적 신규 생성 지시인 경우에만 CONFIRMED 신규 생성으로 등록
-        val isExplicitNew = text.contains("신규") || text.contains("새로") || text.contains("추가") || text.contains("생성")
+        // confirmedNewModuleIds가 있으면 confirmedList에 NewCreation item 추가
+        for (newId in confirmedNewModuleIds) {
+            val hint = LinkHint.NewCreation
+            val item = RequirementItem(
+                id = RequirementItem.deriveId(hint, newId),
+                statement = "신규 컴포넌트 생성: $newId",
+                source = HintSource.USER_UTTERED,
+                hint = hint,
+                anchorRationale = "사용자 직접 발화 신규 컴포넌트 생성 요구사항 ($newId)",
+                verdict = Verdict.CONFIRMED,
+                confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+            )
+            if (confirmedList.none { it.id == item.id }) {
+                confirmedList.add(item)
+            }
+        }
 
+        // unconfirmedUnmatched가 있는 경우 PENDING NewCreation item 생성
         val newCreationItem = when {
-            unmatched.isNotEmpty() && !isExplicitNew -> {
+            unconfirmedUnmatched.isNotEmpty() -> {
+                val names = unconfirmedUnmatched.joinToString(", ")
                 val hint = LinkHint.NewCreation
                 RequirementItem(
-                    id = RequirementItem.deriveId(hint, text),
-                    statement = text,
+                    id = RequirementItem.deriveId(hint, names),
+                    statement = "미확인 부존재 식별자: $names",
                     source = HintSource.SYSTEM_UNCONFIRMED,
                     hint = hint,
-                    anchorRationale = "사용자 발화 미확인 부존재 식별자 (${unmatched.joinToString()})",
+                    anchorRationale = "사용자 발화 미확인 부존재 식별자 ($names)",
                     verdict = Verdict.PENDING, // 사용자 확인 전까지는 미해결(PENDING) 유지
                     confidence = ConfidenceBucket.HIGH_CONFIDENCE,
                     provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
                 )
             }
-            (matchedTokens.isEmpty() && text.isNotBlank()) || unmatched.isNotEmpty() -> {
+            unmatched.isEmpty() && confirmedNewModuleIds.isEmpty() && matchedTokens.isEmpty() && text.isNotBlank() -> {
+                // 식별자는 없지만 사용자 직접 발화 요구사항인 경우
                 val hint = LinkHint.NewCreation
                 RequirementItem(
                     id = RequirementItem.deriveId(hint, text),
                     statement = text,
                     source = HintSource.USER_UTTERED,
                     hint = hint,
-                    anchorRationale = "사용자 직접 발화 신규 컴포넌트 생성 요구사항",
+                    anchorRationale = "사용자 직접 발화 신규 컴포넌트/개념 요구사항",
                     verdict = Verdict.CONFIRMED,
                     confidence = ConfidenceBucket.HIGH_CONFIDENCE,
                     provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
@@ -412,8 +446,10 @@ class Stage0ClarificationEngine(
             val userResolution = resolveUserUtteredIdentifiers(stmt, currentConstraints)
             for (item in userResolution.confirmedItems) {
                 val itemPath = (item.hint as? LinkHint.ExistingRef)?.filePath
-                val existingIndex = updatedItems.indexOfFirst {
-                    (it.hint as? LinkHint.ExistingRef)?.filePath == itemPath
+                val existingIndex = if (itemPath != null) {
+                    updatedItems.indexOfFirst { (it.hint as? LinkHint.ExistingRef)?.filePath == itemPath }
+                } else {
+                    updatedItems.indexOfFirst { it.id == item.id }
                 }
                 if (existingIndex >= 0) {
                     updatedItems[existingIndex] = item
@@ -948,13 +984,31 @@ class Stage0ClarificationEngine(
     private fun extractConstraints(userStatements: List<String>): List<IntentConstraint> {
         if (userStatements.isEmpty()) return emptyList()
 
-        val defaultConstraints = userStatements.map { stmt ->
-            IntentConstraint(
-                kind = ConstraintKind.OTHER,
-                value = stmt,
-                rawStatement = stmt,
-                evidence = stmt
-            )
+        val defaultConstraints = if (llmClient == null) {
+            userStatements.map { stmt ->
+                val kind = when {
+                    stmt.contains("제외") || stmt.contains("건드리지") || stmt.contains("말고") -> ConstraintKind.EXCLUDE_COMPONENT
+                    stmt.contains("신규") || stmt.contains("새로") || stmt.contains("생성") || stmt.contains("개발") || stmt.contains("REST API") -> ConstraintKind.NEW_MODULE
+                    stmt.contains("채널") || stmt.contains("푸시") || stmt.contains("알림톡") -> ConstraintKind.INCLUDE_CHANNEL
+                    stmt.contains("만 수정") || stmt.contains("만 고쳐") -> ConstraintKind.SCOPE_LIMIT
+                    else -> ConstraintKind.OTHER
+                }
+                IntentConstraint(
+                    kind = kind,
+                    value = stmt,
+                    rawStatement = stmt,
+                    evidence = stmt
+                )
+            }
+        } else {
+            userStatements.map { stmt ->
+                IntentConstraint(
+                    kind = ConstraintKind.OTHER,
+                    value = stmt,
+                    rawStatement = stmt,
+                    evidence = stmt
+                )
+            }
         }
 
         val client = llmClient ?: return defaultConstraints

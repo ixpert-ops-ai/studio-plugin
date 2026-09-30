@@ -165,12 +165,18 @@ class Stage0B12ReAskLiveLlmObservationTest {
                     turn2OpenQ.contains(id, ignoreCase = true)
                 }
 
+                val sapacItem = turn2Result.state.items.find { it.statement.contains("SAPACMM0802S01") }
+                val sapacStatus = sapacItem?.let { "${it.verdict} (hint=${it.hint::class.simpleName}, source=${it.source})" } ?: "없음"
+
                 println("--- Run " + run + " ---")
                 println("  LLM 호출 성공/실패: " + liveLlm.successCount.get() + " / " + liveLlm.failCount.get())
                 println("  1턴 식별자: " + spec.turn1Identifiers)
                 println("  1턴 openQuestion: \"" + turn1OpenQ + "\"")
-                println("  2턴 CONFIRMED 경로: " + turn2ConfirmedPaths)
+                println("  2턴 CONFIRMED 목록: " + turn2ConfirmedPaths)
                 println("  2턴 PENDING 경로: " + turn2PendingPaths)
+                if (spec.name == "시나리오 4") {
+                    println("  2턴 SAPACMM0802S01 상태: " + sapacStatus)
+                }
                 println("  2턴 openQuestion: \"" + turn2OpenQ + "\"")
                 println("  다시 물은 식별자 수: " + reAsked.size + " (목록: " + reAsked + ")")
                 println("  모델 ID: qwen3.8-27b")
