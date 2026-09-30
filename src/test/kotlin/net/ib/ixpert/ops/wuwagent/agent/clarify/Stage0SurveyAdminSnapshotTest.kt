@@ -190,10 +190,10 @@ class Stage0SurveyAdminSnapshotTest {
         """.trimIndent()
         val mockLlm = object : net.ib.ixpert.ops.wuwagent.client.LLMClient {
             override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
-                val content = if (systemPrompt.contains("ConstraintKind") || systemPrompt.contains("제약 조건")) {
-                    mockLlmJson
-                } else {
-                    "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발"
+                val content = when {
+                    systemPrompt.contains("ConstraintKind") || systemPrompt.contains("제약 조건") -> mockLlmJson
+                    systemPrompt.contains("요구사항 정제") || systemPrompt.contains("refineRequirement") -> "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발"
+                    else -> error("unmatched prompt: $systemPrompt")
                 }
                 return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse("mock-llm", "", net.ib.ixpert.ops.wuwagent.model.OllamaMessage("assistant", content), true)
             }
@@ -258,8 +258,9 @@ class Stage0SurveyAdminSnapshotTest {
             )
         )
 
-        // 5. Stage 1 Transition Contract 생성
+        // 5. Stage 1 Transition Contract 및 ClarifyIntent 생성
         val contract = engine.transitionToStage1(turn1.state)
+        val clarifyIntent = engine.buildClarifyIntent(turn1.state)
 
         // Category A (5 files) GT 매칭 확인
         val gtAFiles = listOf(
@@ -274,6 +275,8 @@ class Stage0SurveyAdminSnapshotTest {
             contract.newCreations.any { it.statement.contains(gt) }
         }
         assertEquals("Category A 5종 전량이 newCreations에 정확히 수렴해야 함", 5, recoveredACount)
+        assertTrue("Category A 5종 전량이 ClarifyIntent.refinedRequirement에 보존되어야 함", 
+            gtAFiles.all { gt -> clarifyIntent.refinedRequirement.contains(gt) })
 
         // 6. Stage 1 파이프라인 합성 검증
         val dummyClient = object : net.ib.ixpert.ops.wuwagent.client.LLMClient {
