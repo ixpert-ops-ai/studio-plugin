@@ -388,4 +388,49 @@ class ExcludeComponentDialogueTest {
         assertEquals(7, filteredGtRecall.size)
         assertEquals(baselineGtRecall.toSet(), filteredGtRecall.toSet())
     }
+
+    /**
+     * [B-19] 긍정/부정 응답 판정 시 'y', 'n' 등 부분 문자열 매칭으로 인한 오판정 방지 검증:
+     * - 배제 제안 후 사용자가 "SurveyServiceImpl도 같이 봐야 해"와 같이 'y'가 포함된 발화를 했을 때,
+     * - 이를 긍정(Affirmative) 응답으로 오판정하여 배제 후보를 REJECTED로 확정해서는 안 됨.
+     */
+    @Test
+    fun testExclusionResponse_NotTriggeredByPartialSubstringLikeSurvey() {
+        val mockJson = """
+            [
+              {
+                "kind": "EXCLUDE_COMPONENT",
+                "value": "알림톡 배치 제외",
+                "rawStatement": "알림톡 배치는 제외해줘",
+                "evidence": "알림톡 배치"
+              }
+            ]
+        """.trimIndent()
+        val mockClient = createMockLlm(mockJson)
+        val engine = Stage0ClarificationEngine(
+            scanner = surveyScanner,
+            graph = surveyGraph,
+            llmClient = mockClient
+        )
+
+        // Turn 1: 알림톡 배치 배제 제안
+        val turn0 = engine.initSession("설문 발송 채널에 브랜드메시지 추가")
+        val turn1 = engine.processTurn(
+            state = turn0.state,
+            userInput = Stage0ClarificationEngine.UserInput(userStatement = "알림톡 배치는 제외해줘")
+        )
+        val pendingCount = turn1.state.items.count { it.source == HintSource.PROPOSED_EXCLUSION && it.verdict == Verdict.PENDING }
+        assertTrue("1턴 후 배제 제안 PENDING 항목이 존재해야 함", pendingCount > 0)
+
+        // Turn 2: 'y'가 포함된 일반 발화 ("SurveyServiceImpl도 같이 봐야 해")
+        val turn2 = engine.processTurn(
+            state = turn1.state,
+            userInput = Stage0ClarificationEngine.UserInput(userStatement = "SurveyServiceImpl도 같이 봐야 해")
+        )
+        val intent = engine.buildClarifyIntent(turn2.state)
+
+        assertEquals("식별자가 포함된 일반 발화는 긍정 응답으로 오판정되어 배제 확정(REJECTED)되면 안 됨", 0, intent.excludedFiles.size)
+        assertTrue("배제 확정(REJECTED)된 항목이 0건이어야 함", turn2.state.items.none { it.verdict == Verdict.REJECTED })
+    }
 }
+

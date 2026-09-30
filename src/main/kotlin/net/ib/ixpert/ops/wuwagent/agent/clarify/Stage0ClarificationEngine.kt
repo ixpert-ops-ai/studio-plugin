@@ -371,8 +371,11 @@ class Stage0ClarificationEngine(
             // 2-0. 이전 턴에서 제안된 배제 후보(PROPOSED_EXCLUSION)에 대한 긍정/부정 답변 확인
             val pendingExclusions = updatedItems.filter { it.source == HintSource.PROPOSED_EXCLUSION && it.verdict == Verdict.PENDING }
             if (pendingExclusions.isNotEmpty()) {
-                val isAffirmative = listOf("응", "네", "맞아", "제외해", "제외해줘", "빼줘", "yes", "y", "확인", "그래", "오케이", "ok", "제외").any { lowerStmt.contains(it) }
-                val isNegative = listOf("아니", "아니요", "포함해", "건드려", "no", "n", "취소", "유지").any { lowerStmt.contains(it) }
+                val cleanStmt = lowerStmt.replace(Regex("[^a-zA-Z0-9가-힣]"), "").trim()
+                val affirmativeTokens = setOf("응", "네", "맞아", "제외해", "제외해줘", "빼줘", "yes", "y", "확인", "그래", "오케이", "ok", "제외")
+                val negativeTokens = setOf("아니", "아니요", "포함해", "건드려", "no", "n", "취소", "유지")
+                val isAffirmative = cleanStmt in affirmativeTokens
+                val isNegative = cleanStmt in negativeTokens
 
                 if (isAffirmative) {
                     // 모든 토큰이 정확히 번역/매칭된 고신뢰(HIGH_CONFIDENCE) 후보만 "응"으로 일괄 제외 확정
@@ -409,7 +412,7 @@ class Stage0ClarificationEngine(
             val currentConstraints = extractConstraints(listOf(stmt))
             val excludeConstraints = currentConstraints.filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT }
             for (ec in excludeConstraints) {
-                val evidence = ec.evidence ?: stmt
+                val evidence = ec.evidence ?: continue
                 val resolution = resolveExclusionCandidates(evidence)
                 val confidence = if (resolution.isAllTokensTranslated) ConfidenceBucket.HIGH_CONFIDENCE else ConfidenceBucket.LOW_CONFIDENCE
 
