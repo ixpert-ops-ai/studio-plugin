@@ -594,6 +594,7 @@ class Stage0UtteranceProcessTest {
         val engineOff = Stage0ClarificationEngine(scanner, graph, llmClient = null)
         val turn0Off = engineOff.initSession("신규 서비스 FooService 개발")
         val intent0Off = engineOff.buildClarifyIntent(turn0Off.state)
+        println("[Condition 1 LLM-off] anchorTokens=${intent0Off.anchorTokens}, excludedFiles=${intent0Off.excludedFiles}, unresolvedItems=${intent0Off.unresolvedItems.map { it.identifier }}")
         assertLosslessPartitioning(intent0Off, turn0Off.state)
 
         // Mock LLM for exclusion
@@ -627,6 +628,7 @@ class Stage0UtteranceProcessTest {
             Stage0ClarificationEngine.UserInput(userStatement = "sms_send.jsp는 건드리지 마")
         )
         val intentProposed = engineOn.buildClarifyIntent(turn1Proposed.state)
+        println("[Condition 2 Proposed Exclusion] anchorTokens=${intentProposed.anchorTokens}, excludedFiles=${intentProposed.excludedFiles}, unresolvedItems=${intentProposed.unresolvedItems.map { it.identifier }}")
         assertLosslessPartitioning(intentProposed, turn1Proposed.state)
 
         // 조건 (3) LLM-on "yes" (배제 확정)
@@ -635,6 +637,7 @@ class Stage0UtteranceProcessTest {
             Stage0ClarificationEngine.UserInput(userStatement = "응")
         )
         val intentYes = engineOn.buildClarifyIntent(turn2Yes.state)
+        println("[Condition 3 Affirmative Yes] anchorTokens=${intentYes.anchorTokens}, excludedFiles=${intentYes.excludedFiles}, unresolvedItems=${intentYes.unresolvedItems.map { it.identifier }}")
         assertLosslessPartitioning(intentYes, turn2Yes.state)
 
         // 조건 (4) LLM-on "no" (배제 취소 및 발화 식별자 복원)
@@ -643,6 +646,7 @@ class Stage0UtteranceProcessTest {
             Stage0ClarificationEngine.UserInput(userStatement = "아니요")
         )
         val intentNo = engineOn.buildClarifyIntent(turn2No.state)
+        println("[Condition 4 Negative No] anchorTokens=${intentNo.anchorTokens}, excludedFiles=${intentNo.excludedFiles}, unresolvedItems=${intentNo.unresolvedItems.map { it.identifier }}")
         assertLosslessPartitioning(intentNo, turn2No.state)
     }
 
