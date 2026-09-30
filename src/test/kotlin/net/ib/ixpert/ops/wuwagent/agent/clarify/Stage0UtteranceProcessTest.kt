@@ -487,4 +487,188 @@ class Stage0UtteranceProcessTest {
             tempDir.deleteRecursively()
         }
     }
+
+    /**
+     * [UnresolvedItems] 질문 선택 우선순위에 따른 억제 검증:
+     * 배제 질문이 선택되었을 때 미확인 식별자(FooService)의 lastQuestion 및 lastAskedTurn은 null이어야 함
+     */
+    @Test
+    fun testQuestionSelectionSuppression_ExclusionQuestionChosen_UnmatchedItemHasNullLastQuestion() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlmJson = """
+            [
+              {
+                "kind": "EXCLUDE_COMPONENT",
+                "value": "sms_send.jsp",
+                "rawStatement": "sms_send.jsp는 건드리지 말고 신규 FooService를 추가해줘",
+                "evidence": "sms_send.jsp는 건드리지 말고"
+              }
+            ]
+        """.trimIndent()
+        val mockLlm = object : LLMClient {
+            override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): OllamaChatResponse {
+                return OllamaChatResponse(
+                    model = "mock",
+                    createdAt = "",
+                    message = OllamaMessage("assistant", mockLlmJson),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = mockLlm)
+
+        val turn0 = engine.initSession("주문 조회")
+
+        // Turn 1: 배제 제약 + 미확인 식별자가 동시에 포함된 발화
+        // "sms_send.jsp는 건드리지 말고 신규 FooService를 추가해줘"
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "sms_send.jsp는 건드리지 말고 신규 FooService를 추가해줘"
+            )
+        )
+
+        // 배제 질문(sms_send.jsp 관련)이 openQuestion으로 우선 채택됨
+        assertNotNull(turn1.openQuestion)
+        assertTrue("배제 질문이 선택되어야 함", turn1.openQuestion!!.contains("sms_send.jsp") || turn1.openQuestion!!.contains("제외"))
+
+        val intent = engine.buildClarifyIntent(turn1.state)
+        val fooItem = intent.unresolvedItems.find { it.identifier == "FooService" }
+        assertNotNull("FooService가 unresolvedItems에 존재해야 함", fooItem)
+        assertNull("배제 질문이 선택되었으므로 FooService의 lastQuestion은 null이어야 함", fooItem?.lastQuestion)
+        assertNull("배제 질문이 선택되었으므로 FooService의 lastAskedTurn은 null이어야 함", fooItem?.lastAskedTurn)
+    }
+
+    /**
+     * [UnresolvedItems] 발화 턴 번호 추적 및 불변성 검증:
+     * Turn 1에서 발화된 FooService는 utteredTurn == 1,
+     * Turn 2에서 처음 발화된 BarService는 utteredTurn == 2,
+     * Turn 2에서 재발화된 FooService는 utteredTurn == 1 유지
+     */
+    @Test
+    fun testTurnNumbers_Turn2FirstUtteredItemHasTurn2_ReUtteredFirstTurnItemHasTurn1() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        // Turn 0: FooService 발화 (턴 1에 해당)
+        val turn0 = engine.initSession("FooService 신규 개발")
+        val intent0 = engine.buildClarifyIntent(turn0.state)
+        val foo0 = intent0.unresolvedItems.find { it.identifier == "FooService" }
+        assertNotNull(foo0)
+        assertEquals(1, foo0?.utteredTurn)
+
+        // Turn 1 (대화 2번째 턴): BarService 신규 발화 + FooService 재언급
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "BarService도 추가하고 FooService도 계속 필요해"
+            )
+        )
+
+        val intent1 = engine.buildClarifyIntent(turn1.state)
+        val foo1 = intent1.unresolvedItems.find { it.identifier == "FooService" }
+        val bar1 = intent1.unresolvedItems.find { it.identifier == "BarService" }
+
+        assertNotNull(foo1)
+        assertNotNull(bar1)
+        assertEquals("재언급된 FooService의 최초 발화 턴(1)은 보존되어야 함", 1, foo1?.utteredTurn)
+        assertEquals("2번째 턴에서 최초 발화된 BarService의 utteredTurn은 2여야 함", 2, bar1?.utteredTurn)
+    }
+
+    /**
+     * [UnresolvedItems] 4대 조건 무손실 분할 불변식(Lossless Partitioning) 검증:
+     * (1) LLM-off
+     * (2) LLM-on proposed exclusion
+     * (3) LLM-on "yes" (affirmative)
+     * (4) LLM-on "no" (negative)
+     */
+    @Test
+    fun testLosslessPartitioningInvariant_AcrossAllFourConditions() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+
+        // 조건 (1) LLM-off
+        val engineOff = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+        val turn0Off = engineOff.initSession("신규 서비스 FooService 개발")
+        val intent0Off = engineOff.buildClarifyIntent(turn0Off.state)
+        assertLosslessPartitioning(intent0Off, turn0Off.state)
+
+        // Mock LLM for exclusion
+        val mockLlmJson = """
+            [
+              {
+                "kind": "EXCLUDE_COMPONENT",
+                "value": "sms_send.jsp",
+                "rawStatement": "sms_send.jsp는 건드리지 마",
+                "evidence": "sms_send.jsp는 건드리지 마"
+              }
+            ]
+        """.trimIndent()
+        val mockLlm = object : LLMClient {
+            override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): OllamaChatResponse {
+                return OllamaChatResponse(
+                    model = "mock",
+                    createdAt = "",
+                    message = OllamaMessage("assistant", mockLlmJson),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+
+        // 조건 (2) LLM-on proposed exclusion
+        val engineOn = Stage0ClarificationEngine(scanner, graph, mockLlm)
+        val turn0On = engineOn.initSession("주문 조회 및 신규 FooService")
+        val turn1Proposed = engineOn.processTurn(
+            turn0On.state,
+            Stage0ClarificationEngine.UserInput(userStatement = "sms_send.jsp는 건드리지 마")
+        )
+        val intentProposed = engineOn.buildClarifyIntent(turn1Proposed.state)
+        assertLosslessPartitioning(intentProposed, turn1Proposed.state)
+
+        // 조건 (3) LLM-on "yes" (배제 확정)
+        val turn2Yes = engineOn.processTurn(
+            turn1Proposed.state,
+            Stage0ClarificationEngine.UserInput(userStatement = "응")
+        )
+        val intentYes = engineOn.buildClarifyIntent(turn2Yes.state)
+        assertLosslessPartitioning(intentYes, turn2Yes.state)
+
+        // 조건 (4) LLM-on "no" (배제 취소 및 발화 식별자 복원)
+        val turn2No = engineOn.processTurn(
+            turn1Proposed.state,
+            Stage0ClarificationEngine.UserInput(userStatement = "아니요")
+        )
+        val intentNo = engineOn.buildClarifyIntent(turn2No.state)
+        assertLosslessPartitioning(intentNo, turn2No.state)
+    }
+
+    private fun assertLosslessPartitioning(intent: ClarifyIntent, state: Stage0State) {
+        val userUtteredPendingItems = state.items.filter { 
+            it.verdict == Verdict.PENDING && (it.source == HintSource.USER_UTTERED || it.source == HintSource.PROPOSED_EXCLUSION)
+        }
+        val unresolvedTokens = intent.unresolvedItems.map { it.identifier }.toSet()
+
+        // 1. 모든 PENDING 사용자 발화/배제 항목은 unresolvedItems에 존재해야 함
+        for (item in userUtteredPendingItems) {
+            val token = item.utteredIdentifier ?: when (val h = item.hint) {
+                is LinkHint.NewCreation -> item.statement.substringAfter("신규 컴포넌트 생성: ").substringAfter("미확인 부존재 식별자: ").trim()
+                is LinkHint.ExistingRef -> h.symbols.firstOrNull() ?: h.filePath.substringAfterLast("/").substringBeforeLast(".")
+            }
+            assertTrue("PENDING 사용자 발화 식별자($token)는 unresolvedItems에 포함되어야 함", unresolvedTokens.contains(token) || intent.unresolvedItems.any { it.identifier.contains(token) })
+        }
+
+        // 2. CONFIRMED 또는 REJECTED 확정 항목은 unresolvedItems에 절대 포함되지 않아야 함
+        val confirmedOrRejectedPaths = state.items
+            .filter { it.verdict == Verdict.CONFIRMED || it.verdict == Verdict.REJECTED }
+            .mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath?.substringAfterLast("/")?.substringBeforeLast(".") }
+            .toSet()
+
+        for (unres in intent.unresolvedItems) {
+            assertFalse("확정/제외된 파일(${unres.identifier})이 unresolvedItems에 남아서는 안 됨", confirmedOrRejectedPaths.contains(unres.identifier))
+        }
+    }
 }

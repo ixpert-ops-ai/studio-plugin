@@ -444,4 +444,101 @@ class Stage0UserIdentifierDisambiguationTest {
             .mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
         assertFalse("SurveyServiceImpl.java에 대한 PENDING 중복 항목은 0건이어야 함", pendingPaths.any { it.contains("SurveyServiceImpl.java") })
     }
+
+    /**
+     * [UnresolvedItems] 1:1 식별자 분해 검증:
+     * 2개의 미확인 식별자(FooService, BarController) 발화 시 'FooService, BarController'로 묶이지 않고
+     * 2개의 독립된 RequirementItem(id = deriveId(NewCreation, 식별자)) 및 unresolvedItems로 분해되는지 검증
+     */
+    @Test
+    fun test1to1IdentifierDecomposition_TwoUnmatchedTokensProduceTwoUnresolvedItems() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val turn0 = engine.initSession("신규 컴포넌트 FooService와 BarController를 개발해야 해")
+
+        val pendingNewCreations = turn0.state.items.filter { 
+            it.verdict == Verdict.PENDING && it.hint is LinkHint.NewCreation 
+        }
+        assertEquals("미확인 식별자 2개가 각각 독립된 2건의 PENDING 아이템으로 분해되어야 함", 2, pendingNewCreations.size)
+
+        val itemIds = pendingNewCreations.map { it.id }.toSet()
+        val expectedFooId = RequirementItem.deriveId(LinkHint.NewCreation, "FooService")
+        val expectedBarId = RequirementItem.deriveId(LinkHint.NewCreation, "BarController")
+        assertTrue("FooService 전용 아이템 id가 존재해야 함", itemIds.contains(expectedFooId))
+        assertTrue("BarController 전용 아이템 id가 존재해야 함", itemIds.contains(expectedBarId))
+
+        val intent = engine.buildClarifyIntent(turn0.state)
+        assertEquals("ClarifyIntent.unresolvedItems에 2건의 개별 항목이 추출되어야 함", 2, intent.unresolvedItems.size)
+        val unresolvedTokens = intent.unresolvedItems.map { it.identifier }.toSet()
+        assertEquals(setOf("FooService", "BarController"), unresolvedTokens)
+        assertTrue(intent.unresolvedItems.all { it.kind == UnresolvedKind.NEW_CREATION })
+        assertTrue(intent.unresolvedItems.all { it.source == HintSource.USER_UTTERED })
+        assertTrue(intent.unresolvedItems.all { it.utteredTurn == 1 })
+    }
+
+    /**
+     * [UnresolvedItems] 식별자 확정 대체 검증:
+     * 사용자가 PENDING 상태의 FooService를 확정(CONFIRMED)하면 동일 id로 전환되고 unresolvedItems에서 자동 제거되는지 검증
+     */
+    @Test
+    fun testConfirmationReplacement_UnresolvedItemReplacedByConfirmedUnderSameId() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val turn0 = engine.initSession("신규 서비스 FooService를 만들어줘")
+        val fooPendingId = RequirementItem.deriveId(LinkHint.NewCreation, "FooService")
+        val pendingItem = turn0.state.items.find { it.id == fooPendingId }
+        assertNotNull("FooService PENDING 아이템이 존재해야 함", pendingItem)
+        assertEquals(Verdict.PENDING, pendingItem?.verdict)
+
+        val intent0 = engine.buildClarifyIntent(turn0.state)
+        assertEquals(1, intent0.unresolvedItems.size)
+        assertEquals("FooService", intent0.unresolvedItems[0].identifier)
+
+        // Turn 1: 사용자가 FooService 확정
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                verdictUpdates = mapOf(fooPendingId to Verdict.CONFIRMED)
+            )
+        )
+
+        val confirmedItem = turn1.state.items.find { it.id == fooPendingId }
+        assertNotNull("동일 id($fooPendingId)로 아이템이 유지되어야 함", confirmedItem)
+        assertEquals("판정이 CONFIRMED로 전이되어야 함", Verdict.CONFIRMED, confirmedItem?.verdict)
+
+        val intent1 = engine.buildClarifyIntent(turn1.state)
+        assertTrue("확정된 FooService는 unresolvedItems에서 완전히 제거되어야 함 (0건)", intent1.unresolvedItems.isEmpty())
+    }
+
+    /**
+     * [UnresolvedItems] Scenario 4 APC 미확인 식별자 질의 이력 추적 검증:
+     * APC 복합 식별자 중 미확인 항목 SAPACMM0802S01에 대해 질문이 채택되었을 때 lastQuestion 및 lastAskedTurn(1)이 기록되는지 검증
+     */
+    @Test
+    fun testScenario4_UnmatchedIdentifierHasLastQuestionAndLastAskedTurn() {
+        val graphPath = File("C:/Workspace/graph/project-graph-a/project-graph.json")
+        Assume.assumeTrue("APC 메타그래프가 존재할 때만 실행", graphPath.exists())
+        val graph = Gson().fromJson(graphPath.readText(), ProjectGraph::class.java).normalizeLegacyCollections()
+
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val originalReq = "교통카드 발급정보 신규서비스 개발 건 (SAPACMM0802S01 참고). APCMMTrcdIsSVC 신규 추가, aCMBTBAPC024DEM.selTrcdIsInf 참조하여 조회"
+        val turn0 = engine.initSession(originalReq)
+
+        assertNotNull("SAPACMM0802S01에 대한 질문이 openQuestion으로 제시되어야 함", turn0.openQuestion)
+        assertTrue(turn0.openQuestion!!.contains("SAPACMM0802S01"))
+
+        val intent = engine.buildClarifyIntent(turn0.state)
+        val sapItem = intent.unresolvedItems.find { it.identifier == "SAPACMM0802S01" }
+        assertNotNull("SAPACMM0802S01이 unresolvedItems에 존재해야 함", sapItem)
+        assertEquals(1, sapItem?.utteredTurn)
+        assertEquals(turn0.openQuestion, sapItem?.lastQuestion)
+        assertEquals(1, sapItem?.lastAskedTurn)
+    }
 }
+

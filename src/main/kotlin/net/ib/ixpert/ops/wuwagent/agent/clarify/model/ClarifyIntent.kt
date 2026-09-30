@@ -29,8 +29,36 @@ data class ClarifyIntent(
     // 식별자 보존 검사 및 안전판 보정 감사 기록 (지표 왜곡 방지 및 품질 모니터링용)
     val retentionAudit: RetentionAudit? = null,
 
+    // 사용자가 직접 발화/지정한 식별자 중 대화 종료 시점까지 미확정(PENDING)으로 남은 항목 목록
+    val unresolvedItems: List<UnresolvedItem> = emptyList(),
+
     // 계약 버전
-    val contractVersion: String = "1.1"
+    val contractVersion: String = CURRENT_INTENT_VERSION
+) {
+    companion object {
+        const val CURRENT_INTENT_VERSION = "1.2"
+    }
+}
+
+/**
+ * 미확정 사용자 발화 항목 종류
+ */
+enum class UnresolvedKind {
+    EXISTING_REF,
+    NEW_CREATION
+}
+
+/**
+ * 미확정 사용자 발화 항목 구조체
+ */
+data class UnresolvedItem(
+    val identifier: String,        // 필수: 사용자가 발화한 토큰 원문
+    val kind: UnresolvedKind,      // EXISTING_REF 또는 NEW_CREATION
+    val filePath: String?,         // EXISTING_REF일 때의 파일 경로 (NEW_CREATION은 null)
+    val source: HintSource,        // 발화 출처 (USER_UTTERED 또는 PROPOSED_EXCLUSION)
+    val utteredTurn: Int,          // 필수: 최초 발화 턴 번호
+    val lastQuestion: String?,     // 실제 제시된 확인 질문 원문 (미질의 시 null)
+    val lastAskedTurn: Int?        // 질문이 실제 제시된 턴 번호 (미질의 시 null)
 )
 
 /**

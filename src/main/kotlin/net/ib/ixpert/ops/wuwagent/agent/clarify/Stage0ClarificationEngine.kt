@@ -38,10 +38,12 @@ class Stage0ClarificationEngine(
 
     data class UserUtteranceResolution(
         val confirmedItems: List<RequirementItem>,
-        val newCreationItem: RequirementItem?,
+        val newCreationItems: List<RequirementItem> = emptyList(),
         val unconfirmedQuestion: String?,
         val unmatchedIdentifiers: List<String>
-    )
+    ) {
+        val newCreationItem: RequirementItem? get() = newCreationItems.firstOrNull()
+    }
 
     /**
      * [B-12] 사용자 발화 내 식별자 3분기 분석 및 자동 확정 / 확인 질의 결정
@@ -51,10 +53,11 @@ class Stage0ClarificationEngine(
      */
     fun resolveUserUtteredIdentifiers(
         text: String,
-        existingConstraints: List<IntentConstraint>? = null
+        existingConstraints: List<IntentConstraint>? = null,
+        currentTurn: Int = 1
     ): UserUtteranceResolution {
         if (text.isBlank()) {
-            return UserUtteranceResolution(emptyList(), null, null, emptyList())
+            return UserUtteranceResolution(emptyList(), emptyList(), null, emptyList())
         }
 
         // EXCLUDE_COMPONENT 제약의 evidence 범위에 포함된 식별자는 분기 1(CONFIRMED)에서 제외
@@ -108,7 +111,9 @@ class Stage0ClarificationEngine(
                     verdict = matchedVerdict,
                     confidence = ConfidenceBucket.HIGH_CONFIDENCE,
                     provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
-                    domainPackage = scanner.extractDomainPackage(matchedFile.path)
+                    domainPackage = scanner.extractDomainPackage(matchedFile.path),
+                    utteredIdentifier = idToken,
+                    utteredTurn = currentTurn
                 )
                 if (confirmedList.none { (it.hint as? LinkHint.ExistingRef)?.filePath == matchedFile.path }) {
                     confirmedList.add(item)
@@ -138,7 +143,9 @@ class Stage0ClarificationEngine(
                     anchorRationale = "사용자 발화 명시 리소스 ($idToken)",
                     verdict = matchedVerdict,
                     confidence = ConfidenceBucket.HIGH_CONFIDENCE,
-                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
+                    utteredIdentifier = idToken,
+                    utteredTurn = currentTurn
                 )
                 if (confirmedList.none { (it.hint as? LinkHint.ExistingRef)?.filePath == matchedResource.path }) {
                     confirmedList.add(item)
@@ -184,49 +191,55 @@ class Stage0ClarificationEngine(
                 anchorRationale = "사용자 직접 발화 신규 컴포넌트 생성 요구사항 ($newId)",
                 verdict = Verdict.CONFIRMED,
                 confidence = ConfidenceBucket.HIGH_CONFIDENCE,
-                provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+                provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
+                utteredIdentifier = newId,
+                utteredTurn = currentTurn
             )
             if (confirmedList.none { it.id == item.id }) {
                 confirmedList.add(item)
             }
         }
 
-        // unconfirmedUnmatched가 있는 경우 PENDING NewCreation item 생성 (source는 USER_UTTERED)
-        val newCreationItem = when {
-            unconfirmedUnmatched.isNotEmpty() -> {
-                val names = unconfirmedUnmatched.joinToString(", ")
+        // unconfirmedUnmatched 1:1 분해 -> 각각 독립된 PENDING NewCreation item 생성 (source는 USER_UTTERED)
+        val newCreationList = mutableListOf<RequirementItem>()
+        if (unconfirmedUnmatched.isNotEmpty()) {
+            for (token in unconfirmedUnmatched) {
                 val hint = LinkHint.NewCreation
-                RequirementItem(
-                    id = RequirementItem.deriveId(hint, names),
-                    statement = "미확인 부존재 식별자: $names",
+                val item = RequirementItem(
+                    id = RequirementItem.deriveId(hint, token),
+                    statement = "미확인 부존재 식별자: $token",
                     source = HintSource.USER_UTTERED,
                     hint = hint,
-                    anchorRationale = "사용자 발화 미확인 부존재 식별자 ($names)",
+                    anchorRationale = "사용자 발화 미확인 부존재 식별자 ($token)",
                     verdict = Verdict.PENDING, // 사용자 확인 전까지는 미해결(PENDING) 유지
                     confidence = ConfidenceBucket.HIGH_CONFIDENCE,
-                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
+                    utteredIdentifier = token,
+                    utteredTurn = currentTurn
                 )
+                newCreationList.add(item)
             }
-            unmatched.isEmpty() && confirmedNewModuleIds.isEmpty() && matchedTokens.isEmpty() && text.isNotBlank() -> {
-                // 식별자는 없지만 사용자 직접 발화 요구사항인 경우
-                val hint = LinkHint.NewCreation
-                RequirementItem(
-                    id = RequirementItem.deriveId(hint, text),
-                    statement = text,
-                    source = HintSource.USER_UTTERED,
-                    hint = hint,
-                    anchorRationale = "사용자 직접 발화 신규 컴포넌트/개념 요구사항",
-                    verdict = Verdict.CONFIRMED,
-                    confidence = ConfidenceBucket.HIGH_CONFIDENCE,
-                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
-                )
-            }
-            else -> null
+        } else if (unmatched.isEmpty() && confirmedNewModuleIds.isEmpty() && matchedTokens.isEmpty() && text.isNotBlank()) {
+            // 식별자는 없지만 사용자 직접 발화 요구사항인 경우
+            val hint = LinkHint.NewCreation
+            val item = RequirementItem(
+                id = RequirementItem.deriveId(hint, text),
+                statement = text,
+                source = HintSource.USER_UTTERED,
+                hint = hint,
+                anchorRationale = "사용자 직접 발화 신규 컴포넌트/개념 요구사항",
+                verdict = Verdict.CONFIRMED,
+                confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
+                utteredIdentifier = text,
+                utteredTurn = currentTurn
+            )
+            newCreationList.add(item)
         }
 
         return UserUtteranceResolution(
             confirmedItems = confirmedList,
-            newCreationItem = newCreationItem,
+            newCreationItems = newCreationList,
             unconfirmedQuestion = question,
             unmatchedIdentifiers = unmatched
         )
@@ -305,10 +318,10 @@ class Stage0ClarificationEngine(
         }
 
         // B-12: 사용자 초기 발화 식별자 3분기 분해
-        val userResolution = resolveUserUtteredIdentifiers(originalRequirement)
+        val userResolution = resolveUserUtteredIdentifiers(originalRequirement, currentTurn = 1)
         val userConfirmedItems = userResolution.confirmedItems.filter { it.verdict == Verdict.CONFIRMED }
         val userPendingItems = userResolution.confirmedItems.filter { it.verdict == Verdict.PENDING } + 
-            (userResolution.newCreationItem?.takeIf { it.verdict == Verdict.PENDING }?.let { listOf(it) } ?: emptyList())
+            userResolution.newCreationItems.filter { it.verdict == Verdict.PENDING }
         val userConfirmedPaths = userConfirmedItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }.toSet()
         val userPendingPaths = userPendingItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }.toSet()
 
@@ -319,8 +332,24 @@ class Stage0ClarificationEngine(
             }
         val openQ = userResolution.unconfirmedQuestion ?: checkOpenQuestionTrigger(initialTokens, initialCandidates)
 
+        // 미확인 식별자 확인 질문이 openQuestion으로 채택된 경우 lastQuestion 및 lastAskedTurn 기록
+        val finalUserPendingItems = if (userResolution.unconfirmedQuestion != null && openQ == userResolution.unconfirmedQuestion) {
+            userPendingItems.map { pendingItem ->
+                if (pendingItem.hint is LinkHint.NewCreation) {
+                    pendingItem.copy(
+                        lastQuestion = openQ,
+                        lastAskedTurn = 1
+                    )
+                } else {
+                    pendingItem
+                }
+            }
+        } else {
+            userPendingItems
+        }
+
         // 초기 items = 사용자 확정 항목 + 사용자 미확인(PENDING) 항목 + 새로 발견된 후보군 + 이전 세션 거부 동결 항목
-        val combinedItems = userConfirmedItems + userPendingItems + initialCandidates + frozenRejectedItems
+        val combinedItems = userConfirmedItems + finalUserPendingItems + initialCandidates + frozenRejectedItems
 
         val state = Stage0State(
             originalRequirement = originalRequirement,
@@ -343,6 +372,8 @@ class Stage0ClarificationEngine(
      * 3절: 대화 턴 처리 (증분 seed 확장 + 미판정 영역 재탐색 + 확정분 동결)
      */
     fun processTurn(state: Stage0State, userInput: UserInput): Stage0TurnResult {
+        val currentTurn = state.userStatements.size + 2
+
         // 1. 기존 items에 사용자 판정(CONFIRMED/REJECTED) 및 거부 사유 반영
         val updatedItems = state.items.map { item ->
             val update = userInput.verdictUpdates[item.id]
@@ -398,10 +429,26 @@ class Stage0ClarificationEngine(
                         echoMsg = "모호한 배제 후보가 포함되어 있어 일괄 제외되지 않았습니다. 특정 파일을 지정하거나 체크박스로 선택해 주세요."
                     }
                 } else if (isNegative) {
-                    // "아니요"/취소 시: 제안된 배제 후보 항목을 state.items에서 완전히 제거하여 계약(CONFIRMED/REJECTED)에 0 흔적 보장
+                    // "아니요"/취소 시: 제안된 배제 후보 중 사용자가 직접 명시했던 식별자는 USER_UTTERED/PENDING으로 복원하고
+                    // 인접 자동 탐색된 후보만 state.items에서 완전히 제거
                     for (i in updatedItems.indices.reversed()) {
-                        if (updatedItems[i].source == HintSource.PROPOSED_EXCLUSION && updatedItems[i].verdict == Verdict.PENDING) {
-                            updatedItems.removeAt(i)
+                        val itm = updatedItems[i]
+                        if (itm.source == HintSource.PROPOSED_EXCLUSION && itm.verdict == Verdict.PENDING) {
+                            if (itm.utteredIdentifier != null) {
+                                val origHint = itm.hint
+                                val restoredId = when (origHint) {
+                                    is LinkHint.ExistingRef -> RequirementItem.deriveId(origHint)
+                                    is LinkHint.NewCreation -> RequirementItem.deriveId(origHint, itm.utteredIdentifier)
+                                }
+                                updatedItems[i] = itm.copy(
+                                    id = restoredId,
+                                    source = HintSource.USER_UTTERED,
+                                    verdict = Verdict.PENDING,
+                                    statement = "사용자 명시 식별자: ${itm.utteredIdentifier}"
+                                )
+                            } else {
+                                updatedItems.removeAt(i)
+                            }
                         }
                     }
                     echoMsg = "배제 요청을 취소하고 분석 대상을 그대로 유지합니다."
@@ -427,14 +474,18 @@ class Stage0ClarificationEngine(
                         anchorRationale = "사용자 배제 발화('${evidence}') 매칭 제외 후보",
                         verdict = Verdict.PENDING,
                         confidence = confidence,
-                        provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
+                        provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
+                        utteredTurn = currentTurn
                     )
                     val existingIndex = updatedItems.indexOfFirst { 
                         it.id == item.id || (it.hint as? LinkHint.ExistingRef)?.filePath == file.path 
                     }
                     if (existingIndex >= 0) {
                         if (updatedItems[existingIndex].verdict == Verdict.PENDING) {
-                            updatedItems[existingIndex] = item
+                            val existing = updatedItems[existingIndex]
+                            updatedItems[existingIndex] = item.copy(
+                                utteredTurn = existing.utteredTurn ?: currentTurn
+                            )
                         }
                     } else {
                         updatedItems.add(item)
@@ -449,7 +500,7 @@ class Stage0ClarificationEngine(
             newSeedTokens = state.seedSet + utteredTokens
 
             // B-12: 사용자 추가 발화 식별자 3분기 분해 (추출된 constraints 재사용으로 중복 LLM 호출 차단)
-            val userResolution = resolveUserUtteredIdentifiers(stmt, currentConstraints)
+            val userResolution = resolveUserUtteredIdentifiers(stmt, currentConstraints, currentTurn = currentTurn)
             for (item in userResolution.confirmedItems) {
                 val itemPath = (item.hint as? LinkHint.ExistingRef)?.filePath
                 val existingIndex = if (itemPath != null) {
@@ -458,13 +509,22 @@ class Stage0ClarificationEngine(
                     updatedItems.indexOfFirst { it.id == item.id }
                 }
                 if (existingIndex >= 0) {
-                    updatedItems[existingIndex] = item
+                    val existing = updatedItems[existingIndex]
+                    updatedItems[existingIndex] = item.copy(
+                        utteredTurn = existing.utteredTurn ?: item.utteredTurn
+                    )
                 } else {
                     updatedItems.add(item)
                 }
             }
-            userResolution.newCreationItem?.let { newItem ->
-                if (updatedItems.none { it.id == newItem.id }) {
+            for (newItem in userResolution.newCreationItems) {
+                val existingIndex = updatedItems.indexOfFirst { it.id == newItem.id }
+                if (existingIndex >= 0) {
+                    val existing = updatedItems[existingIndex]
+                    updatedItems[existingIndex] = newItem.copy(
+                        utteredTurn = existing.utteredTurn ?: newItem.utteredTurn
+                    )
+                } else {
                     updatedItems.add(newItem)
                 }
             }
@@ -506,13 +566,29 @@ class Stage0ClarificationEngine(
         val isExhausted = newCandidates.isEmpty()
         val openQ = exclusionQuestion ?: unmatchedQuestion ?: if (!isExhausted) null else checkOpenQuestionTrigger(newSeedTokens, mergedItems)
 
+        // 질문 출처가 unmatchedQuestion인 경우에만 해당 미확인 아이템에 lastQuestion / lastAskedTurn 기록
+        val finalMergedItems = if (unmatchedQuestion != null && openQ == unmatchedQuestion) {
+            mergedItems.map { item ->
+                if (item.source == HintSource.USER_UTTERED && item.verdict == Verdict.PENDING && item.hint is LinkHint.NewCreation) {
+                    item.copy(
+                        lastQuestion = openQ,
+                        lastAskedTurn = currentTurn
+                    )
+                } else {
+                    item
+                }
+            }
+        } else {
+            mergedItems
+        }
+
         val nextState = state.copy(
-            items = mergedItems,
+            items = finalMergedItems,
             seedSet = newSeedTokens,
             userStatements = updatedStatements
         )
 
-        val taskSummary = generateTaskSummary(state.originalRequirement, mergedItems, updatedStatements)
+        val taskSummary = generateTaskSummary(state.originalRequirement, finalMergedItems, updatedStatements)
 
         return Stage0TurnResult(
             state = nextState,
@@ -924,6 +1000,33 @@ class Stage0ClarificationEngine(
             knownExpected = retentionResult.expectedIdentifiers
         )
 
+        // 미확정(PENDING) 사용자 발화 식별자 수집 (USER_UTTERED 또는 utteredIdentifier가 있는 PROPOSED_EXCLUSION)
+        val unresolvedItems = state.items
+            .filter { it.verdict == Verdict.PENDING && (it.source == HintSource.USER_UTTERED || (it.source == HintSource.PROPOSED_EXCLUSION && it.utteredIdentifier != null)) }
+            .mapNotNull { item ->
+                val identifier = item.utteredIdentifier
+                    ?: when (val h = item.hint) {
+                        is LinkHint.NewCreation -> item.statement.substringAfter("신규 컴포넌트 생성: ").substringAfter("미확인 부존재 식별자: ").trim()
+                        is LinkHint.ExistingRef -> h.symbols.firstOrNull() ?: h.filePath.substringAfterLast("/").substringBeforeLast(".")
+                    }.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+
+                val kind = when (item.hint) {
+                    is LinkHint.ExistingRef -> UnresolvedKind.EXISTING_REF
+                    is LinkHint.NewCreation -> UnresolvedKind.NEW_CREATION
+                }
+                val filePath = (item.hint as? LinkHint.ExistingRef)?.filePath
+
+                UnresolvedItem(
+                    identifier = identifier,
+                    kind = kind,
+                    filePath = filePath,
+                    source = item.source,
+                    utteredTurn = item.utteredTurn ?: 1,
+                    lastQuestion = item.lastQuestion,
+                    lastAskedTurn = item.lastAskedTurn
+                )
+            }
+
         return ClarifyIntent(
             originalRequirement = state.originalRequirement,
             refinedRequirement = refinedRequirement,
@@ -940,7 +1043,8 @@ class Stage0ClarificationEngine(
                 wasRetainedWithoutModification = retentionResult.wasRetainedWithoutModification,
                 scopeModifierDropped = retentionResult.scopeModifierDropped
             ),
-            contractVersion = "1.1"
+            unresolvedItems = unresolvedItems,
+            contractVersion = ClarifyIntent.CURRENT_INTENT_VERSION
         )
     }
 

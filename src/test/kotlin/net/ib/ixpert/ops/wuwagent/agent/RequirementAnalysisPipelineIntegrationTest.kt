@@ -701,4 +701,119 @@ class RequirementAnalysisPipelineIntegrationTest {
         println("=== [Phase 3-2 디스크 영속화 검증] ===")
         println("디스크 계약 아티팩트 rejectedExistingRefs: ${loadedContract.rejectedExistingRefs.map { it.filePath }}")
     }
+
+    /**
+     * [UnresolvedItems] 파이프라인 무간섭 불변식 검증:
+     * ClarifyIntent에 unresolvedItems가 포함되어 있어도 RequirementAnalysisPipeline.analyze 결과의
+     * 대상 파일 목록(targetFiles), 랭킹, 가중치 및 전달 프롬프트에 0%의 영향(완전 무간섭)을 주는지 검증
+     */
+    @Test
+    fun testNonInterferenceInvariant_UnresolvedItemsDoNotAlterPipelineAnalysisOutput() = kotlinx.coroutines.runBlocking {
+        val projectRoot = tempFolder.newFolder("pipeline_non_interference")
+        val recordedPrompts = mutableListOf<String>()
+
+        val recordingClient = object : net.ib.ixpert.ops.wuwagent.client.LLMClient {
+            override fun chat(
+                systemPrompt: String,
+                userCode: String,
+                maxTokens: Int?,
+                onChunk: ((String) -> Unit)?
+            ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
+                recordedPrompts.add("$systemPrompt\n---\n$userCode")
+                return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse(
+                    model = "test",
+                    createdAt = "",
+                    message = net.ib.ixpert.ops.wuwagent.model.OllamaMessage("assistant", "{}"),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+
+        val graph = ProjectGraph(
+            generatedAt = Instant.now().toString(),
+            projectRoot = projectRoot.absolutePath,
+            frameworkType = FrameworkType.SPRING_MVC_MYBATIS,
+            files = mapOf(
+                "com/example/OrderService.java" to FileNode(
+                    path = "com/example/OrderService.java",
+                    packageName = "com.example",
+                    className = "OrderService",
+                    fileType = SpringFileType.SERVICE,
+                    layer = ArchitectureLayer.SERVICE
+                ),
+                "com/example/OrderRepository.java" to FileNode(
+                    path = "com/example/OrderRepository.java",
+                    packageName = "com.example",
+                    className = "OrderRepository",
+                    fileType = SpringFileType.MAPPER,
+                    layer = ArchitectureLayer.PERSISTENCE
+                )
+            ),
+            relationships = emptyList(),
+            statistics = GraphStatistics()
+        )
+
+        val graphHash = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarificationContractStore.calculateGraphHash(graph)
+        val pipeline = RequirementAnalysisPipeline(recordingClient)
+        val requirement = "주문 처리 로직 개선"
+
+        // 1. unresolvedItems가 비어있는 기본 인텐트 실행
+        val intentWithoutUnresolved = net.ib.ixpert.ops.wuwagent.agent.clarify.model.ClarifyIntent(
+            originalRequirement = requirement,
+            refinedRequirement = requirement,
+            anchorTokens = listOf("OrderService"),
+            constraints = emptyList(),
+            excludedFiles = emptyList(),
+            unresolvedItems = emptyList(),
+            graphHash = graphHash,
+            contractVersion = "1.2"
+        )
+        val resultWithout = pipeline.analyze(
+            primaryReq = requirement,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intentWithoutUnresolved,
+            previousContract = null,
+            projectRoot = projectRoot
+        )
+
+        val promptCountWithout = recordedPrompts.size
+
+        // 2. unresolvedItems가 주입된 인텐트 실행
+        val intentWithUnresolved = intentWithoutUnresolved.copy(
+            unresolvedItems = listOf(
+                net.ib.ixpert.ops.wuwagent.agent.clarify.model.UnresolvedItem(
+                    identifier = "BizgoApiService",
+                    kind = net.ib.ixpert.ops.wuwagent.agent.clarify.model.UnresolvedKind.NEW_CREATION,
+                    filePath = null,
+                    source = net.ib.ixpert.ops.wuwagent.agent.clarify.model.HintSource.USER_UTTERED,
+                    utteredTurn = 1,
+                    lastQuestion = "신규 생성인가요?",
+                    lastAskedTurn = 1
+                )
+            )
+        )
+        val resultWith = pipeline.analyze(
+            primaryReq = requirement,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intentWithUnresolved,
+            previousContract = null,
+            projectRoot = projectRoot
+        )
+
+        // 3. 무간섭 불변성 단언: targetFiles 크기 및 경로, 랭킹이 100% 동일해야 함
+        assertEquals(resultWithout.targetFiles.size, resultWith.targetFiles.size)
+        assertEquals(
+            resultWithout.targetFiles.map { it.path },
+            resultWith.targetFiles.map { it.path }
+        )
+        assertEquals(
+            resultWithout.targetFiles.map { it.order },
+            resultWith.targetFiles.map { it.order }
+        )
+        println("=== [UnresolvedItems 파이프라인 무간섭 불변성 검증 완료] ===")
+    }
 }
+

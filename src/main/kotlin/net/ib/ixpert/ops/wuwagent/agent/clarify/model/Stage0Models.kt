@@ -100,7 +100,11 @@ data class RequirementItem(
     val structuralSlotProposal: StructuralSlotProposal? = null,          // 구조 슬롯 제안 (v1.1)
     val rejectionReason: RejectionReason? = null,                        // 거부 사유 (v1.1 P1)
     val isReEmergence: Boolean = false,                                  // 새 엣지/신호로 재등장 여부 (v1.1 P1)
-    val domainPackage: String? = null                                    // 도메인 패키지 클러스터 (v1.1 P2)
+    val domainPackage: String? = null,                                   // 도메인 패키지 클러스터 (v1.1 P2)
+    val utteredIdentifier: String? = null,                               // 사용자 발화/근거 매칭 식별자 토큰 원문
+    val utteredTurn: Int? = null,                                        // 최초 발화 턴 번호 (불변)
+    val lastQuestion: String? = null,                                    // 사용자에게 실제 채택/제시된 질문 원문
+    val lastAskedTurn: Int? = null                                       // 질문이 실제 제시된 턴 번호
 ) {
     companion object {
         /**

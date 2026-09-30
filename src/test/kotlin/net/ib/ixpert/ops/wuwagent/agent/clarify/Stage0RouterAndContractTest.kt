@@ -712,6 +712,74 @@ class Stage0RouterAndContractTest {
         assertTrue(intentErrorMsg.constraints.all { it.kind == ConstraintKind.OTHER })
         assertEquals("기존 알림톡 채널을 그대로 활용합니다.", intentErrorMsg.constraints[0].rawStatement)
     }
+
+    /**
+     * [UnresolvedItems] 시나리오 2 Turn 1 인텐트 계약 빌드 검증:
+     * "알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야" 발화 후
+     * buildClarifyIntent 호출 시 0건의 예외가 발생하며,
+     * 배제 제약 대상인 알림톡(Alimtalk)이 unresolvedItems에 오탐 등록되지 않아야 함 (0건)
+     */
+    @Test
+    fun testScenario2Turn1_BuildClarifyIntent_UnresolvedItemsDoesNotContainAlimtalk() {
+        val surveyAdminPath = java.io.File("C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json")
+        org.junit.Assume.assumeTrue("survey_admin 메타그래프가 존재할 때만 실행", surveyAdminPath.exists())
+        val graph = Gson().fromJson(surveyAdminPath.readText(), ProjectGraph::class.java).normalizeLegacyCollections()
+
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlmJson = """
+            [
+              {
+                "kind": "EXCLUDE_COMPONENT",
+                "value": "알림톡 배치",
+                "rawStatement": "알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야",
+                "evidence": "알림톡 배치는 건드리지 말고"
+              },
+              {
+                "kind": "SCOPE_LIMIT",
+                "value": "SurveyServiceImpl만 수정",
+                "rawStatement": "알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야",
+                "evidence": "SurveyServiceImpl만 수정할 거야"
+              }
+            ]
+        """.trimIndent()
+        val mockLlm = object : LLMClient {
+            override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse {
+                return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse(
+                    model = "mock-llm",
+                    createdAt = "",
+                    message = net.ib.ixpert.ops.wuwagent.model.OllamaMessage("assistant", mockLlmJson),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+
+        val engine = Stage0ClarificationEngine(scanner, graph, mockLlm)
+        val turn0 = engine.initSession("설문 발송 채널에 브랜드메시지 추가")
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야"
+            )
+        )
+
+        // buildClarifyIntent 호출 시 0건의 예외 발생
+        val intent = engine.buildClarifyIntent(turn1.state)
+        assertNotNull(intent)
+
+        // 배제 제약/후보인 알림톡 관련 식별자가 unresolvedItems에 오탐 등록되지 않아야 함
+        val alimtalkUnresolved = intent.unresolvedItems.filter { 
+            it.identifier.contains("알림톡", ignoreCase = true) || it.identifier.contains("Alimtalk", ignoreCase = true)
+        }
+        assertTrue("알림톡 관련 식별자는 unresolvedItems에 포함되지 않아야 함 (0건)", alimtalkUnresolved.isEmpty())
+
+        // SurveyServiceImpl은 CONFIRMED이므로 unresolvedItems에 미포함
+        val surveyServiceUnresolved = intent.unresolvedItems.filter {
+            it.identifier.contains("SurveyServiceImpl")
+        }
+        assertTrue("CONFIRMED된 SurveyServiceImpl은 unresolvedItems에 포함되지 않아야 함 (0건)", surveyServiceUnresolved.isEmpty())
+    }
 }
+
 
 

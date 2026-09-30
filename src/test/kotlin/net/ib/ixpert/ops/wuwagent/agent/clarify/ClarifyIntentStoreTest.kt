@@ -1,8 +1,6 @@
 package net.ib.ixpert.ops.wuwagent.agent.clarify
 
-import net.ib.ixpert.ops.wuwagent.agent.clarify.model.ClarifyIntent
-import net.ib.ixpert.ops.wuwagent.agent.clarify.model.ConstraintKind
-import net.ib.ixpert.ops.wuwagent.agent.clarify.model.IntentConstraint
+import net.ib.ixpert.ops.wuwagent.agent.clarify.model.*
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.*
 import org.junit.Assert.*
 import org.junit.Rule
@@ -191,4 +189,172 @@ class ClarifyIntentStoreTest {
         assertEquals("새 세션의 사용자 입력이 100% 보존되어야 함", newRequirement, resolved.effectiveRequirement)
         assertNull("단독 /analyze 시 이전 세션 인텐트 계약이 주입되지 않아야 함", resolved.effectiveIntent)
     }
+
+    /**
+     * [UnresolvedItems] 1.2 버전 UnresolvedItem 라운드트립 직렬화 및 역직렬화 무결성 검증
+     */
+    @Test
+    fun testUnresolvedItems_RoundTripSerializationAndLoad() {
+        val projectRoot = tempFolder.newFolder("unresolved_roundtrip")
+        val graph = createMiniGraph()
+        val graphHash = ClarificationContractStore.calculateGraphHash(graph)
+
+        val intent = ClarifyIntent(
+            originalRequirement = "설문 발송 채널에 브랜드메시지 추가",
+            refinedRequirement = "정제문",
+            graphHash = graphHash,
+            unresolvedItems = listOf(
+                UnresolvedItem(
+                    identifier = "SAPACMM0802S01",
+                    kind = UnresolvedKind.NEW_CREATION,
+                    filePath = null,
+                    source = HintSource.USER_UTTERED,
+                    utteredTurn = 1,
+                    lastQuestion = "질문 원문",
+                    lastAskedTurn = 1
+                ),
+                UnresolvedItem(
+                    identifier = "SurveyServiceImpl",
+                    kind = UnresolvedKind.EXISTING_REF,
+                    filePath = "src/main/java/com/example/OrderService.java",
+                    source = HintSource.PROPOSED_EXCLUSION,
+                    utteredTurn = 2,
+                    lastQuestion = null,
+                    lastAskedTurn = null
+                )
+            ),
+            contractVersion = ClarifyIntent.CURRENT_INTENT_VERSION
+        )
+
+        val saved = ClarifyIntentStore.saveIntent(projectRoot, intent, key = "test_unresolved")
+        val loaded = ClarifyIntentStore.loadIntent(saved, graph)
+
+        assertEquals(2, loaded.unresolvedItems.size)
+        assertEquals("SAPACMM0802S01", loaded.unresolvedItems[0].identifier)
+        assertEquals(UnresolvedKind.NEW_CREATION, loaded.unresolvedItems[0].kind)
+        assertNull(loaded.unresolvedItems[0].filePath)
+        assertEquals(HintSource.USER_UTTERED, loaded.unresolvedItems[0].source)
+        assertEquals(1, loaded.unresolvedItems[0].utteredTurn)
+        assertEquals("질문 원문", loaded.unresolvedItems[0].lastQuestion)
+        assertEquals(1, loaded.unresolvedItems[0].lastAskedTurn)
+
+        assertEquals("SurveyServiceImpl", loaded.unresolvedItems[1].identifier)
+        assertEquals(UnresolvedKind.EXISTING_REF, loaded.unresolvedItems[1].kind)
+        assertEquals("src/main/java/com/example/OrderService.java", loaded.unresolvedItems[1].filePath)
+        assertEquals(HintSource.PROPOSED_EXCLUSION, loaded.unresolvedItems[1].source)
+        assertEquals(2, loaded.unresolvedItems[1].utteredTurn)
+        assertNull(loaded.unresolvedItems[1].lastQuestion)
+        assertNull(loaded.unresolvedItems[1].lastAskedTurn)
+    }
+
+    /**
+     * [UnresolvedItems] 1.0 및 1.1 레거시 JSON 로드 시 모든 리스트가 emptyList()로 정상 역직렬화되는지 검증
+     */
+    @Test
+    fun testLegacyJson1_0_And_1_1_DeserializationToEmptyListsWithoutNull() {
+        val projectRoot = tempFolder.newFolder("legacy_json")
+        val graph = createMiniGraph()
+        val graphHash = ClarificationContractStore.calculateGraphHash(graph)
+
+        // 1.0 JSON (unresolvedItems, constraints, excludedFiles 필드 부존재)
+        val legacy10Json = """
+            {
+              "originalRequirement": "원문",
+              "refinedRequirement": "정제문",
+              "graphHash": "$graphHash",
+              "contractVersion": "1.0"
+            }
+        """.trimIndent()
+        val file10 = File(projectRoot, "clarify-intent-v10.json")
+        file10.writeText(legacy10Json, Charsets.UTF_8)
+
+        val loaded10 = ClarifyIntentStore.loadIntent(file10, graph)
+        assertEquals("1.0", loaded10.contractVersion)
+        assertTrue("userStatements가 emptyList()이어야 함", loaded10.userStatements.isEmpty())
+        assertTrue("anchorTokens가 emptyList()이어야 함", loaded10.anchorTokens.isEmpty())
+        assertTrue("constraints가 emptyList()이어야 함", loaded10.constraints.isEmpty())
+        assertTrue("excludedFiles가 emptyList()이어야 함", loaded10.excludedFiles.isEmpty())
+        assertTrue("unresolvedItems가 emptyList()이어야 함", loaded10.unresolvedItems.isEmpty())
+
+        // 1.1 JSON (unresolvedItems 필드 부존재)
+        val legacy11Json = """
+            {
+              "originalRequirement": "원문 1.1",
+              "refinedRequirement": "정제문 1.1",
+              "graphHash": "$graphHash",
+              "contractVersion": "1.1"
+            }
+        """.trimIndent()
+        val file11 = File(projectRoot, "clarify-intent-v11.json")
+        file11.writeText(legacy11Json, Charsets.UTF_8)
+
+        val loaded11 = ClarifyIntentStore.loadIntent(file11, graph)
+        assertEquals("1.1", loaded11.contractVersion)
+        assertTrue("unresolvedItems가 emptyList()이어야 함", loaded11.unresolvedItems.isEmpty())
+    }
+
+    /**
+     * [UnresolvedItems] 미래 버전(1.9) 로드 시 VERSION_MISMATCH 예외 발생 검증
+     */
+    @Test
+    fun testFutureVersion_1_9_RejectedWithVersionMismatch() {
+        val projectRoot = tempFolder.newFolder("future_version")
+        val graph = createMiniGraph()
+        val graphHash = ClarificationContractStore.calculateGraphHash(graph)
+
+        val futureJson = """
+            {
+              "originalRequirement": "원문",
+              "refinedRequirement": "정제문",
+              "graphHash": "$graphHash",
+              "contractVersion": "1.9"
+            }
+        """.trimIndent()
+        val file = File(projectRoot, "clarify-intent-v19.json")
+        file.writeText(futureJson, Charsets.UTF_8)
+
+        try {
+            ClarifyIntentStore.loadIntent(file, graph)
+            fail("미래 버전(1.9) 로드 시 ContractValidationException이 발생해야 함")
+        } catch (e: ContractValidationException) {
+            assertEquals(ContractValidationReason.VERSION_MISMATCH, e.reason)
+        }
+    }
+
+    /**
+     * [UnresolvedItems] 필수 필드 누락 손상 JSON 로드 시 CORRUPT_JSON 예외 발생 검증
+     */
+    @Test
+    fun testCorruptJson_MissingUnresolvedItemFields_ThrowsCorruptJson() {
+        val projectRoot = tempFolder.newFolder("corrupt_json")
+        val graph = createMiniGraph()
+        val graphHash = ClarificationContractStore.calculateGraphHash(graph)
+
+        // identifier 누락
+        val corruptJson = """
+            {
+              "originalRequirement": "원문",
+              "refinedRequirement": "정제문",
+              "graphHash": "$graphHash",
+              "unresolvedItems": [
+                {
+                  "kind": "NEW_CREATION",
+                  "source": "USER_UTTERED",
+                  "utteredTurn": 1
+                }
+              ],
+              "contractVersion": "1.2"
+            }
+        """.trimIndent()
+        val file = File(projectRoot, "clarify-intent-corrupt.json")
+        file.writeText(corruptJson, Charsets.UTF_8)
+
+        try {
+            ClarifyIntentStore.loadIntent(file, graph)
+            fail("필수 필드 누락 시 ContractValidationException(CORRUPT_JSON)이 발생해야 함")
+        } catch (e: ContractValidationException) {
+            assertEquals(ContractValidationReason.CORRUPT_JSON, e.reason)
+        }
+    }
 }
+
