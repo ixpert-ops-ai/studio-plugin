@@ -275,8 +275,10 @@ class Stage0SurveyAdminSnapshotTest {
             contract.newCreations.any { it.statement.contains(gt) }
         }
         assertEquals("Category A 5종 전량이 newCreations에 정확히 수렴해야 함", 5, recoveredACount)
+        println("[ClarifyIntent refinedRequirement]: " + clarifyIntent.refinedRequirement)
+        println("[ClarifyIntent missingIdentifiers]: " + clarifyIntent.retentionAudit?.missingBeforeFix)
         assertTrue("Category A 5종 전량이 ClarifyIntent.refinedRequirement에 보존되어야 함", 
-            gtAFiles.all { gt -> clarifyIntent.refinedRequirement.contains(gt) })
+            gtAFiles.all { gt -> IdentifierRetentionChecker.containsIdentifier(clarifyIntent.refinedRequirement, gt) })
 
         // 6. Stage 1 파이프라인 합성 검증
         val dummyClient = object : net.ib.ixpert.ops.wuwagent.client.LLMClient {

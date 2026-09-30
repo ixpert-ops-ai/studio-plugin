@@ -282,24 +282,28 @@ class Stage0RouterAndContractTest {
     fun testRule3_TokenBasedGraphLookupBranching() {
         val mockLlm = object : LLMClient {
             override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
-                val content = if (systemPrompt.contains("ConstraintKind") || systemPrompt.contains("제약 조건")) {
-                    if (userCode.contains("BizgoApiService")) {
-                        val ev = if (userCode.contains("신규 연동 모듈 BizgoApiService")) "신규 연동 모듈 BizgoApiService" else "신규 모듈 BizgoApiService"
-                        """
-                        [
-                          {
-                            "kind": "NEW_MODULE",
-                            "value": "$ev 개발",
-                            "rawStatement": "$userCode",
-                            "evidence": "$ev"
-                          }
-                        ]
-                        """.trimIndent()
-                    } else {
-                        "[]"
+                val content = when {
+                    systemPrompt.contains("ConstraintKind") || systemPrompt.contains("제약 조건") -> {
+                        if (userCode.contains("BizgoApiService")) {
+                            val ev = if (userCode.contains("신규 연동 모듈 BizgoApiService")) "신규 연동 모듈 BizgoApiService" else "신규 모듈 BizgoApiService"
+                            """
+                            [
+                              {
+                                "kind": "NEW_MODULE",
+                                "value": "$ev 개발",
+                                "rawStatement": "$userCode",
+                                "evidence": "$ev"
+                              }
+                            ]
+                            """.trimIndent()
+                        } else {
+                            "[]"
+                        }
                     }
-                } else {
-                    "주문 결제 처리 ($userCode)"
+                    systemPrompt.contains("요구사항 정제") || systemPrompt.contains("refineRequirement") -> {
+                        "주문 결제 처리 ($userCode)"
+                    }
+                    else -> error("unmatched prompt: $systemPrompt")
                 }
                 return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse("mock-llm", "", net.ib.ixpert.ops.wuwagent.model.OllamaMessage("assistant", content), true)
             }
