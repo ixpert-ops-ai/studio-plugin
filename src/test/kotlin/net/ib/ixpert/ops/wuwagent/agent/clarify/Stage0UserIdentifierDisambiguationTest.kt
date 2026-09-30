@@ -100,7 +100,18 @@ class Stage0UserIdentifierDisambiguationTest {
     fun testBranch1_UtteredAndGraphExists_AutoConfirmedWithoutPendingReQuery() {
         val graph = createSyntheticGraph()
         val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
-        val engine = Stage0ClarificationEngine(scanner, graph)
+        val mockLlmJson = """
+            [
+              {
+                "kind": "SCOPE_LIMIT",
+                "value": "SurveyServiceImpl 수정",
+                "rawStatement": "SurveyServiceImpl만 수정할 거야",
+                "evidence": "SurveyServiceImpl만 수정할 거야"
+              }
+            ]
+        """.trimIndent()
+        val mockLlm = createMockLlm(mockLlmJson)
+        val engine = Stage0ClarificationEngine(scanner, graph, mockLlm)
 
         val turn0 = engine.initSession("SurveyServiceImpl만 수정할 거야")
 
@@ -216,6 +227,29 @@ class Stage0UserIdentifierDisambiguationTest {
     }
 
     @Test
+    fun testFallback_NoLlm_IdentifiersRemainPendingWithoutAutoConfirmed() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        // LLM이 null인 엔진 생성 (룰 폴백 상태)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val turn0 = engine.initSession("SurveyServiceImpl은 건드리지 말고 OrderController만 고쳐 줘")
+
+        val confirmedItems = turn0.state.items.filter { it.verdict == Verdict.CONFIRMED }
+        val confirmedPaths = confirmedItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+
+        // LLM 부재 시 배제 문맥을 판별할 수 없으므로 SurveyServiceImpl은 자동 CONFIRMED되지 않아야 함
+        assertFalse("LLM이 꺼졌을 때 SurveyServiceImpl은 자동 CONFIRMED되지 않아야 함", 
+            confirmedPaths.any { it.contains("SurveyServiceImpl.java") })
+
+        // 발화 식별자는 PENDING 상태로 안전하게 보존되어야 함 (source는 USER_UTTERED)
+        val pendingItems = turn0.state.items.filter { it.verdict == Verdict.PENDING }
+        val surveyItem = pendingItems.find { (it.hint as? LinkHint.ExistingRef)?.filePath?.contains("SurveyServiceImpl.java") == true }
+        assertNotNull("SurveyServiceImpl은 PENDING으로 보존되어야 함", surveyItem)
+        assertEquals("출처는 USER_UTTERED여야 함", HintSource.USER_UTTERED, surveyItem?.source)
+    }
+
+    @Test
     fun testScenario4_NaturalSr_SAPACMM0802S01_RemainsPendingEvenWithNewKeywordInStatement() {
         val graph = createSyntheticGraph()
         val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
@@ -312,7 +346,18 @@ class Stage0UserIdentifierDisambiguationTest {
     fun testBranch2_TwoTurns_UnansweredUnmatchedIdentifier_RemainsPending() {
         val graph = createSyntheticGraph()
         val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
-        val engine = Stage0ClarificationEngine(scanner, graph)
+        val mockLlmJson = """
+            [
+              {
+                "kind": "SCOPE_LIMIT",
+                "value": "OrderController 수정",
+                "rawStatement": "OrderController만 고쳐줘",
+                "evidence": "OrderController만 고쳐줘"
+              }
+            ]
+        """.trimIndent()
+        val mockLlm = createMockLlm(mockLlmJson)
+        val engine = Stage0ClarificationEngine(scanner, graph, mockLlm)
 
         val turn0 = engine.initSession("SAPACMM0802S01을 참고하여 OrderController 수정")
         val turn1 = engine.processTurn(turn0.state, Stage0ClarificationEngine.UserInput(userStatement = "OrderController만 고쳐줘"))
@@ -367,7 +412,18 @@ class Stage0UserIdentifierDisambiguationTest {
         Assume.assumeNotNull("survey_admin 메타그래프가 존재할 때만 실행", graph)
 
         val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
-        val engine = Stage0ClarificationEngine(scanner, graph)
+        val mockLlmJson = """
+            [
+              {
+                "kind": "SCOPE_LIMIT",
+                "value": "SurveyServiceImpl.java 수정",
+                "rawStatement": "SurveyServiceImpl.java만 수정할 거야",
+                "evidence": "SurveyServiceImpl.java만 수정할 거야"
+              }
+            ]
+        """.trimIndent()
+        val mockLlm = createMockLlm(mockLlmJson)
+        val engine = Stage0ClarificationEngine(scanner, graph, mockLlm)
 
         // Turn 0
         val turn0 = engine.initSession("설문 발송 기능 개선")

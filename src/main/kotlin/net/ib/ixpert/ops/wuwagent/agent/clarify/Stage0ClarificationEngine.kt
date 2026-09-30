@@ -75,6 +75,9 @@ class Stage0ClarificationEngine(
             }
         }
 
+        val isLlmAvailable = llmClient != null
+        val matchedVerdict = if (isLlmAvailable) Verdict.CONFIRMED else Verdict.PENDING
+
         val confirmedList = mutableListOf<RequirementItem>()
         val matchedTokens = mutableSetOf<String>()
 
@@ -102,7 +105,7 @@ class Stage0ClarificationEngine(
                     source = HintSource.USER_UTTERED,
                     hint = hint,
                     anchorRationale = "사용자 발화 명시 식별자 ($idToken)",
-                    verdict = Verdict.CONFIRMED,
+                    verdict = matchedVerdict,
                     confidence = ConfidenceBucket.HIGH_CONFIDENCE,
                     provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
                     domainPackage = scanner.extractDomainPackage(matchedFile.path)
@@ -133,7 +136,7 @@ class Stage0ClarificationEngine(
                     source = HintSource.USER_UTTERED,
                     hint = hint,
                     anchorRationale = "사용자 발화 명시 리소스 ($idToken)",
-                    verdict = Verdict.CONFIRMED,
+                    verdict = matchedVerdict,
                     confidence = ConfidenceBucket.HIGH_CONFIDENCE,
                     provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE)
                 )
@@ -149,15 +152,17 @@ class Stage0ClarificationEngine(
         val unmatched = targetIds.filter { it !in matchedTokens && (it.matches(Regex("^[A-Z][a-zA-Z0-9]+$")) || it.contains(".")) }
 
         // NEW_MODULE 제약의 evidence에 포함된 식별자는 명시적 신규 생성(CONFIRMED)으로 분류
-        val confirmedNewModuleIds = unmatched.filter { idToken ->
-            newModuleEvidences.any { ev ->
-                IdentifierRetentionChecker.containsIdentifier(ev, idToken)
+        val confirmedNewModuleIds = if (isLlmAvailable) {
+            unmatched.filter { idToken ->
+                newModuleEvidences.any { ev ->
+                    IdentifierRetentionChecker.containsIdentifier(ev, idToken)
+                }
             }
+        } else {
+            emptyList()
         }
         val unconfirmedUnmatched = unmatched.filter { idToken ->
-            newModuleEvidences.none { ev ->
-                IdentifierRetentionChecker.containsIdentifier(ev, idToken)
-            }
+            idToken !in confirmedNewModuleIds
         }
 
         // 확인 질문은 NEW_MODULE로 확정되지 않은 미확인 식별자에 대해서만 발생
@@ -186,7 +191,7 @@ class Stage0ClarificationEngine(
             }
         }
 
-        // unconfirmedUnmatched가 있는 경우 PENDING NewCreation item 생성
+        // unconfirmedUnmatched가 있는 경우 PENDING NewCreation item 생성 (source는 USER_UTTERED)
         val newCreationItem = when {
             unconfirmedUnmatched.isNotEmpty() -> {
                 val names = unconfirmedUnmatched.joinToString(", ")
@@ -194,7 +199,7 @@ class Stage0ClarificationEngine(
                 RequirementItem(
                     id = RequirementItem.deriveId(hint, names),
                     statement = "미확인 부존재 식별자: $names",
-                    source = HintSource.SYSTEM_UNCONFIRMED,
+                    source = HintSource.USER_UTTERED,
                     hint = hint,
                     anchorRationale = "사용자 발화 미확인 부존재 식별자 ($names)",
                     verdict = Verdict.PENDING, // 사용자 확인 전까지는 미해결(PENDING) 유지
@@ -301,23 +306,21 @@ class Stage0ClarificationEngine(
 
         // B-12: 사용자 초기 발화 식별자 3분기 분해
         val userResolution = resolveUserUtteredIdentifiers(originalRequirement)
-        val userConfirmedItems = userResolution.confirmedItems
+        val userConfirmedItems = userResolution.confirmedItems.filter { it.verdict == Verdict.CONFIRMED }
+        val userPendingItems = userResolution.confirmedItems.filter { it.verdict == Verdict.PENDING } + 
+            (userResolution.newCreationItem?.takeIf { it.verdict == Verdict.PENDING }?.let { listOf(it) } ?: emptyList())
         val userConfirmedPaths = userConfirmedItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }.toSet()
+        val userPendingPaths = userPendingItems.mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }.toSet()
 
         val initialCandidates = scanner.rescanUnverified(initialTokens, frozenRejectedItems)
             .filter { cand ->
                 val p = (cand.hint as? LinkHint.ExistingRef)?.filePath
-                p == null || p !in userConfirmedPaths
+                p == null || (p !in userConfirmedPaths && p !in userPendingPaths)
             }
-        val userUnconfirmed = if (userResolution.newCreationItem?.verdict == Verdict.PENDING) {
-            listOf(userResolution.newCreationItem)
-        } else {
-            emptyList()
-        }
         val openQ = userResolution.unconfirmedQuestion ?: checkOpenQuestionTrigger(initialTokens, initialCandidates)
 
-        // 초기 items = 사용자 확정 항목 + 미확인 참조 항목 + 새로 발견된 후보군 + 이전 세션 거부 동결 항목
-        val combinedItems = userConfirmedItems + userUnconfirmed + initialCandidates + frozenRejectedItems
+        // 초기 items = 사용자 확정 항목 + 사용자 미확인(PENDING) 항목 + 새로 발견된 후보군 + 이전 세션 거부 동결 항목
+        val combinedItems = userConfirmedItems + userPendingItems + initialCandidates + frozenRejectedItems
 
         val state = Stage0State(
             originalRequirement = originalRequirement,
@@ -984,31 +987,13 @@ class Stage0ClarificationEngine(
     private fun extractConstraints(userStatements: List<String>): List<IntentConstraint> {
         if (userStatements.isEmpty()) return emptyList()
 
-        val defaultConstraints = if (llmClient == null) {
-            userStatements.map { stmt ->
-                val kind = when {
-                    stmt.contains("제외") || stmt.contains("건드리지") || stmt.contains("말고") -> ConstraintKind.EXCLUDE_COMPONENT
-                    stmt.contains("신규") || stmt.contains("새로") || stmt.contains("생성") || stmt.contains("개발") || stmt.contains("REST API") -> ConstraintKind.NEW_MODULE
-                    stmt.contains("채널") || stmt.contains("푸시") || stmt.contains("알림톡") -> ConstraintKind.INCLUDE_CHANNEL
-                    stmt.contains("만 수정") || stmt.contains("만 고쳐") -> ConstraintKind.SCOPE_LIMIT
-                    else -> ConstraintKind.OTHER
-                }
-                IntentConstraint(
-                    kind = kind,
-                    value = stmt,
-                    rawStatement = stmt,
-                    evidence = stmt
-                )
-            }
-        } else {
-            userStatements.map { stmt ->
-                IntentConstraint(
-                    kind = ConstraintKind.OTHER,
-                    value = stmt,
-                    rawStatement = stmt,
-                    evidence = stmt
-                )
-            }
+        val defaultConstraints = userStatements.map { stmt ->
+            IntentConstraint(
+                kind = ConstraintKind.OTHER,
+                value = stmt,
+                rawStatement = stmt,
+                evidence = null
+            )
         }
 
         val client = llmClient ?: return defaultConstraints

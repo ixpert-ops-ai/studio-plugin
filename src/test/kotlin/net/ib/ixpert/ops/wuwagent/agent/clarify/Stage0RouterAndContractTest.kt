@@ -280,9 +280,34 @@ class Stage0RouterAndContractTest {
      */
     @Test
     fun testRule3_TokenBasedGraphLookupBranching() {
+        val mockLlm = object : LLMClient {
+            override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
+                val content = if (systemPrompt.contains("ConstraintKind") || systemPrompt.contains("제약 조건")) {
+                    if (userCode.contains("BizgoApiService")) {
+                        val ev = if (userCode.contains("신규 연동 모듈 BizgoApiService")) "신규 연동 모듈 BizgoApiService" else "신규 모듈 BizgoApiService"
+                        """
+                        [
+                          {
+                            "kind": "NEW_MODULE",
+                            "value": "$ev 개발",
+                            "rawStatement": "$userCode",
+                            "evidence": "$ev"
+                          }
+                        ]
+                        """.trimIndent()
+                    } else {
+                        "[]"
+                    }
+                } else {
+                    "주문 결제 처리 ($userCode)"
+                }
+                return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse("mock-llm", "", net.ib.ixpert.ops.wuwagent.model.OllamaMessage("assistant", content), true)
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
         val graph = createSyntheticGraph()
         val scanner = Stage0GraphScanner(graph)
-        val engine = Stage0ClarificationEngine(scanner, graph)
+        val engine = Stage0ClarificationEngine(scanner, graph, mockLlm)
 
         val turn0 = engine.initSession("주문 결제")
 
@@ -397,6 +422,28 @@ class Stage0RouterAndContractTest {
         val contract6 = engine.transitionToStage1(turn1Case6.state)
         assertTrue("trustedExistingRefs에 order_list.jsp가 포함되어야 함", contract6.trustedExistingRefs.any { it.filePath.contains("order_list.jsp") })
         assertTrue("newCreations에는 이 발화로 인한 신규 생성이 없어야 함", contract6.newCreations.none { it.source == HintSource.USER_UTTERED })
+    }
+
+    @Test
+    fun testRule3_NoLlm_UtteredNewModuleRemainsPendingWithUserUttered() {
+        val graph = createSyntheticGraph()
+        val scanner = Stage0GraphScanner(graph)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val turn0 = engine.initSession("주문 결제")
+
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "신규 모듈 BizgoApiService를 연동합니다."
+            )
+        )
+
+        // LLM 부재 시 NEW_MODULE 확정 없이 PENDING 및 USER_UTTERED로 보존되어야 함
+        val bizgoItem = turn1.state.items.find { it.statement.contains("BizgoApiService") }
+        assertNotNull("BizgoApiService 아이템이 PENDING으로 존재해야 함", bizgoItem)
+        assertEquals("판정은 PENDING이어야 함", Verdict.PENDING, bizgoItem!!.verdict)
+        assertEquals("출처는 USER_UTTERED여야 함", HintSource.USER_UTTERED, bizgoItem.source)
     }
 
     /**

@@ -178,7 +178,28 @@ class Stage0SurveyAdminSnapshotTest {
             maxBridgeDegree = 15,
             maxExternalShared = 3
         )
-        val engine = Stage0ClarificationEngine(scanner, graph)
+        val mockLlmJson = """
+            [
+              {
+                "kind": "NEW_MODULE",
+                "value": "BizgoApiService, BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTmplDto",
+                "rawStatement": "외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다.",
+                "evidence": "외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
+              }
+            ]
+        """.trimIndent()
+        val mockLlm = object : net.ib.ixpert.ops.wuwagent.client.LLMClient {
+            override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
+                val content = if (systemPrompt.contains("ConstraintKind") || systemPrompt.contains("제약 조건")) {
+                    mockLlmJson
+                } else {
+                    "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발"
+                }
+                return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse("mock-llm", "", net.ib.ixpert.ops.wuwagent.model.OllamaMessage("assistant", content), true)
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+        val engine = Stage0ClarificationEngine(scanner, graph, mockLlm)
 
         // 1. Turn 0 인입
         val originalReq = "설문 발송 채널에 브랜드메시지 추가"
@@ -298,6 +319,43 @@ class Stage0SurveyAdminSnapshotTest {
         println("그래프 도달 Recall 천장: ${String.format("%.1f", graphRecall)}%")
         println("시스템 최종 실측 Recall: ${String.format("%.1f", systemRecall)}% (17 / 19)")
         println("증분 증폭률 (Amplification): $amplificationLower (하한) ~ $amplificationUpper (상한)")
+    }
+
+    @Test
+    fun testCaseBFullE2E_NoLlm_NewModulesRemainPendingWithUserUttered() = kotlinx.coroutines.runBlocking {
+        val graph = loadSurveyAdminGraph() ?: return@runBlocking
+        val scanner = Stage0GraphScanner(
+            graph = graph,
+            minSpecificityScore = 1.0,
+            proposalBudget = 10,
+            localDomainOverrides = emptyMap(),
+            maxBridgeDegree = 15,
+            maxExternalShared = 3
+        )
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val turn0 = engine.initSession("설문 발송 채널에 브랜드메시지 추가")
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
+            )
+        )
+
+        val gtAFiles = listOf(
+            "BizgoApiService",
+            "BrandMessageTemplateBatchRunner",
+            "BrandMessageTemplateBatchJob",
+            "BrandMessageTemplateBatchRepository",
+            "BrandMessageTmplDto"
+        )
+
+        val pendingUserUtteredItems = turn1.state.items.filter { it.verdict == Verdict.PENDING && it.source == HintSource.USER_UTTERED }
+        
+        for (gt in gtAFiles) {
+            val found = pendingUserUtteredItems.any { it.statement.contains(gt) }
+            assertTrue("Category A '$gt' 파일은 PENDING 및 USER_UTTERED 상태로 보존되어야 함", found)
+        }
     }
 
     /**
