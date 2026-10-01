@@ -180,7 +180,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
     // ─────────────────────────────────────────────────────────────────────────────
 
     @Test
-    fun testMeasureBaselineTopNGtSurvival_SurveyAdmin() = kotlinx.coroutines.runBlocking {
+    fun testMeasureBaselineTopNGtSurvival_SurveyAdmin_LlmOff() = kotlinx.coroutines.runBlocking {
         val graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json"
         val graph = loadGraph(graphPath)
         Assume.assumeNotNull("survey_admin 메타그래프 존재 시에만 실행", graph)
@@ -188,7 +188,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
         val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
 
-        val sr = "설문 발송 채널에 브랜드메시지 추가"
+        val sr = "외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
         val turn0 = engine.initSession(sr)
         val intent = engine.buildClarifyIntent(turn0.state)
 
@@ -224,7 +224,59 @@ class Stage0EngineRoutedBaselineHarnessTest {
     }
 
     @Test
-    fun testMeasureBaselineTopNGtSurvival_ApcTransitCard() = kotlinx.coroutines.runBlocking {
+    fun testMeasureBaselineTopNGtSurvival_SurveyAdmin_LlmOn() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("survey_admin 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlm = StrictClarifyMockLlm(
+            refinementResponse = "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발"
+        )
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = mockLlm)
+
+        val turn0 = engine.initSession("설문 발송 채널에 브랜드메시지 추가")
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
+            )
+        )
+        val intent = engine.buildClarifyIntent(turn1.state)
+
+        val pipeline = RequirementAnalysisPipeline(StrictPipelineLlm())
+        val result = pipeline.analyze(
+            primaryReq = intent.refinedRequirement,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intent
+        )
+
+        val gtFiles = listOf(
+            "survey_list.jsp", "survey_write.jsp", "survey.list.js", "survey.write.js",
+            "SurveyServiceImpl.java", "sql_survey.xml", "AlimtalkChnlDto.java", "AlimtalkTmplDto.java"
+        )
+
+        val finalPaths = result.targetFiles.filter { it.type == "MODIFY" }.map { it.path }
+        val survivedGt = gtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
+
+        println("[GT Baseline: survey_admin (Intent=LlmOn)] RefinedReq: \"${intent.refinedRequirement}\"")
+        println("[GT Baseline: survey_admin (Intent=LlmOn)] Top-30 TargetFiles Count: ${result.targetFiles.size}")
+        println("[GT Baseline: survey_admin (Intent=LlmOn)] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
+        val missing = gtFiles - survivedGt.toSet()
+        if (missing.isNotEmpty()) {
+            println("[GT Baseline: survey_admin (Intent=LlmOn)] GT Missing: $missing")
+        }
+        println("[GT Baseline: survey_admin (Intent=LlmOn)] Top-30 List:")
+        result.targetFiles.forEachIndexed { idx, sf ->
+            val isGt = gtFiles.any { sf.path.contains(it, ignoreCase = true) }
+            val tag = if (isGt) "★[GT]" else "  [FP]"
+            println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
+        }
+    }
+
+    @Test
+    fun testMeasureBaselineTopNGtSurvival_ApcTransitCard_LlmOff() = kotlinx.coroutines.runBlocking {
         val graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json"
         val graph = loadGraph(graphPath)
         Assume.assumeNotNull("apc 메타그래프 존재 시에만 실행", graph)
@@ -256,6 +308,53 @@ class Stage0EngineRoutedBaselineHarnessTest {
             println("[GT Baseline: APC Transit Card (Intent=LlmOff)] GT Missing: $missing")
         }
         println("[GT Baseline: APC Transit Card (Intent=LlmOff)] Top-30 List:")
+        result.targetFiles.forEachIndexed { idx, sf ->
+            val isGt = gtFiles.any { sf.path.contains(it, ignoreCase = true) }
+            val tag = if (isGt) "★[GT]" else "  [FP]"
+            println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
+        }
+    }
+
+    @Test
+    fun testMeasureBaselineTopNGtSurvival_Apc_DemIsolated_LlmOn() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("apc 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlm = StrictClarifyMockLlm(
+            refinementResponse = "앱카드 및 모니모페이 최근이력 1건 조회 기능 개발"
+        )
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = mockLlm)
+
+        val sr = "aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회"
+        val turn0 = engine.initSession(sr)
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(userStatement = "aCMBTBAPC024DEM을 통해서 조회하는 로직을 추가해줘")
+        )
+        val intent = engine.buildClarifyIntent(turn1.state)
+
+        val pipeline = RequirementAnalysisPipeline(StrictPipelineLlm())
+        val result = pipeline.analyze(
+            primaryReq = intent.refinedRequirement,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intent
+        )
+
+        val gtFiles = listOf("APCMMTrcdIsInfSVO", "APCMMTrcdIsSVC", "APCMMTrcdIsSVCImpl", "APCMMTrcdIsBIZ", "ACMBTBAPC024DEM")
+        val finalPaths = result.targetFiles.map { it.path }
+        val survivedGt = gtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
+
+        println("[GT Baseline: APC DEM Isolated (Intent=LlmOn)] RefinedReq: \"${intent.refinedRequirement}\"")
+        println("[GT Baseline: APC DEM Isolated (Intent=LlmOn)] Top-30 TargetFiles Count: ${result.targetFiles.size}")
+        println("[GT Baseline: APC DEM Isolated (Intent=LlmOn)] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
+        val missing = gtFiles - survivedGt.toSet()
+        if (missing.isNotEmpty()) {
+            println("[GT Baseline: APC DEM Isolated (Intent=LlmOn)] GT Missing: $missing")
+        }
+        println("[GT Baseline: APC DEM Isolated (Intent=LlmOn)] Top-30 List:")
         result.targetFiles.forEachIndexed { idx, sf ->
             val isGt = gtFiles.any { sf.path.contains(it, ignoreCase = true) }
             val tag = if (isGt) "★[GT]" else "  [FP]"
