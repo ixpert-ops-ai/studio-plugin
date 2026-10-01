@@ -797,4 +797,40 @@ class Stage0UtteranceProcessTest {
             )
         }
     }
+
+    /**
+     * [Fail-Fast] USER_UTTERED PENDING 항목에 utteredIdentifier가 null인 경우
+     * 문자열 statement 폴백으로 식별자를 유추하지 않고 즉시 IllegalStateException(fail-fast)을 던지는지 검증
+     */
+    @Test
+    fun testBuildClarifyIntent_UserUtteredPendingItemWithoutUtteredIdentifier_ThrowsIllegalStateException() {
+        val graph = createSyntheticPartitionGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val invalidItem = RequirementItem(
+            id = "invalid_user_item",
+            statement = "미확인 부존재 식별자: SomeService",
+            source = HintSource.USER_UTTERED,
+            hint = LinkHint.NewCreation,
+            anchorRationale = "사용자 발화 미확인 식별자",
+            verdict = Verdict.PENDING,
+            utteredIdentifier = null // 의도적으로 null 누락 주입
+        )
+        val state = Stage0State(
+            originalRequirement = "신규 기능 개발",
+            items = listOf(invalidItem),
+            seedSet = emptySet(),
+            userStatements = listOf("신규 기능 개발")
+        )
+
+        var exceptionThrown = false
+        try {
+            engine.buildClarifyIntent(state)
+        } catch (e: IllegalStateException) {
+            exceptionThrown = true
+            println("Expected exception caught: ${e.message}")
+        }
+        assertTrue("USER_UTTERED PENDING 항목에 utteredIdentifier가 null이면 fail-fast로 IllegalStateException을 던져야 함", exceptionThrown)
+    }
 }

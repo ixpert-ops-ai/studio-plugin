@@ -1017,12 +1017,17 @@ class Stage0ClarificationEngine(
         // 미확정(PENDING) 사용자 발화 식별자 수집 (USER_UTTERED 또는 utteredIdentifier가 있는 PROPOSED_EXCLUSION)
         val unresolvedItems = state.items
             .filter { it.verdict == Verdict.PENDING && (it.source == HintSource.USER_UTTERED || (it.source == HintSource.PROPOSED_EXCLUSION && it.utteredIdentifier != null)) }
-            .mapNotNull { item ->
+            .map { item ->
                 val identifier = item.utteredIdentifier
-                    ?: when (val h = item.hint) {
-                        is LinkHint.NewCreation -> item.statement.substringAfter("신규 컴포넌트 생성: ").substringAfter("미확인 부존재 식별자: ").trim()
-                        is LinkHint.ExistingRef -> h.symbols.firstOrNull() ?: h.filePath.substringAfterLast("/").substringBeforeLast(".")
-                    }.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    ?: if (item.source == HintSource.USER_UTTERED) {
+                        error("USER_UTTERED PENDING 항목(id=${item.id})에 utteredIdentifier가 누락되었습니다.")
+                    } else {
+                        error("PROPOSED_EXCLUSION PENDING 항목(id=${item.id})에 utteredIdentifier가 누락되었습니다.")
+                    }
+
+                if (identifier.isBlank()) {
+                    error("미확정 식별자(id=${item.id})의 identifier가 공백입니다.")
+                }
 
                 val kind = when (item.hint) {
                     is LinkHint.ExistingRef -> UnresolvedKind.EXISTING_REF
