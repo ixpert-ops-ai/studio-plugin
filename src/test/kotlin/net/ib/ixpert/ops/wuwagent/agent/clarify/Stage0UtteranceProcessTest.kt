@@ -578,6 +578,55 @@ class Stage0UtteranceProcessTest {
         assertEquals("2번째 턴에서 최초 발화된 BarService의 utteredTurn은 2여야 함", 2, bar1?.utteredTurn)
     }
 
+    private fun createSyntheticPartitionGraph(): ProjectGraph {
+        val files = mapOf(
+            "com/example/OrderDto.java" to FileNode(
+                path = "com/example/OrderDto.java",
+                packageName = "com.example",
+                className = "OrderDto",
+                fileType = SpringFileType.DTO,
+                layer = ArchitectureLayer.PERSISTENCE,
+                methods = listOf(MethodSignature("getPay_type", "String", emptyList()))
+            ),
+            "com/example/SurveyServiceImpl.java" to FileNode(
+                path = "com/example/SurveyServiceImpl.java",
+                packageName = "com.example",
+                className = "SurveyServiceImpl",
+                localName = "SurveyServiceImpl",
+                koreanComments = listOf("SurveyServiceImpl 설문 서비스 구현체"),
+                fileType = SpringFileType.SERVICE,
+                layer = ArchitectureLayer.BUSINESS,
+                methods = listOf(MethodSignature("executeSurvey", "void", emptyList()))
+            ),
+            "com/example/SurveyService.java" to FileNode(
+                path = "com/example/SurveyService.java",
+                packageName = "com.example",
+                className = "SurveyService",
+                localName = "SurveyServiceImpl",
+                koreanComments = listOf("SurveyServiceImpl 설문 서비스 인터페이스"),
+                fileType = SpringFileType.INTERFACE,
+                layer = ArchitectureLayer.BUSINESS,
+                methods = listOf(MethodSignature("executeSurvey", "void", emptyList()))
+            )
+        )
+        val rels = listOf(
+            Relationship(
+                source = "com/example/SurveyServiceImpl.java",
+                target = "com/example/SurveyService.java",
+                type = RelationshipType.IMPLEMENTS
+            )
+        )
+        return ProjectGraph(
+            generatedAt = Instant.now().toString(),
+            projectRoot = "/test/root",
+            frameworkType = FrameworkType.SPRING_MVC_MYBATIS,
+            files = files,
+            relationships = rels,
+            resourceNodes = emptyList(),
+            statistics = GraphStatistics()
+        )
+    }
+
     /**
      * [UnresolvedItems] 4대 조건 무손실 분할 불변식(Lossless Partitioning) 검증:
      * (1) LLM-off
@@ -587,24 +636,29 @@ class Stage0UtteranceProcessTest {
      */
     @Test
     fun testLosslessPartitioningInvariant_AcrossAllFourConditions() {
-        val graph = createSyntheticGraph()
+        val graph = createSyntheticPartitionGraph()
         val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
 
         // 조건 (1) LLM-off
         val engineOff = Stage0ClarificationEngine(scanner, graph, llmClient = null)
         val turn0Off = engineOff.initSession("신규 서비스 FooService 개발")
         val intent0Off = engineOff.buildClarifyIntent(turn0Off.state)
-        println("[Condition 1 LLM-off] anchorTokens=${intent0Off.anchorTokens}, excludedFiles=${intent0Off.excludedFiles}, unresolvedItems=${intent0Off.unresolvedItems.map { it.identifier }}")
-        assertLosslessPartitioning(intent0Off, turn0Off.state)
+        assertLosslessPartitioning(
+            intent0Off,
+            turn0Off.state,
+            graph,
+            listOf("신규 서비스 FooService 개발"),
+            "Condition 1 LLM-off"
+        )
 
         // Mock LLM for exclusion
         val mockLlmJson = """
             [
               {
                 "kind": "EXCLUDE_COMPONENT",
-                "value": "sms_send.jsp",
-                "rawStatement": "sms_send.jsp는 건드리지 마",
-                "evidence": "sms_send.jsp는 건드리지 마"
+                "value": "SurveyServiceImpl 수정 제외",
+                "rawStatement": "SurveyServiceImpl은 건드리지 말고 신규 FooService를 추가해줘",
+                "evidence": "SurveyServiceImpl은 건드리지 말고"
               }
             ]
         """.trimIndent()
@@ -622,14 +676,25 @@ class Stage0UtteranceProcessTest {
 
         // 조건 (2) LLM-on proposed exclusion
         val engineOn = Stage0ClarificationEngine(scanner, graph, mockLlm)
-        val turn0On = engineOn.initSession("주문 조회 및 신규 FooService")
+        val turn0On = engineOn.initSession("주문 기능 개발")
         val turn1Proposed = engineOn.processTurn(
             turn0On.state,
-            Stage0ClarificationEngine.UserInput(userStatement = "sms_send.jsp는 건드리지 마")
+            Stage0ClarificationEngine.UserInput(userStatement = "SurveyServiceImpl은 건드리지 말고 신규 FooService를 추가해줘")
         )
+
+        // 조건 2 가드: 배제 후보가 실제로 1건 이상 생성되었음을 먼저 단언 (비어있는 테스트 방지)
+        val proposedExclusions = turn1Proposed.state.items.filter { it.source == HintSource.PROPOSED_EXCLUSION }
+        assertTrue("조건 2: 배제 제안 후보가 1건 이상 생성되어야 함", proposedExclusions.isNotEmpty())
+        assertEquals("배제 후보는 SurveyServiceImpl과 인접 SurveyService 2건이어야 함", 2, proposedExclusions.size)
+
         val intentProposed = engineOn.buildClarifyIntent(turn1Proposed.state)
-        println("[Condition 2 Proposed Exclusion] anchorTokens=${intentProposed.anchorTokens}, excludedFiles=${intentProposed.excludedFiles}, unresolvedItems=${intentProposed.unresolvedItems.map { it.identifier }}")
-        assertLosslessPartitioning(intentProposed, turn1Proposed.state)
+        assertLosslessPartitioning(
+            intentProposed,
+            turn1Proposed.state,
+            graph,
+            listOf("주문 기능 개발", "SurveyServiceImpl은 건드리지 말고 신규 FooService를 추가해줘"),
+            "Condition 2 Proposed Exclusion"
+        )
 
         // 조건 (3) LLM-on "yes" (배제 확정)
         val turn2Yes = engineOn.processTurn(
@@ -637,8 +702,21 @@ class Stage0UtteranceProcessTest {
             Stage0ClarificationEngine.UserInput(userStatement = "응")
         )
         val intentYes = engineOn.buildClarifyIntent(turn2Yes.state)
-        println("[Condition 3 Affirmative Yes] anchorTokens=${intentYes.anchorTokens}, excludedFiles=${intentYes.excludedFiles}, unresolvedItems=${intentYes.unresolvedItems.map { it.identifier }}")
-        assertLosslessPartitioning(intentYes, turn2Yes.state)
+        assertTrue("조건 3: excludedFiles에 SurveyServiceImpl.java가 포함되어야 함", intentYes.excludedFiles.any { it.contains("SurveyServiceImpl.java") })
+        assertTrue("조건 3: excludedFiles에 인접 SurveyService.java가 포함되어야 함", intentYes.excludedFiles.any { it.contains("SurveyService.java") })
+        assertLosslessPartitioning(
+            intentYes,
+            turn2Yes.state,
+            graph,
+            listOf("주문 기능 개발", "SurveyServiceImpl은 건드리지 말고 신규 FooService를 추가해줘", "응"),
+            "Condition 3 Affirmative Yes"
+        )
+        // 조건 3 인접 후보 SurveyService 튜플 출력 (고신뢰도 일괄 제외에 포함)
+        val adjYesExcluded = intentYes.excludedFiles.any { it.contains("SurveyService.java") }
+        val adjYesUnresolved = intentYes.unresolvedItems.any { it.identifier == "SurveyService" }
+        val adjYesConfirmed = turn2Yes.state.items.any { it.verdict == Verdict.CONFIRMED && (it.hint as? LinkHint.ExistingRef)?.filePath?.contains("SurveyService.java") == true }
+        val adjYesSum = (if (adjYesConfirmed) 1 else 0) + (if (adjYesExcluded) 1 else 0) + (if (adjYesUnresolved) 1 else 0)
+        println("[Condition 3 Affirmative Yes] adjacent token=SurveyService -> (anchor=false, confirmed=$adjYesConfirmed, excluded=$adjYesExcluded, unresolved=$adjYesUnresolved, sum=$adjYesSum)")
 
         // 조건 (4) LLM-on "no" (배제 취소 및 발화 식별자 복원)
         val turn2No = engineOn.processTurn(
@@ -646,33 +724,77 @@ class Stage0UtteranceProcessTest {
             Stage0ClarificationEngine.UserInput(userStatement = "아니요")
         )
         val intentNo = engineOn.buildClarifyIntent(turn2No.state)
-        println("[Condition 4 Negative No] anchorTokens=${intentNo.anchorTokens}, excludedFiles=${intentNo.excludedFiles}, unresolvedItems=${intentNo.unresolvedItems.map { it.identifier }}")
-        assertLosslessPartitioning(intentNo, turn2No.state)
+
+        // 1) 3위치 분할 합계 불변식(sum == 1)을 최우선 평가하여 유실/초과 즉시 감지
+        assertLosslessPartitioning(
+            intentNo,
+            turn2No.state,
+            graph,
+            listOf("주문 기능 개발", "SurveyServiceImpl은 건드리지 말고 신규 FooService를 추가해줘", "아니요"),
+            "Condition 4 Negative No"
+        )
+
+        // 2) 조건 4 개별 항목 및 출처 정밀 단언
+        assertEquals("조건 4: excludedFiles는 0건이어야 함", 0, intentNo.excludedFiles.size)
+        val restoredItem = turn2No.state.items.find { (it.hint as? LinkHint.ExistingRef)?.filePath?.contains("SurveyServiceImpl.java") == true }
+        assertNotNull("조건 4: 사용자 명시 SurveyServiceImpl은 USER_UTTERED로 복원되어야 함", restoredItem)
+        assertEquals(HintSource.USER_UTTERED, restoredItem?.source)
+        assertEquals(Verdict.PENDING, restoredItem?.verdict)
+        assertFalse("조건 4: 미언급 인접 SurveyService는 PROPOSED_EXCLUSION에 남아있지 않아야 함", turn2No.state.items.any { it.source == HintSource.PROPOSED_EXCLUSION })
+
+        // 3) 조건 4 미언급 인접 후보 SurveyService 단언: 세 위치 어디에도 없어야 함 (sum == 0)
+        val adjNoExcluded = intentNo.excludedFiles.any { it.contains("SurveyService.java") }
+        val adjNoUnresolved = intentNo.unresolvedItems.any { it.identifier == "SurveyService" }
+        val adjNoConfirmed = turn2No.state.items.any { it.verdict == Verdict.CONFIRMED && (it.hint as? LinkHint.ExistingRef)?.filePath?.contains("SurveyService.java") == true }
+        val adjNoSum = (if (adjNoConfirmed) 1 else 0) + (if (adjNoExcluded) 1 else 0) + (if (adjNoUnresolved) 1 else 0)
+        println("[Condition 4 Negative No] adjacent token=SurveyService -> (anchor=false, confirmed=$adjNoConfirmed, excluded=$adjNoExcluded, unresolved=$adjNoUnresolved, sum=$adjNoSum)")
+        assertFalse("조건 4: 인접 SurveyService는 excludedFiles에 없어야 함", adjNoExcluded)
+        assertFalse("조건 4: 인접 SurveyService는 unresolvedItems에 없어야 함", adjNoUnresolved)
+        assertFalse("조건 4: 인접 SurveyService는 confirmedItems에 없어야 함", adjNoConfirmed)
+        assertEquals("조건 4: 미언급 인접 SurveyService의 세 위치 합계는 0이어야 함", 0, adjNoSum)
     }
 
-    private fun assertLosslessPartitioning(intent: ClarifyIntent, state: Stage0State) {
-        val userUtteredPendingItems = state.items.filter { 
-            it.verdict == Verdict.PENDING && (it.source == HintSource.USER_UTTERED || it.source == HintSource.PROPOSED_EXCLUSION)
-        }
-        val unresolvedTokens = intent.unresolvedItems.map { it.identifier }.toSet()
+    private fun assertLosslessPartitioning(
+        intent: ClarifyIntent,
+        state: Stage0State,
+        graph: ProjectGraph,
+        allStatements: List<String>,
+        conditionLabel: String
+    ) {
+        val utteredIdentifiers = IdentifierRetentionChecker.extractIdentifiers(allStatements)
+            .filter { id -> id != "OrderDto" } // 발화에 포함된 식별자 대상
 
-        // 1. 모든 PENDING 사용자 발화/배제 항목은 unresolvedItems에 존재해야 함
-        for (item in userUtteredPendingItems) {
-            val token = item.utteredIdentifier ?: when (val h = item.hint) {
-                is LinkHint.NewCreation -> item.statement.substringAfter("신규 컴포넌트 생성: ").substringAfter("미확인 부존재 식별자: ").trim()
-                is LinkHint.ExistingRef -> h.symbols.firstOrNull() ?: h.filePath.substringAfterLast("/").substringBeforeLast(".")
-            }
-            assertTrue("PENDING 사용자 발화 식별자($token)는 unresolvedItems에 포함되어야 함", unresolvedTokens.contains(token) || intent.unresolvedItems.any { it.identifier.contains(token) })
-        }
-
-        // 2. CONFIRMED 또는 REJECTED 확정 항목은 unresolvedItems에 절대 포함되지 않아야 함
-        val confirmedOrRejectedPaths = state.items
-            .filter { it.verdict == Verdict.CONFIRMED || it.verdict == Verdict.REJECTED }
+        val confirmedBaseNames = state.items
+            .filter { it.verdict == Verdict.CONFIRMED }
             .mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath?.substringAfterLast("/")?.substringBeforeLast(".") }
             .toSet()
 
-        for (unres in intent.unresolvedItems) {
-            assertFalse("확정/제외된 파일(${unres.identifier})이 unresolvedItems에 남아서는 안 됨", confirmedOrRejectedPaths.contains(unres.identifier))
+        val excludedBaseNames = intent.excludedFiles
+            .map { it.substringAfterLast("/").substringBeforeLast(".") }
+            .toSet()
+
+        val unresolvedIdentifiers = intent.unresolvedItems
+            .map { it.identifier }
+            .toSet()
+
+        for (token in utteredIdentifiers) {
+            val isAnchor = intent.anchorTokens.any { it.equals(token, ignoreCase = true) }
+            val isConfirmed = confirmedBaseNames.contains(token)
+            val isExcluded = excludedBaseNames.contains(token)
+            val isUnresolved = unresolvedIdentifiers.contains(token)
+
+            val confirmedCount = if (isConfirmed) 1 else 0
+            val excludedCount = if (isExcluded) 1 else 0
+            val unresolvedCount = if (isUnresolved) 1 else 0
+            val sum = confirmedCount + excludedCount + unresolvedCount
+
+            println("[$conditionLabel] token=$token -> (anchor=$isAnchor, confirmed=$isConfirmed, excluded=$isExcluded, unresolved=$isUnresolved, sum=$sum)")
+
+            assertEquals(
+                "[$conditionLabel] 식별자 '$token'의 3위치 합계는 정확히 1이어야 함 (confirmed=$confirmedCount, excluded=$excludedCount, unresolved=$unresolvedCount)",
+                1,
+                sum
+            )
         }
     }
 }

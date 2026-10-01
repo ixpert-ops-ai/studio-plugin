@@ -719,7 +719,7 @@ class RequirementAnalysisPipelineIntegrationTest {
                 maxTokens: Int?,
                 onChunk: ((String) -> Unit)?
             ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
-                recordedPrompts.add("$systemPrompt\n---\n$userCode")
+                recordedPrompts.add("CHAT:\n$systemPrompt\n---\n$userCode")
                 return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse(
                     model = "test",
                     createdAt = "",
@@ -727,6 +727,20 @@ class RequirementAnalysisPipelineIntegrationTest {
                     done = true
                 )
             }
+
+            override fun chatWithTools(
+                systemPrompt: String,
+                messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
+                maxTokens: Int?,
+                tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>?,
+                toolChoice: Any?,
+                temperature: Double?
+            ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
+                val promptRepresentation = "CHAT_WITH_TOOLS:\nSYSTEM: $systemPrompt\n" + messages.joinToString("\n") { "${it.role}: ${it.content}" }
+                recordedPrompts.add(promptRepresentation)
+                return null
+            }
+
             override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
         }
 
@@ -803,7 +817,12 @@ class RequirementAnalysisPipelineIntegrationTest {
             projectRoot = projectRoot
         )
 
-        // 3. 무간섭 불변성 단언: targetFiles 크기 및 경로, 랭킹이 100% 동일해야 함
+        // 3. 무간섭 불변성 단언: targetFiles 크기 및 경로, 랭킹 및 전달된 LLM 프롬프트 목록이 100% 동일해야 함
+        val promptsWithout = recordedPrompts.take(promptCountWithout)
+        val promptsWith = recordedPrompts.drop(promptCountWithout)
+        assertTrue("녹음된 프롬프트 목록은 비어있지 않아야 함 (최소 1개 이상 실행되어야 비교 유효)", promptsWithout.isNotEmpty())
+        assertEquals("UnresolvedItems 주입 전후 LLM에 전달된 프롬프트 목록은 100% 동일해야 함", promptsWithout, promptsWith)
+
         assertEquals(resultWithout.targetFiles.size, resultWith.targetFiles.size)
         assertEquals(
             resultWithout.targetFiles.map { it.path },
@@ -813,7 +832,7 @@ class RequirementAnalysisPipelineIntegrationTest {
             resultWithout.targetFiles.map { it.order },
             resultWith.targetFiles.map { it.order }
         )
-        println("=== [UnresolvedItems 파이프라인 무간섭 불변성 검증 완료] ===")
+        println("=== [UnresolvedItems 파이프라인 무간섭 불변성 검증 완료: recorded prompts count = ${promptsWithout.size}] ===")
     }
 }
 
