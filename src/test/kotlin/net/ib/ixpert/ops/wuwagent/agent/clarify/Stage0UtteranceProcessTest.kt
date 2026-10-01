@@ -809,13 +809,14 @@ class Stage0UtteranceProcessTest {
         val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
 
         val invalidItem = RequirementItem(
-            id = "invalid_user_item",
+            id = "invalid_user_item_no_id",
             statement = "미확인 부존재 식별자: SomeService",
             source = HintSource.USER_UTTERED,
             hint = LinkHint.NewCreation,
             anchorRationale = "사용자 발화 미확인 식별자",
             verdict = Verdict.PENDING,
-            utteredIdentifier = null // 의도적으로 null 누락 주입
+            utteredIdentifier = null, // 의도적으로 null 누락 주입
+            utteredTurn = 1
         )
         val state = Stage0State(
             originalRequirement = "신규 기능 개발",
@@ -824,13 +825,54 @@ class Stage0UtteranceProcessTest {
             userStatements = listOf("신규 기능 개발")
         )
 
-        var exceptionThrown = false
+        var caughtException: IllegalStateException? = null
         try {
             engine.buildClarifyIntent(state)
         } catch (e: IllegalStateException) {
-            exceptionThrown = true
+            caughtException = e
             println("Expected exception caught: ${e.message}")
         }
-        assertTrue("USER_UTTERED PENDING 항목에 utteredIdentifier가 null이면 fail-fast로 IllegalStateException을 던져야 함", exceptionThrown)
+        assertNotNull("USER_UTTERED PENDING 항목에 utteredIdentifier가 null이면 fail-fast로 IllegalStateException을 던져야 함", caughtException)
+        assertTrue("예외 메시지에 항목 id가 포함되어야 함", caughtException!!.message?.contains("invalid_user_item_no_id") == true)
+        assertTrue("예외 메시지에 누락 필드(utteredIdentifier)가 명시되어야 함", caughtException.message?.contains("utteredIdentifier") == true)
+    }
+
+    /**
+     * [Fail-Fast] USER_UTTERED PENDING 항목에 utteredTurn이 null인 경우
+     * 1로 조용히 기본값을 채우지 않고 즉시 IllegalStateException(fail-fast)을 던지는지 검증
+     */
+    @Test
+    fun testBuildClarifyIntent_UserUtteredPendingItemWithoutUtteredTurn_ThrowsIllegalStateException() {
+        val graph = createSyntheticPartitionGraph()
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val invalidItem = RequirementItem(
+            id = "invalid_user_item_no_turn",
+            statement = "미확인 부존재 식별자: SomeService",
+            source = HintSource.USER_UTTERED,
+            hint = LinkHint.NewCreation,
+            anchorRationale = "사용자 발화 미확인 식별자",
+            verdict = Verdict.PENDING,
+            utteredIdentifier = "SomeService",
+            utteredTurn = null // 의도적으로 null 누락 주입
+        )
+        val state = Stage0State(
+            originalRequirement = "신규 기능 개발",
+            items = listOf(invalidItem),
+            seedSet = emptySet(),
+            userStatements = listOf("신규 기능 개발")
+        )
+
+        var caughtException: IllegalStateException? = null
+        try {
+            engine.buildClarifyIntent(state)
+        } catch (e: IllegalStateException) {
+            caughtException = e
+            println("Expected exception caught: ${e.message}")
+        }
+        assertNotNull("USER_UTTERED PENDING 항목에 utteredTurn이 null이면 fail-fast로 IllegalStateException을 던져야 함", caughtException)
+        assertTrue("예외 메시지에 항목 id가 포함되어야 함", caughtException!!.message?.contains("invalid_user_item_no_turn") == true)
+        assertTrue("예외 메시지에 누락 필드(utteredTurn)가 명시되어야 함", caughtException.message?.contains("utteredTurn") == true)
     }
 }
