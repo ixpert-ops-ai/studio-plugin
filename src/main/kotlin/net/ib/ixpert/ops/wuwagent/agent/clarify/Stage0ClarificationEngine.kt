@@ -465,6 +465,11 @@ class Stage0ClarificationEngine(
 
                 for (file in resolution.candidates) {
                     val fileName = file.path.substringAfterLast("/")
+                    val isDirectlyUttered = IdentifierRetentionChecker.containsIdentifier(evidence, file.className) ||
+                            IdentifierRetentionChecker.containsIdentifier(evidence, fileName) ||
+                            IdentifierRetentionChecker.containsIdentifier(evidence, fileName.substringBeforeLast("."))
+                    val utteredId = if (isDirectlyUttered) file.className else null
+
                     val hint = LinkHint.ExistingRef(file.path, listOf(file.className))
                     val item = RequirementItem(
                         id = RequirementItem.deriveId(hint, "exclude:${file.path}"),
@@ -475,7 +480,8 @@ class Stage0ClarificationEngine(
                         verdict = Verdict.PENDING,
                         confidence = confidence,
                         provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
-                        utteredTurn = currentTurn
+                        utteredTurn = currentTurn,
+                        utteredIdentifier = utteredId
                     )
                     val existingIndex = updatedItems.indexOfFirst { 
                         it.id == item.id || (it.hint as? LinkHint.ExistingRef)?.filePath == file.path 
@@ -777,7 +783,15 @@ class Stage0ClarificationEngine(
             }
         }
 
-        // 2) 신규 재탐색 결과 추가 (동결된 ID 및 동결된 filePath는 건드리지 않음)
+        // 2) 사용자 발화(USER_UTTERED) 및 제안(PROPOSED_EXCLUSION) 아이템 우선 보존
+        for (item in currentItems) {
+            if (item.source == HintSource.USER_UTTERED || item.source == HintSource.PROPOSED_EXCLUSION) {
+                resultMap[item.id] = item
+                (item.hint as? LinkHint.ExistingRef)?.filePath?.let { frozenPaths.add(it) }
+            }
+        }
+
+        // 3) 신규 재탐색 결과 추가 (동결된 ID 및 동결된 filePath는 건드리지 않음)
         for (cand in newCandidates) {
             val candPath = (cand.hint as? LinkHint.ExistingRef)?.filePath
             if (!resultMap.containsKey(cand.id) && (candPath == null || !frozenPaths.contains(candPath))) {
@@ -785,7 +799,7 @@ class Stage0ClarificationEngine(
             }
         }
 
-        // 3) 기존 미판정 아이템(배제 제안 등) 중 아직 resultMap에 없는 항목 보존
+        // 4) 기타 기존 미판정 아이템 보존
         for (item in currentItems) {
             val itemPath = (item.hint as? LinkHint.ExistingRef)?.filePath
             if (!resultMap.containsKey(item.id) && (itemPath == null || !frozenPaths.contains(itemPath))) {
