@@ -191,6 +191,7 @@
 - **해결 방향**:
   1. `anchorTokens` 및 `seedSet` 수집 대상을 검증된 식별자/노드로 한정하고 대화성 제어 토큰 격리.
   2. 4조건 불변식 테스트에서 인텐트 계약 세 위치(`confirmed` + `excluded` + `unresolved`)의 합이 정확히 1임을 보장하는 단언 고정.
+- **선행 조건**: 엔진 경로(`initSession` $\rightarrow$ `processTurn` $\rightarrow$ `buildClarifyIntent`)를 거치는 GT 측정 추가.
 - **상태**: Open (우선순위 P2)
 
 
