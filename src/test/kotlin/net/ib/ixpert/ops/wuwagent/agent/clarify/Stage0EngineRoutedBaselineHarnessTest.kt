@@ -1,0 +1,434 @@
+package net.ib.ixpert.ops.wuwagent.agent.clarify
+
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline
+import net.ib.ixpert.ops.wuwagent.agent.clarify.model.*
+import net.ib.ixpert.ops.wuwagent.client.LLMClient
+import net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse
+import net.ib.ixpert.ops.wuwagent.model.OllamaMessage
+import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DomainDictionary
+import net.ib.ixpert.ops.wuwagent.service.metagraph.model.*
+import org.junit.Assert.*
+import org.junit.Assume
+import org.junit.Test
+import java.io.File
+import java.time.Instant
+
+class Stage0EngineRoutedBaselineHarnessTest {
+
+    private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
+
+    private fun loadGraph(pathStr: String): ProjectGraph? {
+        val file = File(pathStr)
+        if (!file.exists()) return null
+        return Gson().fromJson(file.readText(Charsets.UTF_8), ProjectGraph::class.java).normalizeLegacyCollections()
+    }
+
+    /**
+     * 엄격한 프롬프트 매칭 Mock LLM:
+     * - 정의된 안정적 표지 문자열에 부합하지 않는 프롬프트 인입 시 error("unmatched prompt") 즉시 발생 (침묵 방지)
+     */
+    private class StrictClarifyMockLlm(
+        private val refinementResponse: String,
+        private val constraintsResponse: String = "[]",
+        private val openQuestionResponse: String = "추가적으로 수정 또는 연동할 대상이 있으신가요?"
+    ) : LLMClient {
+        override fun chat(
+            systemPrompt: String,
+            userCode: String,
+            maxTokens: Int?,
+            onChunk: ((String) -> Unit)?
+        ): OllamaChatResponse {
+            val content = when {
+                // 표지 1: 요구사항 정제 전문가 프롬프트
+                systemPrompt.contains("소프트웨어 요구사항 정제 전문가") -> refinementResponse
+                // 표지 2: 제약조건 분류 전문가 프롬프트
+                systemPrompt.contains("ConstraintKind") || systemPrompt.contains("제약 조건") -> constraintsResponse
+                // 표지 3: 개방형 질문 생성 프롬프트
+                systemPrompt.contains("개방형 질문") -> openQuestionResponse
+                else -> error("unmatched prompt in StrictClarifyMockLlm: [systemPrompt=$systemPrompt]")
+            }
+            return OllamaChatResponse(
+                model = "strict-mock-llm",
+                createdAt = "",
+                message = OllamaMessage("assistant", content),
+                done = true
+            )
+        }
+
+        override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+    }
+
+    /**
+     * Pipeline Discovery 및 Verifier용 더미 LLM:
+     * - Stage 1/4 Discovery 및 Stage 3 LLM Verification에서 불필요한 LLM 개입을 차단하고 
+     *   결정론적 그래프 탐색 및 스코어러 동작만 평가
+     */
+    private class DummyPipelineLlm : LLMClient {
+        override fun chat(
+            systemPrompt: String,
+            userCode: String,
+            maxTokens: Int?,
+            onChunk: ((String) -> Unit)?
+        ): OllamaChatResponse {
+            val response = when {
+                systemPrompt.contains("신규 생성") || systemPrompt.contains("NewFileDetector") -> "[]"
+                systemPrompt.contains("최종 연관성 검증") || systemPrompt.contains("Stage 3") -> "{}"
+                else -> "{}"
+            }
+            return OllamaChatResponse(
+                model = "dummy-pipeline-llm",
+                createdAt = "",
+                message = OllamaMessage("assistant", response),
+                done = true
+            )
+        }
+
+        override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+    }
+
+    /**
+     * RelevanceScorer의 키워드 추출 로직과 동일한 헬퍼 (테스트용 키워드 차집합 진단)
+     */
+    private fun extractScorerKeywords(text: String, graph: ProjectGraphQueryable): Set<String> {
+        val stopWords = setOf(
+            "controller", "service", "repository", "entity", "dto", "vo", "request", "response",
+            "mapper", "view", "page", "screen", "api", "impl", "config", "exception", "handler",
+            "util", "action", "svc", "svo", "dvo", "dao", "bo",
+            "화면", "컨트롤러", "서비스", "레파지토리", "저장소", "엔티티", "디티오", "매퍼",
+            "액션", "페이지", "에이피아이", "구현체", "인터페이스"
+        )
+        val crudVerbs = setOf("등록", "조회", "수정", "추가", "삭제", "변경", "목록", "상세")
+        val directEnglish = Regex("[a-zA-Z0-9]{3,}").findAll(text)
+            .map { it.value }
+            .filter { it.any { c -> c.isLetter() } }
+            .toMutableList()
+        directEnglish.removeAll { stopWords.contains(it.lowercase()) }
+
+        val dictionary = DomainDictionary.load(graph)
+        val words = text.split(Regex("\\s+"))
+        val nouns = mutableListOf<String>()
+        val translatedEnglish = mutableListOf<String>()
+
+        for (word in words) {
+            val cleanWord = word.replace(Regex("[^가-힣a-zA-Z0-9]"), "")
+            if (cleanWord.length < 2) continue
+            if (stopWords.contains(cleanWord.lowercase())) continue
+
+            if (!cleanWord.endsWith("한다") && !cleanWord.endsWith("해라") && !cleanWord.endsWith("추가") && !cleanWord.endsWith("수정") && !cleanWord.endsWith("삭제")) {
+                nouns.add(cleanWord.replace("을", "").replace("를", "").replace("이", "").replace("가", "").replace("은", "").replace("는", ""))
+            }
+
+            val translated = dictionary.translate(cleanWord).filterNot { stopWords.contains(it.lowercase()) }
+            if (!crudVerbs.any { cleanWord.contains(it) }) {
+                translatedEnglish.addAll(translated)
+            }
+        }
+        return (directEnglish + nouns + translatedEnglish).map { it.lowercase() }.toSet()
+    }
+
+    private fun printClassificationAndDiff(
+        scenarioName: String,
+        intent: ClarifyIntent,
+        state: Stage0State,
+        graph: ProjectGraphQueryable
+    ) {
+        val missingBeforeFix = intent.retentionAudit?.missingBeforeFix ?: emptyList()
+        val rawRefined = intent.retentionAudit?.rawRefinedRequirement ?: intent.refinedRequirement
+
+        if (missingBeforeFix.isEmpty()) {
+            println("[$scenarioName] tagged=(none)")
+        } else {
+            for (tagged in missingBeforeFix) {
+                val isUnresolved = intent.unresolvedItems.any { it.identifier.equals(tagged, ignoreCase = true) }
+                val isExcluded = intent.excludedFiles.any { it.contains(tagged, ignoreCase = true) }
+                val isAnchor = intent.anchorTokens.any { it.equals(tagged, ignoreCase = true) }
+
+                val item = state.items.find {
+                    it.utteredIdentifier?.equals(tagged, ignoreCase = true) == true ||
+                    (it.hint as? LinkHint.ExistingRef)?.filePath?.contains(tagged, ignoreCase = true) == true ||
+                    (it.hint is LinkHint.NewCreation && it.statement.contains(tagged, ignoreCase = true))
+                }
+                val sourceVerdict = if (item != null) "${item.source}/${item.verdict}" else "ABSENT"
+                println("[$scenarioName] tagged=$tagged -> unresolved=$isUnresolved, excluded=$isExcluded, anchor=$isAnchor, source=$sourceVerdict")
+            }
+        }
+
+        // 키워드 차집합 진단
+        val taggedSrText = "${intent.refinedRequirement}\n"
+        val rawPlusMissingText = "$rawRefined ${missingBeforeFix.joinToString(" ")}\n"
+        val kwTagged = extractScorerKeywords(taggedSrText, graph)
+        val kwRawPlusMissing = extractScorerKeywords(rawPlusMissingText, graph)
+
+        val diffTaggedOnly = kwTagged - kwRawPlusMissing
+        val diffRawPlusMissingOnly = kwRawPlusMissing - kwTagged
+        println("[$scenarioName] keyword_diff -> tagged_only=$diffTaggedOnly, raw_plus_missing_only=$diffRawPlusMissingOnly")
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // 1. GT 기준값 측정 (Top-N GT 생존)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun testMeasureBaselineTopNGtSurvival_SurveyAdmin() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("survey_admin 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val sr = "설문 발송 채널에 브랜드메시지 추가"
+        val turn0 = engine.initSession(sr)
+        val intent = engine.buildClarifyIntent(turn0.state)
+
+        val pipeline = RequirementAnalysisPipeline(DummyPipelineLlm())
+        val result = pipeline.analyze(
+            primaryReq = intent.refinedRequirement,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intent
+        )
+
+        val gtFiles = listOf(
+            "survey_list.jsp", "survey_write.jsp", "survey.list.js", "survey.write.js",
+            "SurveyServiceImpl.java", "sql_survey.xml", "AlimtalkChnlDto.java", "AlimtalkTmplDto.java"
+        )
+
+        val finalPaths = result.targetFiles.filter { it.type == "MODIFY" }.map { it.path }
+        val survivedGt = gtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
+
+        println("[GT Baseline: survey_admin] Top-30 TargetFiles Count: ${result.targetFiles.size}")
+        println("[GT Baseline: survey_admin] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
+        val missing = gtFiles - survivedGt.toSet()
+        if (missing.isNotEmpty()) {
+            println("[GT Baseline: survey_admin] GT Missing: $missing")
+        }
+    }
+
+    @Test
+    fun testMeasureBaselineTopNGtSurvival_ApcTransitCard() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("apc 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val sr = "교통카드 발급업체 변경 후, 이전 모바일교통카드 이용회원 체크 및 재발급 안내를 위한 신규서비스 개발 건. 교통카드 구 발급정보 조회 신규서비스 개발 (SAPACMM0802S01 기존서비스 참고). APCMMTrcdIsInfSVO 수정, APCMMTrcdIsSVC.java 신규서비스 추가, aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회"
+        val turn0 = engine.initSession(sr)
+        val intent = engine.buildClarifyIntent(turn0.state)
+
+        val pipeline = RequirementAnalysisPipeline(DummyPipelineLlm())
+        val result = pipeline.analyze(
+            primaryReq = intent.refinedRequirement,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intent
+        )
+
+        val gtFiles = listOf("APCMMTrcdIsInfSVO", "APCMMTrcdIsSVC", "APCMMTrcdIsSVCImpl", "APCMMTrcdIsBIZ", "ACMBTBAPC024DEM")
+        val finalPaths = result.targetFiles.map { it.path }
+        val survivedGt = gtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
+
+        println("[GT Baseline: APC Transit Card] Top-30 TargetFiles Count: ${result.targetFiles.size}")
+        println("[GT Baseline: APC Transit Card] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
+        val missing = gtFiles - survivedGt.toSet()
+        if (missing.isNotEmpty()) {
+            println("[GT Baseline: APC Transit Card] GT Missing: $missing")
+        }
+    }
+
+    @Test
+    fun testMeasureBaselineTopNGtSurvival_IsmCore() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/graph/project-graph-i/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("ISM 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val sr = "케어회원 관리 화면 조회"
+        val turn0 = engine.initSession(sr)
+        val intent = engine.buildClarifyIntent(turn0.state)
+
+        val pipeline = RequirementAnalysisPipeline(DummyPipelineLlm())
+        val result = pipeline.analyze(
+            primaryReq = intent.refinedRequirement,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intent
+        )
+
+        val gtFiles = listOf("CareMemberMgmtController", "CareMemberMgmtServiceImpl", "ECMBTBISM006Mapper", "ECMBTBISM006Mapper.xml")
+        val finalPaths = result.targetFiles.map { it.path }
+        val survivedGt = gtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
+
+        println("[GT Baseline: ISM Core] Top-30 TargetFiles Count: ${result.targetFiles.size}")
+        println("[GT Baseline: ISM Core] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
+        val missing = gtFiles - survivedGt.toSet()
+        if (missing.isNotEmpty()) {
+            println("[GT Baseline: ISM Core] GT Missing: $missing")
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // 2. 분류 줄 및 키워드 차집합 출력
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun testClassificationAndKeywordDiff_SurveyAdmin_LlmOff() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("survey_admin 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val sr = "외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
+        val turn0 = engine.initSession(sr)
+        val intent = engine.buildClarifyIntent(turn0.state)
+
+        printClassificationAndDiff("SurveyAdmin_LlmOff", intent, turn0.state, graph)
+    }
+
+    @Test
+    fun testClassificationAndKeywordDiff_SurveyAdmin_LlmOn() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("survey_admin 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlm = StrictClarifyMockLlm(
+            refinementResponse = "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발"
+        )
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = mockLlm)
+
+        val turn0 = engine.initSession("설문 발송 채널에 브랜드메시지 추가")
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
+            )
+        )
+        val intent = engine.buildClarifyIntent(turn1.state)
+
+        printClassificationAndDiff("SurveyAdmin_LlmOn", intent, turn1.state, graph)
+    }
+
+    @Test
+    fun testClassificationAndKeywordDiff_Scenario4_Apc() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("apc 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+
+        val sr = "교통카드 발급업체 변경 후, 이전 모바일교통카드 이용회원 체크 및 재발급 안내를 위한 신규서비스 개발 건. 교통카드 구 발급정보 조회 신규서비스 개발 (SAPACMM0802S01 기존서비스 참고). APCMMTrcdIsInfSVO 수정, APCMMTrcdIsSVC.java 신규서비스 추가, aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회"
+        val turn0 = engine.initSession(sr)
+        val intent = engine.buildClarifyIntent(turn0.state)
+
+        printClassificationAndDiff("Scenario4_APC", intent, turn0.state, graph)
+    }
+
+    @Test
+    fun testClassificationAndKeywordDiff_4Conditions() = kotlinx.coroutines.runBlocking {
+        val files = mapOf(
+            "com/example/OrderDto.java" to FileNode(
+                path = "com/example/OrderDto.java",
+                packageName = "com.example",
+                className = "OrderDto",
+                fileType = SpringFileType.DTO,
+                layer = ArchitectureLayer.PERSISTENCE,
+                methods = listOf(MethodSignature("getPay_type", "String", emptyList()))
+            ),
+            "com/example/SurveyServiceImpl.java" to FileNode(
+                path = "com/example/SurveyServiceImpl.java",
+                packageName = "com.example",
+                className = "SurveyServiceImpl",
+                localName = "SurveyServiceImpl",
+                koreanComments = listOf("SurveyServiceImpl 설문 서비스 구현체"),
+                fileType = SpringFileType.SERVICE,
+                layer = ArchitectureLayer.BUSINESS,
+                methods = listOf(MethodSignature("executeSurvey", "void", emptyList()))
+            ),
+            "com/example/SurveyService.java" to FileNode(
+                path = "com/example/SurveyService.java",
+                packageName = "com.example",
+                className = "SurveyService",
+                localName = "SurveyServiceImpl",
+                koreanComments = listOf("SurveyServiceImpl 설문 서비스 인터페이스"),
+                fileType = SpringFileType.INTERFACE,
+                layer = ArchitectureLayer.BUSINESS,
+                methods = listOf(MethodSignature("executeSurvey", "void", emptyList()))
+            )
+        )
+        val rels = listOf(
+            Relationship(
+                source = "com/example/SurveyServiceImpl.java",
+                target = "com/example/SurveyService.java",
+                type = RelationshipType.IMPLEMENTS
+            )
+        )
+        val graph = ProjectGraph(
+            generatedAt = Instant.now().toString(),
+            projectRoot = "/test/root",
+            frameworkType = FrameworkType.SPRING_MVC_MYBATIS,
+            files = files,
+            relationships = rels,
+            resourceNodes = emptyList(),
+            statistics = GraphStatistics()
+        )
+
+        val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
+
+        // 1) 조건 1: LLM-off
+        val engine1 = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+        val turn0_1 = engine1.initSession("신규 서비스 FooService 개발")
+        val intent1 = engine1.buildClarifyIntent(turn0_1.state)
+        printClassificationAndDiff("Condition1_LlmOff", intent1, turn0_1.state, graph)
+
+        // Mock for condition 2, 3, 4
+        val exclusionMockLlm = StrictClarifyMockLlm(
+            refinementResponse = "SurveyServiceImpl 수정 제외 및 신규 FooService 추가",
+            constraintsResponse = """
+                [
+                  {
+                    "kind": "EXCLUDE_COMPONENT",
+                    "value": "SurveyServiceImpl 수정 제외",
+                    "rawStatement": "SurveyServiceImpl은 건드리지 말고 신규 FooService를 추가해줘",
+                    "evidence": "SurveyServiceImpl은 건드리지 말고"
+                  }
+                ]
+            """.trimIndent()
+        )
+
+        // 2) 조건 2: Proposed Exclusion
+        val engine2 = Stage0ClarificationEngine(scanner, graph, llmClient = exclusionMockLlm)
+        val turn0_2 = engine2.initSession("주문 기능 개발")
+        val turn1_2 = engine2.processTurn(
+            turn0_2.state,
+            Stage0ClarificationEngine.UserInput(userStatement = "SurveyServiceImpl은 건드리지 말고 신규 FooService를 추가해줘")
+        )
+        val intent2 = engine2.buildClarifyIntent(turn1_2.state)
+        printClassificationAndDiff("Condition2_ProposedExclusion", intent2, turn1_2.state, graph)
+
+        // 3) 조건 3: Affirmative Yes
+        val turn2_3 = engine2.processTurn(
+            turn1_2.state,
+            Stage0ClarificationEngine.UserInput(userStatement = "응")
+        )
+        val intent3 = engine2.buildClarifyIntent(turn2_3.state)
+        printClassificationAndDiff("Condition3_AffirmativeYes", intent3, turn2_3.state, graph)
+
+        // 4) 조건 4: Negative No
+        val turn2_4 = engine2.processTurn(
+            turn1_2.state,
+            Stage0ClarificationEngine.UserInput(userStatement = "아니요")
+        )
+        val intent4 = engine2.buildClarifyIntent(turn2_4.state)
+        printClassificationAndDiff("Condition4_NegativeNo", intent4, turn2_4.state, graph)
+    }
+}
