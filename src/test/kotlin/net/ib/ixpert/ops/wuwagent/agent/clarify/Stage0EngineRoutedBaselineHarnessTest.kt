@@ -61,11 +61,13 @@ class Stage0EngineRoutedBaselineHarnessTest {
     }
 
     /**
-     * Pipeline Discovery 및 Verifier용 더미 LLM:
-     * - Stage 1/4 Discovery 및 Stage 3 LLM Verification에서 불필요한 LLM 개입을 차단하고 
-     *   결정론적 그래프 탐색 및 스코어러 동작만 평가
+     * Pipeline Discovery 및 Verifier용 엄격한 Mock LLM:
+     * - NewFileDetector 및 Stage 3 LLM Verification에서 엄격한 표지 매칭을 수행하며,
+     *   알 수 없는 프롬프트 인입 시 error("unmatched prompt in StrictPipelineLlm")로 즉시 실패.
+     * - AgenticSeedSelector는 도구 호출(Tool Calls)을 시도하므로, toolCalls가 없는 일반 텍스트 Mock 응답 시
+     *   AgenticSeedSelector의 내장 Heuristic Fallback(270~370행) 경로를 타게 됨.
      */
-    private class DummyPipelineLlm : LLMClient {
+    private class StrictPipelineLlm : LLMClient {
         override fun chat(
             systemPrompt: String,
             userCode: String,
@@ -73,12 +75,16 @@ class Stage0EngineRoutedBaselineHarnessTest {
             onChunk: ((String) -> Unit)?
         ): OllamaChatResponse {
             val response = when {
+                // 표지 A: NewFileDetector 프롬프트
                 systemPrompt.contains("신규 생성") || systemPrompt.contains("NewFileDetector") -> "[]"
+                // 표지 B: Stage 3 LLM Verification 프롬프트
                 systemPrompt.contains("최종 연관성 검증") || systemPrompt.contains("Stage 3") -> "{}"
-                else -> "{}"
+                // 표지 C: AgenticSeedSelector 시스템 프롬프트 (Tool Calling 에이전트)
+                systemPrompt.contains("AgenticGraphExplorer") || systemPrompt.contains("search_graph_nodes") -> "{}"
+                else -> error("unmatched prompt in StrictPipelineLlm: [systemPrompt=$systemPrompt]")
             }
             return OllamaChatResponse(
-                model = "dummy-pipeline-llm",
+                model = "strict-pipeline-llm",
                 createdAt = "",
                 message = OllamaMessage("assistant", response),
                 done = true
@@ -137,6 +143,9 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val missingBeforeFix = intent.retentionAudit?.missingBeforeFix ?: emptyList()
         val rawRefined = intent.retentionAudit?.rawRefinedRequirement ?: intent.refinedRequirement
 
+        println("[$scenarioName] refinedRequirement=\"${intent.refinedRequirement}\"")
+        println("[$scenarioName] rawRefinedRequirement=\"$rawRefined\"")
+
         if (missingBeforeFix.isEmpty()) {
             println("[$scenarioName] tagged=(none)")
         } else {
@@ -167,7 +176,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // 1. GT 기준값 측정 (Top-N GT 생존)
+    // 1. GT 기준값 측정 (Top-N GT 생존 및 순위/점수 전체 목록)
     // ─────────────────────────────────────────────────────────────────────────────
 
     @Test
@@ -183,7 +192,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val turn0 = engine.initSession(sr)
         val intent = engine.buildClarifyIntent(turn0.state)
 
-        val pipeline = RequirementAnalysisPipeline(DummyPipelineLlm())
+        val pipeline = RequirementAnalysisPipeline(StrictPipelineLlm())
         val result = pipeline.analyze(
             primaryReq = intent.refinedRequirement,
             secondaryReq = "",
@@ -199,11 +208,18 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val finalPaths = result.targetFiles.filter { it.type == "MODIFY" }.map { it.path }
         val survivedGt = gtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
 
-        println("[GT Baseline: survey_admin] Top-30 TargetFiles Count: ${result.targetFiles.size}")
-        println("[GT Baseline: survey_admin] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
+        println("[GT Baseline: survey_admin (Intent=LlmOff)] RefinedReq: \"${intent.refinedRequirement}\"")
+        println("[GT Baseline: survey_admin (Intent=LlmOff)] Top-30 TargetFiles Count: ${result.targetFiles.size}")
+        println("[GT Baseline: survey_admin (Intent=LlmOff)] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
         val missing = gtFiles - survivedGt.toSet()
         if (missing.isNotEmpty()) {
-            println("[GT Baseline: survey_admin] GT Missing: $missing")
+            println("[GT Baseline: survey_admin (Intent=LlmOff)] GT Missing: $missing")
+        }
+        println("[GT Baseline: survey_admin (Intent=LlmOff)] Top-30 List:")
+        result.targetFiles.forEachIndexed { idx, sf ->
+            val isGt = gtFiles.any { sf.path.contains(it, ignoreCase = true) }
+            val tag = if (isGt) "★[GT]" else "  [FP]"
+            println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
         }
     }
 
@@ -220,7 +236,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val turn0 = engine.initSession(sr)
         val intent = engine.buildClarifyIntent(turn0.state)
 
-        val pipeline = RequirementAnalysisPipeline(DummyPipelineLlm())
+        val pipeline = RequirementAnalysisPipeline(StrictPipelineLlm())
         val result = pipeline.analyze(
             primaryReq = intent.refinedRequirement,
             secondaryReq = "",
@@ -232,11 +248,18 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val finalPaths = result.targetFiles.map { it.path }
         val survivedGt = gtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
 
-        println("[GT Baseline: APC Transit Card] Top-30 TargetFiles Count: ${result.targetFiles.size}")
-        println("[GT Baseline: APC Transit Card] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
+        println("[GT Baseline: APC Transit Card (Intent=LlmOff)] RefinedReq: \"${intent.refinedRequirement}\"")
+        println("[GT Baseline: APC Transit Card (Intent=LlmOff)] Top-30 TargetFiles Count: ${result.targetFiles.size}")
+        println("[GT Baseline: APC Transit Card (Intent=LlmOff)] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
         val missing = gtFiles - survivedGt.toSet()
         if (missing.isNotEmpty()) {
-            println("[GT Baseline: APC Transit Card] GT Missing: $missing")
+            println("[GT Baseline: APC Transit Card (Intent=LlmOff)] GT Missing: $missing")
+        }
+        println("[GT Baseline: APC Transit Card (Intent=LlmOff)] Top-30 List:")
+        result.targetFiles.forEachIndexed { idx, sf ->
+            val isGt = gtFiles.any { sf.path.contains(it, ignoreCase = true) }
+            val tag = if (isGt) "★[GT]" else "  [FP]"
+            println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
         }
     }
 
@@ -253,7 +276,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val turn0 = engine.initSession(sr)
         val intent = engine.buildClarifyIntent(turn0.state)
 
-        val pipeline = RequirementAnalysisPipeline(DummyPipelineLlm())
+        val pipeline = RequirementAnalysisPipeline(StrictPipelineLlm())
         val result = pipeline.analyze(
             primaryReq = intent.refinedRequirement,
             secondaryReq = "",
@@ -265,11 +288,18 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val finalPaths = result.targetFiles.map { it.path }
         val survivedGt = gtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
 
-        println("[GT Baseline: ISM Core] Top-30 TargetFiles Count: ${result.targetFiles.size}")
-        println("[GT Baseline: ISM Core] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
+        println("[GT Baseline: ISM Core (Intent=LlmOff)] RefinedReq: \"${intent.refinedRequirement}\"")
+        println("[GT Baseline: ISM Core (Intent=LlmOff)] Top-30 TargetFiles Count: ${result.targetFiles.size}")
+        println("[GT Baseline: ISM Core (Intent=LlmOff)] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
         val missing = gtFiles - survivedGt.toSet()
         if (missing.isNotEmpty()) {
-            println("[GT Baseline: ISM Core] GT Missing: $missing")
+            println("[GT Baseline: ISM Core (Intent=LlmOff)] GT Missing: $missing")
+        }
+        println("[GT Baseline: ISM Core (Intent=LlmOff)] Top-30 List:")
+        result.targetFiles.forEachIndexed { idx, sf ->
+            val isGt = gtFiles.any { sf.path.contains(it, ignoreCase = true) }
+            val tag = if (isGt) "★[GT]" else "  [FP]"
+            println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
         }
     }
 
@@ -331,6 +361,30 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val intent = engine.buildClarifyIntent(turn0.state)
 
         printClassificationAndDiff("Scenario4_APC", intent, turn0.state, graph)
+    }
+
+    @Test
+    fun testClassificationAndKeywordDiff_Apc_DemIsolatedSimulation_LlmOnMissingDem() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("apc 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        // LLM이 aCMBTBAPC024DEM 식별자를 누락하고 일반 문장으로만 정제한 상황을 모사
+        val mockLlm = StrictClarifyMockLlm(
+            refinementResponse = "앱카드 및 모니모페이 최근이력 1건 조회 기능 개발"
+        )
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = mockLlm)
+
+        val sr = "aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회"
+        val turn0 = engine.initSession(sr)
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(userStatement = "aCMBTBAPC024DEM을 통해서 조회하는 로직을 추가해줘")
+        )
+        val intent = engine.buildClarifyIntent(turn1.state)
+
+        printClassificationAndDiff("Apc_DemIsolated_LlmOn", intent, turn1.state, graph)
     }
 
     @Test
