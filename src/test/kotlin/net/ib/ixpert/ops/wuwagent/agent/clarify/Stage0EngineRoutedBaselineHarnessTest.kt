@@ -34,6 +34,12 @@ class Stage0EngineRoutedBaselineHarnessTest {
         private val constraintsResponse: String = "[]",
         private val openQuestionResponse: String = "추가적으로 수정 또는 연동할 대상이 있으신가요?"
     ) : LLMClient {
+        val callCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+        private fun recordCall(branch: String) {
+            callCounts.compute(branch) { _, count -> (count ?: 0) + 1 }
+        }
+
         override fun chat(
             systemPrompt: String,
             userCode: String,
@@ -41,13 +47,22 @@ class Stage0EngineRoutedBaselineHarnessTest {
             onChunk: ((String) -> Unit)?
         ): OllamaChatResponse {
             val content = when {
-                // 표지 1: 요구사항 정제 전문가 프롬프트
-                systemPrompt.contains("소프트웨어 요구사항 정제 전문가") -> refinementResponse
-                // 표지 2: 제약조건 분류 전문가 프롬프트
-                systemPrompt.contains("ConstraintKind") || systemPrompt.contains("제약 조건") -> constraintsResponse
-                // 표지 3: 개방형 질문 생성 프롬프트
-                systemPrompt.contains("개방형 질문") -> openQuestionResponse
-                else -> error("unmatched prompt in StrictClarifyMockLlm: [systemPrompt=$systemPrompt]")
+                // 표지 1: 요구사항 정제 전문가 프롬프트 (Stage0ClarificationEngine.kt:1078)
+                systemPrompt.contains("소프트웨어 요구사항 정제 전문가") -> {
+                    recordCall("Clarify_Refinement")
+                    refinementResponse
+                }
+                // 표지 2: 제약조건 분류 전문가 프롬프트 (Stage0ClarificationEngine.kt:1133)
+                systemPrompt.contains("ConstraintKind") -> {
+                    recordCall("Clarify_Constraints")
+                    constraintsResponse
+                }
+                // 표지 3: 개방형 질문 생성 프롬프트 (Stage0ClarificationEngine.kt:728)
+                systemPrompt.contains("개방형 질문") -> {
+                    recordCall("Clarify_OpenQuestion")
+                    openQuestionResponse
+                }
+                else -> error("unmatched prompt in StrictClarifyMockLlm.chat: [systemPrompt=$systemPrompt]")
             }
             return OllamaChatResponse(
                 model = "strict-mock-llm",
@@ -57,17 +72,32 @@ class Stage0EngineRoutedBaselineHarnessTest {
             )
         }
 
+        override fun chatWithTools(
+            systemPrompt: String,
+            messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
+            maxTokens: Int?,
+            tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>?,
+            toolChoice: Any?,
+            temperature: Double?
+        ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
+            error("StrictClarifyMockLlm does not expect chatWithTools: [systemPrompt=$systemPrompt]")
+        }
+
         override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
     }
 
     /**
      * Pipeline Discovery 및 Verifier용 엄격한 Mock LLM:
-     * - NewFileDetector 및 Stage 3 LLM Verification에서 엄격한 표지 매칭을 수행하며,
-     *   알 수 없는 프롬프트 인입 시 error("unmatched prompt in StrictPipelineLlm")로 즉시 실패.
-     * - AgenticSeedSelector는 도구 호출(Tool Calls)을 시도하므로, toolCalls가 없는 일반 텍스트 Mock 응답 시
-     *   AgenticSeedSelector의 내장 Heuristic Fallback(270~370행) 경로를 타게 됨.
+     * - NewFileDetector, Stage 3 Verifier, AgenticSeedSelector의 정확한 시스템 프롬프트 상수 문자열 매칭
+     * - 매칭되지 않는 프롬프트 인입 시 error("unmatched prompt in StrictPipelineLlm")로 즉시 실패.
      */
     private class StrictPipelineLlm : LLMClient {
+        val callCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+        private fun recordCall(branch: String) {
+            callCounts.compute(branch) { _, count -> (count ?: 0) + 1 }
+        }
+
         override fun chat(
             systemPrompt: String,
             userCode: String,
@@ -75,13 +105,22 @@ class Stage0EngineRoutedBaselineHarnessTest {
             onChunk: ((String) -> Unit)?
         ): OllamaChatResponse {
             val response = when {
-                // 표지 A: NewFileDetector 프롬프트
-                systemPrompt.contains("신규 생성") || systemPrompt.contains("NewFileDetector") -> "[]"
-                // 표지 B: Stage 3 LLM Verification 프롬프트
-                systemPrompt.contains("최종 연관성 검증") || systemPrompt.contains("Stage 3") -> "{}"
-                // 표지 C: AgenticSeedSelector 시스템 프롬프트 (Tool Calling 에이전트)
-                systemPrompt.contains("AgenticGraphExplorer") || systemPrompt.contains("search_graph_nodes") -> "{}"
-                else -> error("unmatched prompt in StrictPipelineLlm: [systemPrompt=$systemPrompt]")
+                // 표지 A: NewFileDetector 프롬프트 (NewFileDetector.kt:88)
+                systemPrompt.contains("당신은 프로젝트 아키텍트입니다.") -> {
+                    recordCall("BranchA_NewFileDetector_chat")
+                    "[]"
+                }
+                // 표지 B: Stage 3 LLM Verification 프롬프트 (FileRelevanceVerifier.kt:49)
+                systemPrompt.contains("당신은 코드 변경 범위 검증자입니다.") -> {
+                    recordCall("BranchB_Stage3Verifier_chat")
+                    "{}"
+                }
+                // 표지 C: AgenticSeedSelector 시스템 프롬프트 (AgenticSeedSelector.kt:31)
+                systemPrompt.contains("당신은 시스템의 소스코드 및 메타그래프를 능동적으로 탐색하는 전문 AI 분석 에이전트입니다.") -> {
+                    recordCall("BranchC_AgenticSeedSelector_chat")
+                    "{}"
+                }
+                else -> error("unmatched prompt in StrictPipelineLlm.chat: [systemPrompt=$systemPrompt]")
             }
             return OllamaChatResponse(
                 model = "strict-pipeline-llm",
@@ -89,6 +128,34 @@ class Stage0EngineRoutedBaselineHarnessTest {
                 message = OllamaMessage("assistant", response),
                 done = true
             )
+        }
+
+        override fun chatWithTools(
+            systemPrompt: String,
+            messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
+            maxTokens: Int?,
+            tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>?,
+            toolChoice: Any?,
+            temperature: Double?
+        ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
+            when {
+                // 표지 A: NewFileDetector 프롬프트 (NewFileDetector.kt:88)
+                systemPrompt.contains("당신은 프로젝트 아키텍트입니다.") -> {
+                    recordCall("BranchA_NewFileDetector_chatWithTools")
+                    return null
+                }
+                // 표지 B: Stage 3 LLM Verification 프롬프트 (FileRelevanceVerifier.kt:49)
+                systemPrompt.contains("당신은 코드 변경 범위 검증자입니다.") -> {
+                    recordCall("BranchB_Stage3Verifier_chatWithTools")
+                    return null
+                }
+                // 표지 C: AgenticSeedSelector 시스템 프롬프트 (AgenticSeedSelector.kt:31)
+                systemPrompt.contains("당신은 시스템의 소스코드 및 메타그래프를 능동적으로 탐색하는 전문 AI 분석 에이전트입니다.") -> {
+                    recordCall("BranchC_AgenticSeedSelector_chatWithTools")
+                    return null
+                }
+                else -> error("unmatched prompt in StrictPipelineLlm.chatWithTools: [systemPrompt=$systemPrompt]")
+            }
         }
 
         override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
@@ -188,16 +255,22 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
         val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
 
-        val sr = "외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
+        val sr = "설문 발송 채널에 브랜드메시지 추가"
         val turn0 = engine.initSession(sr)
         val intent = engine.buildClarifyIntent(turn0.state)
 
-        val pipeline = RequirementAnalysisPipeline(StrictPipelineLlm())
+        val resolved = AnalyzeInputResolver.resolve(
+            rawInput = intent.refinedRequirement,
+            inMemoryIntent = intent
+        )
+
+        val pipelineLlm = StrictPipelineLlm()
+        val pipeline = RequirementAnalysisPipeline(pipelineLlm)
         val result = pipeline.analyze(
-            primaryReq = intent.refinedRequirement,
+            primaryReq = resolved.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
-            clarifyIntent = intent
+            clarifyIntent = resolved.effectiveIntent
         )
 
         val gtFiles = listOf(
@@ -221,6 +294,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
             val tag = if (isGt) "★[GT]" else "  [FP]"
             println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
         }
+        println("[MockTelemetry: SurveyAdmin_LlmOff] BranchCalls=${pipelineLlm.callCounts}, unmatched=0")
     }
 
     @Test
@@ -244,12 +318,18 @@ class Stage0EngineRoutedBaselineHarnessTest {
         )
         val intent = engine.buildClarifyIntent(turn1.state)
 
-        val pipeline = RequirementAnalysisPipeline(StrictPipelineLlm())
+        val resolved = AnalyzeInputResolver.resolve(
+            rawInput = intent.refinedRequirement,
+            inMemoryIntent = intent
+        )
+
+        val pipelineLlm = StrictPipelineLlm()
+        val pipeline = RequirementAnalysisPipeline(pipelineLlm)
         val result = pipeline.analyze(
-            primaryReq = intent.refinedRequirement,
+            primaryReq = resolved.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
-            clarifyIntent = intent
+            clarifyIntent = resolved.effectiveIntent
         )
 
         val gtFiles = listOf(
@@ -273,6 +353,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
             val tag = if (isGt) "★[GT]" else "  [FP]"
             println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
         }
+        println("[MockTelemetry: SurveyAdmin_LlmOn] ClarifyCalls=${mockLlm.callCounts}, PipelineCalls=${pipelineLlm.callCounts}, unmatched=0")
     }
 
     @Test
@@ -288,12 +369,18 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val turn0 = engine.initSession(sr)
         val intent = engine.buildClarifyIntent(turn0.state)
 
-        val pipeline = RequirementAnalysisPipeline(StrictPipelineLlm())
+        val resolved = AnalyzeInputResolver.resolve(
+            rawInput = intent.refinedRequirement,
+            inMemoryIntent = intent
+        )
+
+        val pipelineLlm = StrictPipelineLlm()
+        val pipeline = RequirementAnalysisPipeline(pipelineLlm)
         val result = pipeline.analyze(
-            primaryReq = intent.refinedRequirement,
+            primaryReq = resolved.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
-            clarifyIntent = intent
+            clarifyIntent = resolved.effectiveIntent
         )
 
         val gtFiles = listOf("APCMMTrcdIsInfSVO", "APCMMTrcdIsSVC", "APCMMTrcdIsSVCImpl", "APCMMTrcdIsBIZ", "ACMBTBAPC024DEM")
@@ -313,6 +400,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
             val tag = if (isGt) "★[GT]" else "  [FP]"
             println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
         }
+        println("[MockTelemetry: ApcTransitCard_LlmOff] BranchCalls=${pipelineLlm.callCounts}, unmatched=0")
     }
 
     @Test
@@ -335,12 +423,18 @@ class Stage0EngineRoutedBaselineHarnessTest {
         )
         val intent = engine.buildClarifyIntent(turn1.state)
 
-        val pipeline = RequirementAnalysisPipeline(StrictPipelineLlm())
+        val resolved = AnalyzeInputResolver.resolve(
+            rawInput = intent.refinedRequirement,
+            inMemoryIntent = intent
+        )
+
+        val pipelineLlm = StrictPipelineLlm()
+        val pipeline = RequirementAnalysisPipeline(pipelineLlm)
         val result = pipeline.analyze(
-            primaryReq = intent.refinedRequirement,
+            primaryReq = resolved.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
-            clarifyIntent = intent
+            clarifyIntent = resolved.effectiveIntent
         )
 
         val gtFiles = listOf("APCMMTrcdIsInfSVO", "APCMMTrcdIsSVC", "APCMMTrcdIsSVCImpl", "APCMMTrcdIsBIZ", "ACMBTBAPC024DEM")
@@ -360,6 +454,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
             val tag = if (isGt) "★[GT]" else "  [FP]"
             println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
         }
+        println("[MockTelemetry: Apc_DemIsolated_LlmOn] ClarifyCalls=${mockLlm.callCounts}, PipelineCalls=${pipelineLlm.callCounts}, unmatched=0")
     }
 
     @Test
@@ -375,12 +470,18 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val turn0 = engine.initSession(sr)
         val intent = engine.buildClarifyIntent(turn0.state)
 
-        val pipeline = RequirementAnalysisPipeline(StrictPipelineLlm())
+        val resolved = AnalyzeInputResolver.resolve(
+            rawInput = intent.refinedRequirement,
+            inMemoryIntent = intent
+        )
+
+        val pipelineLlm = StrictPipelineLlm()
+        val pipeline = RequirementAnalysisPipeline(pipelineLlm)
         val result = pipeline.analyze(
-            primaryReq = intent.refinedRequirement,
+            primaryReq = resolved.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
-            clarifyIntent = intent
+            clarifyIntent = resolved.effectiveIntent
         )
 
         val gtFiles = listOf("CareMemberMgmtController", "CareMemberMgmtServiceImpl", "ECMBTBISM006Mapper", "ECMBTBISM006Mapper.xml")
@@ -400,6 +501,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
             val tag = if (isGt) "★[GT]" else "  [FP]"
             println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
         }
+        println("[MockTelemetry: IsmCore_LlmOff] BranchCalls=${pipelineLlm.callCounts}, unmatched=0")
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
