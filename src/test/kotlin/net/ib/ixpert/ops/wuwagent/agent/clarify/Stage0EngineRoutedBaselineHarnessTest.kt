@@ -686,4 +686,222 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val intent4 = engine2.buildClarifyIntent(turn2_4.state)
         printClassificationAndDiff("Condition4_NegativeNo", intent4, turn2_4.state, graph)
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // 3. Commit 2b 시뮬레이션 및 점수 분해 진단 (C-11, C-12)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun testSimulateCommit2b_SurveyAdmin_LlmOn() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("survey_admin 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlm = StrictClarifyMockLlm(
+            refinementResponse = "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발"
+        )
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = mockLlm)
+
+        val turn0 = engine.initSession("설문 발송 채널에 브랜드메시지 추가")
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
+            )
+        )
+        val intent = engine.buildClarifyIntent(turn1.state)
+
+        // C-11 시뮬레이션 규칙:
+        // raw = intent.retentionAudit?.rawRefinedRequirement ?: intent.refinedRequirement
+        // srText = "$raw\n" + missingBeforeFix.joinToString("") { "\n$it" }
+        val raw = intent.retentionAudit?.rawRefinedRequirement ?: intent.refinedRequirement
+        val missingBeforeFix = intent.retentionAudit?.missingBeforeFix ?: emptyList()
+        val simulatedSrText = "$raw\n" + missingBeforeFix.joinToString("") { "\n$it" }
+
+        val pipelineLlm = StrictPipelineLlm()
+        val pipeline = RequirementAnalysisPipeline(pipelineLlm)
+        val result = pipeline.analyze(
+            primaryReq = simulatedSrText,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intent
+        )
+
+        val gtFiles = listOf(
+            "survey_list.jsp", "survey_write.jsp", "survey.list.js", "survey.write.js",
+            "SurveyServiceImpl.java", "sql_survey.xml", "AlimtalkChnlDto.java", "AlimtalkTmplDto.java"
+        )
+
+        val finalPaths = result.targetFiles.filter { it.type == "MODIFY" }.map { it.path }
+        val survivedGt = gtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
+
+        println("[Simulated 2b: survey_admin (Intent=LlmOn)] SimulatedSrText:\n\"\"\"\n$simulatedSrText\n\"\"\"")
+        println("[Simulated 2b: survey_admin (Intent=LlmOn)] Top-30 TargetFiles Count: ${result.targetFiles.size}")
+        println("[Simulated 2b: survey_admin (Intent=LlmOn)] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
+        val missing = gtFiles - survivedGt.toSet()
+        if (missing.isNotEmpty()) {
+            println("[Simulated 2b: survey_admin (Intent=LlmOn)] GT Missing: $missing")
+        }
+        println("[Simulated 2b: survey_admin (Intent=LlmOn)] Top-30 List:")
+        result.targetFiles.forEachIndexed { idx, sf ->
+            val isGt = gtFiles.any { sf.path.contains(it, ignoreCase = true) }
+            val tag = if (isGt) "★[GT]" else "  [FP]"
+            println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
+        }
+        println("[MockTelemetry: SurveyAdmin_LlmOn_Simulated2b] ClarifyCalls=${mockLlm.callCounts}, PipelineCalls=${pipelineLlm.callCounts}, unmatched=0")
+    }
+
+    @Test
+    fun testSimulateCommit2b_Apc_DemIsolated_LlmOn() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("apc 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlm = StrictClarifyMockLlm(
+            refinementResponse = "앱카드 및 모니모페이 최근이력 1건 조회 기능 개발"
+        )
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = mockLlm)
+
+        val sr = "aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회"
+        val turn0 = engine.initSession(sr)
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(userStatement = "aCMBTBAPC024DEM을 통해서 조회하는 로직을 추가해줘")
+        )
+        val intent = engine.buildClarifyIntent(turn1.state)
+
+        val raw = intent.retentionAudit?.rawRefinedRequirement ?: intent.refinedRequirement
+        val missingBeforeFix = intent.retentionAudit?.missingBeforeFix ?: emptyList()
+        val simulatedSrText = "$raw\n" + missingBeforeFix.joinToString("") { "\n$it" }
+
+        val pipelineLlm = StrictPipelineLlm()
+        val pipeline = RequirementAnalysisPipeline(pipelineLlm)
+        val result = pipeline.analyze(
+            primaryReq = simulatedSrText,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intent
+        )
+
+        val gtFiles = listOf("APCMMTrcdIsInfSVO", "APCMMTrcdIsSVC", "APCMMTrcdIsSVCImpl", "APCMMTrcdIsBIZ", "ACMBTBAPC024DEM")
+        val finalPaths = result.targetFiles.map { it.path }
+        val survivedGt = gtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
+
+        println("[Simulated 2b: APC DEM Isolated (Intent=LlmOn)] SimulatedSrText:\n\"\"\"\n$simulatedSrText\n\"\"\"")
+        println("[Simulated 2b: APC DEM Isolated (Intent=LlmOn)] Top-30 TargetFiles Count: ${result.targetFiles.size}")
+        println("[Simulated 2b: APC DEM Isolated (Intent=LlmOn)] GT Survived: ${survivedGt.size}/${gtFiles.size} (${survivedGt.joinToString(", ")})")
+        val missing = gtFiles - survivedGt.toSet()
+        if (missing.isNotEmpty()) {
+            println("[Simulated 2b: APC DEM Isolated (Intent=LlmOn)] GT Missing: $missing")
+        }
+        println("[Simulated 2b: APC DEM Isolated (Intent=LlmOn)] Top-30 List:")
+        result.targetFiles.forEachIndexed { idx, sf ->
+            val isGt = gtFiles.any { sf.path.contains(it, ignoreCase = true) }
+            val tag = if (isGt) "★[GT]" else "  [FP]"
+            println("  $tag #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
+        }
+        println("[MockTelemetry: Apc_DemIsolated_LlmOn_Simulated2b] ClarifyCalls=${mockLlm.callCounts}, PipelineCalls=${pipelineLlm.callCounts}, unmatched=0")
+    }
+
+    @Test
+    fun testScoreBreakdown_SurveyServiceImpl() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("survey_admin 메타그래프 존재 시에만 실행", graph)
+
+        val fileNode = graph!!.files.values.find { it.className == "SurveyServiceImpl" }
+        assertNotNull("SurveyServiceImpl 노드 존재 확인", fileNode)
+
+        println("=== C-12: SurveyServiceImpl Score Breakdown Diagnostic ===")
+        val cases = listOf(
+            "LlmOff" to "설문 발송 채널에 브랜드메시지 추가",
+            "LlmOn (Tagged)" to "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발 (명시된 식별자: BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto)",
+            "Simulated2b" to "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발\nBizgoApiService\nBrandMessageTemplateBatchJob\nBrandMessageTemplateBatchRepository\nBrandMessageTemplateBatchRunner\nBrandMessageTmplDto"
+        )
+
+        val totalNodes = graph.files.size + graph.resourceNodes.size
+        val maxIdf = Math.log(totalNodes.toDouble())
+        fun getDf(token: String): Int {
+            val lower = token.lowercase()
+            val fm = graph.files.values.count { it.className.contains(lower, ignoreCase = true) }
+            val rm = graph.resourceNodes.count { it.path.substringAfterLast("/").contains(lower, ignoreCase = true) }
+            return fm + rm
+        }
+        fun getIdfWeight(token: String): Double {
+            val df = maxOf(1, getDf(token))
+            return Math.log(totalNodes.toDouble() / df) / maxIdf
+        }
+
+        for ((label, text) in cases) {
+            println("[$label] InputText: \"$text\"")
+            val stopWords = setOf(
+                "controller", "service", "repository", "entity", "dto", "vo", "request", "response", 
+                "mapper", "view", "page", "screen", "api", "impl", "config", "exception", "handler", 
+                "util", "action", "svc", "svo", "dvo", "dao", "bo",
+                "화면", "컨트롤러", "서비스", "레파지토리", "저장소", "엔티티", "디티오", "매퍼", 
+                "액션", "페이지", "에이피아이", "구현체", "인터페이스"
+            )
+            val directEnglish = Regex("[a-zA-Z0-9]{3,}").findAll(text)
+                .map { it.value }
+                .filter { it.any { c -> c.isLetter() } }
+                .filterNot { stopWords.contains(it.lowercase()) }
+                .toList()
+
+            val dict = DomainDictionary.load(graph)
+            val words = text.split(Regex("\\s+"))
+            val nouns = mutableListOf<String>()
+            val verbs = mutableListOf<String>()
+            val translatedEnglish = mutableListOf<String>()
+            for (w in words) {
+                val cw = w.replace(Regex("[^가-힣a-zA-Z0-9]"), "")
+                if (cw.length < 2 || stopWords.contains(cw.lowercase())) continue
+                if (cw.endsWith("한다") || cw.endsWith("해라") || cw.endsWith("추가") || cw.endsWith("수정") || cw.endsWith("삭제")) {
+                    verbs.add(cw.replace("한다", "").replace("해라", ""))
+                } else {
+                    nouns.add(cw.replace("을", "").replace("를", "").replace("이", "").replace("가", "").replace("은", "").replace("는", ""))
+                }
+                translatedEnglish.addAll(dict.translate(cw).filterNot { stopWords.contains(it.lowercase()) })
+            }
+
+            println("  - directEnglish: $directEnglish")
+            println("  - translatedEnglish: $translatedEnglish")
+            println("  - nouns: $nouns")
+            println("  - verbs: $verbs")
+
+            // NameMatchScore 계산
+            val directMatches = directEnglish.filter { eng -> fileNode!!.className.contains(eng, ignoreCase = true) }
+            val transMatches = translatedEnglish.filter { eng -> fileNode!!.className.contains(eng, ignoreCase = true) }
+            var nameMatchScore = 0.0
+            var matchedKeyword = "none"
+            var idfWeight = 0.0
+            if (directMatches.isNotEmpty()) {
+                val maxToken = directMatches.maxByOrNull { getIdfWeight(it) }!!
+                idfWeight = getIdfWeight(maxToken)
+                nameMatchScore = 50.0 * idfWeight
+                matchedKeyword = "Direct:$directMatches (max=$maxToken)"
+            } else if (transMatches.isNotEmpty()) {
+                val maxToken = transMatches.maxByOrNull { getIdfWeight(it) }!!
+                idfWeight = getIdfWeight(maxToken)
+                nameMatchScore = 30.0 * idfWeight
+                matchedKeyword = "Trans:$transMatches (max=$maxToken)"
+            }
+
+            // CommentMatchScore 계산
+            var commentMatchScore = 0.0
+            val matchedComment = fileNode!!.koreanComments.find { comment ->
+                nouns.any { n -> comment.contains(n) } || verbs.any { v -> comment.contains(v) }
+            }
+            if (matchedComment != null) {
+                commentMatchScore = 20.0
+            }
+
+            println("  - NameMatch: score=${String.format("%.1f", nameMatchScore)}, matched=$matchedKeyword, idf=${String.format("%.3f", idfWeight)}")
+            println("  - CommentMatch: score=$commentMatchScore, commentSnippet=\"${matchedComment?.take(30)}\"")
+            println("  - HopScore (Hop 1 via DEPENDED_BY / Seed): 30")
+            println("  - LayerAlignScore: 15 (if layer matches)")
+            println("  - Total Score Breakdown: Hop(30) + NameMatch(${String.format("%.1f", nameMatchScore)}) + Comment($commentMatchScore) = Total")
+        }
+    }
 }
