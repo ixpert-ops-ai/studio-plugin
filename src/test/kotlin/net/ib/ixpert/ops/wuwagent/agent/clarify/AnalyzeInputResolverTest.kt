@@ -158,4 +158,71 @@ class AnalyzeInputResolverTest {
             result.targetFiles.any { it.path == "com/example/TargetService.java" }
         )
     }
+
+    @Test
+    fun testPipelineConsumesOriginalRequirementWhenClarifyIntentRefinedIsBlank() = kotlinx.coroutines.runBlocking {
+        // [검증 목표]: clarifyIntent의 refinedRequirement가 공백("")인 경우,
+        // Resolver를 거쳐 primaryReq로 전달된 originalRequirement가 RequirementAnalysisPipeline에서 정상 소비되어야 함.
+        val graph = net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph(
+            generatedAt = java.time.Instant.now().toString(),
+            projectRoot = "/test/root",
+            files = mapOf(
+                "com/example/TargetService.java" to net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode(
+                    path = "com/example/TargetService.java",
+                    packageName = "com.example",
+                    className = "TargetService",
+                    fileType = net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType.SERVICE,
+                    layer = net.ib.ixpert.ops.wuwagent.service.metagraph.model.ArchitectureLayer.SERVICE
+                )
+            ),
+            relationships = emptyList(),
+            statistics = net.ib.ixpert.ops.wuwagent.service.metagraph.model.GraphStatistics()
+        )
+
+        val clarifyIntent = ClarifyIntent(
+            originalRequirement = "TargetService 관련 원본 요구사항",
+            refinedRequirement = "", // 빈 정제문
+            anchorTokens = listOf("TargetService"),
+            constraints = emptyList(),
+            excludedFiles = emptyList(),
+            graphHash = "dummyHash",
+            contractVersion = "1.0"
+        )
+
+        val resolved = AnalyzeInputResolver.resolve(
+            rawInput = clarifyIntent.originalRequirement,
+            inMemoryIntent = clarifyIntent
+        )
+        assertEquals("정제문 공백 시 originalRequirement로 복원되어야 함", "TargetService 관련 원본 요구사항", resolved.effectiveRequirement)
+
+        val dummyClient = object : net.ib.ixpert.ops.wuwagent.client.LLMClient {
+            override fun chat(
+                systemPrompt: String,
+                userCode: String,
+                maxTokens: Int?,
+                onChunk: ((String) -> Unit)?
+            ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
+                return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse(
+                    model = "test",
+                    createdAt = "",
+                    message = net.ib.ixpert.ops.wuwagent.model.OllamaMessage("assistant", "[]"),
+                    done = true
+                )
+            }
+            override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
+        }
+
+        val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(dummyClient)
+        val result = pipeline.analyze(
+            primaryReq = resolved.effectiveRequirement,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = resolved.effectiveIntent,
+            previousContract = null,
+            projectRoot = null
+        )
+
+        assertNotNull(result)
+        assertEquals("파이프라인이 빈 refinedRequirement 대신 primaryReq(originalRequirement)를 유지해야 함", "TargetService 관련 원본 요구사항", resolved.effectiveRequirement)
+    }
 }

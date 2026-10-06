@@ -52,8 +52,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         val fwType = projectGraph.frameworkDetection?.userOverride ?: projectGraph.frameworkType
         logger.info("Starting RequirementAnalysisPipeline. Resolved Framework Type: ${fwType.name}")
         
-        val effectiveReq = clarifyIntent?.refinedRequirement?.ifBlank { null }
-            ?: stage0Contract?.enrichedRequirementText?.ifBlank { null }
+        val effectiveReq = stage0Contract?.enrichedRequirementText?.ifBlank { null }
             ?: primaryReq
         
         // --- Stage 0.5: Scope Selection ---

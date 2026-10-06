@@ -261,8 +261,8 @@ class WebviewActionRouter(private val project: Project) {
                         logger.warn("Clarify intent save failed (recording only): ${e.message}")
                     }
 
-                    // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행
-                    executeAnalyzePipeline(project, bridge, clarifyIntent.refinedRequirement, messageId, clarifyIntent)
+                    // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행 (executeAnalyzePipeline 내부의 AnalyzeInputResolver.resolve 위임)
+                    executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent)
                 }
 
                 // ── 요구사항 대화형 발화 처리 (Stage 0: /clarify-utterance) ────────
@@ -313,8 +313,8 @@ class WebviewActionRouter(private val project: Project) {
                                 logger.warn("Clarify intent save failed (recording only): ${e.message}")
                             }
 
-                            // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행
-                            executeAnalyzePipeline(project, bridge, clarifyIntent.refinedRequirement, messageId, clarifyIntent)
+                            // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행 (executeAnalyzePipeline 내부의 AnalyzeInputResolver.resolve 위임)
+                            executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent)
                         } catch (e: Exception) {
                             logger.error("Clarify utterance error", e)
                             ApplicationManager.getApplication().invokeLater {
