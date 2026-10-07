@@ -392,9 +392,15 @@ class RequirementAnalysisPipelineIntegrationTest {
 
         val pipeline = RequirementAnalysisPipeline(dummyClient)
 
+        // 운영 경로(WebviewActionRouter)와 동일하게 Resolver를 거쳐 입력을 확정
+        val resolvedInput = net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeInputResolver.resolve(
+            rawInput = clarifyIntent.originalRequirement,
+            inMemoryIntent = clarifyIntent
+        )
+
         // 2. 1차 Analyze 실행 (ClarifyIntent 주입, previousContract = null)
         val result1 = pipeline.analyze(
-            primaryReq = clarifyIntent.originalRequirement,
+            primaryReq = resolvedInput.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
             clarifyIntent = clarifyIntent,
@@ -429,7 +435,7 @@ class RequirementAnalysisPipelineIntegrationTest {
 
         // 4. 2차 Analyze 실행 (재로드된 previousContract 주입)
         val result2 = pipeline.analyze(
-            primaryReq = clarifyIntent.originalRequirement,
+            primaryReq = resolvedInput.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
             clarifyIntent = clarifyIntent,
