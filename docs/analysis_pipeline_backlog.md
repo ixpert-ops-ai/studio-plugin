@@ -222,7 +222,27 @@
   1. **Top-30의 `#N` 표기**: 최종 출력 목록의 `#N`은 종합 스코어 랭킹(ranking)이 아니라 파이프라인의 **제시 순서(presentation order)**임. 점수 정렬과 인덱스 표기 간의 오해 방지를 위해 하네스 출력 및 문서에 명시.
   2. **Stage 3 Mock Fallback 프롬프트 검증 격리**: Stage 3 Verifier Mock이 `null`을 반환할 경우 `FileRelevanceVerifier.kt:51`에 의해 "후보 전원 보존 Fallback"으로 작동하므로, 실 파이프라인 하네스 실행만으로는 프롬프트 주입 여부를 완벽히 증명할 수 없음. 프롬프트 주입 검증은 프롬프트 기록 단위 테스트(`Stage3PromptRecordingTest` 등)로 비침습적으로 격리 단언함.
   3. **`srKeyHex` 연속성 영향 범위**: `RequirementAnalysisPipeline.kt:314`의 `srKeyHex = String.format("SR-%08x", primaryReq.hashCode())`는 태그가 제거될 때 해시값이 변경되지만, 그 영향 범위는 **태그가 실제로 부착된 인텐트(`missingBeforeFix`가 비어 있지 않은 경우)**로 국한됨. 태그가 없는 LlmOff 등 단독 SR에서는 해시 변경이 발생하지 않음.
+  4. **커밋 2a (`63af698`) Before 서술 정정**: 커밋 2a 이전에도 Router가 `clarifyIntent.refinedRequirement`를 전달하고 있었으나 `AnalyzeInputResolver.resolve` 내부에서 `refinedRequirement.ifBlank` 시 `originalRequirement`로 폴백하는 로직이 이미 존재했음. 따라서 refined가 비어 있을 때도 2a 전후의 실질 동작은 동일함. Router가 `originalRequirement`를 명시적으로 넘기도록 수정한 것은 입력 해석의 단일 책임을 Resolver에 온전히 위임하고 의도를 코드에 명확히 드러내기 위한 리팩토링임. 또한 `stage0Contract`는 `WebviewActionRouter:1513` 런타임에서 호출되지 않는 비활성(dead) 경로임이 확인됨.
 - **상태**: Open (우선순위 P3)
+
+---
+
+### [B-25] 정제문(Refinement) 문구 확장으로 인한 시드 편향 및 GT 탈락 (`SurveyServiceImpl`)
+- **현상**: `survey_admin` 시나리오에서 LlmOff 시 GT 2/8(`SurveyServiceImpl.java`, `sql_survey.xml`)이 생존하였으나, LlmOn 시 1/8(`sql_survey.xml`)로 하락함.
+- **원인 규명 (C-11/C-12 실측 증명)**:
+  - C-11 실측 결과 태그 부착 버전과 식별자 리터럴 줄바꿈 버전(Simulated 2b)의 Top-30 산출 목록이 14개 전 항목 바이트 단위로 100% 일치함(`EXACT_MATCH`). 즉, `(명시된 식별자: ...)` 태그 자체나 괄호 문구는 결정론적 탐색 결과에 아무런 영향을 미치지 않음.
+  - C-12 점수 분해 결과, 정제 LLM이 요구사항에 새로 덧붙인 `"Bizgo 연동 API 신규 개발"` 문구의 영문 토큰(`API` 등)으로 인해 휴리스틱 시드가 `SurveyDaoImpl`에서 `ApiService`, `IbCenterApiService` 등 API 계층으로 편향됨.
+  - 이로 인해 `SurveyServiceImpl`의 확장 홉이 Hop 1(`DEPENDED_BY`, 30점)에서 Hop 3(`REPO_TO_SERVICE`, 0점)으로 밀려나며 총점이 65점 $\rightarrow$ 35점으로 급락하여 minScore(55) 미달 탈락함.
+- **해결 방안**: 정제 프롬프트가 기존 시스템의 맥락을 희석시키지 않도록 하거나, 시드 선택 단계에서 도메인 고유 명사 가중치 방어 로직 강화.
+- **상태**: Open (우선순위 P2)
+
+---
+
+### [B-26] RequirementAnalysisPipeline 완주 계약 생성 시 enrichedRequirementText 불일치 (`effectiveReq` vs `clarifyIntent.refinedRequirement`)
+- **현상**: 커밋 2a에서 `RequirementAnalysisPipeline.kt:55`의 `clarifyIntent?.refinedRequirement?.ifBlank { null }` fallback을 제거하고 `primaryReq`를 직접 소비하도록 변경함.
+- **영향**: `RequirementAnalysisPipelineIntegrationTest:413`에서 `clarifyIntent`가 주입된 채 `primaryReq`로 `originalRequirement`("서비스 수정 요청")를 넘길 경우, 파이프라인 완주 후 생성되는 계약의 `enrichedRequirementText`(:446)가 `effectiveReq`(즉 `primaryReq`)로 기록되어, 기존 테스트의 기대값(`clarifyIntent.refinedRequirement`)과 불일치 발생.
+- **해결 방향**: 계약의 `enrichedRequirementText` 기록 시 `clarifyIntent?.refinedRequirement?.ifBlank { null } ?: effectiveReq`를 참조하도록 명확히 하거나, 계약 스키마 생성 시의 정제문 처리 규칙을 일원화.
+- **상태**: Open (우선순위 P2)
 
 
 
