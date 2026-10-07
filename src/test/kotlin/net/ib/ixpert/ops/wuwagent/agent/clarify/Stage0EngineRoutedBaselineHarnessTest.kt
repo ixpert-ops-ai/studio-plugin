@@ -805,6 +805,139 @@ class Stage0EngineRoutedBaselineHarnessTest {
         println("[MockTelemetry: Apc_DemIsolated_LlmOn_Simulated2b] ClarifyCalls=${mockLlm.callCounts}, PipelineCalls=${pipelineLlm.callCounts}, unmatched=0")
     }
 
+    /**
+     * 점수 분해 결과: SeedClasses와 출력 줄 목록.
+     * ScoredFile에는 점수 구성 요소 필드가 없어(score 합계만 존재) 구성 요소를 테스트에서 재계산하고,
+     * RelevanceScorer.scoreAndFilter가 돌려준 score와 같은지 단언한다.
+     */
+    private data class BreakdownResult(val seedClasses: List<String>, val lines: List<String>)
+
+    private fun scoreBreakdownLines(
+        text: String,
+        graph: ProjectGraph,
+        fileNode: FileNode,
+        expander: net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.GraphExpander
+    ): BreakdownResult {
+        val lines = mutableListOf<String>()
+
+        // 1. Selector 실행하여 실제 Seed 및 SeedResult 도출
+        val selector = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AgenticSeedSelector(
+            llmClient = StrictPipelineLlm(),
+            projectBasePath = null,
+            clarificationBridge = null
+        )
+        val seedResult = selector.selectSeeds(text, graph)
+        lines.add("  - SeedClasses: ${seedResult.seedClasses}")
+        lines.add("  - LayerHint: ${seedResult.layerHint}")
+
+        // 2. Expander 실행하여 실제 확장 그래프 획득
+        val expandedFiles = expander.expand(seedResult, text)
+        val step = expandedFiles[fileNode.path]
+        lines.add("  - ExpansionStep for SurveyServiceImpl: hop=${step?.hop}, via=${step?.via}, from=${step?.from}")
+
+        // 3. RelevanceScorer 실제 호출 (minScore = 10으로 주어 탈락 노드도 점수 계산값 수집)
+        val scorer = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.RelevanceScorer(graph, fileLimit = 100, minScore = 10)
+        val scoredList = scorer.scoreAndFilter(text, expandedFiles, seedResult)
+        val targetScored = scoredList.find { it.className == "SurveyServiceImpl" }
+
+        lines.add("  - RelevanceScorer.scoreAndFilter Actual Output:")
+        if (targetScored != null) {
+            lines.add("    * Actual Total Score: ${targetScored.score}")
+            lines.add("    * Discovery Reason: ${targetScored.discoveryReason}")
+            lines.add("    * Hop Distance: ${targetScored.hopDistance}")
+            lines.add("    * Protected: ${targetScored.isProtected} (Reason: ${targetScored.protectionReason})")
+        } else {
+            lines.add("    * SurveyServiceImpl NOT FOUND in scored list (Score < 10 or not expanded)")
+        }
+
+        // 4. 구성 요소별 정밀 분해 (RelevanceScorer 공식과 동일한 가중치 계산)
+        val totalNodes = graph.files.size + graph.resourceNodes.size
+        val maxIdf = Math.log(totalNodes.toDouble())
+        fun getDf(token: String): Int {
+            val lower = token.lowercase()
+            val fm = graph.files.values.count { it.className.contains(lower, ignoreCase = true) }
+            val rm = graph.resourceNodes.count { it.path.substringAfterLast("/").contains(lower, ignoreCase = true) }
+            return fm + rm
+        }
+        fun getIdfWeight(token: String): Double {
+            val df = maxOf(1, getDf(token))
+            return Math.log(totalNodes.toDouble() / df) / maxIdf
+        }
+
+        val stopWords = setOf(
+            "controller", "service", "repository", "entity", "dto", "vo", "request", "response",
+            "mapper", "view", "page", "screen", "api", "impl", "config", "exception", "handler",
+            "util", "action", "svc", "svo", "dvo", "dao", "bo",
+            "화면", "컨트롤러", "서비스", "레파지토리", "저장소", "엔티티", "디티오", "매퍼",
+            "액션", "페이지", "에이피아이", "구현체", "인터페이스"
+        )
+        val directEnglish = Regex("[a-zA-Z0-9]{3,}").findAll(text)
+            .map { it.value }
+            .filter { it.any { c -> c.isLetter() } }
+            .filterNot { stopWords.contains(it.lowercase()) }
+            .toList()
+
+        val dict = DomainDictionary.load(graph)
+        val words = text.split(Regex("\\s+"))
+        val nouns = mutableListOf<String>()
+        val verbs = mutableListOf<String>()
+        val translatedEnglish = mutableListOf<String>()
+        for (w in words) {
+            val cw = w.replace(Regex("[^가-힣a-zA-Z0-9]"), "")
+            if (cw.length < 2 || stopWords.contains(cw.lowercase())) continue
+            if (cw.endsWith("한다") || cw.endsWith("해라") || cw.endsWith("추가") || cw.endsWith("수정") || cw.endsWith("삭제")) {
+                verbs.add(cw.replace("한다", "").replace("해라", ""))
+            } else {
+                nouns.add(cw.replace("을", "").replace("를", "").replace("이", "").replace("가", "").replace("은", "").replace("는", ""))
+            }
+            translatedEnglish.addAll(dict.translate(cw).filterNot { stopWords.contains(it.lowercase()) })
+        }
+
+        // RelevanceScorer.kt:61-66의 hop 점수표와 동일 (0→40, 1→30, 2→15, else→0)
+        val hopScore = when (step?.hop) {
+            0 -> 40
+            1 -> 30
+            2 -> 15
+            else -> 0
+        }
+
+        val directMatches = directEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
+        val transMatches = translatedEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
+        var nameMatchScore = 0.0
+        if (directMatches.isNotEmpty()) {
+            val maxToken = directMatches.maxByOrNull { getIdfWeight(it) }!!
+            nameMatchScore = 50.0 * getIdfWeight(maxToken)
+        } else if (transMatches.isNotEmpty()) {
+            val maxToken = transMatches.maxByOrNull { getIdfWeight(it) }!!
+            nameMatchScore = 30.0 * getIdfWeight(maxToken)
+        }
+
+        val layerAlignScore = if (seedResult.layerHint.any { layer -> fileNode.layer.name.contains(layer, ignoreCase = true) || fileNode.fileType.name.contains(layer, ignoreCase = true) }) 15 else 0
+
+        var commentMatchScore = 0.0
+        val matchedComment = fileNode.koreanComments.find { comment ->
+            nouns.any { n -> comment.contains(n) } || verbs.any { v -> comment.contains(v) }
+        }
+        if (matchedComment != null) {
+            commentMatchScore = 20.0
+        }
+
+        val recomputed = (hopScore + nameMatchScore + layerAlignScore + commentMatchScore).toInt()
+        lines.add("    * Score Components: HopScore=$hopScore + NameMatch=${String.format("%.1f", nameMatchScore)} + LayerAlign=$layerAlignScore + CommentMatch=${String.format("%.1f", commentMatchScore)} = $recomputed")
+
+        // ScoredFile에는 구성 요소 필드가 없으므로 재계산 합계가 Scorer 반환 score와 같은지 단언한다 (실패 시 공식을 맞추지 말고 보고).
+        if (targetScored != null) {
+            assertEquals(
+                "점수 분해 재계산 합계가 RelevanceScorer 반환 score와 같아야 함 (input=\"$text\")",
+                targetScored.score,
+                recomputed
+            )
+            lines.add("    * Assert: recomputed($recomputed) == Actual Total Score(${targetScored.score})")
+        }
+
+        return BreakdownResult(seedResult.seedClasses.toList(), lines)
+    }
+
     @Test
     fun testScoreBreakdown_SurveyServiceImpl() = kotlinx.coroutines.runBlocking {
         val graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json"
@@ -826,110 +959,134 @@ class Stage0EngineRoutedBaselineHarnessTest {
         val expander = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.GraphExpander(graph, domainExtractor, config)
 
         for ((label, text) in cases) {
+            // 점수 계산 중 RelevanceScorer가 찍는 로그와 구분되도록 계산을 먼저 끝낸 뒤 결과 줄을 출력한다.
+            val breakdown = scoreBreakdownLines(text, graph, fileNode!!, expander)
             println("[$label] InputText: \"$text\"")
-
-            // 1. Selector 실행하여 실제 Seed 및 SeedResult 도출
-            val selector = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AgenticSeedSelector(
-                llmClient = StrictPipelineLlm(),
-                projectBasePath = null,
-                clarificationBridge = null
-            )
-            val seedResult = selector.selectSeeds(text, graph)
-            println("  - SeedClasses: ${seedResult.seedClasses}")
-            println("  - LayerHint: ${seedResult.layerHint}")
-
-            // 2. Expander 실행하여 실제 확장 그래프 획득
-            val expandedFiles = expander.expand(seedResult, text)
-            val step = expandedFiles[fileNode!!.path]
-            println("  - ExpansionStep for SurveyServiceImpl: hop=${step?.hop}, via=${step?.via}, from=${step?.from}")
-
-            // 3. RelevanceScorer 실제 호출 (minScore = 10으로 주어 탈락 노드도 점수 계산값 수집)
-            val scorer = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.RelevanceScorer(graph, fileLimit = 100, minScore = 10)
-            val scoredList = scorer.scoreAndFilter(text, expandedFiles, seedResult)
-            val targetScored = scoredList.find { it.className == "SurveyServiceImpl" }
-
-            println("  - RelevanceScorer.scoreAndFilter Actual Output:")
-            if (targetScored != null) {
-                println("    * Actual Total Score: ${targetScored.score}")
-                println("    * Discovery Reason: ${targetScored.discoveryReason}")
-                println("    * Hop Distance: ${targetScored.hopDistance}")
-                println("    * Protected: ${targetScored.isProtected} (Reason: ${targetScored.protectionReason})")
-            } else {
-                println("    * SurveyServiceImpl NOT FOUND in scored list (Score < 10 or not expanded)")
-            }
-
-            // 4. 구성 요소별 정밀 분해 (RelevanceScorer 공식과 동일한 가중치 계산)
-            val totalNodes = graph.files.size + graph.resourceNodes.size
-            val maxIdf = Math.log(totalNodes.toDouble())
-            fun getDf(token: String): Int {
-                val lower = token.lowercase()
-                val fm = graph.files.values.count { it.className.contains(lower, ignoreCase = true) }
-                val rm = graph.resourceNodes.count { it.path.substringAfterLast("/").contains(lower, ignoreCase = true) }
-                return fm + rm
-            }
-            fun getIdfWeight(token: String): Double {
-                val df = maxOf(1, getDf(token))
-                return Math.log(totalNodes.toDouble() / df) / maxIdf
-            }
-
-            val stopWords = setOf(
-                "controller", "service", "repository", "entity", "dto", "vo", "request", "response",
-                "mapper", "view", "page", "screen", "api", "impl", "config", "exception", "handler",
-                "util", "action", "svc", "svo", "dvo", "dao", "bo",
-                "화면", "컨트롤러", "서비스", "레파지토리", "저장소", "엔티티", "디티오", "매퍼",
-                "액션", "페이지", "에이피아이", "구현체", "인터페이스"
-            )
-            val directEnglish = Regex("[a-zA-Z0-9]{3,}").findAll(text)
-                .map { it.value }
-                .filter { it.any { c -> c.isLetter() } }
-                .filterNot { stopWords.contains(it.lowercase()) }
-                .toList()
-
-            val dict = DomainDictionary.load(graph)
-            val words = text.split(Regex("\\s+"))
-            val nouns = mutableListOf<String>()
-            val verbs = mutableListOf<String>()
-            val translatedEnglish = mutableListOf<String>()
-            for (w in words) {
-                val cw = w.replace(Regex("[^가-힣a-zA-Z0-9]"), "")
-                if (cw.length < 2 || stopWords.contains(cw.lowercase())) continue
-                if (cw.endsWith("한다") || cw.endsWith("해라") || cw.endsWith("추가") || cw.endsWith("수정") || cw.endsWith("삭제")) {
-                    verbs.add(cw.replace("한다", "").replace("해라", ""))
-                } else {
-                    nouns.add(cw.replace("을", "").replace("를", "").replace("이", "").replace("가", "").replace("은", "").replace("는", ""))
-                }
-                translatedEnglish.addAll(dict.translate(cw).filterNot { stopWords.contains(it.lowercase()) })
-            }
-
-            val hopScore = when (step?.hop) {
-                0 -> 40
-                1 -> 30
-                2 -> 15
-                else -> 0
-            }
-
-            val directMatches = directEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
-            val transMatches = translatedEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
-            var nameMatchScore = 0.0
-            if (directMatches.isNotEmpty()) {
-                val maxToken = directMatches.maxByOrNull { getIdfWeight(it) }!!
-                nameMatchScore = 50.0 * getIdfWeight(maxToken)
-            } else if (transMatches.isNotEmpty()) {
-                val maxToken = transMatches.maxByOrNull { getIdfWeight(it) }!!
-                nameMatchScore = 30.0 * getIdfWeight(maxToken)
-            }
-
-            val layerAlignScore = if (seedResult.layerHint.any { layer -> fileNode.layer.name.contains(layer, ignoreCase = true) || fileNode.fileType.name.contains(layer, ignoreCase = true) }) 15 else 0
-
-            var commentMatchScore = 0.0
-            val matchedComment = fileNode.koreanComments.find { comment ->
-                nouns.any { n -> comment.contains(n) } || verbs.any { v -> comment.contains(v) }
-            }
-            if (matchedComment != null) {
-                commentMatchScore = 20.0
-            }
-
-            println("    * Score Components: HopScore=$hopScore + NameMatch=${String.format("%.1f", nameMatchScore)} + LayerAlign=$layerAlignScore + CommentMatch=${String.format("%.1f", commentMatchScore)} = ${(hopScore + nameMatchScore + layerAlignScore + commentMatchScore).toInt()}")
+            breakdown.lines.forEach { println(it) }
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // 4. 절제 실험 (B-25 원인 분리): 식별자 줄 vs 정제문 문구
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private val surveyAdminGtFiles = listOf(
+        "survey_list.jsp", "survey_write.jsp", "survey.list.js", "survey.write.js",
+        "SurveyServiceImpl.java", "sql_survey.xml", "AlimtalkChnlDto.java", "AlimtalkTmplDto.java"
+    )
+
+    /**
+     * 절제 실험 한 건을 실행하고 [GT Baseline: <tag>] ~ [MockTelemetry: <mockLabel>] 블록 하나를 출력한다.
+     * 점수 계산과 파이프라인 실행을 모두 끝낸 뒤 블록을 연속 출력하므로 중간 로그가 블록에 섞이지 않는다.
+     */
+    private suspend fun runSurveyAdminAblation(
+        tag: String,
+        mockLabel: String,
+        text: String,
+        intent: ClarifyIntent,
+        graph: ProjectGraph,
+        telemetryPrefix: String
+    ) {
+        val fileNode = graph.files.values.find { it.className == "SurveyServiceImpl" }
+        assertNotNull("SurveyServiceImpl 노드 존재 확인", fileNode)
+
+        val domainExtractor = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DomainExtractor(graph.files)
+        val config = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DiscoveryConfig(maxHop = 3)
+        val expander = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.GraphExpander(graph, domainExtractor, config)
+        val breakdown = scoreBreakdownLines(text, graph, fileNode!!, expander)
+
+        val pipelineLlm = StrictPipelineLlm()
+        val pipeline = RequirementAnalysisPipeline(pipelineLlm)
+        val result = pipeline.analyze(
+            primaryReq = text,
+            secondaryReq = "",
+            projectGraph = graph,
+            clarifyIntent = intent
+        )
+
+        val finalPaths = result.targetFiles.filter { it.type == "MODIFY" }.map { it.path }
+        val survivedGt = surveyAdminGtFiles.filter { gt -> finalPaths.any { it.contains(gt, ignoreCase = true) } }
+        val missing = surveyAdminGtFiles - survivedGt.toSet()
+
+        println("[GT Baseline: $tag] InputText:\n\"\"\"\n$text\n\"\"\"")
+        println("[GT Baseline: $tag] SeedClasses: ${breakdown.seedClasses}")
+        println("[GT Baseline: $tag] SurveyServiceImpl Score Breakdown:")
+        breakdown.lines.forEach { println("[GT Baseline: $tag] $it") }
+        println("[GT Baseline: $tag] Top-30 TargetFiles Count: ${result.targetFiles.size}")
+        println("[GT Baseline: $tag] GT Survived: ${survivedGt.size}/${surveyAdminGtFiles.size} (${survivedGt.joinToString(", ")})")
+        if (missing.isNotEmpty()) {
+            println("[GT Baseline: $tag] GT Missing: $missing")
+        }
+        println("[GT Baseline: $tag] Top-30 List:")
+        result.targetFiles.forEachIndexed { idx, sf ->
+            val isGt = surveyAdminGtFiles.any { sf.path.contains(it, ignoreCase = true) }
+            val tagMark = if (isGt) "★[GT]" else "  [FP]"
+            println("  $tagMark #${idx + 1}. [${sf.type}] ${sf.path} (${sf.description})")
+        }
+        println("[MockTelemetry: $mockLabel] ${telemetryPrefix}PipelineCalls=${pipelineLlm.callCounts}, unmatched=0")
+    }
+
+    @Test
+    fun testAblationA_SurveyAdmin_LlmOff_PlusFiveIdentifierLines() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("survey_admin 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = null)
+        val turn0 = engine.initSession("설문 발송 채널에 브랜드메시지 추가")
+        val intent = engine.buildClarifyIntent(turn0.state)
+
+        // LlmOff 정제문 + 다섯 식별자를 줄마다 하나씩 붙인 입력
+        val identifiers = listOf(
+            "BizgoApiService",
+            "BrandMessageTemplateBatchRunner",
+            "BrandMessageTemplateBatchJob",
+            "BrandMessageTemplateBatchRepository",
+            "BrandMessageTmplDto"
+        )
+        val text = intent.refinedRequirement + "\n" + identifiers.joinToString("\n")
+
+        runSurveyAdminAblation(
+            tag = "Ablation-a (survey_admin LlmOff refined + 5 identifier lines)",
+            mockLabel = "Ablation_a_SurveyAdmin_LlmOff_Plus5IdLines",
+            text = text,
+            intent = intent,
+            graph = graph,
+            telemetryPrefix = ""
+        )
+    }
+
+    @Test
+    fun testAblationB_SurveyAdmin_LlmOn_RefinedOnly() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("survey_admin 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlm = StrictClarifyMockLlm(
+            refinementResponse = "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발"
+        )
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = mockLlm)
+        val turn0 = engine.initSession("설문 발송 채널에 브랜드메시지 추가")
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
+            )
+        )
+        val intent = engine.buildClarifyIntent(turn1.state)
+
+        // LlmOn 정제문만 (태그와 식별자 줄 없이)
+        val text = intent.retentionAudit?.rawRefinedRequirement ?: intent.refinedRequirement
+
+        runSurveyAdminAblation(
+            tag = "Ablation-b (survey_admin LlmOn refined only - no identifiers)",
+            mockLabel = "Ablation_b_SurveyAdmin_LlmOn_RefinedOnly",
+            text = text,
+            intent = intent,
+            graph = graph,
+            telemetryPrefix = "ClarifyCalls=${mockLlm.callCounts}, "
+        )
     }
 }
