@@ -223,6 +223,7 @@
   2. **Stage 3 Mock Fallback 프롬프트 검증 격리**: Stage 3 Verifier Mock이 `null`을 반환할 경우 `FileRelevanceVerifier.kt:51`에 의해 "후보 전원 보존 Fallback"으로 작동하므로, 실 파이프라인 하네스 실행만으로는 프롬프트 주입 여부를 완벽히 증명할 수 없음. 프롬프트 주입 검증은 프롬프트 기록 단위 테스트(`Stage3PromptRecordingTest` 등)로 비침습적으로 격리 단언함.
   3. **`srKeyHex` 연속성 영향 범위**: `RequirementAnalysisPipeline.kt:314`의 `srKeyHex = String.format("SR-%08x", primaryReq.hashCode())`는 태그가 제거될 때 해시값이 변경되지만, 그 영향 범위는 **태그가 실제로 부착된 인텐트(`missingBeforeFix`가 비어 있지 않은 경우)**로 국한됨. 태그가 없는 LlmOff 등 단독 SR에서는 해시 변경이 발생하지 않음.
   4. **커밋 2a (`63af698`) Before 서술 정정**: 커밋 2a 이전에도 Router가 `clarifyIntent.refinedRequirement`를 전달하고 있었으나 `AnalyzeInputResolver.resolve` 내부에서 `refinedRequirement.ifBlank` 시 `originalRequirement`로 폴백하는 로직이 이미 존재했음. 따라서 refined가 비어 있을 때도 2a 전후의 실질 동작은 동일함. Router가 `originalRequirement`를 명시적으로 넘기도록 수정한 것은 입력 해석의 단일 책임을 Resolver에 온전히 위임하고 의도를 코드에 명확히 드러내기 위한 리팩토링임. 또한 `stage0Contract`는 `WebviewActionRouter:1513` 런타임에서 호출되지 않는 비활성(dead) 경로임이 확인됨.
+  5. **커밋 2a (`63af698`) Before 보충 (운영 경로)**: 운영 경로의 `primaryReq`(`WebviewActionRouter.kt:1514`)에는 2a 전후 모두 `AnalyzeInputResolver.resolve` 출력이 들어가며 실질 동작은 같다. 2a가 바꾼 것은 `analyze()`가 `clarifyIntent`에서 정제문을 스스로 고르지 않게 된 계약이고, 이 때문에 `analyze()`를 직접 부르던 테스트가 깨졌다(B-26). 줄 번호는 `pipeline.analyze(` 호출이 `:1513`, `primaryReq` 인자가 `:1514`, `clarifyIntent` 인자가 `:1517`이다(기존 서술의 `:1513`은 호출 줄 기준으로 유효하며, `primaryReq` 인자를 가리킬 때는 `:1514`). `:1517`의 `clarifyIntent`는 `:1503`의 `resolvedInput.effectiveIntent`이고 Resolver는 `inMemoryIntent`를 복사 없이 그대로 돌려주므로(`AnalyzeInputResolver.kt:27`) 같은 객체다.
 - **상태**: Open (우선순위 P3)
 
 ---
@@ -282,4 +283,28 @@
 - **상태**: Open (우선순위 P4)
 
 
+
+---
+
+### [B-31] C-12 점수 분해가 테스트 내 재계산이며 단언이 없음
+- **현상**: `Stage0EngineRoutedBaselineHarnessTest.kt`의 `Score Components` 출력(`:932`)은 `RelevanceScorer` 반환 객체의 필드가 아니라 테스트가 공식을 복제해 다시 계산한 값이다. `hopScore`는 `:904-909`에 하드코딩(`0→40, 1→30, 2→15, else→0`)되어 있고, `nameMatch`, `layerAlign`, `commentMatch`도 테스트 안에서 계산한다.
+- **영향**: `Actual Total Score`(`:853`, Scorer 반환값)와 재계산 합계가 같다는 단언이 없어, Scorer 공식이 바뀌어도 분해 출력이 조용히 어긋날 수 있다. `:780-935` 구간의 assert는 `assertNotNull("SurveyServiceImpl 노드 존재 확인", fileNode)` 하나뿐이다. B-25의 "65 → 35" 서술은 출력 숫자를 대조한 것이며 코드로 단언된 것이 아니다.
+- **해결 방안**: `RelevanceScorer` 반환 타입에 구성 요소 필드가 있으면 그 필드를 출력하고, 없으면 `assertEquals(targetScored.score, 재계산 합계)`를 추가.
+- **상태**: Open (우선순위 P3)
+
+---
+
+### [B-32] 바이트 비교 스크립트가 저장소 밖에 있어 기준선 비교를 재현할 수 없음
+- **현상**: `13e53f7` ↔ `63af698` ↔ `77d0d37`의 GT 기준선 블록(`[GT Baseline:` ~ 같은 시나리오 `[MockTelemetry:`) 비교에 쓴 `compare_baseline_bytes.js`가 저장소 밖(에이전트 작업 폴더의 `scratch/`)에 있고, 경로가 삭제된 worktree(`worktree-13e53f7`, `worktree-63af698`)와 덮어써지는 메인 트리 XML에 하드코딩되어 있다. 같은 이름의 시나리오가 둘이면 뒤의 것이 앞의 것을 덮어쓰며 오류 없이 지나간다.
+- **영향**: 위 세 커밋 사이의 "EXACT_MATCH" 주장을 지금은 재현하거나 검증할 수 없다.
+- **해결 방안**: 비교 도구를 저장소에 커밋(입력: XML 경로 둘, 출력: 블록별 EXACT_MATCH 또는 첫 번째로 다른 줄과 sha256, 중복 시나리오명은 오류 종료)하고 `13e53f7` 대비 HEAD를 다시 측정.
+- **상태**: Open (우선순위 P3)
+
+---
+
+### [B-33] Router 경로에서 정제문이 원문과 다를 때의 프롬프트 테스트 부재
+- **현상**: `AnalyzeInputResolverTest`에서 파이프라인 프롬프트까지 확인하는 테스트(`bf5e33c`)의 픽스처는 `refinedRequirement = ""`(빈 정제문)이라 `primaryReq`가 원문과 같다. 정제문이 비어 있지 않고 원문과 다른 경우에 시드 선택기 프롬프트에 무엇이 들어가는지 확인하는 테스트가 없다. 나머지 정제문 픽스처(`:27`, `:117`)는 Resolver 반환값만 검증한다.
+- **영향**: 운영 경로(`executeAnalyzePipeline`)에서 정제문이 시드 프롬프트로 전달된다는 계약이 테스트로 고정되어 있지 않다.
+- **해결 방안**: 원문 전용 문구와 정제문 전용 문구가 다른 인텐트로 `executeAnalyzePipeline` 경로를 실행해 프롬프트 포함 여부를 단언.
+- **상태**: Open (우선순위 P2)
 
