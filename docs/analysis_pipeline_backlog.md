@@ -242,7 +242,44 @@
 - **현상**: 커밋 2a에서 `RequirementAnalysisPipeline.kt:55`의 `clarifyIntent?.refinedRequirement?.ifBlank { null }` fallback을 제거하고 `primaryReq`를 직접 소비하도록 변경함.
 - **영향**: `RequirementAnalysisPipelineIntegrationTest:413`에서 `clarifyIntent`가 주입된 채 `primaryReq`로 `originalRequirement`("서비스 수정 요청")를 넘길 경우, 파이프라인 완주 후 생성되는 계약의 `enrichedRequirementText`(:446)가 `effectiveReq`(즉 `primaryReq`)로 기록되어, 기존 테스트의 기대값(`clarifyIntent.refinedRequirement`)과 불일치 발생.
 - **해결 방향**: 계약의 `enrichedRequirementText` 기록 시 `clarifyIntent?.refinedRequirement?.ifBlank { null } ?: effectiveReq`를 참조하도록 명확히 하거나, 계약 스키마 생성 시의 정제문 처리 규칙을 일원화.
-- **상태**: Open (우선순위 P2)
+- **조사 결과**: `src/main`에서 `enrichedRequirementText`를 읽는 곳은 `RequirementAnalysisPipeline.kt:55`, `:258`뿐이며 둘 다 `stage0Contract` 파라미터를 읽는다. `stage0Contract`를 넘기는 호출자와 `loadContractByKey` 호출자는 `src/main`에 없다. 운영 경로(`WebviewActionRouter.kt:1494-1514`)는 `AnalyzeInputResolver.resolve(...).effectiveRequirement`를 `primaryReq`로 넘기므로, 테스트가 Resolver를 거치지 않고 `originalRequirement`를 직접 넘긴 것이 불일치의 원인이었음.
+- **상태**: 해소 — 회귀 수정 커밋 `4ece8af`에서 해소(대상 테스트 8/8 통과, 31개 클래스 필터 기준 `b7ff09e`와 실패·skip 목록 동일). 테스트 전용 수정이며 `src/main` 변경 없음, 단언 기대값 변경 없음.
+
+---
+
+### [B-27] 전체 테스트 기준선 정정 (`./gradlew.bat test --offline`)
+- **측정**: 전체 실행 412 testcase / 57 실패 / 9 skip (`4ece8af`, 소요 1h 7m).
+- **정정**: 위 중 12 testcase(11 실패, 1 통과)는 소스가 삭제된 낡은 instrumented 클래스(B-28) 때문이다. 정정 기준선은 **400 / 46 / 9** (원인 미조사). 46건 비교는 31개 클래스 필터 기준이며, 필터 실행에서 `b7ff09e`와 `4ece8af`의 testcase 목록(통과 포함 70건)이 동일함을 확인함.
+- **정정 기준선 46건의 예외 종류 (XML `type` 기준)**: `java.lang.Error` 32, `java.lang.AssertionError` 6, `com.intellij.testFramework.TestLoggerFactory$TestLoggerAssertionError` 5, `java.lang.IllegalAccessError` 1, `java.lang.NoClassDefFoundError` 1, `com.fasterxml.jackson.databind.exc.ValueInstantiationException` 1.
+- **미검증**: 400이라는 숫자는 "낡은 클래스 testcase가 12건뿐"이라는 가정에 의존한다. 소스 없는 외곽 클래스는 총 20개이고 그중 12개(`Analyze2V0*Test`, `PureAnalyzeSurveyAdminTest` 등)는 31개 클래스 필터 밖이어서, 전체 실행에서 함께 실행됐다면 testcase 수가 달라질 수 있다. 전체 실행 XML은 이후 실행으로 덮어써져 재확인 불가.
+- **상태**: Open (우선순위 P3, 정정 기준선 확정은 낡은 클래스 정리 후 전체 재측정 필요)
+
+---
+
+### [B-28] `build/instrumented/instrumentTestCode/`의 낡은 테스트 클래스 미삭제
+- **현상**: 소스(`.kt`)가 삭제된 테스트의 컴파일 결과(2026-08-19자 `.class`)가 `build/instrumented/instrumentTestCode/`에 남아, 전체 테스트 실행 시 그대로 실행되어 `NoSuchMethodError` 등으로 실패함. `build/classes/kotlin/test/`에는 해당 클래스가 없음.
+- **대상**: 소스 없는 외곽 클래스 20개(class 파일 44개): `PureAnalyzeMemberMarketTest`, `PureAnalyzeSurveyAdminTest`, `Analyze2IsmStageATest`, `Analyze2IsmStageLb1LlmRerunTest`, `Analyze2IsmStageLb1Test`, `Analyze2MemberMarketBaselineTest`, `Analyze2SurveyAdminBaselineTest`, `Analyze2V0MethodCTest`, `Analyze2V0PipelineTest`, `Analyze2V0Stage3ExpansionTest`, `Analyze2V0Stage3FirstTurnTest`, `Analyze2V0Stage3PipelineTest`, `Analyze2V0Stage3Turn2Test`, `Analyze2V0Stage3Turn3DialogueTest`, `Analyze2V0Stage3Turn3Test`, `Analyze2V0Test`, `Stage1And2TraceTest`, `Stage1TraceTest` 및 보조 클래스 `ConceptSet`, `VLLMClient`.
+- **조치 이력**: 로컬에서는 해당 class 파일 44개와 대응 XML 8개를 `build/` 밖(임시 폴더, 상대 경로 유지)으로 이동만 하고 삭제하지 않았다. 추적되지 않는 산출물이라 저장소에는 반영되지 않는다.
+- **해결 방안**: 전체 측정 전 `./gradlew clean test`로 산출물을 재생성하거나, 낡은 instrumented 클래스를 정리하는 절차를 문서화.
+- **상태**: Open (우선순위 P3)
+
+---
+
+### [B-29] 테스트가 `fake-project/.wuwagent/`에 파일을 씀
+- **현상**: 테스트 실행이 저장소 루트의 `fake-project/.wuwagent/` 아래에 산출물을 기록함. 이번 측정(2026-10-07 16:25:55)에서 바뀐 파일:
+  - `fake-project/.wuwagent/shadow_logs.jsonl`
+  - `fake-project/.wuwagent/contracts/clarification-contract-default.json`
+- **영향**: 별도 worktree에서 실행해도 junction 등으로 `fake-project/`를 공유하면 원본이 변경되며, 실행 간 상태가 오염될 수 있음. `fake-project/`는 추적되지 않음.
+- **해결 방안**: 테스트가 임시 폴더(`TemporaryFolder`)를 쓰도록 하거나 쓰기 위치를 실행별로 격리.
+- **상태**: Open (우선순위 P4)
+
+---
+
+### [B-30] 빌드가 추적 파일 `src/main/resources/webview/index.html`을 다시 생성함
+- **현상**: `buildWebview` → `copyWebviewToResources`가 추적 중인 `src/main/resources/webview/index.html`을 덮어써, 빌드나 테스트 후 `git status`에 `M`으로 나타남(worktree `b7ff09e` 실행 후 11 insertions, 11 deletions).
+- **영향**: 의도하지 않은 변경이 커밋에 섞이거나, 변경 여부를 구분하기 어려움.
+- **해결 방안**: 빌드 산출물의 추적 여부를 정리(추적 제외 또는 재현 가능한 빌드 결과로 고정).
+- **상태**: Open (우선순위 P4)
 
 
 
