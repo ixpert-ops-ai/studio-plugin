@@ -19,18 +19,36 @@ Companion docs in repo root: `DEVELOPMENT_GUIDE.md` (architecture rules), `WORKI
 The Gradle build wires the webview into `processResources`, so any plugin task rebuilds the webview as needed:
 `installWebviewDependencies` → `buildWebview` (Vite) → `copyWebviewToResources` → `processResources`. Node 20.11.1 is auto-downloaded by the `node` plugin (don't install Node manually). Webview-only dev server: `cd webview && npm run dev`.
 
-There is **no test task wired in** — there are no JUnit tests in this repo. Don't claim a test command exists.
+### Tests
+
+JUnit 4 + `kotlin("test")` under `src/test/kotlin` (mostly `agent/clarify` and `agent/completeness`), fixtures in `src/test/resources` and `src/test/testData`.
+
+- `./gradlew test` — all tests. Single class: `./gradlew test --tests "net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeInputResolverTest"`.
+- Tests that hit a live LLM (`*LiveLlm*Test`) are skipped via `Assume` unless `-DrunLiveLlmTests=true` or env `RUN_LIVE_LLM_TESTS=true`. The Gradle `test` task forwards JVM system properties.
+- `PipelineE2ETest` has no HTTP timeouts and can block a full `./gradlew test` run (backlog B-17); prefer targeted `--tests`.
+- Root-level `*.kts`, `scratch_*.js`, `*_output*.txt`, `build2/`, `build.old` are throwaway experiment artifacts, not part of the build.
 
 ## Architecture: Action → Agent → Service → LLM → UI
 
 This layering is strictly enforced (see `AI_DEVELOPMENT_RULES.md`). Putting logic in the wrong layer is the most common rule violation here.
 
-- **`action/`** — IntelliJ `AnAction` entry points (`ExplainAction`, `ReviewAction`, `ImpactAnalysisAction`, `QueryValidationAction`, `ImproveAction`, `DocGenerateAction` — right-click menu items declared in `META-INF/plugin.xml`) plus `WebviewActionRouter` which dispatches JSQuery commands from the React webview (`/explain`, `/chat`, `/task`, `/doc`, `/ragdoc`, `/apply`, `/viewDiff`, `/undo`, `/cancel`, `/saveMarkdown`, `/testConnection`, `/fetchModels`, `/changeModel`, `/openTabs`, `/openSettings`, `/alert`, `/saveChat`, `/loadChat`, `/loadLastChat`, `/listChats`, `/deleteChat`). **No business logic in this layer.**
+- **`action/`** — IntelliJ `AnAction` entry points (`ExplainAction`, `ReviewAction`, `ImpactAnalysisAction`, `QueryValidationAction`, `ImproveAction`, `DocGenerateAction`, plus `UnitTestReportAction` and `MetaGraphAction` — right-click menu items declared in `META-INF/plugin.xml`) plus `WebviewActionRouter` which dispatches JSQuery commands from the React webview (`/explain`, `/chat`, `/task`, `/doc`, `/ragdoc`, `/apply`, `/viewDiff`, `/undo`, `/cancel`, `/saveMarkdown`, `/testConnection`, `/fetchModels`, `/changeModel`, `/openTabs`, `/openSettings`, `/alert`, `/saveChat`, `/loadChat`, `/loadLastChat`, `/listChats`, `/deleteChat`). **No business logic in this layer.**
 - **`agent/`** — Holds all LLM-calling logic. Inherits from `BaseAgent` / implements `WuwAgent`. **LLM (Ollama) calls live only here.**
 - **`service/`** — "Tools": `EditorContextService`, `EditorApplyService`, `EditorDiffService`, `FileSearchService`, `BuildContextService`, `TypeContextService`, `MarkdownFileService`, `ChatHistoryService`, `WuwLlmService`, plus `service/analysis/` extractors. **Services must not call the LLM.**
 - **`prompt/`** — `PromptManager.loadPrompt(fileName)` reads from `src/main/resources/prompt/`. Prompts are never hardcoded; new features add a new prompt file there.
 - **`ui/`** — `WuwToolWindowFactory` mounts the JCEF browser; `ui/bridge/JcefBridge` is the IDE→JS message channel (`sendMessage`, `sendMessageChunk`); `JcefMessageHandler` is the JS→IDE side feeding `WebviewActionRouter`.
 - **`client/OllamaClient`** — HTTP client for Ollama (streaming + blocking). All settings (baseUrl, model, temperature, timeoutSeconds, contextWindow) come from `setting/SettingsState` (persisted IntelliJ application service).
+
+### Requirement-analysis subsystem (`/clarify` → `/analyze` → `/implement`)
+
+A second, larger pipeline beside the TaskAgent features, routed from `WebviewActionRouter` (`/clarify`, `/clarify-utterance`, `/clarify-confirm`, `/analyze`, `/implement`, `/test-all`, `/metagraph`, `/find`, `/impact`):
+
+- **Stage 0 `/clarify`** (`agent/clarify/`, `agent/stage0/`): conversational requirement refinement (`Stage0ClarificationEngine`, `Stage0GraphScanner`) producing a `ClarifyIntent` (refined requirement, anchorTokens, constraints, `excludedFiles`, `unresolvedItems`).
+- **Stage 1–3 `/analyze`** (`RequirementAnalysisPipeline`, `agent/analyze/search/`, `agent/completeness/`): discovery → trimming → verification over the project MetaGraph. `AnalyzeInputResolver` is the single entry point that turns raw input + optional in-memory intent into analyze input.
+- **MetaGraph** (`service/metagraph/`): PSI/resource scanner building a project dependency graph (Spring, Anyframe, JPA, JSP/JS) consumed by analyze and Impact.
+- **Contract invariants** (`docs/clarify_analyze_interface_contract.md`, ADR-001): `/analyze` must run fully without `/clarify`; `ClarifyIntent` is a soft hint plus a hard `excludedFiles` filter; new sessions always start with `previousContract = null` — never auto-load intent/contract files from disk (`findIntentFile`, `loadIntentByKey`, etc. must have zero callers in `src/main`).
+- Open issues and measurement history live in `docs/analysis_pipeline_backlog.md` (B-xx IDs referenced in commits/tests); baseline reports are `clarify_analyze_baseline_*`.
+- `client/` has `LLMClient` with `OllamaClient` and `OpenAIClient` (vLLM-compatible) implementations; the Ollama-only rule above applies to the TaskAgent features.
 
 ### TaskAgent + TaskPipeline (the orchestration core)
 
@@ -55,7 +73,7 @@ React + Vite + TypeScript under `webview/`. `vite.config.ts` uses `vite-plugin-s
 
 ## Project conventions you must respect
 
-- **Korean commit messages** (`feat: …`, `fix: …`, `refactor: …`). Enforced by `DEVELOPMENT_GUIDE.md` §11.
+- **Korean commit messages** (`feat: …`, `fix: …`, `refactor: …`) per `DEVELOPMENT_GUIDE.md` §11. Recent clarify-area history uses scoped English messages (`test(clarify): …`); match the style of the area you touch.
 - **Per-feature ownership boundaries** in `WORKING_GUIDE.md`: each developer owns one feature's `agent/` class + `prompt/` file. Do not modify other features' agents/prompts, anything in `action/` or `service/`, or `agent/TaskPipeline.kt`, unless explicitly asked. Cross-feature edits require explicit user direction.
 - **Default LLM settings** are intentional: `Context Window = 32768` is required (the default 4096 fails on files >~250 lines). `Base URL = http://ollama.jodongik.cloud`, `Model = qwen3-coder:30b`, `Timeout = 300`, `Temperature = 0.1`. Don't change these without being asked.
 - **Diff-based edits**: code modifications go through `EditorApplyService` (SEARCH/REPLACE blocks or extracted code blocks) and `EditorDiffService` (3-way diff). Agents never write to files directly.
