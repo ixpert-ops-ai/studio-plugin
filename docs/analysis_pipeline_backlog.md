@@ -306,7 +306,9 @@
 - **현상**: `AnalyzeInputResolverTest`에서 파이프라인 프롬프트까지 확인하는 테스트(`bf5e33c`)의 픽스처는 `refinedRequirement = ""`(빈 정제문)이라 `primaryReq`가 원문과 같다. 정제문이 비어 있지 않고 원문과 다른 경우에 시드 선택기 프롬프트에 무엇이 들어가는지 확인하는 테스트가 없다. 나머지 정제문 픽스처(`:27`, `:117`)는 Resolver 반환값만 검증한다.
 - **영향**: 운영 경로(`executeAnalyzePipeline`)에서 정제문이 시드 프롬프트로 전달된다는 계약이 테스트로 고정되어 있지 않다.
 - **해결 방안**: 원문 전용 문구와 정제문 전용 문구가 다른 인텐트로 `executeAnalyzePipeline` 경로를 실행해 프롬프트 포함 여부를 단언.
-- **상태**: Open (우선순위 P2)
+- **고정된 범위**: Resolver → `analyze()` → 시드 프롬프트는 테스트 `2423ae9`(`AnalyzeRefinedSeedPromptTest`, 원문 "원문 전용 문구 A" / 정제문 "정제문 전용 문구 B", strict mock으로 프롬프트 기록, 시드 프롬프트에 B가 있고 A가 없음을 단언)로 고정. 입력을 원문으로 바꾸면 같은 테스트가 실패함을 확인함. `4ece8af`의 `RequirementAnalysisPipelineIntegrationTest`는 프롬프트를 기록하지 않고 계약의 `enrichedRequirementText`만 단언하므로 이 계약을 고정하지 못한다.
+- **미고정 범위**: Router `executeAnalyzePipeline` 내부 연결(`:1499` resolve → `:1503`/`:1504` → `:1514`/`:1517`)은 코드 읽기로만 확인됨(B-35).
+- **상태**: 부분 해소 (우선순위 P2, Router 내부 연결은 B-35)
 
 ---
 
@@ -315,5 +317,13 @@
 - **관측**: 2026-10-07 16:37 전체 실행(`a09dfb7`)에서 HTTP 520/502(`Server returned HTTP response code: 520/502 for URL: http://vllm.ixpertops.cloud/v1/chat/completions`)로 6건 중 3건 실패(`runHeldOutEvaluation`, `testOpenAIClientStreaming30FilesDirectly`, `traceApcHeldOutPipeline`, 소요 334초). 같은 3건은 31개 클래스 필터 실행에는 포함되지 않았다.
 - **영향**: 전체 테스트 결과가 외부 서버 상태에 따라 달라져 결정적 기준선(B-27)에 포함할 수 없고, 서버 장애 시 실행 시간이 길어진다.
 - **해결 방안**: `-DrunLiveLlmTests=true` 또는 `RUN_LIVE_LLM_TESTS=true` 게이트(`Assume`)를 적용.
+- **상태**: Open (우선순위 P3)
+
+---
+
+### [B-35] `WebviewActionRouter.executeAnalyzePipeline` 테스트 불가
+- **현상**: `private fun executeAnalyzePipeline(project, bridge, rawInput, messageId, inMemoryClarifyIntent)`(`WebviewActionRouter.kt:1482`)는 테스트에서 호출할 수 없다. `private`이고, `WuwLlmService.getClient()`(`:1509`)를 함수 안에서 직접 호출해 LLM 클라이언트 주입 지점이 없으며, `JcefBridge`(실 JCEF), `ApplicationManager.executeOnPooledThread`/`invokeLater`, `project.getService(GraphLoader)`에 의존한다. 테스트 소스에는 `WebviewActionRouter`를 생성하는 곳이 없다.
+- **선택지**: B) 함수를 `internal`로 열고 LLM 클라이언트·그래프 로더·실행기를 파라미터로 주입. C) 플랫폼 테스트 픽스처(`BasePlatformTestCase` 등)로 Project/Application 구성(`getClient()` 주입이 풀리지 않으므로 B 필요). 선택지 A(입력 조립 경로만 직접 호출)는 `2423ae9`로 수행함. 이 선택은 `action/` 계층 "비즈니스 로직 금지" 규칙과 함께 검토해야 한다.
+- **영향**: Router 내부의 `:1499 → :1503/:1504 → :1514/:1517` 연결은 코드 읽기로만 확인되며 테스트로 고정되지 않음.
 - **상태**: Open (우선순위 P3)
 
