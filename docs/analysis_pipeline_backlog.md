@@ -298,7 +298,16 @@
 - **현상**: `13e53f7` ↔ `63af698` ↔ `77d0d37`의 GT 기준선 블록(`[GT Baseline:` ~ 같은 시나리오 `[MockTelemetry:`) 비교에 쓴 `compare_baseline_bytes.js`가 저장소 밖(에이전트 작업 폴더의 `scratch/`)에 있고, 경로가 삭제된 worktree(`worktree-13e53f7`, `worktree-63af698`)와 덮어써지는 메인 트리 XML에 하드코딩되어 있다. 같은 이름의 시나리오가 둘이면 뒤의 것이 앞의 것을 덮어쓰며 오류 없이 지나간다.
 - **영향**: 위 세 커밋 사이의 "EXACT_MATCH" 주장을 지금은 재현하거나 검증할 수 없다.
 - **해결 방안**: 비교 도구를 저장소에 커밋(입력: XML 경로 둘, 출력: 블록별 EXACT_MATCH 또는 첫 번째로 다른 줄과 sha256, 중복 시나리오명은 오류 종료)하고 `13e53f7` 대비 HEAD를 다시 측정.
-- **상태**: Open (우선순위 P3)
+- **추가 확인(스크립트 읽기 기준)**: 기존 `compare_baseline_bytes.js`의 `extractBlocks`는 `[GT Baseline:` 줄을 만날 때마다 버퍼를 `[line]`으로 초기화한다. 하네스는 같은 이름의 `[GT Baseline: ...]` 줄을 5줄 연속 출력(`RefinedReq`, `Top-30 TargetFiles Count`, `GT Survived`, `GT Missing`, `Top-30 List:`)하므로, 비교 범위가 마지막 줄(`Top-30 List:`)부터로 줄어들어 앞 4줄은 비교에서 빠졌을 가능성이 크다(스크립트를 읽은 결론이며 재실행으로 확인하지 않음).
+- **조치 (도구)**: `scripts/compare-harness-blocks.js`를 커밋(`87dfbb8`). 블록은 `[GT Baseline: <이름>]` 첫 줄부터 다음 `[MockTelemetry:` 줄까지이고, 같은 이름 블록이 둘이면 오류(exit 2), 블록별 `EXACT_MATCH` 또는 `FIRST_DIFF line <n>`과 sha256을 출력하며 비교 대상이 모두 `EXACT_MATCH`일 때만 exit 0이다. 검증: HEAD(`6ef5e9f`) 하네스 2회 실행 비교는 기존 5종 모두 EXACT_MATCH(exit 0), 블록 안 한 줄(2번째 줄)을 고친 파일은 `FIRST_DIFF line 2`(exit 1), 블록을 복제한 파일은 중복 오류(exit 2).
+- **사용법**:
+  ```
+  node scripts/compare-harness-blocks.js <A.xml> <B.xml> --scenarios "APC Transit Card (Intent=LlmOff),survey_admin (Intent=LlmOff),ISM Core (Intent=LlmOff),survey_admin (Intent=LlmOn),APC DEM Isolated (Intent=LlmOn)"
+  ```
+  하네스 XML은 `./gradlew.bat test --offline --rerun --tests "net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest"` 실행 후 `build/test-results/test/TEST-net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest.xml`에 생긴다.
+- **HEAD 기준선 파일**: `6ef5e9f` 하네스 결과 XML 2개가 임시 폴더 `%TEMP%\bl\harness_6ef5e9f_run1.xml`, `harness_6ef5e9f_run2.xml`에 있다(저장소에 커밋하지 않음, 임시 폴더라 유실될 수 있으므로 같은 명령으로 재생성). 블록별 sha256(run1=run2): APC Transit Card(LlmOff) `a7284443…4999`, survey_admin(LlmOff) `12396f45…7363`, ISM Core(LlmOff) `9f870558…6c02`, survey_admin(LlmOn) `39c72ebe…be60`, APC DEM Isolated(LlmOn) `b535c4f9…5323`.
+- **남은 작업**: `13e53f7` ↔ `63af698` ↔ `77d0d37` 재측정(10-b)은 아직 수행하지 않았다. 4번(C-12 수정) 시 C-12 출력 줄(`=== C-12: ...`, `Score Components`)은 `[GT Baseline:` 블록 밖(system-out 675~860행, 블록 사이)이라 기존 5종 블록에는 영향이 없다.
+- **상태**: 부분 해소 (우선순위 P3, 도구 완료, 과거 커밋 재측정 미수행)
 
 ---
 
