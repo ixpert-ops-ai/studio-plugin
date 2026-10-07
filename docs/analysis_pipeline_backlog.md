@@ -306,8 +306,21 @@
   ```
   하네스 XML은 `./gradlew.bat test --offline --rerun --tests "net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest"` 실행 후 `build/test-results/test/TEST-net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest.xml`에 생긴다.
 - **HEAD 기준선 파일**: `6ef5e9f` 하네스 결과 XML 2개가 임시 폴더 `%TEMP%\bl\harness_6ef5e9f_run1.xml`, `harness_6ef5e9f_run2.xml`에 있다(저장소에 커밋하지 않음, 임시 폴더라 유실될 수 있으므로 같은 명령으로 재생성). 블록별 sha256(run1=run2): APC Transit Card(LlmOff) `a7284443…4999`, survey_admin(LlmOff) `12396f45…7363`, ISM Core(LlmOff) `9f870558…6c02`, survey_admin(LlmOn) `39c72ebe…be60`, APC DEM Isolated(LlmOn) `b535c4f9…5323`.
-- **남은 작업**: `13e53f7` ↔ `63af698` ↔ `77d0d37` 재측정(10-b)은 아직 수행하지 않았다. 4번(C-12 수정) 시 C-12 출력 줄(`=== C-12: ...`, `Score Components`)은 `[GT Baseline:` 블록 밖(system-out 675~860행, 블록 사이)이라 기존 5종 블록에는 영향이 없다.
-- **상태**: 부분 해소 (우선순위 P3, 도구 완료, 과거 커밋 재측정 미수행)
+- **기준선 sha256 (전체 값)**: 블록 텍스트(`[GT Baseline: <이름>]` 첫 줄 ~ `[MockTelemetry:` 줄, 줄바꿈 `\n`)의 SHA-256이며 두 번 실행(run1, run2)이 같은 값이다.
+  - `6ef5e9f` run1 (기존 5종): 
+    - `APC Transit Card (Intent=LlmOff)` (29줄) `a7284443110bbd1d3edec4ef88c941799668d5cee5d8fbda28502b1f34c44999`
+    - `survey_admin (Intent=LlmOff)` (20줄) `12396f450851d5485c825a35f468f785dad4fd7112b8c3be8bf95802d0407363`
+    - `ISM Core (Intent=LlmOff)` (36줄) `9f870558d1374e275923b9179b379fb64e4c6485cf44a604c5d34bec4b8e6c02`
+    - `survey_admin (Intent=LlmOn)` (22줄) `39c72ebe90f878548fc1afe393634aca6f3b5be334782f84cee6288d59d2be60`
+    - `APC DEM Isolated (Intent=LlmOn)` (23줄) `b535c4f92683ade092225ffcf3c7db1490d91fc107d097ad9ce486ab01475323`
+  - `58eb590` run1 (7종): 위 5종과 같은 값(기존 5종 EXACT_MATCH) + 절제 실험 2종
+    - `Ablation-a (survey_admin LlmOff refined + 5 identifier lines)` (40줄) `474e1cd9fab814a611929ed8d7921dceb8f20a749ddf82d94b2088a20bb474c0`
+    - `Ablation-b (survey_admin LlmOn refined only - no identifiers)` (37줄) `f339f80ecb87dc7ee8dec5f930ca326f7fbf39528629b1a8e41042bbb4a8ccdf`
+  - 기준 XML: `%TEMP%\bl\harness_58eb590_run1.xml`, `_run2.xml` (임시 폴더, 미커밋).
+- **도구 제약**: `--scenarios`는 쉼표로 이름을 나누므로 시나리오 이름(`[GT Baseline: <이름>]`)에 쉼표를 쓸 수 없다. 쉼표가 들어간 이름은 `MISSING_IN_BOTH`로 나온다(절제 실험 블록 이름을 쉼표 없이 바꾼 이유). 블록 시작 없이 끝나지 않거나(끝 줄 `[MockTelemetry:` 누락) 다른 이름의 `[GT Baseline:`이 먼저 나오는 경우는 오류(exit 2)로 처리됨을 검증 파일로 확인함.
+- **C-12 점수 분해 단언**: `58eb590`에서 `ScoredFile`에 점수 구성 요소 필드가 없어(`score` 합계만 존재, `DiscoveryModels.kt:33-44`) 테스트가 구성 요소를 재계산하고 `assertEquals(targetScored.score, 재계산 합계)`를 추가했다(C-12 3종 + 절제 실험 2종 모두 통과). 단, 재계산식에는 `RelevanceScorer.kt:133`의 `methodMatchScore`, `typeBonusScore`, `criticalChainBonus` 항이 없고, `SurveyServiceImpl`에서는 단언이 통과하므로 이 세 항이 0이었다는 것만 확인된 상태다(다른 파일에는 적용되지 않음). hop 점수표는 `RelevanceScorer.kt:61-66`(`0→40, 1→30, 2→15, else→0`)과 동일하다.
+- **남은 작업**: `13e53f7` ↔ `63af698` ↔ `77d0d37` 재측정(10-b)은 아직 수행하지 않았다.
+- **상태**: 부분 해소 (우선순위 P3, 도구와 HEAD 기준선 완료, 과거 커밋 재측정 미수행)
 
 ---
 
