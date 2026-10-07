@@ -249,11 +249,11 @@
 ---
 
 ### [B-27] 전체 테스트 기준선 정정 (`./gradlew.bat test --offline`)
-- **측정**: 전체 실행 412 testcase / 57 실패 / 9 skip (`4ece8af`, 소요 1h 7m).
-- **정정**: 위 중 12 testcase(11 실패, 1 통과)는 소스가 삭제된 낡은 instrumented 클래스(B-28) 때문이다. 정정 기준선은 **400 / 46 / 9** (원인 미조사). 46건 비교는 31개 클래스 필터 기준이며, 필터 실행에서 `b7ff09e`와 `4ece8af`의 testcase 목록(통과 포함 70건)이 동일함을 확인함.
-- **정정 기준선 46건의 예외 종류 (XML `type` 기준)**: `java.lang.Error` 32, `java.lang.AssertionError` 6, `com.intellij.testFramework.TestLoggerFactory$TestLoggerAssertionError` 5, `java.lang.IllegalAccessError` 1, `java.lang.NoClassDefFoundError` 1, `com.fasterxml.jackson.databind.exc.ValueInstantiationException` 1.
-- **미검증**: 400이라는 숫자는 "낡은 클래스 testcase가 12건뿐"이라는 가정에 의존한다. 소스 없는 외곽 클래스는 총 20개이고 그중 12개(`Analyze2V0*Test`, `PureAnalyzeSurveyAdminTest` 등)는 31개 클래스 필터 밖이어서, 전체 실행에서 함께 실행됐다면 testcase 수가 달라질 수 있다. 전체 실행 XML은 이후 실행으로 덮어써져 재확인 불가.
-- **상태**: Open (우선순위 P3, 정정 기준선 확정은 낡은 클래스 정리 후 전체 재측정 필요)
+- **측정**: 전체 실행 412 testcase / 57 실패 / 9 skip (`4ece8af`, 소요 1h 7m). 이후 낡은 instrumented 클래스(B-28)를 정리하고 `--rerun`으로 재측정.
+- **실측 기준선**: **389 tests / 49 failed / 9 skipped** (`a09dfb7`, 2026-10-07 16:37 실행, `./gradlew.bat test --offline --rerun`, 소요 36분). 결정적 기준선: `IntegrationPipelineTest` 제외 실패 46건, skip 9건, 목록은 `b7ff09e` 필터 실행과 동일(실패·skip 목록 diff 비어 있음). 실패 49건 중 3건은 `IntegrationPipelineTest`의 실 vLLM 서버 호출 실패이며(B-34) 실행 시점에 따라 달라질 수 있다. clarify 패키지는 118 testcase 중 실패 1(B-10 `Stage0GraphScannerTest`), skip 3(Live LLM).
+- **412 → 389 차이 23건**: 소스가 삭제된 낡은 instrumented 클래스의 testcase다(필터 안 8개 클래스 12건 + 필터 밖 10개 테스트 클래스 11건, `javap`로 `@Test` 메서드 수를 세어 확인). 필터 밖 11건: `PureAnalyzeSurveyAdminTest` 1, `Analyze2V0MethodCTest` 1, `Analyze2V0PipelineTest` 1, `Analyze2V0Stage3ExpansionTest` 1, `Analyze2V0Stage3FirstTurnTest` 1, `Analyze2V0Stage3PipelineTest` 1, `Analyze2V0Stage3Turn2Test` 1, `Analyze2V0Stage3Turn3DialogueTest` 2, `Analyze2V0Stage3Turn3Test` 1, `Analyze2V0Test` 1 (`ConceptSet`, `VLLMClient`는 0).
+- **결정적 기준선 46건의 예외 종류 (XML `type` 기준)**: `java.lang.Error` 32, `java.lang.AssertionError` 6, `com.intellij.testFramework.TestLoggerFactory$TestLoggerAssertionError` 5, `java.lang.IllegalAccessError` 1, `java.lang.NoClassDefFoundError` 1, `com.fasterxml.jackson.databind.exc.ValueInstantiationException` 1. 원인은 미조사.
+- **상태**: 기준선 확정 (우선순위 P3, 46건의 원인 조사는 별도)
 
 ---
 
@@ -307,4 +307,13 @@
 - **영향**: 운영 경로(`executeAnalyzePipeline`)에서 정제문이 시드 프롬프트로 전달된다는 계약이 테스트로 고정되어 있지 않다.
 - **해결 방안**: 원문 전용 문구와 정제문 전용 문구가 다른 인텐트로 `executeAnalyzePipeline` 경로를 실행해 프롬프트 포함 여부를 단언.
 - **상태**: Open (우선순위 P2)
+
+---
+
+### [B-34] `IntegrationPipelineTest`가 실 vLLM 서버를 호출하는데 live 게이트가 없음
+- **현상**: `agent/integration/IntegrationPipelineTest.kt`(6개 `@Test`)는 `OpenAIClient`의 기본 서버 주소(`SettingsState.openaiServerUrl` 기본값 `http://vllm.ixpertops.cloud`)로 실제 LLM을 호출하지만, 다른 Live LLM 테스트와 달리 `Assume`/`runLiveLlmTests` 게이트가 없어 기본 `./gradlew test`에서 실행된다.
+- **관측**: 2026-10-07 16:37 전체 실행(`a09dfb7`)에서 HTTP 520/502(`Server returned HTTP response code: 520/502 for URL: http://vllm.ixpertops.cloud/v1/chat/completions`)로 6건 중 3건 실패(`runHeldOutEvaluation`, `testOpenAIClientStreaming30FilesDirectly`, `traceApcHeldOutPipeline`, 소요 334초). 같은 3건은 31개 클래스 필터 실행에는 포함되지 않았다.
+- **영향**: 전체 테스트 결과가 외부 서버 상태에 따라 달라져 결정적 기준선(B-27)에 포함할 수 없고, 서버 장애 시 실행 시간이 길어진다.
+- **해결 방안**: `-DrunLiveLlmTests=true` 또는 `RUN_LIVE_LLM_TESTS=true` 게이트(`Assume`)를 적용.
+- **상태**: Open (우선순위 P3)
 
