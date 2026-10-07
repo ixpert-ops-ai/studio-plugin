@@ -195,13 +195,15 @@ class AnalyzeInputResolverTest {
         )
         assertEquals("정제문 공백 시 originalRequirement로 복원되어야 함", "TargetService 관련 원본 요구사항", resolved.effectiveRequirement)
 
-        val dummyClient = object : net.ib.ixpert.ops.wuwagent.client.LLMClient {
+        val recordedPrompts = mutableListOf<String>()
+        val promptRecordingClient = object : net.ib.ixpert.ops.wuwagent.client.LLMClient {
             override fun chat(
                 systemPrompt: String,
                 userCode: String,
                 maxTokens: Int?,
                 onChunk: ((String) -> Unit)?
             ): net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse? {
+                recordedPrompts.add(userCode)
                 return net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse(
                     model = "test",
                     createdAt = "",
@@ -209,10 +211,23 @@ class AnalyzeInputResolverTest {
                     done = true
                 )
             }
+            override fun chatWithTools(
+                systemPrompt: String,
+                messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
+                maxTokens: Int?,
+                tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>?,
+                toolChoice: Any?,
+                temperature: Double?
+            ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
+                messages.forEach { msg ->
+                    msg.content?.let { recordedPrompts.add(it) }
+                }
+                return null
+            }
             override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
         }
 
-        val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(dummyClient)
+        val pipeline = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline(promptRecordingClient)
         val result = pipeline.analyze(
             primaryReq = resolved.effectiveRequirement,
             secondaryReq = "",
@@ -223,6 +238,11 @@ class AnalyzeInputResolverTest {
         )
 
         assertNotNull(result)
-        assertEquals("파이프라인이 빈 refinedRequirement 대신 primaryReq(originalRequirement)를 유지해야 함", "TargetService 관련 원본 요구사항", resolved.effectiveRequirement)
+        val seedPrompt = recordedPrompts.firstOrNull { it.contains("요구사항(SR):") }
+        assertNotNull("AgenticSeedSelector에 전달된 사용자 프롬프트가 기록되어야 함", seedPrompt)
+        assertTrue(
+            "파이프라인 AgenticSeedSelector의 프롬프트에 originalRequirement가 온전히 주입되어야 함 (빈 refined가 주입되면 안 됨)",
+            seedPrompt!!.contains("TargetService 관련 원본 요구사항")
+        )
     }
 }

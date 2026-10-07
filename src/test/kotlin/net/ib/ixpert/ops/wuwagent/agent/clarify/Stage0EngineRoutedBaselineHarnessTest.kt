@@ -821,26 +821,62 @@ class Stage0EngineRoutedBaselineHarnessTest {
             "Simulated2b" to "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발\nBizgoApiService\nBrandMessageTemplateBatchJob\nBrandMessageTemplateBatchRepository\nBrandMessageTemplateBatchRunner\nBrandMessageTmplDto"
         )
 
-        val totalNodes = graph.files.size + graph.resourceNodes.size
-        val maxIdf = Math.log(totalNodes.toDouble())
-        fun getDf(token: String): Int {
-            val lower = token.lowercase()
-            val fm = graph.files.values.count { it.className.contains(lower, ignoreCase = true) }
-            val rm = graph.resourceNodes.count { it.path.substringAfterLast("/").contains(lower, ignoreCase = true) }
-            return fm + rm
-        }
-        fun getIdfWeight(token: String): Double {
-            val df = maxOf(1, getDf(token))
-            return Math.log(totalNodes.toDouble() / df) / maxIdf
-        }
+        val domainExtractor = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DomainExtractor(graph.files)
+        val config = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DiscoveryConfig(maxHop = 3)
+        val expander = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.GraphExpander(graph, domainExtractor, config)
 
         for ((label, text) in cases) {
             println("[$label] InputText: \"$text\"")
+
+            // 1. Selector 실행하여 실제 Seed 및 SeedResult 도출
+            val selector = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AgenticSeedSelector(
+                llmClient = StrictPipelineLlm(),
+                projectBasePath = null,
+                clarificationBridge = null
+            )
+            val seedResult = selector.selectSeeds(text, graph)
+            println("  - SeedClasses: ${seedResult.seedClasses}")
+            println("  - LayerHint: ${seedResult.layerHint}")
+
+            // 2. Expander 실행하여 실제 확장 그래프 획득
+            val expandedFiles = expander.expand(seedResult, text)
+            val step = expandedFiles[fileNode!!.path]
+            println("  - ExpansionStep for SurveyServiceImpl: hop=${step?.hop}, via=${step?.via}, from=${step?.from}")
+
+            // 3. RelevanceScorer 실제 호출 (minScore = 10으로 주어 탈락 노드도 점수 계산값 수집)
+            val scorer = net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.RelevanceScorer(graph, fileLimit = 100, minScore = 10)
+            val scoredList = scorer.scoreAndFilter(text, expandedFiles, seedResult)
+            val targetScored = scoredList.find { it.className == "SurveyServiceImpl" }
+
+            println("  - RelevanceScorer.scoreAndFilter Actual Output:")
+            if (targetScored != null) {
+                println("    * Actual Total Score: ${targetScored.score}")
+                println("    * Discovery Reason: ${targetScored.discoveryReason}")
+                println("    * Hop Distance: ${targetScored.hopDistance}")
+                println("    * Protected: ${targetScored.isProtected} (Reason: ${targetScored.protectionReason})")
+            } else {
+                println("    * SurveyServiceImpl NOT FOUND in scored list (Score < 10 or not expanded)")
+            }
+
+            // 4. 구성 요소별 정밀 분해 (RelevanceScorer 공식과 동일한 가중치 계산)
+            val totalNodes = graph.files.size + graph.resourceNodes.size
+            val maxIdf = Math.log(totalNodes.toDouble())
+            fun getDf(token: String): Int {
+                val lower = token.lowercase()
+                val fm = graph.files.values.count { it.className.contains(lower, ignoreCase = true) }
+                val rm = graph.resourceNodes.count { it.path.substringAfterLast("/").contains(lower, ignoreCase = true) }
+                return fm + rm
+            }
+            fun getIdfWeight(token: String): Double {
+                val df = maxOf(1, getDf(token))
+                return Math.log(totalNodes.toDouble() / df) / maxIdf
+            }
+
             val stopWords = setOf(
-                "controller", "service", "repository", "entity", "dto", "vo", "request", "response", 
-                "mapper", "view", "page", "screen", "api", "impl", "config", "exception", "handler", 
+                "controller", "service", "repository", "entity", "dto", "vo", "request", "response",
+                "mapper", "view", "page", "screen", "api", "impl", "config", "exception", "handler",
                 "util", "action", "svc", "svo", "dvo", "dao", "bo",
-                "화면", "컨트롤러", "서비스", "레파지토리", "저장소", "엔티티", "디티오", "매퍼", 
+                "화면", "컨트롤러", "서비스", "레파지토리", "저장소", "엔티티", "디티오", "매퍼",
                 "액션", "페이지", "에이피아이", "구현체", "인터페이스"
             )
             val directEnglish = Regex("[a-zA-Z0-9]{3,}").findAll(text)
@@ -865,43 +901,35 @@ class Stage0EngineRoutedBaselineHarnessTest {
                 translatedEnglish.addAll(dict.translate(cw).filterNot { stopWords.contains(it.lowercase()) })
             }
 
-            println("  - directEnglish: $directEnglish")
-            println("  - translatedEnglish: $translatedEnglish")
-            println("  - nouns: $nouns")
-            println("  - verbs: $verbs")
-
-            // NameMatchScore 계산
-            val directMatches = directEnglish.filter { eng -> fileNode!!.className.contains(eng, ignoreCase = true) }
-            val transMatches = translatedEnglish.filter { eng -> fileNode!!.className.contains(eng, ignoreCase = true) }
-            var nameMatchScore = 0.0
-            var matchedKeyword = "none"
-            var idfWeight = 0.0
-            if (directMatches.isNotEmpty()) {
-                val maxToken = directMatches.maxByOrNull { getIdfWeight(it) }!!
-                idfWeight = getIdfWeight(maxToken)
-                nameMatchScore = 50.0 * idfWeight
-                matchedKeyword = "Direct:$directMatches (max=$maxToken)"
-            } else if (transMatches.isNotEmpty()) {
-                val maxToken = transMatches.maxByOrNull { getIdfWeight(it) }!!
-                idfWeight = getIdfWeight(maxToken)
-                nameMatchScore = 30.0 * idfWeight
-                matchedKeyword = "Trans:$transMatches (max=$maxToken)"
+            val hopScore = when (step?.hop) {
+                0 -> 40
+                1 -> 30
+                2 -> 15
+                else -> 0
             }
 
-            // CommentMatchScore 계산
+            val directMatches = directEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
+            val transMatches = translatedEnglish.filter { eng -> fileNode.className.contains(eng, ignoreCase = true) }
+            var nameMatchScore = 0.0
+            if (directMatches.isNotEmpty()) {
+                val maxToken = directMatches.maxByOrNull { getIdfWeight(it) }!!
+                nameMatchScore = 50.0 * getIdfWeight(maxToken)
+            } else if (transMatches.isNotEmpty()) {
+                val maxToken = transMatches.maxByOrNull { getIdfWeight(it) }!!
+                nameMatchScore = 30.0 * getIdfWeight(maxToken)
+            }
+
+            val layerAlignScore = if (seedResult.layerHint.any { layer -> fileNode.layer.name.contains(layer, ignoreCase = true) || fileNode.fileType.name.contains(layer, ignoreCase = true) }) 15 else 0
+
             var commentMatchScore = 0.0
-            val matchedComment = fileNode!!.koreanComments.find { comment ->
+            val matchedComment = fileNode.koreanComments.find { comment ->
                 nouns.any { n -> comment.contains(n) } || verbs.any { v -> comment.contains(v) }
             }
             if (matchedComment != null) {
                 commentMatchScore = 20.0
             }
 
-            println("  - NameMatch: score=${String.format("%.1f", nameMatchScore)}, matched=$matchedKeyword, idf=${String.format("%.3f", idfWeight)}")
-            println("  - CommentMatch: score=$commentMatchScore, commentSnippet=\"${matchedComment?.take(30)}\"")
-            println("  - HopScore (Hop 1 via DEPENDED_BY / Seed): 30")
-            println("  - LayerAlignScore: 15 (if layer matches)")
-            println("  - Total Score Breakdown: Hop(30) + NameMatch(${String.format("%.1f", nameMatchScore)}) + Comment($commentMatchScore) = Total")
+            println("    * Score Components: HopScore=$hopScore + NameMatch=${String.format("%.1f", nameMatchScore)} + LayerAlign=$layerAlignScore + CommentMatch=${String.format("%.1f", commentMatchScore)} = ${(hopScore + nameMatchScore + layerAlignScore + commentMatchScore).toInt()}")
         }
     }
 }
