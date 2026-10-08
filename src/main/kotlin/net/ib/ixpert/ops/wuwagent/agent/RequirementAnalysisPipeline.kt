@@ -47,8 +47,13 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         clarifyIntent: net.ib.ixpert.ops.wuwagent.agent.clarify.model.ClarifyIntent? = null,
         previousContract: net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract? = null,
         projectRoot: java.io.File? = null,
+        analyzeInput: net.ib.ixpert.ops.wuwagent.agent.clarify.ResolvedAnalyzeInput? = null,
         onChunk: ((String) -> Unit)? = null
     ): RequirementAnalysisResult {
+        if (analyzeInput != null) {
+            require(analyzeInput.effectiveRequirement == primaryReq) { "analyzeInput.effectiveRequirement와 primaryReq가 다릅니다" }
+            require(analyzeInput.effectiveIntent === clarifyIntent) { "analyzeInput.effectiveIntent와 clarifyIntent가 같은 객체가 아닙니다" }
+        }
         val fwType = projectGraph.frameworkDetection?.userOverride ?: projectGraph.frameworkType
         logger.info("Starting RequirementAnalysisPipeline. Resolved Framework Type: ${fwType.name}")
         
@@ -255,8 +260,14 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             
             // 앵커 형제(anchorSiblingRefs)는 Stage 1 위상 시드 확장 풀에 섞지 않고 (노이즈 원천 차단),
             // Stage 2/3 프롬프트 참조 컨텍스트로 주입하여 신규 파일 구조 생성의 참조로만 소비 (방안 B 실측 채택)
-            val baseRequirement = stage0Contract?.enrichedRequirementText
+            val legacyBase = stage0Contract?.enrichedRequirementText
                 ?: if (secondaryReq.isNotBlank()) "$effectiveReq\n$secondaryReq" else effectiveReq
+            val baseRequirement = net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSections.buildStage3Base(
+                input = analyzeInput,
+                secondaryReq = secondaryReq,
+                enrichedRequirementText = stage0Contract?.enrichedRequirementText,
+                fallbackBase = legacyBase
+            )
             val fullRequirement = if (stage0Contract != null && stage0Contract.anchorSiblingRefs.isNotEmpty()) {
                 buildString {
                     appendLine(baseRequirement)

@@ -1516,7 +1516,8 @@ class WebviewActionRouter(private val project: Project) {
                         projectGraph = projectGraph,
                         clarifyIntent = clarifyIntent,
                         previousContract = previousContract,
-                        projectRoot = projectBase
+                        projectRoot = projectBase,
+                        analyzeInput = resolvedInput
                     ) { chunk ->
                         ApplicationManager.getApplication().invokeLater {
                             bridge.sendMessageChunk(messageId, chunk)
