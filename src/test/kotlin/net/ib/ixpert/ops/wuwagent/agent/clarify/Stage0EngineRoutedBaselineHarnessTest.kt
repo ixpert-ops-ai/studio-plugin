@@ -752,6 +752,56 @@ class Stage0EngineRoutedBaselineHarnessTest {
         println("[MockTelemetry: SurveyAdmin_LlmOn_Simulated2b] ClarifyCalls=${mockLlm.callCounts}, PipelineCalls=${pipelineLlm.callCounts}, unmatched=0")
     }
 
+    /**
+     * 커밋 2b: survey_admin LlmOn 인텐트의 AnalyzeInputResolver.resolve 결과(effectiveRequirement)가
+     * 위 Simulated 2b 입력 문자열과 바이트 단위로 같고, 기존 태그 형식 정제문과는 다르다는 것을 단언한다.
+     * (출력 블록을 만들지 않으므로 [GT Baseline: ~ [MockTelemetry: 블록에 영향이 없다.)
+     */
+    @Test
+    fun testResolvedInputMatchesSimulated2bSrText_SurveyAdmin_LlmOn() = kotlinx.coroutines.runBlocking {
+        val graphPath = "C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json"
+        val graph = loadGraph(graphPath)
+        Assume.assumeNotNull("survey_admin 메타그래프 존재 시에만 실행", graph)
+
+        val scanner = Stage0GraphScanner(graph!!, minSpecificityScore = 1.0, proposalBudget = 10)
+        val mockLlm = StrictClarifyMockLlm(
+            refinementResponse = "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발"
+        )
+        val engine = Stage0ClarificationEngine(scanner, graph, llmClient = mockLlm)
+        val turn0 = engine.initSession("설문 발송 채널에 브랜드메시지 추가")
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(
+                userStatement = "외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
+            )
+        )
+        val intent = engine.buildClarifyIntent(turn1.state)
+
+        // Simulated 2b와 같은 조립 규칙 (testSimulateCommit2b_SurveyAdmin_LlmOn 참조)
+        val raw = intent.retentionAudit?.rawRefinedRequirement ?: intent.refinedRequirement
+        val missingBeforeFix = intent.retentionAudit?.missingBeforeFix ?: emptyList()
+        val simulatedSrText = "$raw\n" + missingBeforeFix.joinToString("") { "\n$it" }
+
+        val resolved = AnalyzeInputResolver.resolve(
+            rawInput = intent.refinedRequirement,
+            inMemoryIntent = intent
+        )
+
+        assertTrue("누락 식별자가 있어야 이 단언이 의미가 있음", missingBeforeFix.isNotEmpty())
+        assertArrayEquals(
+            "resolve 결과가 Simulated 2b 입력 문자열과 바이트 단위로 같아야 함",
+            simulatedSrText.toByteArray(Charsets.UTF_8),
+            resolved.effectiveRequirement.toByteArray(Charsets.UTF_8)
+        )
+        assertNotEquals(
+            "새 조립식은 기존 태그 형식 정제문(intent.refinedRequirement)과 달라야 함",
+            intent.refinedRequirement,
+            resolved.effectiveRequirement
+        )
+        assertEquals("rawRefined는 감사 기록의 태그 없는 정제문이어야 함", raw, resolved.rawRefined)
+        assertEquals("missingIdentifiers는 missingBeforeFix 그대로(사전순)여야 함", missingBeforeFix, resolved.missingIdentifiers)
+    }
+
     @Test
     fun testSimulateCommit2b_Apc_DemIsolated_LlmOn() = kotlinx.coroutines.runBlocking {
         val graphPath = "C:/Workspace/graph/project-graph-a/project-graph.json"
