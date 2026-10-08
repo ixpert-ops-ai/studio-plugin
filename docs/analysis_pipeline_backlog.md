@@ -198,6 +198,7 @@
   1. `anchorTokens` 및 `seedSet` 수집 대상을 검증된 식별자/노드로 한정하고 대화성 제어 토큰 격리.
   2. `anchorTokens`를 불변식에 포함. 조건 3에서 excluded이면서 anchor=true인 모순을 제거.
 - **선행 조건**: 엔진 경로(`initSession` $\rightarrow$ `processTurn` $\rightarrow$ `buildClarifyIntent`)를 거치는 GT 측정 추가.
+- **사례 (APC Transit Card LlmOff, `selTrcdIsInf`)**: `extractIdentifiers`가 뽑아 `expectedIdentifiers`에 들어가지만, 사용자 발화 항목(`utteredIdentifier`)으로는 `state.items`에 없다(13건 중 `USER_UTTERED` 4건은 `APCMMTrcdIsSVC.java`, `APCMMTrcdIsInfSVO`, `aCMBTBAPC024DEM`, `SAPACMM0802S01`). `resolveUserUtteredIdentifiers`의 `unmatched` 필터(`Stage0ClarificationEngine.kt:159`)가 소문자 시작이고 `.`이 없는 토큰을 버리기 때문이다. 이 토큰은 `SYSTEM_UNCONFIRMED` 항목 4건(`APCCmnConstantUtil.java`, `APCMMOpnApiConstantUtil.java`, `APCCOCardImgUrl.java`, `ACMBTBAPC039DVO.java`)의 ExistingRef symbols에 `token:seltrcdisinf`(소문자)로만 나타나, 발화 식별자의 확정·배제·미확정 세 위치 어디에도 들어가지 않는다. 따라서 "세 위치 합 1" 불변식은 소문자 시작 단독 토큰에는 성립하지 않는다(이 불변식이 그런 토큰까지 포함하는 것이 의도인지는 미확인). 다만 Stage 3 입력에서는 사라지지 않는다: 정제문 본문에 있으면 본문에, 정제문에서 빠졌으면 빠진 식별자 섹션에 남는다(2c, B-36).
 - **상태**: Open (우선순위 P2)
 
 ---
@@ -358,8 +359,9 @@
 ### [B-34] `IntegrationPipelineTest`가 실 vLLM 서버를 호출하는데 live 게이트가 없음
 - **현상**: `agent/integration/IntegrationPipelineTest.kt`(6개 `@Test`)는 `OpenAIClient`의 기본 서버 주소(`SettingsState.openaiServerUrl` 기본값 `http://vllm.ixpertops.cloud`)로 실제 LLM을 호출하지만, 다른 Live LLM 테스트와 달리 `Assume`/`runLiveLlmTests` 게이트가 없어 기본 `./gradlew test`에서 실행된다.
 - **관측**: 2026-10-07 16:37 전체 실행(`a09dfb7`)에서 HTTP 520/502(`Server returned HTTP response code: 520/502 for URL: http://vllm.ixpertops.cloud/v1/chat/completions`)로 6건 중 3건 실패(`runHeldOutEvaluation`, `testOpenAIClientStreaming30FilesDirectly`, `traceApcHeldOutPipeline`, 소요 334초). 같은 3건은 31개 클래스 필터 실행에는 포함되지 않았다.
+- **추가 사례 `agent/IntegrationAnalyzeTest#testFullPipeline`**: 같은 서버를 `TestVllmClient`(`IntegrationAnalyzeTest.kt:19-22`, 주소 `http://vllm.ixpertops.cloud/v1/chat/completions`, 모델명 `Qwen/Qwen3.8-27B-FP8`로 하드코딩)로 직접 호출하고(`:168` 부근에서 `analyze()`를 `analyzeInput` 없이 호출) 게이트가 없다. `a09dfb7` 전체 실행에서는 PASS였으나 2026-10-08 전체 실행(2c 테스트 커밋 상태)과 같은 날 단독 `--rerun`에서 모두 `java.lang.AssertionError: Failed to call LLM: HTTP 530: error code: 1033`(`FileRelevanceVerifier.kt:137`)로 실패했다. 같은 요청을 `curl -X POST`로 직접 보내도 `http_code=530`이었으므로 코드와 무관한 서버 상태다. 이 테스트는 `integration-test-result.txt`를 `C:/Workspace/member-market/`에 쓰는 부수 효과도 있다. 결정적 기준선(B-27)에는 `IntegrationPipelineTest`와 함께 "외부 서버 HTTP 5xx"로 분류해 제외한다.
 - **영향**: 전체 테스트 결과가 외부 서버 상태에 따라 달라져 결정적 기준선(B-27)에 포함할 수 없고, 서버 장애 시 실행 시간이 길어진다.
-- **해결 방안**: `-DrunLiveLlmTests=true` 또는 `RUN_LIVE_LLM_TESTS=true` 게이트(`Assume`)를 적용.
+- **해결 방안**: `-DrunLiveLlmTests=true` 또는 `RUN_LIVE_LLM_TESTS=true` 게이트(`Assume`)를 적용(`IntegrationAnalyzeTest` 포함).
 - **상태**: Open (우선순위 P3)
 
 ---
@@ -386,7 +388,7 @@
 - **하네스 기준선 경로 확인**: 하네스의 GT 기준선 5종 테스트는 모두 `AnalyzeInputResolver.resolve(rawInput = intent.refinedRequirement, inMemoryIntent = intent)`를 부르고 그 `effectiveRequirement`를 `analyze()`의 `primaryReq`로 넘긴다(`Stage0EngineRoutedBaselineHarnessTest.kt`의 `resolve` 호출 `:262`, `:321`, `:372`, `:426`, `:473`과 `primaryReq = resolved.effectiveRequirement` `:270`, `:329`, `:380`, `:434`, `:481`). 그래서 2b의 조립식 변경이 기준선 블록 측정에 반영된다.
 - **변이 확인 (2b 테스트가 옛 식에서 실패하는지)**: `AnalyzeInputResolver.kt`를 `%TEMP%\bl\resolver_orig.kt`로 복사한 뒤 `val req = …` 식만 옛 식(`inMemoryIntent.refinedRequirement.ifBlank { inMemoryIntent.originalRequirement.ifBlank { rawInput } }`)으로 바꾸고(새 필드는 유지) `AnalyzeInputStructureTest`와 `Stage0EngineRoutedBaselineHarnessTest#testResolvedInputMatchesSimulated2bSrText_SurveyAdmin_LlmOn`만 `--rerun`으로 실행했다(2026-10-08 10:33 시작). 6건 중 2건만 실패했다: `AnalyzeInputStructureTest#missingIdentifiersAreAppendedAsLinesInGivenOrder`(`AnalyzeInputStructureTest.kt:91`, 메시지 첫 줄 `org.junit.ComparisonFailure: expected:<정제문 본문[`)와 `Stage0EngineRoutedBaselineHarnessTest#testResolvedInputMatchesSimulated2bSrText_SurveyAdmin_LlmOn`(`:761`, 메시지 첫 줄 `resolve 결과가 Simulated 2b 입력 문자열과 바이트 단위로 같아야 함: array lengths differed, expected.length=218 actual.length=244; arrays first differed at element [84]; expected:<10> but was:<32>`). 나머지 4건(`auditNullFallsBackToRefinedRequirementByteForByte`, `emptyMissingKeepsEffectiveRequirementIdenticalToRefined`, `blankRefinedStillFallsBackToOriginal`, `standaloneAnalyzeKeepsRawInputAndEmptyFields`)은 통과했다(옛 식과 새 식이 같은 경우라서). 이어서 `cp`로 원본을 덮어써 복원했고(`git checkout`/`restore` 미사용) `cmp` exit 0, `git status -s`와 `git diff -- src/main`이 모두 비어 있었다. 변이 실행 결과는 임시 산출물이라 저장소에는 없다.
 - **2c 추가 조건**: Stage 3 입력에는 `rawRefined`와 두 섹션을 넣고, 식별자 줄이 붙은 `effectiveReq`는 넣지 않는다(그대로 두면 식별자가 중복됨). 두 섹션은 겹치지 않게 한다: 미확정 섹션(`[미확정(확정 아님) 식별자]`)에는 `unresolvedItems` 전체(항목마다 `UnresolvedKind` 표기), 빠진 식별자 섹션(`[원문에 있었으나 정제문에서 빠진 식별자]`)에는 `missingIdentifiers − unresolvedItems`(사전순)를 넣는다.
-- **2c 설계 확정(구현 전 승인안)**:
+- **2c 설계 확정(구현 완료: `7946da7` src/main, `e267741`·`ecf2b33` 테스트)**:
   - **전달 방식**: `analyze()`에 `analyzeInput: ResolvedAnalyzeInput? = null`을 `onChunk` 앞에 추가하고 Router `:1513-1519`가 `analyzeInput = resolvedInput`을 넘긴다. 순수 함수 `AnalyzeSections.buildStage3Base`(`agent/clarify/AnalyzeSections.kt`, 신규)가 본문과 섹션을 조립한다. `analyzeInput == null`이면 현재 `baseRequirement`(`:258-259`)와 바이트 동일.
   - **본문**: `stage0Contract?.enrichedRequirementText ?: if (secondaryReq.isNotBlank()) "${rawRefined}\n$secondaryReq" else rawRefined`. 섹션은 이 본문 뒤, 앵커 블록(`:260-267`) 앞에 붙는다.
   - **미확정 섹션** `[미확정(확정 아님) 식별자]`: `unresolvedItems` 전체를 **인텐트가 준 순서**로 `- <identifier> (<UnresolvedKind>)`. 걸러내거나 중복 제거하지 않고 본문 포함 여부를 보지 않는다(본문에 이미 있어도 나온다).
@@ -396,12 +398,35 @@
   - **fail-fast**(`analyze()` 첫머리): `analyzeInput != null`이면 `require(analyzeInput.effectiveRequirement == primaryReq)`와 `require(analyzeInput.effectiveIntent === clarifyIntent)`. 첫째는 `primaryReq` 불일치만, 둘째는 `copy()` 객체, `clarifyIntent == null`인데 인텐트가 있는 경우, 인텐트가 null인데 `clarifyIntent`가 있는 경우를 막는다(`ClarifyIntent`는 `data class`라 `copy()`는 `==`로 같고 `===`로 다르다).
   - **`retentionAudit == null`이고 `unresolvedItems`가 있는 경우(의도된 동작)**: 본문은 `refinedRequirement` 그대로(옛 태그가 있을 수 있음), 빠진 식별자 섹션은 없고 미확정 섹션만 생긴다. 현재 운영 경로에는 없다(`buildClarifyIntent`는 항상 `RetentionAudit`을 채우고 Router는 디스크 인텐트를 쓰지 않음). 테스트로 고정한다.
   - **2c 이후 Stage 3 섹션 예상(미실행 유도)**: APC Transit Card LlmOff는 미확정 4개(EXISTING_REF 3, NEW_CREATION 1)로 **2b 대비 바뀜**, survey_admin/ISM Core LlmOff는 섹션 없음, survey_admin LlmOn은 미확정 5개(NEW_CREATION), APC DEM Isolated LlmOn은 빠진 식별자 2개. 하네스 5종 블록은 strict mock이 Stage 3에서 user 내용을 보지 않고 null을 반환하므로 2c를 탐지하지 못한다(회귀 확인용).
-  - **테스트 구성**: [순수 함수] 1P(인텐트 픽스처 → `resolve` → 전체 문자열), 2P(대소문자 겹침), 3(빠진 섹션 안 대소문자 중복), 4(본문에 있어도 섹션에 나옴), 5P(3경우 `== effectiveRequirement`), 8(`retentionAudit == null` + `unresolvedItems`). [파이프라인 기록] 1R, 2R, 5R(3경우에서 `analyzeInput=null`과 `=resolved` 구간 바이트 동일), 6, 9(`secondaryReq`/공백/`enrichedRequirementText`). 7(fail-fast)은 LLM 호출 전 예외. 기록 테스트는 user 내용의 `## 요구사항\n`~`\n\n## 후보 파일 목록` 구간을 `assertEquals`로 전체 비교하고 출현 횟수는 보조 단언. 손으로 만든 입력의 `effectiveRequirement`는 2b 조립식으로 계산한다.
+  - **테스트 구성**: [순수 함수] 1P(인텐트 픽스처 → `resolve` → 전체 문자열), 2P(대소문자 겹침), 3(빠진 섹션 안 대소문자 중복), 4(본문에 있어도 섹션에 나옴), 5P(3경우 `== effectiveRequirement`), 8(`retentionAudit == null` + `unresolvedItems`). [파이프라인 기록] 1R, 2R, 5R(3경우에서 `analyzeInput=null`과 `=resolved` 구간 바이트 동일), 6, 9(`secondaryReq`/공백/`enrichedRequirementText`). 7i~7v(fail-fast, 메서드 5개)는 LLM 호출 전 예외. 기록 테스트는 user 내용의 `## 요구사항\n`~`\n\n## 후보 파일 목록` 구간을 `assertEquals`로 전체 비교하고 출현 횟수는 보조 단언. 손으로 만든 입력의 `effectiveRequirement`는 2b 조립식으로 계산한다.
   - **변이 확인 계획(11건, 실패 기대 집합은 설계상 예측)**: M1 본문을 `effectiveRequirement`로 {1P,1R,2P,2R,3,6,9} / M2 빠진 섹션에서 `− unresolvedItems` 제거 {1P,1R,2P,2R,6} / M3a 차집합 대소문자 구분 {2P,2R} / M3b 빠진 섹션 안 중복 제거 삭제 {3} / M4 빈 섹션도 헤더 출력 {1P,1R,3,4,5P,5R,6,8,9} / M5 본문 포함 제외 추가 {1P,1R,4} / (a) 파이프라인이 `analyzeInput` 무시 {1R,2R,6,9} / (b) 미확정 섹션 사전순 정렬 {1P,1R,4,6} / (c) 첫 `require` 삭제 {7(i)} / (d) 둘째 `require`의 `===`를 `==`로 {7(ii)} / (e) 둘째 `require` 삭제 {7(ii),7(iii),7(v)}.
+- **2c 측정 결과**:
+  - **테스트 구성(실제)**: `AnalyzeSectionsTest` 17건(1P, 1R, 2P, 2R, 3, 4, 5P, 5R, 6, 7i~7v, 8, 9R, 9S), clarify 패키지 144건 중 실패 1(B-10), skip 3. 1R은 survey_admin LlmOff를 기록 비교에서 뺐다(한글뿐이라 작은 그래프에서 후보가 없어 Stage 3이 호출되지 않음, 1P에는 있음). 기록 테스트의 그래프는 픽스처의 effectiveRequirement에 나오는 식별자와 같은 클래스명을 가진 6개 파일이다(discovery는 `primaryReq`/`secondaryReq` 텍스트만 보므로).
+  - **하네스**: `harness_58eb590_run1` 대 2c run1과 2c run1 대 run2 모두 7블록(5종 + Ablation-a/b) `EXACT_MATCH`(sha256은 B-32의 값과 같음). strict mock이 Stage 3 user 내용을 보지 않고 null을 반환하므로 이 비교는 회귀 확인용이며 2c를 탐지하지 못한다.
+  - **전체 `./gradlew.bat test --offline --rerun`**: 411 tests / 50 failed / 9 skipped(약 4분 47초). 실패 목록에서 `IntegrationPipelineTest` 3건을 뺀 결과가 `fail_b7ff09e.txt`와 `IntegrationAnalyzeTest#testFullPipeline` 1건만 다르고, skip 목록은 diff가 비어 있다. 그 1건은 외부 서버 HTTP 530(B-34)이다. 따라서 **외부 서버 HTTP 530 1건 제외 시 diff 없음(조건부 충족)**. 2c 이전 커밋에서의 재현은 하지 않았다(체크아웃 금지). 서버 상태 확인은 B-34 참조.
+  - **변이 확인 11건**(한 번에 1건, 새 테스트 클래스만 `--rerun`, `cp` 복원 후 `cmp` exit 0, 두 파일 sha256이 변이 전과 같음, `git status -s`와 `git diff -- src/main` 빈 출력). 실패 집합은 모두 예측과 일치했다.
+
+    | 변이 | 실제 실패 테스트 | 예측과 일치 |
+    |---|---|---|
+    | M1 본문을 `effectiveRequirement`로 | 1P, 1R, 2P, 2R, 3, 6, 9R (7건) | 일치 |
+    | M2 빠진 섹션 `− unresolvedItems` 제거 | 1P, 1R, 2P, 2R, 6 (5건) | 일치 |
+    | M3a 차집합 대소문자 구분 | 2P, 2R | 일치 |
+    | M3b 빠진 섹션 안 중복 제거 삭제 | 3 | 일치 |
+    | M4 빈 섹션도 헤더 출력 | 1P, 1R, 3, 4, 5P, 5R, 6, 8, 9R, 9S (10건) | 일치 |
+    | M5 본문 포함 제외 추가 | 1P, 1R, 4 | 일치 |
+    | (a) 파이프라인이 `analyzeInput` 무시 | 1R, 2R, 6, 9R | 일치 |
+    | (b) 미확정 섹션 사전순 정렬 | 1P, 1R, 4, 6 | 일치 |
+    | (c) 첫 `require` 삭제 | 7i | 일치 |
+    | (d) 둘째 `require`의 `===`를 `==`로 | 7ii | 일치 |
+    | (e) 둘째 `require` 삭제 | 7ii, 7iii, 7v | 일치 |
+
+    7iv는 모든 변이에서 통과했다. 5P/5R/8/9S는 M4에서만 실패하고 (a)~(e)에서는 통과했다(5R은 섹션이 없는 세 경우라 (a)를 잡지 못한다).
+  - **미고정 범위**: `stage0Contract` 경로는 기록 수준으로 고정하지 못했다. `enrichedRequirementText`가 본문이 되고 섹션이 뒤따르는 동작은 순수 함수 테스트 9S로만 고정되고, 파이프라인에서 `stage0Contract`를 거친 Stage 3 기록 테스트는 없다(`Stage0TransitionContract.enrichedRequirementText` 기본값이 `""`라 후보 없이 끝날 수 있어 시도하지 않음). 이 경로는 운영에서 쓰이지 않는다(B-24 7). Router의 `analyzeInput = resolvedInput` 연결은 B-35로 미고정.
+  - **미확인**: 실제 LLM에서 Stage 3 판정이 새 섹션으로 어떻게 바뀌는지, `UnresolvedKind` 라벨 정확도(B-37).
 - **2d 테스트 예시**: B-22의 `aCMBTBAPC024DEM`과 `ACMBTBAPC024DEM`(대소문자 불일치), `selTrcdIsInf`를 포함한다.
 - **도구 옵션(커밋 4 직전)**: `RefinedReq:` 줄만 비교에서 빼고 그 줄은 따로 보고한다. `Top-30 TargetFiles Count`, `GT Survived`, `GT Missing`은 비교 범위에 남긴다.
 - **커밋 4 불변식 (합격 기준에 단언으로 포함)**: 태그를 지운 뒤에도 (1) `missingBeforeFix`는 지금처럼 채워져야 하고, (2) `rawRefinedRequirement == refinedRequirement`가 성립해야 한다.
-- **상태**: 진행 중 (우선순위 P2, 2b 완료, 2c 이후 미착수)
+- **상태**: 진행 중 (우선순위 P2, 2b·2c 완료, 2d 이후 미착수)
 
 ---
 
