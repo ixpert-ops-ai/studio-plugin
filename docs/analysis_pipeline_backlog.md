@@ -230,12 +230,25 @@
 
 ### [B-25] 정제문(Refinement) 문구 확장으로 인한 시드 편향 및 GT 탈락 (`SurveyServiceImpl`)
 - **현상**: `survey_admin` 시나리오에서 LlmOff 시 GT 2/8(`SurveyServiceImpl.java`, `sql_survey.xml`)이 생존하였으나, LlmOn 시 1/8(`sql_survey.xml`)로 하락함.
-- **원인 규명 (C-11/C-12 실측 증명)**:
-  - C-11 실측 결과 태그 부착 버전과 식별자 리터럴 줄바꿈 버전(Simulated 2b)의 Top-30 산출 목록이 14개 전 항목 바이트 단위로 100% 일치함(`EXACT_MATCH`). 즉, `(명시된 식별자: ...)` 태그 자체나 괄호 문구는 결정론적 탐색 결과에 아무런 영향을 미치지 않음.
-  - C-12 점수 분해 결과, 정제 LLM이 요구사항에 새로 덧붙인 `"Bizgo 연동 API 신규 개발"` 문구의 영문 토큰(`API` 등)으로 인해 휴리스틱 시드가 `SurveyDaoImpl`에서 `ApiService`, `IbCenterApiService` 등 API 계층으로 편향됨.
-  - 이로 인해 `SurveyServiceImpl`의 확장 홉이 Hop 1(`DEPENDED_BY`, 30점)에서 Hop 3(`REPO_TO_SERVICE`, 0점)으로 밀려나며 총점이 65점 $\rightarrow$ 35점으로 급락하여 minScore(55) 미달 탈락함.
-- **해결 방안**: 정제 프롬프트가 기존 시스템의 맥락을 희석시키지 않도록 하거나, 시드 선택 단계에서 도메인 고유 명사 가중치 방어 로직 강화.
-- **상태**: Open (우선순위 P2)
+- **라벨 정의**: LlmOff의 정제문 필드(`refinedRequirement`)는 LLM 정제가 없어 내용이 원문과 같다(하네스 출력 `RefinedReq: "설문 발송 채널에 브랜드메시지 추가"`, 입력 SR `Stage0EngineRoutedBaselineHarnessTest.kt:258`과 같은 문자열). Resolver는 이 필드를 `effectiveRequirement`로 쓴다(`AnalyzeInputResolver.kt:22` `inMemoryIntent.refinedRequirement.ifBlank { ... }`). 아래에서 "LlmOff"는 이 텍스트(원문과 동일), "LlmOn"은 하네스 Mock LLM(`StrictClarifyMockLlm`)의 `refinementResponse` 픽스처 정제문 `설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발`이다. LlmOn 정제문은 **실제 LLM 출력이 아니라 테스트 픽스처 문자열**이다.
+- **원인 규명 (절제 실험 `58eb590`, 블록 sha256은 B-32)**: 2×2, 각 칸은 `SurveyServiceImpl` 점수 · GT 생존 · Top-30 건수
+
+  | 정제문 | 식별자 없음 | 식별자 줄 형식 | 식별자 태그 형식 `(명시된 식별자: …)` |
+  |---|---|---|---|
+  | **LlmOff** (원문과 동일) | 65점 · GT 2/8 · 12건 (`survey_admin (Intent=LlmOff)`) | 65점 · GT 2/8 · 12건 (`Ablation-a`, 식별자 5줄) | 미측정 |
+  | **LlmOn** (픽스처 정제문) | 35점 · GT 1/8 · 14건 (`Ablation-b`) | 35점 · GT 1/8 · 14건 (`Simulated 2b`) | 35점 · GT 1/8 · 14건 (`survey_admin (Intent=LlmOn)`) |
+
+  - 시드(`selectSeeds(text, graph)` 단독 호출): LlmOff와 `Ablation-a`는 `[SurveyPartExportRunner, AlimtalkTemplateBatchRepository, SurveyDaoImpl, ReviewDto, SurveyDto]`, LlmOn 3종(`Ablation-b`, `Simulated 2b`, Tagged)은 `[ApiService, ApiServiceImpl, IbCenterApiService, IbCenterApiServiceImpl, SurveyPartExportRunner]`.
+  - `SurveyServiceImpl`: LlmOff 계열은 hop 1(`DEPENDED_BY`) 30+0+15+20=**65**, LlmOn 계열은 hop 3(`REPO_TO_SERVICE`) 0+0+15+20=**35**이며, 재계산 합계가 `RelevanceScorer` 반환 score와 같음을 단언으로 확인함(B-32). LlmOn 계열은 최종 목록에서 `SurveyServiceImpl.java`가 빠진다(`GT Missing`). (기존 서술의 "minScore(55) 미달"은 이번에 기준값을 코드와 다시 대조하지 않았다.)
+  - Top-30 목록(`Top-30 List:` 이후 줄) 비교: `Ablation-a` 대 LlmOff는 diff 없음(14줄, exit 0, sha256 `8cffa9cc0cc49f5b704b262cce23027ba53b497d903de422541ffa87faa93fac`), `Ablation-b` 대 LlmOn은 diff 없음(16줄, exit 0, sha256 `4b64b7b86290bea7ba405a7dd15927b47a1244fef2b1458cd09fbf4d0bc0d369`). LlmOn의 줄 형식(`Simulated 2b`)과 태그 형식(Tagged)의 Top-30 목록 텍스트도 같다(14건).
+  - **결론**: 식별자의 유무와 형식(LlmOn에서는 없음/줄/태그, LlmOff에서는 없음/줄)은 점수·GT·Top-30을 바꾸지 않았고, 결과는 정제문 텍스트와 함께 움직인다. 원인은 **LlmOn 픽스처 정제문의 문구**(`…및 Bizgo 연동 API 신규 개발`)이다.
+  - **한계**: `Ablation-b`는 입력 텍스트에서만 식별자를 뺐고 LlmOn 인텐트 객체(`anchorTokens`/`unresolvedItems` 등에 식별자가 들어 있을 수 있음)는 그대로 `analyze()`에 넘겼다. 따라서 "식별자 없음"은 입력 텍스트 기준이다.
+- **남은 일**:
+  1. 정제문 안의 원인 토큰 분리(`Bizgo`, `API`, `신규 개발` 등 어느 토큰이 시드를 바꾸는지)
+  2. 줄 형식과 태그 형식 차이 확인 보완(LlmOn은 두 형식이 같음을 확인함, LlmOff + 태그 형식은 미측정)
+  3. 인텐트 객체(`anchorTokens` 등)가 결과에 미치는 영향 분리
+- **해결 방안 (후보, 미검증)**: (1) 정제 프롬프트가 기존 시스템의 맥락을 희석시키지 않도록 조정, (2) 시드 선택 단계에서 도메인 고유 명사 가중치 방어 로직 강화. 어느 쪽도 효과를 측정하지 않았다.
+- **상태**: Open (우선순위 P2, 원인 범위는 정제문 텍스트로 좁혀짐, 토큰 단위 분리는 남음)
 
 ---
 
