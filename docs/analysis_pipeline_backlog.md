@@ -239,14 +239,15 @@
   | **LlmOn** (픽스처 정제문) | 35점 · GT 1/8 · 14건 (`Ablation-b`) | 35점 · GT 1/8 · 14건 (`Simulated 2b`) | 35점 · GT 1/8 · 14건 (`survey_admin (Intent=LlmOn)`) |
 
   - 시드(`selectSeeds(text, graph)` 단독 호출): LlmOff와 `Ablation-a`는 `[SurveyPartExportRunner, AlimtalkTemplateBatchRepository, SurveyDaoImpl, ReviewDto, SurveyDto]`, LlmOn 3종(`Ablation-b`, `Simulated 2b`, Tagged)은 `[ApiService, ApiServiceImpl, IbCenterApiService, IbCenterApiServiceImpl, SurveyPartExportRunner]`.
-  - `SurveyServiceImpl`: LlmOff 계열은 hop 1(`DEPENDED_BY`) 30+0+15+20=**65**, LlmOn 계열은 hop 3(`REPO_TO_SERVICE`) 0+0+15+20=**35**이며, 재계산 합계가 `RelevanceScorer` 반환 score와 같음을 단언으로 확인함(B-32). LlmOn 계열은 최종 목록에서 `SurveyServiceImpl.java`가 빠진다(`GT Missing`). (기존 서술의 "minScore(55) 미달"은 이번에 기준값을 코드와 다시 대조하지 않았다.)
-  - Top-30 목록(`Top-30 List:` 이후 줄) 비교: `Ablation-a` 대 LlmOff는 diff 없음(14줄, exit 0, sha256 `8cffa9cc0cc49f5b704b262cce23027ba53b497d903de422541ffa87faa93fac`), `Ablation-b` 대 LlmOn은 diff 없음(16줄, exit 0, sha256 `4b64b7b86290bea7ba405a7dd15927b47a1244fef2b1458cd09fbf4d0bc0d369`). LlmOn의 줄 형식(`Simulated 2b`)과 태그 형식(Tagged)의 Top-30 목록 텍스트도 같다(14건).
+  - `SurveyServiceImpl`: LlmOff 계열은 hop 1(`DEPENDED_BY`) 30+0+15+20=**65**, LlmOn 계열은 hop 3(`REPO_TO_SERVICE`) 0+0+15+20=**35**이며, 재계산 합계가 `RelevanceScorer` 반환 score와 같음을 단언으로 확인함(B-32). LlmOn 계열은 최종 목록에서 `SurveyServiceImpl.java`가 빠진다(`GT Missing`).
+  - **탈락 기준(`minScore = 55`) 확인**: 파이프라인은 `RequirementAnalysisPipeline.kt:148` `AdaptiveFileDiscovery.filter(...)`를 거치고, 그 안에서 `AdaptiveFileDiscovery.kt:46` `RelevanceScorer(graph, fileLimit = limit, minScore = 55)`를 만든다. `RelevanceScorer.kt:173`은 `if (totalScore >= minScore)`로 통과시키고, 미달인 경우 `:188` `else if (protection != null)`일 때만 구제한다(`SurveyServiceImpl`은 `Protected: false`). 따라서 35점은 제외되고 65점은 통과한다. 하네스 C-12 진단의 스코어러는 탈락 노드 점수를 수집하려고 `minScore = 10`으로 따로 만든 것이며 파이프라인 값이 아니다. 이 확인은 `RelevanceScorer` 단계에 한정되고 이후 단계(Stage 2/3)의 영향은 따로 보지 않았다.
+  - Top-30 목록(`Top-30 List:` 이후 줄) 비교(`harness_58eb590_run1.xml`): `Ablation-a` 대 LlmOff는 diff 없음(14줄, exit 0, sha256 `8cffa9cc0cc49f5b704b262cce23027ba53b497d903de422541ffa87faa93fac`), `Ablation-b` 대 LlmOn(Tagged)은 diff 없음(16줄, exit 0, sha256 `4b64b7b86290bea7ba405a7dd15927b47a1244fef2b1458cd09fbf4d0bc0d369`). LlmOn의 줄 형식(`Simulated 2b`)과 태그 형식(Tagged)도 diff 없음(목록 본문 16줄, exit 0, 같은 sha256 `4b64b7b8…d369`). 경계는 Tagged가 `[GT Baseline: survey_admin (Intent=LlmOn)] Top-30 List:`(system-out 1869행) 다음 줄부터 `[MockTelemetry:` 직전(1870-1885행), `Simulated 2b`는 시작 줄 `[GT Baseline:`이 없어 `[Simulated 2b: survey_admin (Intent=LlmOn)] Top-30 List:`(2538행) 다음 줄부터 `[MockTelemetry:` 직전(2539-2554행)으로 잡았다. `Simulated 2b`의 `GT Survived: 1/8 (sql_survey.xml)`, `Top-30 TargetFiles Count: 14`.
   - **결론**: 식별자의 유무와 형식(LlmOn에서는 없음/줄/태그, LlmOff에서는 없음/줄)은 점수·GT·Top-30을 바꾸지 않았고, 결과는 정제문 텍스트와 함께 움직인다. 원인은 **LlmOn 픽스처 정제문의 문구**(`…및 Bizgo 연동 API 신규 개발`)이다.
-  - **한계**: `Ablation-b`는 입력 텍스트에서만 식별자를 뺐고 LlmOn 인텐트 객체(`anchorTokens`/`unresolvedItems` 등에 식별자가 들어 있을 수 있음)는 그대로 `analyze()`에 넘겼다. 따라서 "식별자 없음"은 입력 텍스트 기준이다.
+  - **한계**: `Ablation-b`는 입력 텍스트에서만 식별자를 뺐고 LlmOn 인텐트 객체는 그대로 `analyze()`에 넘겼다. 그러나 `analyze()`가 읽는 인텐트 필드는 `excludedFiles`뿐이다(`RequirementAnalysisPipeline.kt:218`, `:426`, `git grep -n "clarifyIntent" -- src/main` 기준). `anchorTokens`를 읽는 곳은 `src/main`의 clarify 패키지 밖에 없고(`ClarifyIntentStore`·`Stage0ClarificationEngine`·모델 정의에서만 등장), 탐색 단계(`AdaptiveFileDiscovery.filter`)에는 인텐트가 전달되지 않고 텍스트(`primaryReq`, `secondaryReq`, `enhancedRequirements`)만 간다. 따라서 "식별자 없음"은 입력 텍스트 기준이며, 인텐트 객체가 결과에 미치는 경로는 `excludedFiles` 필터뿐이다(그 값이 비어 있는지는 이번에 확인하지 않았다).
 - **남은 일**:
   1. 정제문 안의 원인 토큰 분리(`Bizgo`, `API`, `신규 개발` 등 어느 토큰이 시드를 바꾸는지)
-  2. 줄 형식과 태그 형식 차이 확인 보완(LlmOn은 두 형식이 같음을 확인함, LlmOff + 태그 형식은 미측정)
-  3. 인텐트 객체(`anchorTokens` 등)가 결과에 미치는 영향 분리
+  2. LlmOff 태그 형식 미측정 (LlmOn은 줄 형식과 태그 형식의 Top-30 목록이 같음을 확인함)
+  3. 두 인텐트(LlmOff, LlmOn)의 `excludedFiles` 값 확인(비어 있는지)
 - **해결 방안 (후보, 미검증)**: (1) 정제 프롬프트가 기존 시스템의 맥락을 희석시키지 않도록 조정, (2) 시드 선택 단계에서 도메인 고유 명사 가중치 방어 로직 강화. 어느 쪽도 효과를 측정하지 않았다.
 - **상태**: Open (우선순위 P2, 원인 범위는 정제문 텍스트로 좁혀짐, 토큰 단위 분리는 남음)
 
