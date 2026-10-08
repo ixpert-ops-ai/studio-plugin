@@ -396,28 +396,51 @@ class AnalyzeSectionsTest {
             )
         }
 
-    // 7 [파이프라인] (LLM 호출 전 예외, 기록 불필요)
-    @Test
-    fun failFastWhenAnalyzeInputDoesNotMatchPrimaryReqOrClarifyIntent() {
-        val intent = surveyLlmOnIntent
-        val resolved = AnalyzeInputResolver.resolve(rawInput = intent.refinedRequirement, inMemoryIntent = intent)
+    // 7i~7v [파이프라인] (LLM 호출 전 예외, 기록 불필요). 메서드를 나눠 변이마다 실패 부분을 구분한다.
 
-        // (i) primaryReq != analyzeInput.effectiveRequirement → 첫 번째 require
+    private fun failFastFixture(): Pair<ClarifyIntent, ResolvedAnalyzeInput> {
+        val intent = surveyLlmOnIntent
+        return intent to AnalyzeInputResolver.resolve(rawInput = intent.refinedRequirement, inMemoryIntent = intent)
+    }
+
+    // 7i primaryReq != analyzeInput.effectiveRequirement → 첫 번째 require
+    @Test
+    fun failFast7i_primaryReqDiffersFromEffectiveRequirement() {
+        val (_, resolved) = failFastFixture()
         expectIllegalArgument("(i) primaryReq 불일치") {
             analyzeOnly("다른 primaryReq", resolved.effectiveIntent, resolved)
         }
-        // (ii) 같은 값이지만 다른 객체(copy) → 두 번째 require (===)
+    }
+
+    // 7ii 같은 값이지만 다른 객체(copy) → 두 번째 require (===)
+    @Test
+    fun failFast7ii_equalButDifferentIntentObject() {
+        val (intent, resolved) = failFastFixture()
         expectIllegalArgument("(ii) 인텐트 copy()") {
             analyzeOnly(resolved.effectiveRequirement, intent.copy(), resolved)
         }
-        // (iii) analyzeInput.effectiveIntent는 있는데 clarifyIntent == null → 두 번째 require
+    }
+
+    // 7iii analyzeInput.effectiveIntent는 있는데 clarifyIntent == null → 두 번째 require
+    @Test
+    fun failFast7iii_clarifyIntentNullWhileInputHasIntent() {
+        val (_, resolved) = failFastFixture()
         expectIllegalArgument("(iii) clarifyIntent null") {
             analyzeOnly(resolved.effectiveRequirement, null, resolved)
         }
-        // (iv) 둘 다 일치하면 정상 진행
-        val ok = analyzeOnly(resolved.effectiveRequirement, resolved.effectiveIntent, resolved)
-        assertNotNull(ok)
-        // (v) analyzeInput.effectiveIntent == null인데 clarifyIntent != null → 두 번째 require
+    }
+
+    // 7iv 둘 다 일치하면 정상 진행 (항상 통과해야 함)
+    @Test
+    fun failFast7iv_matchingInputProceeds() {
+        val (_, resolved) = failFastFixture()
+        assertNotNull(analyzeOnly(resolved.effectiveRequirement, resolved.effectiveIntent, resolved))
+    }
+
+    // 7v analyzeInput.effectiveIntent == null인데 clarifyIntent != null → 두 번째 require
+    @Test
+    fun failFast7v_inputHasNoIntentButClarifyIntentGiven() {
+        val (intent, _) = failFastFixture()
         val standalone = AnalyzeInputResolver.resolve(rawInput = "단독 입력", inMemoryIntent = null)
         expectIllegalArgument("(v) analyzeInput.effectiveIntent null, clarifyIntent 있음") {
             analyzeOnly(standalone.effectiveRequirement, intent, standalone)
