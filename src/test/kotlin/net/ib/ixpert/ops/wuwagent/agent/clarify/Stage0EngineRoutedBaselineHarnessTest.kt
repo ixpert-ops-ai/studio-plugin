@@ -270,7 +270,8 @@ class Stage0EngineRoutedBaselineHarnessTest {
             primaryReq = resolved.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
-            clarifyIntent = resolved.effectiveIntent
+            clarifyIntent = resolved.effectiveIntent,
+            analyzeInput = resolved
         )
 
         val gtFiles = listOf(
@@ -329,7 +330,8 @@ class Stage0EngineRoutedBaselineHarnessTest {
             primaryReq = resolved.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
-            clarifyIntent = resolved.effectiveIntent
+            clarifyIntent = resolved.effectiveIntent,
+            analyzeInput = resolved
         )
 
         val gtFiles = listOf(
@@ -380,7 +382,8 @@ class Stage0EngineRoutedBaselineHarnessTest {
             primaryReq = resolved.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
-            clarifyIntent = resolved.effectiveIntent
+            clarifyIntent = resolved.effectiveIntent,
+            analyzeInput = resolved
         )
 
         val gtFiles = listOf("APCMMTrcdIsInfSVO", "APCMMTrcdIsSVC", "APCMMTrcdIsSVCImpl", "APCMMTrcdIsBIZ", "ACMBTBAPC024DEM")
@@ -434,7 +437,8 @@ class Stage0EngineRoutedBaselineHarnessTest {
             primaryReq = resolved.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
-            clarifyIntent = resolved.effectiveIntent
+            clarifyIntent = resolved.effectiveIntent,
+            analyzeInput = resolved
         )
 
         val gtFiles = listOf("APCMMTrcdIsInfSVO", "APCMMTrcdIsSVC", "APCMMTrcdIsSVCImpl", "APCMMTrcdIsBIZ", "ACMBTBAPC024DEM")
@@ -481,7 +485,8 @@ class Stage0EngineRoutedBaselineHarnessTest {
             primaryReq = resolved.effectiveRequirement,
             secondaryReq = "",
             projectGraph = graph,
-            clarifyIntent = resolved.effectiveIntent
+            clarifyIntent = resolved.effectiveIntent,
+            analyzeInput = resolved
         )
 
         val gtFiles = listOf("CareMemberMgmtController", "CareMemberMgmtServiceImpl", "ECMBTBISM006Mapper", "ECMBTBISM006Mapper.xml")
