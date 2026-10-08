@@ -224,6 +224,7 @@
   3. **`srKeyHex` 연속성 영향 범위**: `RequirementAnalysisPipeline.kt:314`의 `srKeyHex = String.format("SR-%08x", primaryReq.hashCode())`는 태그가 제거될 때 해시값이 변경되지만, 그 영향 범위는 **태그가 실제로 부착된 인텐트(`missingBeforeFix`가 비어 있지 않은 경우)**로 국한됨. 태그가 없는 LlmOff 등 단독 SR에서는 해시 변경이 발생하지 않음.
   4. **커밋 2a (`63af698`) Before 서술 정정**: 커밋 2a 이전에도 Router가 `clarifyIntent.refinedRequirement`를 전달하고 있었으나 `AnalyzeInputResolver.resolve` 내부에서 `refinedRequirement.ifBlank` 시 `originalRequirement`로 폴백하는 로직이 이미 존재했음. 따라서 refined가 비어 있을 때도 2a 전후의 실질 동작은 동일함. Router가 `originalRequirement`를 명시적으로 넘기도록 수정한 것은 입력 해석의 단일 책임을 Resolver에 온전히 위임하고 의도를 코드에 명확히 드러내기 위한 리팩토링임. 또한 `stage0Contract`는 `WebviewActionRouter:1513` 런타임에서 호출되지 않는 비활성(dead) 경로임이 확인됨.
   5. **커밋 2a (`63af698`) Before 보충 (운영 경로)**: 운영 경로의 `primaryReq`(`WebviewActionRouter.kt:1514`)에는 2a 전후 모두 `AnalyzeInputResolver.resolve` 출력이 들어가며 실질 동작은 같다. 2a가 바꾼 것은 `analyze()`가 `clarifyIntent`에서 정제문을 스스로 고르지 않게 된 계약이고, 이 때문에 `analyze()`를 직접 부르던 테스트가 깨졌다(B-26). 줄 번호는 `pipeline.analyze(` 호출이 `:1513`, `primaryReq` 인자가 `:1514`, `clarifyIntent` 인자가 `:1517`이다(기존 서술의 `:1513`은 호출 줄 기준으로 유효하며, `primaryReq` 인자를 가리킬 때는 `:1514`). `:1517`의 `clarifyIntent`는 `:1503`의 `resolvedInput.effectiveIntent`이고 Resolver는 `inMemoryIntent`를 복사 없이 그대로 돌려주므로(`AnalyzeInputResolver.kt:27`) 같은 객체다.
+  6. **`srKeyHex` 단절 시점 정정 (커밋 2b `b397975`)**: 3번의 "태그가 제거될 때 해시값이 변경"은 커밋 4가 아니라 **커밋 2b 시점**으로 정정한다. `srKeyHex`(`RequirementAnalysisPipeline.kt:313`, `String.format("SR-%08x", primaryReq.hashCode())`; 3번의 `:314`는 현재 `:313`)는 코드를 바꾸지 않았고, 2b에서 `primaryReq`(= `ResolvedAnalyzeInput.effectiveRequirement`)가 태그 형식에서 줄 형식으로 바뀌므로 **`missingBeforeFix`가 비어 있지 않은 인텐트에 한해** 해시가 바뀐다. `missingBeforeFix`가 비어 있는 인텐트는 입력이 바이트 단위로 같아 해시가 같다(5종 중 LlmOff 3종은 불변, LlmOn 2종은 변경). 섀도 로그는 `srKey`로 묶으므로(`ShadowLogAggregator.kt:43`, `:57`) 2b 전후의 같은 SR은 다른 키가 된다. 커밋 4(태그 제거)는 `primaryReq`가 이미 `rawRefined` 기반이라 해시를 다시 바꾸지 않는다. 이 단절을 합쳐 보는 운영 절차가 있는지는 확인하지 않았다. `src/test`의 `srKey`는 고정 문자열뿐이라(예: `MemberMarketJpaRealDataTest.kt:245`) 해시 값에 의존하는 테스트는 찾지 못했다.
 - **상태**: Open (우선순위 P3)
 
 ---
@@ -367,4 +368,23 @@
 - **선택지**: B) 함수를 `internal`로 열고 LLM 클라이언트·그래프 로더·실행기를 파라미터로 주입. C) 플랫폼 테스트 픽스처(`BasePlatformTestCase` 등)로 Project/Application 구성(`getClient()` 주입이 풀리지 않으므로 B 필요). 선택지 A(입력 조립 경로만 직접 호출)는 `2423ae9`로 수행함. 이 선택은 `action/` 계층 "비즈니스 로직 금지" 규칙과 함께 검토해야 한다.
 - **영향**: Router 내부의 `:1499 → :1503/:1504 → :1514/:1517` 연결은 코드 읽기로만 확인되며 테스트로 고정되지 않음.
 - **상태**: Open (우선순위 P3)
+
+---
+
+### [B-36] 식별자 태그 제거를 위한 커밋 2b~4 진행 계획과 불변식
+- **목표**: `IdentifierRetentionChecker`가 `refinedRequirement`에 붙이는 ` (명시된 식별자: …)` 태그를 없애도 Analyze 입력과 결과가 유지되도록, 식별자 전달을 구조화된 필드로 옮긴다(근거: B-25의 줄 형식 = 태그 형식 결과).
+- **커밋 순서**:
+  1. **2b** — `ResolvedAnalyzeInput` 확장(`rawRefined`, `missingIdentifiers`, `unresolvedItems`, `excludedFiles`)과 `effectiveRequirement`(`srText`) 조립. `missingBeforeFix`는 차감 없이 그대로(사전순 유지).
+  2. **2c** — Stage 3 프롬프트 섹션.
+  3. **2d** — 제외 식별자 차감.
+  4. **도구 옵션 커밋** — 커밋 4 직전에 `scripts/compare-harness-blocks.js`에 옵션 추가.
+  5. **3** — 테스트 단언을 태그 문자열에서 구조화된 필드(`unresolvedItems` 등)로 옮기기(예: `Stage0SurveyAdminSnapshotTest.kt:280`).
+  6. **4** — 태그 제거.
+- **2b 상태**: `b397975`(`src/main`: `AnalyzeInputResolver.kt` 1개 파일)와 `02f0db5`(테스트 전용: `AnalyzeInputStructureTest` 5건, 하네스 단언 1건) 완료. 조립식은 `missingBeforeFix`가 비면 `rawRefined`, 아니면 `"$rawRefined\n" + missing.joinToString("") { "\n$it" }`이고 `retentionAudit == null`이면 `refinedRequirement`를 그대로 쓴다. 하네스 Simulated 2b의 입력 조립 줄(`Stage0EngineRoutedBaselineHarnessTest.kt:718-720`, `:775-777`)과 같은 식이며, `missingBeforeFix`가 빈 경우만 하네스 쪽이 끝에 `\n`이 하나 더 붙는다(하네스는 LlmOff에 이 식을 쓰지 않음). 측정: 기존 5종 `EXACT_MATCH`(sha256이 B-32의 값과 같음), `b397975` run1 = run2 7종 `EXACT_MATCH`, `AnalyzeInputStructureTest`와 하네스 단언 포함 clarify 패키지 127건 중 실패 1건(B-10)·skip 3건, `RequirementAnalysisPipelineIntegrationTest` 8건과 `AnalyzeRefinedSeedPromptTest` 1건 통과. 새 테스트가 옛 `Resolver`에서 실제로 실패하는지는 실행해 보지 않았다(하네스 단언의 `assertNotEquals`가 새 조립을 요구한다는 논리상의 확인뿐).
+- **2b 적용만으로 생기는 변화**: Stage 3 입력(`RequirementAnalysisPipeline.kt:258-271`의 `fullRequirement`는 `effectiveReq` 기반)이 태그 형식에서 줄 형식으로 바뀐다. 실제 LLM에 주는 영향은 **미검증**이다(하네스의 strict mock은 Stage 3에서 null을 반환해 전원 보존 폴백).
+- **2c 추가 조건**: Stage 3 입력에는 `rawRefined`와 두 섹션을 넣고, 식별자 줄이 붙은 `effectiveReq`는 넣지 않는다(그대로 두면 식별자가 중복됨). 두 섹션은 겹치지 않게 한다: 미확정 섹션(`[미확정(확정 아님) 식별자]`)에는 `unresolvedItems` 전체(항목마다 `UnresolvedKind` 표기), 빠진 식별자 섹션(`[원문에 있었으나 정제문에서 빠진 식별자]`)에는 `missingIdentifiers − unresolvedItems`(사전순)를 넣는다.
+- **2d 테스트 예시**: B-22의 `aCMBTBAPC024DEM`과 `ACMBTBAPC024DEM`(대소문자 불일치), `selTrcdIsInf`를 포함한다.
+- **도구 옵션(커밋 4 직전)**: `RefinedReq:` 줄만 비교에서 빼고 그 줄은 따로 보고한다. `Top-30 TargetFiles Count`, `GT Survived`, `GT Missing`은 비교 범위에 남긴다.
+- **커밋 4 불변식 (합격 기준에 단언으로 포함)**: 태그를 지운 뒤에도 (1) `missingBeforeFix`는 지금처럼 채워져야 하고, (2) `rawRefinedRequirement == refinedRequirement`가 성립해야 한다.
+- **상태**: 진행 중 (우선순위 P2, 2b 완료, 2c 이후 미착수)
 
