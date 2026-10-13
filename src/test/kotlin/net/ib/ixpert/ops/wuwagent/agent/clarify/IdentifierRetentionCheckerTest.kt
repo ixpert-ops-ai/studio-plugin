@@ -107,7 +107,17 @@ class IdentifierRetentionCheckerTest {
         assertEquals("원시 정제문(rawRefinedRequirement)이 보존되어야 측정 지표를 계산할 수 있음", rawRefined, result.rawRefinedRequirement)
         assertFalse(result.wasRetainedWithoutModification)
         assertEquals(3, result.missingIdentifiers.size)
-        assertTrue(result.effectiveRefinedRequirement.contains("(명시된 식별자:"))
+        // 태그 문자열 대신 구조화된 결과로 확인한다(B-36 커밋 3: 태그가 있을 때와 없을 때 모두 성립).
+        // 누락 목록은 `.sorted()` 순서(대문자 A < 대문자 S < 소문자 s)이고, 기대 식별자는 파일명이 있는 SurveyServiceImpl의 기본 이름이 빠진 3개다.
+        assertEquals(
+            listOf("AlimtalkTemplateBatchRepository", "SurveyServiceImpl.java", "sql_survey.xml"),
+            result.missingIdentifiers
+        )
+        assertEquals(
+            setOf("SurveyServiceImpl.java", "sql_survey.xml", "AlimtalkTemplateBatchRepository"),
+            result.expectedIdentifiers
+        )
+        assertTrue(result.effectiveRefinedRequirement.startsWith(rawRefined.trimEnd('.')))
     }
 
     @Test

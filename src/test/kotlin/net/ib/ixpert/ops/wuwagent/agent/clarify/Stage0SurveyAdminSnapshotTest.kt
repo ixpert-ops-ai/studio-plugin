@@ -277,8 +277,16 @@ class Stage0SurveyAdminSnapshotTest {
         assertEquals("Category A 5종 전량이 newCreations에 정확히 수렴해야 함", 5, recoveredACount)
         println("[ClarifyIntent refinedRequirement]: " + clarifyIntent.refinedRequirement)
         println("[ClarifyIntent missingIdentifiers]: " + clarifyIntent.retentionAudit?.missingBeforeFix)
-        assertTrue("Category A 5종 전량이 ClarifyIntent.refinedRequirement에 보존되어야 함", 
-            gtAFiles.all { gt -> IdentifierRetentionChecker.containsIdentifier(clarifyIntent.refinedRequirement, gt) })
+        // B-36 커밋 3: 태그가 붙은 refinedRequirement 대신 Analyze 입력(resolve 결과)과 구조화 필드로 확인한다(태그 제거 전후 모두 성립).
+        assertEquals("전제: 제외 확정된 파일이 없어야 함(2d 차감이 개입하지 않음)", emptyList<String>(), clarifyIntent.excludedFiles)
+        val resolved = AnalyzeInputResolver.resolve(rawInput = clarifyIntent.refinedRequirement, inMemoryIntent = clarifyIntent)
+        assertTrue("Category A 5종 전량이 Analyze 입력(effectiveRequirement)에 보존되어야 함",
+            gtAFiles.all { gt -> IdentifierRetentionChecker.containsIdentifier(resolved.effectiveRequirement, gt) })
+        assertTrue("Category A 5종은 rawRefined에 있거나 missingIdentifiers로 인계되어야 함",
+            gtAFiles.all { gt ->
+                IdentifierRetentionChecker.containsIdentifier(resolved.rawRefined, gt) ||
+                    resolved.missingIdentifiers.any { it.equals(gt, ignoreCase = true) }
+            })
 
         // 6. Stage 1 파이프라인 합성 검증
         val dummyClient = object : net.ib.ixpert.ops.wuwagent.client.LLMClient {
