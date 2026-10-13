@@ -361,6 +361,8 @@
 - **현상**: `agent/integration/IntegrationPipelineTest.kt`(6개 `@Test`)는 `OpenAIClient`의 기본 서버 주소(`SettingsState.openaiServerUrl` 기본값 `http://vllm.ixpertops.cloud`)로 실제 LLM을 호출하지만, 다른 Live LLM 테스트와 달리 `Assume`/`runLiveLlmTests` 게이트가 없어 기본 `./gradlew test`에서 실행된다.
 - **관측**: 2026-10-07 16:37 전체 실행(`a09dfb7`)에서 HTTP 520/502(`Server returned HTTP response code: 520/502 for URL: http://vllm.ixpertops.cloud/v1/chat/completions`)로 6건 중 3건 실패(`runHeldOutEvaluation`, `testOpenAIClientStreaming30FilesDirectly`, `traceApcHeldOutPipeline`, 소요 334초). 같은 3건은 31개 클래스 필터 실행에는 포함되지 않았다.
 - **추가 사례 `agent/IntegrationAnalyzeTest#testFullPipeline`**: 같은 서버를 `TestVllmClient`(`IntegrationAnalyzeTest.kt:19-22`, 주소 `http://vllm.ixpertops.cloud/v1/chat/completions`, 모델명 `Qwen/Qwen3.8-27B-FP8`로 하드코딩)로 직접 호출하고(`:168` 부근에서 `analyze()`를 `analyzeInput` 없이 호출) 게이트가 없다. `a09dfb7` 전체 실행에서는 PASS였으나 2026-10-08 전체 실행(2c 테스트 커밋 상태)과 같은 날 단독 `--rerun`에서 모두 `java.lang.AssertionError: Failed to call LLM: HTTP 530: error code: 1033`(`FileRelevanceVerifier.kt:137`)로 실패했다. 같은 요청을 `curl -X POST`로 직접 보내도 `http_code=530`이었으므로 코드와 무관한 서버 상태다. 이 테스트는 `integration-test-result.txt`를 `C:/Workspace/member-market/`에 쓰는 부수 효과도 있다. 결정적 기준선(B-27)에는 `IntegrationPipelineTest`와 함께 "외부 서버 HTTP 5xx"로 분류해 제외한다.
+- **서버가 살아 있을 때의 정지 관찰 (2026-10-13, 2d 전체 실행)**: 서버는 응답하는 상태였다(`POST /v1/chat/completions`에 최소 요청을 보내면 0.3초에 HTTP 404, 사용자 확인으로 `/v1/models`는 HTTP 200이고 `Qwen/Qwen3.8-27B-FP8` 포함). 제외 없이 `./gradlew.bat test --offline --rerun`을 09:46:17에 시작했고, 콘솔 로그의 마지막 갱신은 10:19:03(`RequirementPipelineHardLimitTest > testHardLimitBoundary FAILED`)이며 이후 약 10:47까지 새 출력이 없었다(약 28분). 그 시점(실행 시작 후 3626초)의 `jstack` 한 번에서 `Test worker`가 `IntegrationPipelineTest.traceApcHeldOutPipeline`(`IntegrationPipelineTest.kt:556`) → `AgenticSeedSelector.selectSeeds`(`:83`) → `OpenAIClient.chatWithTools`(`OpenAIClient.kt:294`) → 람다 `OpenAIClient.kt:358`(`reader.readLine()`) → `Socket$SocketInputStream.read`에 있었다. 이후 실행은 직접 띄운 것만 `TaskStop`으로 중단했다. 한계: 스택은 한 번만 떴으므로 28분 내내 같은 읽기였는지, 같은 테스트 안에서 여러 호출이 이어진 것인지는 확인하지 못했다.
+- **타임아웃 설정 (`OpenAIClient.kt` grep, 확인한 범위)**: `connectTimeout`/`readTimeout`/`timeout` grep에서 `chatWithTools`(`:231`)는 `:290-292`에서 `timeoutMs = settings.timeoutSeconds * 1000`, `connection.connectTimeout = 30_000`, `connection.readTimeout = timeoutMs`를 설정한다. `chat`(`:53`)도 `:96-98`에서 같은 설정이고 `fetchModels`(`:434`)는 `:442-443`에서 5000/5000이다. `SettingsState.timeoutSeconds` 기본값은 300(`SettingsState.kt:30`). 따라서 `:358` 읽기에 읽기 타임아웃 설정이 없는 것이 아니며 "무한 대기"로 단정할 수 없다. `readTimeout`은 읽기 한 번마다 적용되므로 서버가 SSE 청크를 계속 보내면 만료되지 않는다. 그 실행에서 `settings.timeoutSeconds`가 실제로 몇이었는지, 서버가 데이터를 계속 보냈는지는 확인하지 못했다(미확인).
 - **영향**: 전체 테스트 결과가 외부 서버 상태에 따라 달라져 결정적 기준선(B-27)에 포함할 수 없고, 서버 장애 시 실행 시간이 길어진다.
 - **해결 방안**: `-DrunLiveLlmTests=true` 또는 `RUN_LIVE_LLM_TESTS=true` 게이트(`Assume`)를 적용(`IntegrationAnalyzeTest` 포함).
 - **상태**: Open (우선순위 P3)
@@ -424,7 +426,7 @@
     7iv는 모든 변이에서 통과했다. 5P/5R/8/9S는 M4에서만 실패하고 (a)~(e)에서는 통과했다(5R은 섹션이 없는 세 경우라 (a)를 잡지 못한다).
   - **미고정 범위**: `stage0Contract` 경로는 기록 수준으로 고정하지 못했다. `enrichedRequirementText`가 본문이 되고 섹션이 뒤따르는 동작은 순수 함수 테스트 9S로만 고정되고, 파이프라인에서 `stage0Contract`를 거친 Stage 3 기록 테스트는 없다(`Stage0TransitionContract.enrichedRequirementText` 기본값이 `""`라 후보 없이 끝날 수 있어 시도하지 않음). 이 경로는 운영에서 쓰이지 않는다(B-24 7). Router의 `analyzeInput = resolvedInput` 연결은 B-35로 미고정.
   - **미확인**: 실제 LLM에서 Stage 3 판정이 새 섹션으로 어떻게 바뀌는지, `UnresolvedKind` 라벨 정확도(B-37).
-- **2d 설계 확정(구현 전 승인안)**: `AnalyzeInputResolver.resolve`에서 `missingBeforeFix`에서 `excludedFiles`에 해당하는 식별자를 차감한다(`src/main`은 `AnalyzeInputResolver.kt` 1개 파일).
+- **2d 설계 확정(구현 완료: `3c1f502` src/main, `c7f2f55` 테스트)**: `AnalyzeInputResolver.resolve`에서 `missingBeforeFix`에서 `excludedFiles`에 해당하는 식별자를 차감한다(`src/main`은 `AnalyzeInputResolver.kt` 1개 파일).
   - **차감 대상**: `missingIdentifiers` 하나뿐이다. `unresolvedItems`는 생성 시 `PENDING`만 담으므로(`Stage0ClarificationEngine.kt:1019`) 제외 확정(REJECTED) 항목과 구조적으로 겹치지 않고, 소비 쪽에서 다시 거르지 않는다(B-38). `retentionAudit.missingBeforeFix`는 바꾸지 않는다(커밋 4 불변식 (1)). 차감된 식별자는 `ResolvedAnalyzeInput.subtractedIdentifiers`(끝에 기본값 `emptyList()`로 추가, `missingBeforeFix` 순서 유지, 프롬프트에 넣지 않음)에 기록한다.
   - **`excludedFiles` 형식**: 그래프 경로 전체이고 확장자를 포함한다(`Stage0ClarificationEngine.kt:1004-1007`, 예 `com/example/SurveyServiceImpl.java`). `analyze()`는 완전 일치로 쓴다(`RequirementAnalysisPipeline.kt:223`, `:226-227`).
   - **일치 규칙**: 제외 파일 `file`(마지막 `/` 뒤)과 `base`(확장자 제거)에 대해 (1) `id.equals(file, ignoreCase = true)`(모든 확장자), (2) 제외 파일의 확장자가 `java` 또는 `kt`일 때만 `id.equals(base, ignoreCase = true)`. `java`/`kt`는 클래스명이 생기는 확장자다(`ProjectGraphBuilder.kt:410`, `SpringAnnotationResolver.kt:126-129`). 따라서 `aCMBTBAPC024DEM`은 `…/ACMBTBAPC024DEM.java`에 차감되고(B-22), `Foo.xml`은 `…/Foo.java`에, `ECMBTBISM006Mapper`는 `…/ECMBTBISM006Mapper.xml`에, `SurveyServiceImpl`은 `…/SurveyService.java`에 차감되지 않으며, 메서드 토큰 `selTrcdIsInf`는 소유 클래스가 제외돼도 차감하지 않는다(소유 클래스 추론 없음).
@@ -434,10 +436,34 @@
   - **테스트 16건(`ExcludedIdentifierSubtractionTest`)**: [순수 함수] D1P(차감, `subtractedIdentifiers`가 `missingBeforeFix` 순서), D2aP(파일명 형태, `.java`와 `.xml`), D2bP(`Foo.xml`은 `Foo.java`에 비차감), D2cP(`ECMBTBISM006Mapper`는 `…Mapper.xml`에 비차감), D3P(B-22 대소문자), D4P(`selTrcdIsInf` 비차감), D5P(전부 차감 시 `effectiveRequirement == rawRefined`), D6P(겹침 없으면 2c와 바이트 동일), D7P(`unresolvedItems` 비차감), D8P(`effectiveIntent === intent`, 감사 기록 불변), D9P(부분 문자열 비차감), D10P(본문에 제외 식별자가 있어도 `rawRefined`/`effectiveRequirement` 불변). [파이프라인 기록] D1R(Stage 3 구간 전체 `assertEquals`), D2R(전부 차감 시 구간이 `rawRefined`와 동일), D3R(시드 프롬프트에 차감된 식별자 없음), D0R(엔진 경로: 정제 mock이 `SurveyServiceImpl`을 뺀 정제문을 돌려줌 → `buildClarifyIntent` → `resolve` → `analyze(primaryReq = resolved.effectiveRequirement, clarifyIntent = resolved.effectiveIntent, analyzeInput = resolved)`).
   - **변이 N1~N10(실행 범위: 새 클래스 + `AnalyzeSectionsTest` + `AnalyzeInputStructureTest` + `AnalyzeRefinedSeedPromptTest` + 하네스 `testResolvedInputMatchesSimulated2bSrText_*` + `AnalyzeInputResolverTest`, 예측은 설계상)**: N1 차감 제거 {D1P, D2aP, D3P, D5P, D1R, D2R, D3R, D0R} / N2 규칙 1 삭제(규칙 2의 java/kt 제한 유지) {D2aP} / N3 `ignoreCase = false` {D3P} / N4 규칙 2를 `id.substringBeforeLast('.')`와 `base` 비교로(java/kt 제한 유지) {D2bP} / N5 규칙 2의 `equals`를 `contains`로(java/kt 제한 유지) {D9P, D2bP} / N6 `unresolvedItems`도 `filePath`로 차감 {D7P} / N7 차감본이 비어 있지 않을 때만 `effectiveIntent`를 감사 기록을 바꾼 복사본으로 교체 {D8P} / N8 `effectiveRequirement`에서만 차감하고 `missingIdentifiers`는 그대로 {D1P, D2aP, D3P, D5P, D1R, D2R, D0R} / N9 규칙 2의 java/kt 제한 삭제 {D2cP} / N10 제외 파일의 기본 이름을 `rawRefined` 본문에서 제거 {D10P, `AnalyzeInputStructureTest#auditNullFallsBackToRefinedRequirementByteForByte`}. `AnalyzeInputResolverTest`는 모든 변이에서 통과로 예측한다.
   - **합격 기준**: 하네스 7블록 `EXACT_MATCH`는 회귀 확인용이며 2d를 탐지하지 못한다(모든 하네스 픽스처가 `excludedFiles = []`). clarify 패키지 160건 중 실패 1(B-10)·skip 3. 변이 10건이 예측한 테스트에서만 실패.
+- **2d 측정 결과**:
+  - **테스트**: `ExcludedIdentifierSubtractionTest` 16건(D0R, D1P, D1R, D2aP, D2bP, D2cP, D2R, D3P, D3R, D4P, D5P, D6P, D7P, D8P, D9P, D10P). 테스트 커밋 `c7f2f55`의 `git diff 3c1f502 --stat -- src/main`은 빈 출력. D0R(엔진 경로)의 단언 1·2·4와 시드 프롬프트 1건 단언은 mock이나 픽스처를 고치지 않고 통과했다(`sr`은 `"신규 FooService 추가\n"`).
+  - **clarify 패키지**: 160건 중 실패 1(B-10), skip 3. 하네스 7블록(5종 + Ablation-a/b)은 `harness_58eb590_run1` 대 2d run1, 2d run1 대 run2 모두 `EXACT_MATCH`. 모든 하네스 픽스처가 `excludedFiles = []`이므로 이 비교는 회귀 확인용이며 2d를 탐지하지 못한다.
+  - **전체 테스트(④)는 서버 의존 14개 클래스를 제외한 기준**이다. 서버가 살아 있는 상태에서 제외 없이 돌린 전체 실행(2026-10-13 09:46 시작)은 `IntegrationPipelineTest#traceApcHeldOutPipeline`에서 진행하지 않아 중단했다(B-34). 제외 14개: `AgenticExplorationPilotTest`, `AgenticSeedSelectorBenchmarkTest`, `IntegrationAnalyzeTest`, `LlmDomainExtractionBenchmarkTest`, `PipelineE2ETest`, `VllmToolCallPilotTest`, `ClarifyBaselineTest`, `PipelineBaselineTest`, `completeness.ApcPilotHarnessTest`, `completeness.Scenario7E2ETest`, `completeness.Stage3TokenMeasurementTest`, `completeness.TokenMeasurementTest`, `stage0.E2EPipelineIntegrationTest`, `integration.IntegrationPipelineTest`(26건). `runLiveLlmTests` 게이트 4개 클래스는 제외하지 않았다(기본 skip, skip 목록 비교에 필요). 제외는 저장소 파일 수정 없이 TEMP의 init script(`-I`)로 했고, 실행 전 `RUN_LIVE_LLM_TESTS` 환경 변수와 `runLiveLlmTests` 속성이 설정되지 않았음을 확인했다. 실행 전 `runIde`(PID 21144)는 닫힌 상태였다(`jps -l`로 확인).
+  - **④ 결과**: `405 tests completed, 42 failed, 5 skipped`(예상 431 − 26 = 405). 같은 14개 클래스를 뺀 `a09dfb7`·2c 전체 실행의 실패 42·skip 5 목록과 diff 없음. 제외 14개 클래스의 XML은 0개이고 `ixpertops.cloud`와 `HTTP `를 포함한 XML은 0건. 이 실행은 서버 의존 클래스를 보지 않으므로 서버 상태에 영향받지 않는 부분만 증명한다. 소요 11분 17초(2c 전체 실행은 4분 47초)이며 차이의 원인은 **미확인**이다(하네스 약 301초와 `Stage0SurveyAdminSnapshotTest` 약 240초가 큰 비중).
+  - **진행 신호**: Gradle은 XML을 작업 끝에 쓰므로 실행 중에는 새 XML이 생기지 않는다. 정지 판정에는 새 XML 개수와 함께 `build/test-results/test/binary/output.bin` 크기를 진행 신호로 썼다.
+  - **변이 10건**(실행 범위: 새 클래스 + `AnalyzeSectionsTest` + `AnalyzeInputStructureTest` + `AnalyzeRefinedSeedPromptTest` + `AnalyzeInputResolverTest` + 하네스 `testResolvedInputMatchesSimulated2bSrText_SurveyAdmin_LlmOn`, 한 번에 1건, `cp` 복원 후 `cmp` exit 0, 변이 전과 같은 sha256 `7b67b6e0…2b6d`, `git status -s`와 `git diff -- src/main` 빈 출력). 9건은 예측과 일치했고 N1만 예측이 틀려 정정했다.
+
+    | 변이 | 실제 실패 | 예측 |
+    |---|---|---|
+    | N1 차감 제거 | D0R, D1P, D1R, D2aP, D2R, D3P, D3R, D5P, **D8P** (9건) | **정정**(아래) |
+    | N2 규칙 1 삭제 | D2aP | 일치 |
+    | N3 `ignoreCase = false` | D3P | 일치 |
+    | N4 식별자 쪽 확장자도 떼어 비교 | D2bP | 일치 |
+    | N5 `equals`를 `contains`로 | D2bP, D9P | 일치 |
+    | N6 `unresolvedItems`도 `filePath`로 차감 | D7P | 일치 |
+    | N7 차감이 있을 때 `effectiveIntent` 교체 | D8P | 일치 |
+    | N8 `missingIdentifiers`만 원본 | D0R, D1P, D1R, D2aP, D2R, D3P, D5P (7건) | 일치 |
+    | N9 java/kt 제한 삭제 | D2cP | 일치 |
+    | N10 본문에서 제외 파일 기본 이름 제거 | D10P, `AnalyzeInputStructureTest#auditNullFallsBackToRefinedRequirementByteForByte` | 일치 |
+
+    `AnalyzeSectionsTest`, `AnalyzeRefinedSeedPromptTest`, `AnalyzeInputResolverTest`, 하네스 테스트는 N10의 `AnalyzeInputStructureTest` 1건을 빼고 모든 변이에서 통과했다.
+  - **N1 예측 정정**: 예측은 8건(D8P 제외)이었으나 실제는 9건이다. D8P의 첫 단언 `assertTrue("전제: 차감이 실제로 생겨야 함", …)`가 차감이 없는 N1에서도 실패하기 때문이며(N7에서는 신원 단언으로 실패), 예측에서 이 전제 단언을 빠뜨렸다.
+  - **변이 실행 절차 기록**: 변이 10건을 한 스크립트로 연속 실행해, N1이 예측과 다르다는 것을 안 시점에 이미 N2~N10이 끝나 있었다(예측과 다르면 그 자리에서 멈추는 규칙을 지키지 못함). 매 변이마다 `cp` 복원 후 `cmp`, sha256, `git status -s`, `git diff -- src/main`을 확인했으므로 저장소 상태와 각 변이의 결과는 유효하다. 다음 변이 실행부터는 스크립트가 예측과 처음 어긋나는 지점에서 멈추게 한다.
 - **2d 테스트 예시**: B-22의 `aCMBTBAPC024DEM`과 `ACMBTBAPC024DEM`(대소문자 불일치), `selTrcdIsInf`를 포함한다.
 - **도구 옵션(커밋 4 직전)**: `RefinedReq:` 줄만 비교에서 빼고 그 줄은 따로 보고한다. `Top-30 TargetFiles Count`, `GT Survived`, `GT Missing`은 비교 범위에 남긴다.
 - **커밋 4 불변식 (합격 기준에 단언으로 포함)**: 태그를 지운 뒤에도 (1) `missingBeforeFix`는 지금처럼 채워져야 하고, (2) `rawRefinedRequirement == refinedRequirement`가 성립해야 한다.
-- **상태**: 진행 중 (우선순위 P2, 2b·2c 완료, 2d 이후 미착수)
+- **상태**: 진행 중 (우선순위 P2, 2b·2c·2d 완료, 도구 옵션 커밋 이후 미착수)
 
 ---
 
