@@ -5,8 +5,9 @@
  * 사용법:
  *   node scripts/compare-harness-blocks.selftest.js                       # T1~T13 (메모리에서 만든 XML)
  *   node scripts/compare-harness-blocks.selftest.js --real <기준선.xml> <비교.xml>   # 위 + 실데이터 확인 R1, R2
+ *   (--real이 없거나 두 파일 중 하나라도 없으면 R 계열은 SKIP으로 표시하고 T 계열만으로 종료 코드를 정한다)
  *
- * 종료 코드: 모든 사례가 기대와 같으면 0, 하나라도 다르면 1.
+ * 종료 코드: 실행한 사례가 모두 기대와 같으면 0, 하나라도 다르면 1 (SKIP은 판정에 넣지 않음).
  */
 const fs = require("fs");
 const os = require("os");
@@ -138,14 +139,22 @@ check("T13", "라벨이 5번 반복되는 블록 + 옵션 → duplicate 오류 �
   [`[${X}] MATCH_EXCLUDING`, "excluded=1", "excludedLinesDiffer=false"], ["duplicate block", "ambiguous"]);
 
 // ───────────── 실데이터 확인 R1, R2 (옵션 --real) ─────────────
+// R 계열은 XML 경로를 `--real <기준선.xml> <비교.xml>` 인자로만 받는다(하드코딩/환경 변수 없음).
+// 인자가 없거나 파일이 없으면 R 계열을 SKIP으로 따로 표시하고 종료 코드는 T 계열만으로 정한다.
 const realIdx = process.argv.indexOf("--real");
-if (realIdx !== -1) {
-  const baseline = process.argv[realIdx + 1];
-  const after = process.argv[realIdx + 2];
-  if (!baseline || !after) {
-    console.error("--real needs <기준선.xml> <비교.xml>");
-    process.exit(1);
-  }
+const R_IDS = "R1a R1b R2-0 R2a R2b R2c R2d";
+const realPaths = realIdx === -1 ? [] : [process.argv[realIdx + 1], process.argv[realIdx + 2]];
+const realMissing = realPaths.filter((p) => !p || !fs.existsSync(p));
+let rSkipped = false;
+if (realIdx === -1) {
+  rSkipped = true;
+  console.log(`SKIP ${R_IDS} (--real 미지정; 종료 코드는 T 계열만으로 결정)`);
+} else if (realMissing.length > 0) {
+  rSkipped = true;
+  console.log(`SKIP ${R_IDS} (파일 없음 또는 인자 누락: ${realMissing.map((p) => p || "<인자 없음>").join(", ")}; 종료 코드는 T 계열만으로 결정)`);
+} else {
+  const baseline = realPaths[0];
+  const after = realPaths[1];
   const LLMON = "survey_admin (Intent=LlmOn),APC DEM Isolated (Intent=LlmOn)";
   const STRICT = [
     "APC Transit Card (Intent=LlmOff)", "survey_admin (Intent=LlmOff)", "ISM Core (Intent=LlmOff)",
@@ -189,5 +198,5 @@ if (realIdx !== -1) {
   else { failed++; console.log(`FAIL R2d\n${r2s.out}`); }
 }
 
-console.log(`\n${failed === 0 ? "ALL PASSED" : "FAILED"}: ${total - failed}/${total}`);
+console.log(`\n${failed === 0 ? "ALL PASSED" : "FAILED"}: ${total - failed}/${total}${rSkipped ? " (R 계열 SKIP: 실데이터 미확인)" : ""}`);
 process.exit(failed === 0 ? 0 : 1);
