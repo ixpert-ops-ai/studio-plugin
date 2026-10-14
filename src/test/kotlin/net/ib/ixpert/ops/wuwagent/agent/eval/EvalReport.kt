@@ -52,7 +52,7 @@ object EvalReport {
         val excludedText = if (clarifyRuns.isEmpty()) "-" else "확정 ${f1(clarifyRuns.map { it.excludedFiles.size }.average())}개, 위반 ${okRuns.sumOf { it.excludedInTargets.size }}" +
             (clarifyRuns.mapNotNull { it.expectedExcludedConfirmed }.let { if (it.isEmpty()) "" else ", 기대 제외 확정 ${it.count { b -> b }}/${it.size}" })
         val turns = clarifyRuns.mapNotNull { it.turns }
-        val turnText = if (turns.isEmpty()) "-" else "질문 ${f1(turns.map { it.engineQuestions }.average())}, 답함 ${f1(turns.map { it.answeredQuestions }.average())}, 대본 먼저 끝남 ${turns.count { it.scriptEndedBeforeQuestion }}/${turns.size}, 대체 답변 ${turns.sumOf { it.fallbackAnswersUsed }}회(그래도 질문 남음 ${turns.count { it.questionRemainedAfterFallback }})"
+        val turnText = if (turns.isEmpty()) "-" else "질문 ${f1(turns.map { it.engineQuestions }.average())}, 답함 ${f1(turns.map { it.answeredQuestions }.average())}, 대본 먼저 끝남 ${turns.count { it.scriptEndedBeforeQuestion }}/${turns.size}, 대체 답변 ${turns.sumOf { it.fallbackAnswersUsed }}회, 규칙 답변 ${turns.sumOf { it.ruleAnswersUsed }}회(그래도 질문 남음 ${turns.count { it.questionRemainedAfterFallback }})"
         val fp = if (okRuns.isEmpty()) "-" else f1(okRuns.map { it.fp30 }.average())
         val refText = if (okRuns.isEmpty() || okRuns.first().referenceTotal == 0) "-" else {
             val total = okRuns.first().referenceTotal
@@ -106,7 +106,7 @@ object EvalReport {
             }
             if (r.turns != null) sb.appendLine("- 제외 확정: ${r.excludedFiles}" + if (r.ok) ", 최종 목록에 포함된 제외 파일: ${r.excludedInTargets}, Stage 3 섹션에 나타난 제외 파일명: ${r.excludedNameInStage3Sections}, 본문에 나타난 제외 파일명(참고): ${r.excludedNameInStage3Body}" else " (분석 실패로 최종 목록 비교 불가)")
             r.turns?.let {
-                sb.appendLine("- 턴: 엔진 질문 ${it.engineQuestions}회, 답한 질문 ${it.answeredQuestions}회, 처리한 발화 ${it.utterancesProcessed}개, 대본이 질문보다 먼저 끝남=${it.scriptEndedBeforeQuestion}, 대체 답변 ${it.fallbackAnswersUsed}회, 대체 답변 뒤에도 질문 남음=${it.questionRemainedAfterFallback}, 정제 완료(isReadyForStage1)=${it.readyForStage1}, 마지막 미확정 ${it.unresolvedAtEnd}개")
+                sb.appendLine("- 턴: 엔진 질문 ${it.engineQuestions}회, 답한 질문 ${it.answeredQuestions}회, 처리한 발화 ${it.utterancesProcessed}개, 대본이 질문보다 먼저 끝남=${it.scriptEndedBeforeQuestion}, 대체 답변 ${it.fallbackAnswersUsed}회, 규칙 답변 ${it.ruleAnswersUsed}회(${it.ruleAnswerText ?: "-"}), 답변 뒤에도 질문 남음=${it.questionRemainedAfterFallback}, 정제 완료(isReadyForStage1)=${it.readyForStage1}, 마지막 미확정 ${it.unresolvedAtEnd}개")
                 sb.appendLine("- 엔진 질문 원문: ${if (it.engineQuestionTexts.isEmpty()) "(없음)" else it.engineQuestionTexts.joinToString(" / ") { q -> "\"${cell(q)}\"" }}")
                 it.remainingQuestion?.let { q -> sb.appendLine("- 분석으로 넘어갈 때 남은 질문: \"${cell(q)}\"") }
             }
@@ -167,7 +167,7 @@ object EvalReport {
         val mdFile = File(outDir, "live_eval_$stamp.md")
         val jsonFile = File(outDir, "live_eval_$stamp.json")
         val git = gitHead()
-        val groups = listOf("dev" to "개발용 시나리오", "synthetic" to "합성 시나리오", "real" to "실제 업무 SR")
+        val groups = listOf("dev" to "개발용 시나리오", "synthetic" to "합성 시나리오", "real" to "실제 업무 SR", "probe" to "확인용(기준선 아님)")
         val calls = proxyCalls.sortedBy { it.seq }
         val allTurns = summaries.flatMap { it.runs }.mapNotNull { it.turns }
 

@@ -47,6 +47,19 @@
       "note": "Stage0ThreeScenarioLiveLlmObservationTest 시나리오 2(제외·범위 제약)의 SR·발화. GT는 D1과 같은 8개. 제외 확정(excludedFiles)이 실제로 생기는지는 미확인이라 기대 제외 파일을 적지 않고 결과만 기록한다."
     },
     {
+      "id": "D5E", "group": "probe", "graphKey": "survey_admin",
+      "sr": "설문 발송 채널에 브랜드메시지 추가",
+      "script": ["알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야"],
+      "answerRules": [{"questionContains": "제외", "answer": "네, 제외해 주세요"}],
+      "gtMatch": "harness-contains", "onlyType": "MODIFY", "gtStatus": "confirmed",
+      "expectExcluded": ["src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchJob.java", "src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRunner.java"],
+      "gt": [
+        {"name": "survey_list.jsp"}, {"name": "survey_write.jsp"}, {"name": "survey.list.js"}, {"name": "survey.write.js"},
+        {"name": "SurveyServiceImpl.java"}, {"name": "sql_survey.xml"}, {"name": "AlimtalkChnlDto.java"}, {"name": "AlimtalkTmplDto.java"}
+      ],
+      "note": "확인용(기준선 아님): D5와 같은 SR·발화에 제외 확인 질문('제외'가 들어간 질문)에만 '네, 제외해 주세요'로 답하도록 한 테스트 전용 대본. 제외 확정(excludedFiles), 최종 목록에서 제외 파일이 빠졌는지, 정제문을 기록한다."
+    },
+    {
       "id": "S1", "group": "synthetic", "graphKey": "member_market",
       "sr": "채팅방 목록에서 안 읽은 메시지 개수가 이상하게 나와서 고치고 싶어요.",
       "script": ["목록 조회하는 쪽이에요."],

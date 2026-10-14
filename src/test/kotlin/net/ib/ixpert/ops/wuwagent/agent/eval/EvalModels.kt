@@ -56,6 +56,8 @@ data class TurnStats(
     val scriptEndedBeforeQuestion: Boolean,
     val readyForStage1: Boolean,
     val unresolvedAtEnd: Int,
+    val ruleAnswersUsed: Int = 0,                     // 시나리오 답변 규칙(예: 제외 확인에 '네')을 쓴 횟수
+    val ruleAnswerText: String? = null,
     val fallbackAnswersUsed: Int = 0,                 // 대본에 없는 엔진 질문에 대체 답변을 쓴 횟수(1회 한도)
     val questionRemainedAfterFallback: Boolean = false, // 대체 답변 뒤에도 질문이 남아 그대로 분석으로 진행했는지
     val remainingQuestion: String? = null,            // 분석으로 넘어갈 때 남아 있던 엔진 질문

@@ -135,10 +135,15 @@ class LiveEvalTest {
             // 대본이 끝났는데 엔진 질문이 남아 있으면(대본에 없는 질문) 대체 답변을 1회 쓴다. 그래도 남으면 그대로 분석으로 진행한다.
             val scriptEnded = result.openQuestion != null && !result.isReadyForStage1
             var fallbackUsed = 0
+            var ruleUsed = 0
+            var ruleText: String? = null
             var remainedAfterFallback = false
             if (scriptEnded) {
-                result = engine.processTurn(result.state, Stage0ClarificationEngine.UserInput(userStatement = FALLBACK_ANSWER))
-                fallbackUsed = 1
+                val q = result.openQuestion ?: ""
+                val rule = sc.rulesOrEmpty().firstOrNull { !it.questionContains.isNullOrEmpty() && q.contains(it.questionContains) && !it.answer.isNullOrEmpty() }
+                val reply = rule?.answer ?: FALLBACK_ANSWER
+                if (rule != null) { ruleUsed = 1; ruleText = rule.answer } else fallbackUsed = 1
+                result = engine.processTurn(result.state, Stage0ClarificationEngine.UserInput(userStatement = reply))
                 answered++
                 result.openQuestion?.let { questionTexts.add(it) }
                 remainedAfterFallback = result.openQuestion != null && !result.isReadyForStage1
@@ -152,6 +157,8 @@ class LiveEvalTest {
                 scriptEndedBeforeQuestion = scriptEnded,
                 readyForStage1 = result.isReadyForStage1,
                 unresolvedAtEnd = intent.unresolvedItems.size,
+                ruleAnswersUsed = ruleUsed,
+                ruleAnswerText = ruleText,
                 fallbackAnswersUsed = fallbackUsed,
                 questionRemainedAfterFallback = remainedAfterFallback,
                 remainingQuestion = if (result.openQuestion != null && !result.isReadyForStage1) result.openQuestion else null,

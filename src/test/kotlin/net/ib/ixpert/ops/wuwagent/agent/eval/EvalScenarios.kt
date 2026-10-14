@@ -27,6 +27,12 @@ data class EvalExtra(
     val inGraph: Boolean? = null
 )
 
+/** 대본이 끝난 뒤 남은 엔진 질문에 질문 문구가 포함되면 대체 답변 대신 이 답을 쓴다(테스트 전용 대본 확장). */
+data class EvalAnswerRule(
+    val questionContains: String? = null,
+    val answer: String? = null
+)
+
 data class EvalScenario(
     val id: String,
     val group: String,                    // dev | synthetic | real
@@ -39,7 +45,8 @@ data class EvalScenario(
     val onlyType: String? = null,         // 하네스 규칙 유지용: 이 type의 targetFiles만 GT 판정에 쓴다(예: MODIFY)
     val expectExcluded: List<String>? = null, // 제외될 것으로 기대하는 파일 경로(없으면 비움)
     val extraCandidates: List<EvalExtra>? = null,
-    val note: String? = null
+    val note: String? = null,
+    val answerRules: List<EvalAnswerRule>? = null
 ) {
     fun scriptOrEmpty(): List<String> = script ?: emptyList()
     fun gtOrEmpty(): List<EvalGt> = gt ?: emptyList()
@@ -47,6 +54,7 @@ data class EvalScenario(
     fun status(): String = gtStatus ?: "draft"
     fun expectExcludedOrEmpty(): List<String> = expectExcluded ?: emptyList()
     fun extrasOrEmpty(): List<EvalExtra> = extraCandidates ?: emptyList()
+    fun rulesOrEmpty(): List<EvalAnswerRule> = answerRules ?: emptyList()
 }
 
 data class EvalScenarioFile(val scenarios: List<EvalScenario>? = null)
@@ -82,6 +90,7 @@ object EvalScenarios {
         val real = if (!realFile.isNullOrBlank()) parse(File(realFile).readText(Charsets.UTF_8)) else parse(readResource("/eval/real_scenarios.json"))
         val all = base + real.map { it.copy(group = "real") }
         val only = System.getProperty("eval.only")?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
-        return if (only.isNullOrEmpty()) all else all.filter { it.id in only }
+        // group == probe(확인용)는 기준선에 섞이지 않도록 eval.only로 지정했을 때만 돈다.
+        return if (only.isNullOrEmpty()) all.filter { it.group != "probe" } else all.filter { it.id in only }
     }
 }
