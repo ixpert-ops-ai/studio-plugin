@@ -6,7 +6,15 @@ plugins {
 }
 
 group = "net.ib.ixpert.ops.wuwagent"
-version = "1.0-SNAPSHOT"
+
+// 빌드 대상 플랫폼: 기본(미지정)=기존 빌드(since-build 243), -Pplatform=253 → IntelliJ 2026.2용
+// (2026.2부터 JCEF가 별도 모듈로 분리되어 plugin.xml에 jcef depends 필요. 2025.3.1 미만에서는 인식 불가)
+val targetPlatform: String? = providers.gradleProperty("platform").orNull
+val is253 = targetPlatform == "253"
+if (targetPlatform != null && !is253) {
+    throw GradleException("지원하지 않는 -Pplatform 값: '$targetPlatform' (지원: 253, 미지정 시 기존 빌드)")
+}
+version = if (is253) "1.0-SNAPSHOT-253" else "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
@@ -50,7 +58,24 @@ tasks {
     }
 
     patchPluginXml {
-        sinceBuild.set("243")
+        sinceBuild.set(if (is253) "253" else "243")
+
+        // platform 값이 바뀌면 캐시(UP-TO-DATE/FROM-CACHE)를 재사용하지 않도록 input으로 선언
+        inputs.property("targetPlatform", targetPlatform ?: "default")
+
+        // 253 빌드일 때만 패치된 plugin.xml(빌드 산출물)에 jcef depends 주입. 원본 소스는 수정하지 않음
+        if (is253) {
+            doLast {
+                val xml = outputFile.get().asFile
+                val anchor = "<depends>com.intellij.modules.java</depends>"
+                val jcef = "<depends>com.intellij.modules.jcef</depends>"
+                val text = xml.readText()
+                if (!text.contains(jcef)) {
+                    check(text.contains(anchor)) { "plugin.xml에서 depends 기준 라인을 찾지 못했습니다" }
+                    xml.writeText(text.replace(anchor, "$anchor\n    $jcef"))
+                }
+            }
+        }
     }
 
     // 웹앱 의존성 설치
