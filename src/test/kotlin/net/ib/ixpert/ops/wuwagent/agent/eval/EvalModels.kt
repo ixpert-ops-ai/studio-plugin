@@ -55,7 +55,11 @@ data class TurnStats(
     val utterancesProcessed: Int,
     val scriptEndedBeforeQuestion: Boolean,
     val readyForStage1: Boolean,
-    val unresolvedAtEnd: Int
+    val unresolvedAtEnd: Int,
+    val fallbackAnswersUsed: Int = 0,                 // 대본에 없는 엔진 질문에 대체 답변을 쓴 횟수(1회 한도)
+    val questionRemainedAfterFallback: Boolean = false, // 대체 답변 뒤에도 질문이 남아 그대로 분석으로 진행했는지
+    val remainingQuestion: String? = null,            // 분석으로 넘어갈 때 남아 있던 엔진 질문
+    val engineQuestionTexts: List<String> = emptyList()
 )
 
 data class DeliveredCheck(val identifier: String, val source: String, val inStage3: Boolean?)

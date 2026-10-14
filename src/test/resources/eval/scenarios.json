@@ -55,17 +55,17 @@
         {"path": "member-market-api/src/main/java/com/membermarket/api/chat/ChatService.java", "reason": "getMyChatRooms(:32-40)가 방마다 countUnreadMessages를 호출해 목록을 만든다"},
         {"path": "member-market-api/src/main/java/com/membermarket/domain/chat/ChatRoomRepository.java", "reason": "countUnreadMessages(:24-26) 쿼리가 안 읽은 수를 센다"},
         {"path": "member-market-api/src/main/java/com/membermarket/api/chat/dto/ChatRoomResponse.java", "reason": "unreadCount 필드와 from(…, unreadCount)가 응답 값을 담는다"},
-        {"path": "member-market-api/src/main/java/com/membermarket/api/chat/ChatController.java", "reason": "getMyChatRooms(:28-32) GET 진입점"}
+        {"path": "member-market-api/src/main/java/com/membermarket/api/chat/ChatController.java", "role": "reference", "reason": "[초안] getMyChatRooms(:28-32)는 chatService.getMyChatRooms를 호출해 돌려줄 뿐 개수 계산은 하지 않는다(읽기만 함). 반환 형식을 바꾸는 수정이면 required"}
+      ,{"path": "member-market-api/src/main/java/com/membermarket/domain/chat/ChatMessageRepository.java", "role": "reference", "reason": "[초안] markAllAsRead(:15-17)는 countUnreadMessages와 같은 조건(sender != 나, isRead = false)을 읽음 처리에 쓴다. 증상이 '읽어도 개수가 안 줄어든다'라면 required, 목록 개수 계산 자체의 문제라면 읽기만 한다"}
       ],
       "extraCandidates": [
-        {"path": "member-market-api/src/main/java/com/membermarket/domain/chat/ChatMessageRepository.java", "reason": "markAllAsRead(:15-17) 쿼리가 안 읽은 수와 쌍으로 쓰인다", "inGraph": true},
         {"path": "member-market-api/src/main/java/com/membermarket/domain/chat/ChatMessage.java", "reason": "isRead(:37)와 markAsRead(:39)가 읽음 상태를 정의한다", "inGraph": true},
         {"path": "member-market-api/src/main/java/com/membermarket/api/chat/ChatWebSocketController.java", "reason": "markAsRead 읽음 알림 전송(그래프 한글 주석 기준, 본문 미확인)", "inGraph": true},
         {"path": "member-market-web/src/views/chat/ChatListView.vue", "reason": "grep unreadCount 일치(웹)", "inGraph": true},
         {"path": "member-market-web/src/stores/chat.js", "reason": "grep unreadCount 일치. 그래프에 없음(웹)", "inGraph": false},
         {"path": "member-market-web/src/components/layout/TheHeader.vue", "reason": "grep unreadCount 일치(웹)", "inGraph": true}
       ],
-      "note": "합성: 기존 기능 수정. GT는 사용자 확인 전까지 초안"
+      "note": "합성: 기존 기능 수정. 안 읽은 수 계산 위치: ChatRoomRepository.countUnreadMessages(:24-26 JPQL, sender != 나 AND isRead = false)를 ChatService.getMyChatRooms(:37-38)가 방마다 호출하고 ChatRoomResponse.from(:26, :47)이 unreadCount에 담는다. 웹은 ChatListView.vue(:35-36 배지), stores/chat.js(:21 합계), TheHeader.vue(:144). 읽음 처리는 ChatService.markAsRead(:99-103) -> ChatMessageRepository.markAllAsRead(:15-17). GT는 사용자 확인 전까지 초안"
     },
     {
       "id": "S2", "group": "synthetic", "graphKey": "member_market",
