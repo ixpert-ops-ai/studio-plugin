@@ -117,7 +117,8 @@ class IdentifierRetentionCheckerTest {
             setOf("SurveyServiceImpl.java", "sql_survey.xml", "AlimtalkTemplateBatchRepository"),
             result.expectedIdentifiers
         )
-        assertTrue(result.effectiveRefinedRequirement.startsWith(rawRefined.trimEnd('.')))
+        // 커밋 4: 태그를 붙이지 않으므로 effective는 끝 마침표까지 raw와 같다(불변식 (2)).
+        assertEquals(rawRefined, result.effectiveRefinedRequirement)
     }
 
     @Test

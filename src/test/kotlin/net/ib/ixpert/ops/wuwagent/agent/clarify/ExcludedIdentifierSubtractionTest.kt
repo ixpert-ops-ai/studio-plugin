@@ -523,4 +523,13 @@ class ExcludedIdentifierSubtractionTest {
         val intent = engineIntent()
         assertEquals("신규 FooService 추가", intent.retentionAudit!!.rawRefinedRequirement)
     }
+
+    // I2b [엔진 경로] 커밋 4 이후에만 통과: 정제문에 식별자 태그가 없고 refinedRequirement == 감사 기록의 raw
+    @Test
+    fun i2b_refinedEqualsRawWithoutTag() {
+        val intent = engineIntent()
+        assertEquals("신규 FooService 추가", intent.refinedRequirement)
+        assertEquals(intent.retentionAudit!!.rawRefinedRequirement, intent.refinedRequirement)
+        assertFalse(intent.refinedRequirement.contains("명시된 식별자"))
+    }
 }
