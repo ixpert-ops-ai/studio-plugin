@@ -27,7 +27,7 @@ print_usage() {
     echo -e "  command 없이 실행하면 ${GREEN}buildrun${NC} 이 기본으로 실행됩니다."
     echo ""
     echo -e "${YELLOW}명령어:${NC}"
-    echo -e "  ${GREEN}build${NC}        전체 빌드 (webview + plugin + release 복사)"
+    echo -e "  ${GREEN}build${NC}        전체 빌드 - 기존용 + 2026.2용 zip 2벌 생성"
     echo -e "  ${GREEN}plugin${NC}       플러그인만 빌드 (webview 빌드 포함)"
     echo -e "  ${GREEN}webview${NC}      웹뷰만 빌드"
     echo -e "  ${GREEN}clean${NC}        빌드 캐시 정리"
@@ -52,10 +52,54 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-cmd_build() {
-    log_step "전체 빌드 시작..."
+# 개발용 1벌 빌드 (기존용만). buildrun 에서 사용
+cmd_build_single() {
+    log_step "빌드 시작 (기존용 1벌)..."
     $GRADLEW build
     log_done "빌드 완료!"
+    cmd_release
+}
+
+# 설치파일 생성: 기존용(since-build 243) + IntelliJ 2026.2용(-253) 2벌. 하나라도 누락되면 실패
+cmd_build() {
+    local release_dir="$PROJECT_DIR/_release"
+
+    # a. 기존 zip을 _release/old/ 로 이동 (같은 이름은 덮어쓰기)
+    mkdir -p "$release_dir/old"
+    shopt -s nullglob
+    local old_zips=("$release_dir"/*.zip)
+    shopt -u nullglob
+    if [ ${#old_zips[@]} -gt 0 ]; then
+        log_step "기존 zip ${#old_zips[@]}개를 _release/old/ 로 이동..."
+        mv -f "${old_zips[@]}" "$release_dir/old/"
+    fi
+
+    # b. 기존용 빌드
+    log_step "[1/2] 기존용 빌드 (since-build 243, 테스트 제외)..."
+    $GRADLEW clean build -x test
+
+    # c. 2026.2용 빌드 (platform 값이 patchPluginXml input 이므로 clean 없이도 캐시 재사용 없음)
+    log_step "[2/2] 2026.2용 빌드 (-Pplatform=253)..."
+    $GRADLEW buildPlugin copyToRelease -Pplatform=253
+
+    # d. 검증: 기존용 1개 + -253 1개
+    shopt -s nullglob
+    local zips=("$release_dir"/*.zip)
+    shopt -u nullglob
+    local std=0 p253=0
+    for f in "${zips[@]}"; do
+        case "$f" in
+            *-253.zip) p253=$((p253 + 1)) ;;
+            *)         std=$((std + 1)) ;;
+        esac
+    done
+    if [ "$std" -ne 1 ] || [ "$p253" -ne 1 ]; then
+        log_error "_release 검증 실패: 기존용 ${std}개, 2026.2용(-253) ${p253}개 (각 1개여야 합니다)"
+        exit 1
+    fi
+
+    log_done "빌드 완료! (기존용 + 2026.2용)"
+    # e. 결과 출력
     cmd_release
 }
 
@@ -83,7 +127,7 @@ cmd_rebuild() {
 }
 
 cmd_buildrun() {
-    cmd_build
+    cmd_build_single
     log_step "IDE 샌드박스에서 플러그인 실행..."
     $GRADLEW runIde
 }
