@@ -1,0 +1,11 @@
+{
+  "_howto": "실제 업무 SR 그룹 자리. scenarios 배열에 아래 형식의 항목을 추가하면 보고서에 '실제 업무 SR' 그룹으로 따로 집계된다(group 값은 자동으로 real로 바뀐다). GT가 없으면 gt를 비우고 첫 측정 보고서의 후보 목록에서 표시해 채운 뒤 gtStatus를 confirmed로 바꾼다. 파일 경로 GT는 gtMatch=path, 이름 GT는 harness-contains.",
+  "_template": {
+    "id": "R1", "group": "real", "graphKey": "survey_admin | apc | ism | member_market (또는 -Deval.graphs의 키)",
+    "sr": "실제 SR 원문", "script": ["사용자 발화 1", "사용자 발화 2"],
+    "gtMatch": "path", "gtStatus": "draft",
+    "gt": [{"path": "프로젝트 루트 기준 파일 경로", "reason": "고른 근거 한 줄"}],
+    "expectExcluded": ["제외될 것으로 기대하는 파일 경로(없으면 생략)"]
+  },
+  "scenarios": []
+}
