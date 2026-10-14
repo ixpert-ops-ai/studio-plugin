@@ -184,6 +184,22 @@ LLM 응답 품질은 컨텍스트에 의해 결정된다.
 
 ---
 
+## 12. 설치파일(배포용 zip) 빌드
+
+* 설치파일 생성은 항상 2벌: 기존용(since-build 243) + IntelliJ 2026.2용(`-253`, since-build 253, jcef depends)
+* macOS/Linux: `./build.sh build`
+* Windows (`build.sh` 사용 불가 시), 먼저 `_release`의 기존 zip을 `_release\old\`로 이동한 뒤 같은 순서로 실행:
+
+```
+gradlew.bat clean build -x test
+gradlew.bat buildPlugin copyToRelease -Pplatform=253
+```
+
+* 완료 후 `_release`에 기존용 zip 1개 + `-253` zip 1개가 있는지 확인
+* `./gradlew build`, `buildPlugin` 단독 실행은 1벌만 생성되므로 개발용으로만 사용
+
+---
+
 ## Summary
 
 이 프로젝트는 단순 기능 구현이 아닌
