@@ -10,11 +10,24 @@ Companion docs in repo root: `DEVELOPMENT_GUIDE.md` (architecture rules), `WORKI
 
 ## Common commands
 
+> **설치파일(배포용 zip) 생성 요청 시 반드시 `./build.sh build`를 사용한다.**
+> 결과물은 항상 2벌: 기존용(since-build 243) + IntelliJ 2026.2용(`-253`, since-build 253, jcef depends).
+> `./gradlew build`나 `buildPlugin` 단독 실행은 1벌만 나오므로 설치파일 생성 용도로 쓰지 않는다.
+> 빌드 후 _release의 두 zip 파일명을 보고한다.
+>
+> Windows 등 `build.sh`를 못 쓰는 환경에서는 같은 순서로 실행한다 (먼저 `_release`의 기존 zip을 `_release\old\`로 이동):
+> ```
+> gradlew.bat clean build -x test
+> gradlew.bat buildPlugin copyToRelease -Pplatform=253
+> ```
+> 실행 후 `_release`에 기존용 zip 1개 + `-253` zip 1개가 있는지 확인한다.
+
 - `./gradlew runIde` — main dev loop. Launches a sandbox IDE with the plugin installed.
 - `./gradlew buildPlugin` — produces the installable `.zip` under `build/distributions/`.
-- `./gradlew build` — full build; finalizes by copying the zip to `_release/` (`copyToRelease`).
+- `./gradlew build` — 개발용 1벌 빌드(기존용만); finalizes by copying the zip to `_release/` (`copyToRelease`). 설치파일 생성에는 쓰지 않는다.
 - `./gradlew verifyPlugin` — runs JetBrains plugin verifier.
-- `./build.sh [build|plugin|webview|clean|rebuild|buildrun|run|release|verify]` — convenience wrapper. No-arg default is `buildrun`.
+- `./build.sh build` — 설치파일 생성: 기존용 + 2026.2용(`-253`) 2벌을 `_release/`에 생성 (이전 zip은 `_release/old/`로 이동, 하나라도 누락되면 실패).
+- `./build.sh [build|plugin|webview|clean|rebuild|buildrun|run|release|verify]` — convenience wrapper. No-arg default is `buildrun`. `buildrun`/`run`/`plugin`은 개발용이라 기존용 1벌만 빌드한다.
 
 The Gradle build wires the webview into `processResources`, so any plugin task rebuilds the webview as needed:
 `installWebviewDependencies` → `buildWebview` (Vite) → `copyWebviewToResources` → `processResources`. Node 20.11.1 is auto-downloaded by the `node` plugin (don't install Node manually). Webview-only dev server: `cd webview && npm run dev`.
@@ -64,3 +77,4 @@ React + Vite + TypeScript under `webview/`. `vite.config.ts` uses `vite-plugin-s
 ## Plugin compatibility
 
 Targets IntelliJ Platform 2024.3.5 (IC). `build.gradle.kts` patches `sinceBuild=243`; no `untilBuild` is set (plugin runs on all later builds). JVM 17. Kotlin Gradle plugin 2.1.20, IntelliJ Platform Gradle plugin 2.11.0.
+IntelliJ 2026.2(253)부터 JCEF가 별도 모듈로 분리되어 `-Pplatform=253` 빌드 옵션이 `<depends>com.intellij.modules.jcef</depends>`를 빌드 시점에만 주입하고 since-build 253, 버전 접미사 `-253`을 적용한다 (plugin.xml 원본은 수정하지 않음).
