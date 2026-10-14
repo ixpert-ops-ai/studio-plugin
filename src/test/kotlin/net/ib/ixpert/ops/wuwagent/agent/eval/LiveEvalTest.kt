@@ -86,7 +86,10 @@ class LiveEvalTest {
             subtractedIdentifiers = emptyList(), unresolved = emptyList(), delivered = emptyList(), stage3Calls = 0, stage3Observed = false,
             excludedFiles = emptyList(), expectedExcludedConfirmed = null, excludedInTargets = emptyList(),
             excludedNameInStage3Sections = emptyList(), excludedNameInStage3Body = emptyList(), turns = turns, targets = emptyList(),
-            gtTotal = sc.gtOrEmpty().size, gtHit30 = 0, gtHit10 = 0, gtMissing = sc.gtOrEmpty().map { it.label() }, fp30 = 0,
+            gtTotal = sc.gtOrEmpty().count { it.countsForRecall() }, gtHit30 = 0, gtHit10 = 0,
+            gtMissing = sc.gtOrEmpty().filter { it.countsForRecall() }.map { it.label() },
+            referenceTotal = sc.gtOrEmpty().count { it.isReference() }, referenceIn10 = emptyList(), referenceIn30 = emptyList(),
+            graphMissingGt = sc.gtOrEmpty().filter { !it.isInGraph() }.map { it.label() }, fp30 = 0,
             llmClarify = if (c.isEmpty()) emptyStats() else stats(c), llmAnalyze = if (a.isEmpty()) emptyStats() else stats(a),
             callMs = (c + a).map { it.ms }
         )
@@ -140,10 +143,18 @@ class LiveEvalTest {
             val sorted = analysis.targetFiles.sortedBy { it.order }
             val eligible = sorted.filter { sc.onlyType == null || it.type == sc.onlyType }
             val gt = sc.gtOrEmpty()
-            val hit30 = gt.filter { g -> eligible.any { matchesGt(sc, g, it.path) } }
+            val required = gt.filter { it.countsForRecall() }
+            val references = gt.filter { it.isReference() }
             val top10 = eligible.take(10)
-            val hit10 = gt.filter { g -> top10.any { matchesGt(sc, g, it.path) } }
-            val targets = sorted.map { t -> TargetRow(t.order, t.path, t.type, gt.any { g -> matchesGt(sc, g, t.path) }) }
+            val hit30 = required.filter { g -> eligible.any { matchesGt(sc, g, it.path) } }
+            val hit10 = required.filter { g -> top10.any { matchesGt(sc, g, it.path) } }
+            val refIn30 = references.filter { g -> eligible.any { matchesGt(sc, g, it.path) } }
+            val refIn10 = references.filter { g -> top10.any { matchesGt(sc, g, it.path) } }
+            val targets = sorted.map { t ->
+                TargetRow(t.order, t.path, t.type,
+                    isGt = required.any { g -> matchesGt(sc, g, t.path) },
+                    isReference = references.any { g -> matchesGt(sc, g, t.path) })
+            }
             val fp30 = eligible.count { t -> gt.none { g -> matchesGt(sc, g, t.path) } }
 
             // 누락 식별자가 Stage 3 입력(요구사항 구간)에 실제로 들어갔는지: Stage 3 검증기 호출에서 잘라 확인
@@ -182,8 +193,10 @@ class LiveEvalTest {
                 excludedFiles = excluded, expectedExcludedConfirmed = expectConfirmed, excludedInTargets = excludedInTargets,
                 excludedNameInStage3Sections = inSections, excludedNameInStage3Body = inBody,
                 turns = turns, targets = targets,
-                gtTotal = gt.size, gtHit30 = hit30.size, gtHit10 = hit10.size,
-                gtMissing = gt.filter { it !in hit30 }.map { it.label() }, fp30 = fp30,
+                gtTotal = required.size, gtHit30 = hit30.size, gtHit10 = hit10.size,
+                gtMissing = required.filter { it !in hit30 }.map { it.label() },
+                referenceTotal = references.size, referenceIn10 = refIn10.map { it.label() }, referenceIn30 = refIn30.map { it.label() },
+                graphMissingGt = gt.filter { !it.isInGraph() }.map { it.label() }, fp30 = fp30,
                 llmClarify = stats(clarifyRecords), llmAnalyze = stats(analyzeRecords),
                 callMs = (clarifyRecords + analyzeRecords).map { it.ms }
             )
@@ -229,6 +242,15 @@ class LiveEvalTest {
                 }
             }
             summaries.add(ScenarioSummary(sc, results))
+            if (summaries.size == 1) {
+                // 중단 조건: 첫 시나리오에서 LLM 호출의 절반 이상이 상한 초과(timeout)이면 평가를 멈추고 그 사실만 출력한다.
+                val calls = results.sumOf { it.llmClarify.calls + it.llmAnalyze.calls }
+                val timeouts = results.sumOf { it.llmClarify.timeouts + it.llmAnalyze.timeouts }
+                if (calls > 0 && timeouts * 2 >= calls) {
+                    println("[EVAL] 평가를 중단함: 첫 시나리오(${sc.id})에서 호출 ${calls}건 중 ${timeouts}건이 호출 상한(${callTimeoutSec}초)을 넘음")
+                    return
+                }
+            }
         }
         val outDir = File(System.getProperty("eval.out") ?: "build/eval-reports")
         val written = EvalReport.write(outDir, server, summaries, runs, callTimeoutSec, metered.firstModel, System.currentTimeMillis() - startedAt)

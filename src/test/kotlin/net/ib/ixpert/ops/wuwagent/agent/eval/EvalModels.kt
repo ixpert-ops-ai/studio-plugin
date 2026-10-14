@@ -60,7 +60,7 @@ data class TurnStats(
 
 data class DeliveredCheck(val identifier: String, val source: String, val inStage3: Boolean?)
 
-data class TargetRow(val order: Int, val path: String, val type: String, val isGt: Boolean)
+data class TargetRow(val order: Int, val path: String, val type: String, val isGt: Boolean, val isReference: Boolean = false)
 
 data class RunResult(
     val scenarioId: String,
@@ -84,11 +84,15 @@ data class RunResult(
     val excludedNameInStage3Body: List<String>,
     val turns: TurnStats?,
     val targets: List<TargetRow>,
-    val gtTotal: Int,
+    val gtTotal: Int,               // Recall 분모: required이면서 그래프에 있는 GT
     val gtHit30: Int,
     val gtHit10: Int,
-    val gtMissing: List<String>,
-    val fp30: Int,
+    val gtMissing: List<String>,    // 분모 중 상위 30에 없는 것
+    val referenceTotal: Int,        // reference 항목 수(분모 아님)
+    val referenceIn10: List<String>,
+    val referenceIn30: List<String>,
+    val graphMissingGt: List<String>, // inGraph=false인 GT(그래프 누락)
+    val fp30: Int,                  // GT(required·reference 모두)와 무관한 상위 30 파일 수. GT가 불완전하면 상한
     val llmClarify: LlmStats,
     val llmAnalyze: LlmStats,
     val callMs: List<Long>

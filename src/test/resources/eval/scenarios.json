@@ -76,8 +76,8 @@
         {"path": "member-market-api/src/main/java/com/membermarket/api/admin/AdminController.java", "reason": "/api/admin/members GET(:37-42)이 있는 관리자 회원 API 진입점, 정지 API가 여기 붙는다"},
         {"path": "member-market-api/src/main/java/com/membermarket/api/admin/AdminService.java", "reason": "getMembers(:81-88) 등 관리자 회원 로직, 정지 처리 로직이 들어갈 곳"},
         {"path": "member-market-api/src/main/java/com/membermarket/domain/member/Member.java", "reason": "status 필드(:57)가 있고 상태를 바꾸는 메서드는 없다"},
-        {"path": "member-market-api/src/main/java/com/membermarket/domain/member/MemberStatus.java", "reason": "SUSPENDED 값이 이미 있다(참조용, 수정 불필요할 수 있음)"},
-        {"path": "member-market-api/src/main/java/com/membermarket/api/admin/dto/AdminMemberResponse.java", "reason": "status를 이미 노출한다(참조용, 수정 불필요할 수 있음)"},
+        {"path": "member-market-api/src/main/java/com/membermarket/domain/member/MemberStatus.java", "role": "reference", "reason": "SUSPENDED 값이 이미 있다(읽기만 함, 수정 불필요할 수 있음)"},
+        {"path": "member-market-api/src/main/java/com/membermarket/api/admin/dto/AdminMemberResponse.java", "role": "reference", "reason": "status를 이미 노출한다(읽기만 함, 수정 불필요할 수 있음)"},
         {"path": "member-market-api/src/main/java/com/membermarket/api/auth/AuthService.java", "reason": "login(:62-74)에 상태 검사가 없어 정지 회원 차단을 여기에 넣는다"}
       ],
       "extraCandidates": [

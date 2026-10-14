@@ -10,9 +10,15 @@ import java.io.File
 data class EvalGt(
     val path: String? = null,   // gtMatch == "path": 프로젝트 루트 기준 파일 경로
     val name: String? = null,   // gtMatch == "harness-contains": 하네스 규칙(경로가 이름을 대소문자 무시하고 포함)
-    val reason: String? = null  // 고른 근거 한 줄
+    val reason: String? = null, // 고른 근거 한 줄
+    val role: String? = null,   // required(고칠 파일, 기본) | reference(읽기만 하는 파일)
+    val inGraph: Boolean? = null // false면 그래프에 없는 파일(그래프 누락). Recall 분모에서 뺀다. 기본 true
 ) {
     fun label(): String = path ?: name ?: "?"
+    fun isReference(): Boolean = role == "reference"
+    fun isInGraph(): Boolean = inGraph != false
+    /** Recall 분모: required이면서 그래프에 있는 항목 */
+    fun countsForRecall(): Boolean = !isReference() && isInGraph()
 }
 
 data class EvalExtra(

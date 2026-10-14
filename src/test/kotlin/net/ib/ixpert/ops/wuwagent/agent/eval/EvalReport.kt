@@ -48,7 +48,11 @@ object EvalReport {
         val turns = okRuns.mapNotNull { it.turns }
         val turnText = if (turns.isEmpty()) "-" else "질문 ${f1(turns.map { it.engineQuestions }.average())}, 답함 ${f1(turns.map { it.answeredQuestions }.average())}, 대본 먼저 끝남 ${turns.count { it.scriptEndedBeforeQuestion }}/${turns.size}"
         val fp = if (okRuns.isEmpty()) "-" else f1(okRuns.map { it.fp30 }.average())
-        return "| ${sc.id} | ${okRuns.size}/${runs.size} | ${recallCell(recalls(runs) { it.gtHit30 }, draft)} | ${recallCell(recalls(runs) { it.gtHit10 }, draft)} | $fp | $missingAvg / $deliveredText | $excludedText | $turnText | ${medianMs} / ${maxMs} | $timeouts / $badCalls |"
+        val refText = if (okRuns.isEmpty() || okRuns.first().referenceTotal == 0) "-" else {
+            val total = okRuns.first().referenceTotal
+            "${f1(okRuns.map { it.referenceIn10.size }.average())}/${total} | ${f1(okRuns.map { it.referenceIn30.size }.average())}/${total}"
+        }
+        return "| ${sc.id} | ${okRuns.size}/${runs.size} | ${recallCell(recalls(runs) { it.gtHit30 }, draft)} | ${recallCell(recalls(runs) { it.gtHit10 }, draft)} | $fp | ${refText} | $missingAvg / $deliveredText | $excludedText | $turnText | ${medianMs} / ${maxMs} | $timeouts / $badCalls |"
     }
 
     private fun detail(s: ScenarioSummary, sb: StringBuilder) {
@@ -70,9 +74,11 @@ object EvalReport {
             sb.appendLine("- 제외 확정: ${r.excludedFiles}, 최종 목록에 포함된 제외 파일: ${r.excludedInTargets}, Stage 3 섹션에 나타난 제외 파일명: ${r.excludedNameInStage3Sections}, 본문에 나타난 제외 파일명(참고): ${r.excludedNameInStage3Body}")
             r.turns?.let { sb.appendLine("- 턴: 엔진 질문 ${it.engineQuestions}회, 답한 질문 ${it.answeredQuestions}회, 처리한 발화 ${it.utterancesProcessed}개, 대본이 질문보다 먼저 끝남=${it.scriptEndedBeforeQuestion}, 정제 완료(isReadyForStage1)=${it.readyForStage1}, 마지막 미확정 ${it.unresolvedAtEnd}개") }
             sb.appendLine("- LLM 호출: clarify ${r.llmClarify}, analyze ${r.llmAnalyze}")
-            sb.appendLine("- GT 적중: 상위30 ${r.gtHit30}/${r.gtTotal}, 상위10 ${r.gtHit10}/${r.gtTotal}, 미적중 ${r.gtMissing}, 오탐(GT가 불완전하면 상한) ${r.fp30}")
+            sb.appendLine("- GT 적중(required, 그래프 내): 상위30 ${r.gtHit30}/${r.gtTotal}, 상위10 ${r.gtHit10}/${r.gtTotal}, 미적중 ${r.gtMissing}, 오탐(GT가 불완전하면 상한) ${r.fp30}")
+            if (r.referenceTotal > 0) sb.appendLine("- reference(읽기만 하는 파일): 상위10 ${r.referenceIn10}, 상위30 ${r.referenceIn30}, 전체 ${r.referenceTotal}개")
+            if (r.graphMissingGt.isNotEmpty()) sb.appendLine("- 그래프 누락 GT(분모에서 제외): ${r.graphMissingGt}")
             sb.appendLine("- 상위 10 파일(★=GT):")
-            r.targets.take(10).forEach { sb.appendLine("  ${it.order}. ${if (it.isGt) "★" else " "} [${it.type}] ${it.path}") }
+            r.targets.take(10).forEach { sb.appendLine("  ${it.order}. ${if (it.isGt) "★" else if (it.isReference) "☆" else " "} [${it.type}] ${it.path}") }
             sb.appendLine()
         }
         val needMark = sc.status() != "confirmed" || sc.gtOrEmpty().isEmpty()
@@ -82,17 +88,17 @@ object EvalReport {
             sb.appendLine()
             sb.appendLine("| 채택 | 순서 | type | 경로 | GT 초안 |")
             sb.appendLine("|---|---|---|---|---|")
-            firstOk.targets.take(30).forEach { sb.appendLine("| [ ] | ${it.order} | ${it.type} | ${cell(it.path)} | ${if (it.isGt) "★" else ""} |") }
+            firstOk.targets.take(30).forEach { sb.appendLine("| [ ] | ${it.order} | ${it.type} | ${cell(it.path)} | ${if (it.isGt) "★" else if (it.isReference) "☆" else ""} |") }
             sb.appendLine()
         }
         if (sc.extrasOrEmpty().isNotEmpty()) {
             sb.appendLine("**추가 후보(GT 초안에 넣지 않은 관련 파일):**")
-            sc.extrasOrEmpty().forEach { sb.appendLine("- ${cell(it.path)}${if (it.inGraph == false) " (그래프 밖)" else ""}: ${cell(it.reason)}") }
+            sc.extrasOrEmpty().forEach { sb.appendLine("- ${cell(it.path)}${if (it.inGraph == false) " (그래프 누락)" else ""}: ${cell(it.reason)}") }
             sb.appendLine()
         }
         if (sc.gtOrEmpty().isNotEmpty() && sc.matchMode() == "path") {
             sb.appendLine("**GT 초안과 근거:**")
-            sc.gtOrEmpty().forEach { sb.appendLine("- ${cell(it.path)}: ${cell(it.reason)}") }
+            sc.gtOrEmpty().forEach { sb.appendLine("- [${if (it.isReference()) "reference" else "required"}${if (!it.isInGraph()) ", 그래프 누락" else ""}] ${cell(it.path)}: ${cell(it.reason)}") }
             sb.appendLine()
         }
     }
@@ -129,8 +135,10 @@ object EvalReport {
             if (list.isEmpty()) { sb.appendLine("(시나리오 없음)"); sb.appendLine(); continue }
             if (list.any { it.scenario.status() != "confirmed" }) sb.appendLine("GT가 초안인 시나리오가 있어 해당 Recall은 확정값이 아니다((초안) 표기).")
             sb.appendLine()
-            sb.appendLine("| 시나리오 | 성공 | Recall@30 평균(최소~최대) | Recall@10 | 오탐@30 | 누락 식별자 평균 / Stage 3 전달 | 제외 | 턴(평균) | 응답 ms 중앙 / 최대 | 타임아웃 / 실패·null |")
-            sb.appendLine("|---|---|---|---|---|---|---|---|---|---|")
+            sb.appendLine("| 시나리오 | 성공 | Recall@30 평균(최소~최대) | Recall@10 | 오탐@30 | reference 상위10 | reference 상위30 | 누락 식별자 평균 / Stage 3 전달 | 제외 | 턴(평균) | 응답 ms 중앙 / 최대 | 타임아웃 / 실패·null |")
+            sb.appendLine("|---|---|---|---|---|---|---|---|---|---|---|---|")
+            sb.appendLine("(Recall 분모는 required이면서 그래프에 있는 GT만. reference는 상위 N 안에 들었는지만 표시)")
+            sb.appendLine()
             list.forEach { sb.appendLine(scenarioRow(it)) }
             sb.appendLine()
         }
