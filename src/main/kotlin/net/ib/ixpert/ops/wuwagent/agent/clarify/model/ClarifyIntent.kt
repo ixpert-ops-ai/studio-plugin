@@ -11,7 +11,7 @@ data class ClarifyIntent(
     // 대화로 정제된 최종 요구사항 (Analyze 방향타)
     val refinedRequirement: String,
 
-    // 사용자 추가 발화 원문 목록 (Analyze는 refinedRequirement를 소비하고, userStatements는 무손실 원본 기록 및 후속 Implement 단계용)
+    // 사용자 추가 발화 원문 목록 (무손실 원본 기록 및 후속 Implement 단계용. Analyze는 이 값을 직접 읽지 않고 AnalyzeInputResolver를 거친다)
     val userStatements: List<String> = emptyList(),
 
     // 대화 중 검증/확정된 핵심 앵커 토큰 (Analyze Seed 우선 부여용)

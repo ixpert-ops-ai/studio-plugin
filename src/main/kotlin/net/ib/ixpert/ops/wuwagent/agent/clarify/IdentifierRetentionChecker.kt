@@ -179,12 +179,7 @@ object IdentifierRetentionChecker {
 
         if (missing.isNotEmpty()) {
             logger.warn("IdentifierRetentionChecker: 식별자 누락 감지 (${missing.size}건: $missing). 정제문에 안전판 병기 수행.")
-            val effective = buildString {
-                append(refinedRequirement.trimEnd('.'))
-                append(" (명시된 식별자: ")
-                append(missing.joinToString(", "))
-                append(")")
-            }
+            val effective = refinedRequirement
             return RetentionResult(
                 effectiveRefinedRequirement = effective,
                 rawRefinedRequirement = refinedRequirement,
@@ -207,6 +202,7 @@ object IdentifierRetentionChecker {
 
     /**
      * 기존 호환 메서드
+     * 정제문에 식별자 태그를 붙이지 않으므로 [checkRetention]의 effectiveRefinedRequirement는 raw 정제문과 같다. 호출처 없음.
      */
     fun verifyAndRetain(
         refinedRequirement: String,
