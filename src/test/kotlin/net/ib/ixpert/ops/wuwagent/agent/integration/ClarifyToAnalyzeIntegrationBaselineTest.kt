@@ -3,6 +3,7 @@ package net.ib.ixpert.ops.wuwagent.agent.integration
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import net.ib.ixpert.ops.wuwagent.agent.PipelineE2ETestVllmClient
+import net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeInputResolver
 import net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore
 import net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine
 import net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0GraphScanner
@@ -224,7 +225,8 @@ class ClarifyToAnalyzeIntegrationBaselineTest {
                     clarifyIntent
                 }
 
-                val refinedSr = loadedIntent.refinedRequirement
+                val resolvedInput = AnalyzeInputResolver.resolve(rawInput = loadedIntent.refinedRequirement, inMemoryIntent = loadedIntent)
+                val refinedSr = resolvedInput.effectiveRequirement
                 val idChecks = bc.targetIdentifiers.map { id -> checkIdentifierRetention(id, refinedSr) }
 
                 val refinedResult = AdaptiveFileDiscovery.filter(

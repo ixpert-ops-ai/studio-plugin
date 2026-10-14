@@ -480,4 +480,47 @@ class ExcludedIdentifierSubtractionTest {
         assertEquals("신규 FooService 추가\n", sr)
         assertFalse(sr.contains("SurveyServiceImpl"))
     }
+
+    // ───────────────────────── 커밋 4 불변식 (엔진 경로, D0R과 같은 대화) ─────────────────────────
+
+    /** D0R과 같은 대화로 엔진이 만든 인텐트. 정제 mock은 '신규 FooService 추가'를 돌려주므로 SurveyServiceImpl이 정제문에서 빠진다. */
+    private fun engineIntent(): ClarifyIntent {
+        val graph = conditionGraph()
+        val constraints = """
+            [
+              {
+                "kind": "EXCLUDE_COMPONENT",
+                "value": "SurveyServiceImpl 수정 제외",
+                "rawStatement": "SurveyServiceImpl은 건드리지 말고 신규 FooService를 추가해줘",
+                "evidence": "SurveyServiceImpl은 건드리지 말고"
+              }
+            ]
+        """.trimIndent()
+        val engine = Stage0ClarificationEngine(
+            Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10),
+            graph,
+            llmClient = EngineMockLlm(refinementResponse = "신규 FooService 추가", constraintsResponse = constraints)
+        )
+        val turn0 = engine.initSession("주문 기능 개발")
+        val turn1 = engine.processTurn(
+            turn0.state,
+            Stage0ClarificationEngine.UserInput(userStatement = "SurveyServiceImpl은 건드리지 말고 신규 FooService를 추가해줘")
+        )
+        val turn2 = engine.processTurn(turn1.state, Stage0ClarificationEngine.UserInput(userStatement = "응"))
+        return engine.buildClarifyIntent(turn2.state)
+    }
+
+    // I1R [엔진 경로] 정제문에서 빠진 식별자가 감사 기록의 missingBeforeFix에 채워진다 (커밋 4 전후 모두 통과)
+    @Test
+    fun i1R_enginePathFillsMissingBeforeFix() {
+        val intent = engineIntent()
+        assertEquals(listOf("SurveyServiceImpl"), intent.retentionAudit!!.missingBeforeFix)
+    }
+
+    // I2a [엔진 경로] 감사 기록의 raw 정제문은 리터럴과 같다 (커밋 4 전후 모두 통과, 두 필드에 같은 태그가 붙는 변이를 막는다)
+    @Test
+    fun i2a_rawRefinedRequirementIsLiteral() {
+        val intent = engineIntent()
+        assertEquals("신규 FooService 추가", intent.retentionAudit!!.rawRefinedRequirement)
+    }
 }
