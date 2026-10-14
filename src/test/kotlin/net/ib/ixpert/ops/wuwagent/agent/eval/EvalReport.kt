@@ -64,7 +64,7 @@ object EvalReport {
     private fun callRow(c: ProxyCall, origin: Long): String {
         val total = c.totalMs
         val decodeMs = if (c.stream && total != null && c.ttfbMs != null) total - c.ttfbMs!! else total
-        val approx = if (c.completionTokens == null && c.sseChunks != null) "~${c.sseChunks}청크" else ""
+        val approx = if (c.completionTokens == null && c.sseChunks != null) "~${c.sseChunks}청크(r${c.reasoningChunks}/c${c.contentChunks}/t${c.toolArgChunks})" else ""
         return "| ${c.seq} | ${c.phase} | ${cell(c.stage)} | ${sec(c.startMs - origin)} | ${sec(c.ttfbMs)} | ${sec(total)}${if (!c.completed) " (미완료)" else ""}${if (c.clientGone) " (호출자 포기)" else ""} | " +
             "${c.promptTokens ?: "미제공"} | ${c.completionTokens ?: ("미제공" + if (approx.isNotEmpty()) " $approx" else "")} | ${c.finishReason ?: "-"} | ${if (c.stream) "스트림" else "일반"}${if (c.hasTools) "+tool" else ""} | ${c.maxTokens ?: "-"} | ${tokS(c.completionTokens, decodeMs)} |"
     }
@@ -72,14 +72,14 @@ object EvalReport {
     private fun lastAnalyzeCallTable(summaries: List<ScenarioSummary>, calls: List<ProxyCall>, sb: StringBuilder) {
         sb.appendLine("## 분석 마지막 호출(시나리오별 1줄)")
         sb.appendLine()
-        sb.appendLine("| 시나리오 | run | 단계 | prompt 토큰 | completion 토큰 | finish_reason | TTFB(초) | 총(초) | 디코드 속도(tok/s) | 스트림 | max_tokens | 비고 |")
-        sb.appendLine("|---|---|---|---|---|---|---|---|---|---|---|---|")
+        sb.appendLine("| 시나리오 | run | 단계 | prompt 토큰 | completion 토큰 | 출력 구성(청크: reasoning / content / tool args) | finish_reason | TTFB(초) | 총(초) | 디코드 속도(tok/s) | 스트림 | max_tokens | 비고 |")
+        sb.appendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for (s in summaries) for (r in s.runs) {
             val last = calls.filter { it.scenarioId == s.scenario.id && it.run == r.run && it.phase == "analyze" }.maxByOrNull { it.seq }
-            if (last == null) { sb.appendLine("| ${s.scenario.id} | ${r.run} | (분석 호출 없음) | | | | | | | | | |"); continue }
+            if (last == null) { sb.appendLine("| ${s.scenario.id} | ${r.run} | (분석 호출 없음) | | | | | | | | | | |"); continue }
             val decodeMs = if (last.stream && last.totalMs != null && last.ttfbMs != null) last.totalMs!! - last.ttfbMs!! else last.totalMs
             val note = (if (!last.completed) "서버 응답 미완료. " else "") + (if (last.clientGone) "호출자가 상한으로 포기. " else "") + last.usageNote
-            sb.appendLine("| ${s.scenario.id} | ${r.run} | ${cell(last.stage)} | ${last.promptTokens ?: "미제공"} | ${last.completionTokens ?: "미제공"} | ${last.finishReason ?: "-"} | ${sec(last.ttfbMs)} | ${sec(last.totalMs)} | ${tokS(last.completionTokens, decodeMs)} | ${if (last.stream) "스트림" else "일반"} | ${last.maxTokens ?: "-"} | ${cell(note)} |")
+            sb.appendLine("| ${s.scenario.id} | ${r.run} | ${cell(last.stage)} | ${last.promptTokens ?: "미제공"} | ${last.completionTokens ?: "미제공"} | ${last.reasoningChunks ?: "-"} / ${last.contentChunks ?: "-"} / ${last.toolArgChunks ?: "-"} | ${last.finishReason ?: "-"} | ${sec(last.ttfbMs)} | ${sec(last.totalMs)} | ${tokS(last.completionTokens, decodeMs)} | ${if (last.stream) "스트림" else "일반"} | ${last.maxTokens ?: "-"} | ${cell(note)} |")
         }
         sb.appendLine()
     }

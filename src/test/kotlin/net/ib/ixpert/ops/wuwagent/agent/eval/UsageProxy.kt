@@ -1,10 +1,13 @@
 package net.ib.ixpert.ops.wuwagent.agent.eval
 
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -37,14 +40,87 @@ class ProxyCall(
     @Volatile var sseChunks: Int? = null
     @Volatile var responseChars: Int? = null
     @Volatile var usageNote: String = "미제공"
+    // 출력 구성(스트림): delta 종류별 청크 수. 청크는 토큰의 근사다.
+    @Volatile var reasoningChunks: Int? = null
+    @Volatile var contentChunks: Int? = null
+    @Volatile var toolArgChunks: Int? = null
+    @Volatile var reasoningChars: Int? = null
+    @Volatile var contentChars: Int? = null
+    @Volatile var toolArgChars: Int? = null
+    @Volatile var deltaKeys: String? = null
+}
+
+/** 스트림·일반 응답에서 추출한 출력 구성. 프록시와 재생 실험이 같은 해석을 쓴다. */
+class ParsedOutput(
+    var chunks: Int = 0,
+    var reasoningChunks: Int = 0,
+    var contentChunks: Int = 0,
+    var toolArgChunks: Int = 0,
+    val reasoning: StringBuilder = StringBuilder(),
+    val content: StringBuilder = StringBuilder(),
+    val toolArgs: StringBuilder = StringBuilder(),
+    var finishReason: String? = null,
+    var promptTokens: Int? = null,
+    var completionTokens: Int? = null,
+    val deltaKeys: MutableSet<String> = linkedSetOf()
+)
+
+object ResponseParser {
+    private fun str(e: JsonElement?): String? = if (e != null && e.isJsonPrimitive) e.asString else null
+
+    /** SSE 본문(`data: {...}` 줄)을 해석한다. */
+    fun parseStream(text: String): ParsedOutput {
+        val out = ParsedOutput()
+        for (line in text.lineSequence()) {
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+            if (data.isEmpty() || data == "[DONE]") continue
+            val o = JsonParser.parseString(data).asJsonObject
+            out.chunks++
+            o.get("usage")?.takeIf { it.isJsonObject }?.asJsonObject?.let { u ->
+                out.promptTokens = str(u.get("prompt_tokens"))?.toIntOrNull() ?: out.promptTokens
+                out.completionTokens = str(u.get("completion_tokens"))?.toIntOrNull() ?: out.completionTokens
+            }
+            val choice = o.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject ?: continue
+            str(choice.get("finish_reason"))?.let { out.finishReason = it }
+            val delta = choice.getAsJsonObject("delta") ?: continue
+            delta.keySet().forEach { out.deltaKeys.add(it) }
+            (str(delta.get("reasoning_content")) ?: str(delta.get("reasoning")))?.takeIf { it.isNotEmpty() }?.let { out.reasoningChunks++; out.reasoning.append(it) }
+            str(delta.get("content"))?.takeIf { it.isNotEmpty() }?.let { out.contentChunks++; out.content.append(it) }
+            delta.getAsJsonArray("tool_calls")?.forEach { tc ->
+                str(tc.asJsonObject.getAsJsonObject("function")?.get("arguments"))?.takeIf { it.isNotEmpty() }?.let { out.toolArgChunks++; out.toolArgs.append(it) }
+            }
+        }
+        return out
+    }
+
+    /** 일반(non-stream) 응답 JSON을 해석한다. 청크 수는 없고 글자 수와 usage만 채운다. */
+    fun parseJson(text: String): ParsedOutput {
+        val out = ParsedOutput()
+        val o = JsonParser.parseString(text).asJsonObject
+        o.get("usage")?.takeIf { it.isJsonObject }?.asJsonObject?.let { u ->
+            out.promptTokens = str(u.get("prompt_tokens"))?.toIntOrNull()
+            out.completionTokens = str(u.get("completion_tokens"))?.toIntOrNull()
+        }
+        val choice = o.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject
+        out.finishReason = str(choice?.get("finish_reason"))
+        val msg = choice?.getAsJsonObject("message")
+        if (msg != null) {
+            (str(msg.get("reasoning_content")) ?: str(msg.get("reasoning")))?.let { out.reasoning.append(it) }
+            str(msg.get("content"))?.let { out.content.append(it) }
+            msg.getAsJsonArray("tool_calls")?.forEach { tc -> str(tc.asJsonObject.getAsJsonObject("function")?.get("arguments"))?.let { out.toolArgs.append(it) } }
+        }
+        return out
+    }
 }
 
 /**
  * 평가용 투명 프록시(측정만, 요청·응답 내용은 바꾸지 않는다). 운영 `OpenAIClient`는 usage를 읽지 않으므로,
  * JVM 프록시 설정(http.proxyHost/proxyPort)으로 이 서버를 거치게 해 호출마다 prompt/completion 토큰, finish_reason,
  * 첫 바이트까지 시간(TTFB), 총 시간을 서버 응답에서 직접 기록한다. 응답에 usage가 없으면 "미제공"으로 둔다.
+ * `dumpDir`을 주면 호출마다 요청 본문(.req.json)과 응답 구성(.resp.json: reasoning/content/toolArgs)을 파일로 남긴다(재생 실험·누락 위치 분석용).
  */
-class UsageProxy(private val target: String) {
+class UsageProxy(private val target: String, private val dumpDir: File? = null) {
     @Volatile var scenarioId: String = ""
     @Volatile var run: Int = 0
     @Volatile var phase: String = ""
@@ -52,10 +128,12 @@ class UsageProxy(private val target: String) {
     val calls = CopyOnWriteArrayList<ProxyCall>()
     private val seq = AtomicInteger()
     private var server: HttpServer? = null
+    private val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
     var port: Int = 0
         private set
 
     fun start() {
+        dumpDir?.mkdirs()
         val s = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         s.createContext("/") { ex -> handle(ex) }
         s.executor = Executors.newCachedThreadPool { r -> Thread(r, "eval-proxy").apply { isDaemon = true } }
@@ -165,46 +243,53 @@ class UsageProxy(private val target: String) {
             try { ex.sendResponseHeaders(502, -1) } catch (_: Exception) { }
         } finally {
             call.totalMs = System.currentTimeMillis() - started
-            parseResponse(call, String(buf.toByteArray(), Charsets.UTF_8))
+            val parsed = parseResponse(call, String(buf.toByteArray(), Charsets.UTF_8))
             call.completed = true
+            if (isChat && dumpDir != null) dump(call, reqBytes, parsed)
             try { ex.close() } catch (_: Exception) { }
         }
     }
 
-    private fun parseResponse(call: ProxyCall, text: String) {
-        if (text.isBlank()) return
-        call.responseChars = text.length
+    private fun dump(call: ProxyCall, req: ByteArray, parsed: ParsedOutput?) {
         try {
-            if (call.stream) {
-                var chunks = 0
-                var usage: JsonObject? = null
-                var finish: String? = null
-                for (line in text.lineSequence()) {
-                    if (!line.startsWith("data:")) continue
-                    val data = line.removePrefix("data:").trim()
-                    if (data.isEmpty() || data == "[DONE]") continue
-                    val o = JsonParser.parseString(data).asJsonObject
-                    chunks++
-                    o.get("usage")?.takeIf { it.isJsonObject }?.let { usage = it.asJsonObject }
-                    o.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject?.get("finish_reason")?.takeIf { it.isJsonPrimitive }?.asString?.let { finish = it }
-                }
-                call.sseChunks = chunks
-                call.finishReason = finish
-                applyUsage(call, usage, " (스트림 응답에 usage 없음, 청크 수 ${chunks}는 토큰 수의 근사)")
-            } else {
-                val o = JsonParser.parseString(text).asJsonObject
-                call.finishReason = o.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject?.get("finish_reason")?.takeIf { it.isJsonPrimitive }?.asString
-                applyUsage(call, o.get("usage")?.takeIf { it.isJsonObject }?.asJsonObject, "")
-            }
-        } catch (e: Exception) {
-            call.usageNote = "응답 해석 실패: ${e.javaClass.simpleName}"
-        }
+            val base = "${call.scenarioId}_run${call.run}_c${call.seq}"
+            File(dumpDir, "$base.req.json").writeBytes(req)
+            val resp = mapOf(
+                "stage" to call.stage, "phase" to call.phase, "stream" to call.stream, "httpStatus" to call.httpStatus,
+                "totalMs" to call.totalMs, "ttfbMs" to call.ttfbMs, "finishReason" to call.finishReason,
+                "promptTokens" to call.promptTokens, "completionTokens" to call.completionTokens,
+                "chunks" to call.sseChunks, "reasoningChunks" to call.reasoningChunks, "contentChunks" to call.contentChunks, "toolArgChunks" to call.toolArgChunks,
+                "deltaKeys" to call.deltaKeys,
+                "reasoning" to (parsed?.reasoning?.toString() ?: ""), "content" to (parsed?.content?.toString() ?: ""), "toolArgs" to (parsed?.toolArgs?.toString() ?: "")
+            )
+            File(dumpDir, "$base.resp.json").writeText(gson.toJson(resp), Charsets.UTF_8)
+        } catch (_: Exception) { /* 덤프 실패는 측정에 영향을 주지 않는다 */ }
     }
 
-    private fun applyUsage(call: ProxyCall, usage: JsonObject?, missingSuffix: String) {
-        if (usage == null) { call.usageNote = "미제공$missingSuffix"; return }
-        call.promptTokens = usage.get("prompt_tokens")?.takeIf { it.isJsonPrimitive }?.asInt
-        call.completionTokens = usage.get("completion_tokens")?.takeIf { it.isJsonPrimitive }?.asInt
-        call.usageNote = if (call.promptTokens == null && call.completionTokens == null) "미제공$missingSuffix" else "서버 usage"
+    private fun parseResponse(call: ProxyCall, text: String): ParsedOutput? {
+        if (text.isBlank()) return null
+        call.responseChars = text.length
+        return try {
+            val p = if (call.stream) ResponseParser.parseStream(text) else ResponseParser.parseJson(text)
+            call.finishReason = p.finishReason
+            call.promptTokens = p.promptTokens
+            call.completionTokens = p.completionTokens
+            if (call.stream) {
+                call.sseChunks = p.chunks
+                call.reasoningChunks = p.reasoningChunks
+                call.contentChunks = p.contentChunks
+                call.toolArgChunks = p.toolArgChunks
+                call.deltaKeys = p.deltaKeys.joinToString(",")
+            }
+            call.reasoningChars = p.reasoning.length
+            call.contentChars = p.content.length
+            call.toolArgChars = p.toolArgs.length
+            call.usageNote = if (p.promptTokens != null || p.completionTokens != null) "서버 usage"
+                else "미제공" + if (call.stream) " (스트림 응답에 usage 없음, 청크 수 ${p.chunks}는 토큰 수의 근사)" else ""
+            p
+        } catch (e: Exception) {
+            call.usageNote = "응답 해석 실패: ${e.javaClass.simpleName}"
+            null
+        }
     }
 }

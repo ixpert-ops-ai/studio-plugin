@@ -20,6 +20,7 @@ import java.io.File
  * 실행: ./gradlew test --tests "net.ib.ixpert.ops.wuwagent.agent.eval.LiveEvalTest" -DrunLiveLlmTests=true -i
  * 선택 옵션: -Deval.graphs=<graphs.json> -Deval.real=<real_scenarios.json> -Deval.only=D1,S2 -Deval.runs=1
  *           -Deval.callTimeoutSec=300 -Deval.out=<출력 폴더, 기본 build/eval-reports>
+ *           -Deval.dump=<호출별 요청·응답 덤프 폴더(재생 실험용), 기본 없음>
  */
 class LiveEvalTest {
 
@@ -262,7 +263,7 @@ class LiveEvalTest {
         val metered = MeteredLlmClient(OpenAIClient(), callTimeoutSec)
 
         // 호출마다 usage·TTFB를 서버 응답에서 직접 기록하는 투명 프록시(내용은 바꾸지 않음)
-        val proxy = UsageProxy(SERVER)
+        val proxy = UsageProxy(SERVER, System.getProperty("eval.dump")?.takeIf { it.isNotBlank() }?.let { File(it) })
         proxy.start()
         proxy.install()
 
