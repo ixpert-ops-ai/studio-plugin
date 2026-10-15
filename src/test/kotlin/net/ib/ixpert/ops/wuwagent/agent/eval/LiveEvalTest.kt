@@ -99,6 +99,7 @@ class LiveEvalTest {
         var subtracted: List<String> = emptyList()
         var unresolved: List<String> = emptyList()
         var excluded: List<String> = emptyList()
+        var unconfirmedTexts: List<String> = emptyList()
         var expectConfirmed: Boolean? = null
         val gtAll = sc.gtOrEmpty()
 
@@ -112,7 +113,8 @@ class LiveEvalTest {
             gtMissing = gtAll.filter { it.countsForRecall() }.map { it.label() },
             referenceTotal = gtAll.count { it.isReference() }, referenceIn10 = emptyList(), referenceIn30 = emptyList(),
             graphMissingGt = gtAll.filter { !it.isInGraph() }.map { it.label() }, fp30 = 0,
-            llmClarify = llm("clarify"), llmAnalyze = llm("analyze"), callMs = callMs()
+            llmClarify = llm("clarify"), llmAnalyze = llm("analyze"), callMs = callMs(),
+            unconfirmedExclusions = unconfirmedTexts
         )
 
         try {
@@ -136,7 +138,11 @@ class LiveEvalTest {
                     rejectedBefore = before.state.items.count { it.verdict == Verdict.REJECTED },
                     rejectedAfter = result.state.items.count { it.verdict == Verdict.REJECTED },
                     seedBefore = before.state.seedSet.size, seedAfter = result.state.seedSet.size,
-                    ready = result.isReadyForStage1
+                    ready = result.isReadyForStage1,
+                    exclusionPayload = com.google.gson.Gson().toJson(mapOf(
+                        "excludedFiles" to engine.exclusionView(result.state).excludedFiles,
+                        "pendingExclusions" to engine.exclusionView(result.state).pendingExclusions
+                    ))
                 ))
             }
             for (stmt in sc.scriptOrEmpty()) {
@@ -196,6 +202,7 @@ class LiveEvalTest {
             subtracted = resolved.subtractedIdentifiers
             unresolved = intent.unresolvedItems.map { "${it.identifier} (${it.kind})" }
             excluded = resolved.excludedFiles
+            unconfirmedTexts = intent.unconfirmedExclusions.map { u -> "'${u.evidence}' 후보=${u.candidateFiles.map { p -> p.substringAfterLast('/') }}" }
             val expectExcl = sc.expectExcludedOrEmpty()
             expectConfirmed = if (expectExcl.isEmpty()) null else expectExcl.all { exp -> excluded.any { pathMatches(it, exp) || pathMatches(exp, it) } }
 
@@ -265,7 +272,9 @@ class LiveEvalTest {
                 gtMissing = required.filter { it !in hit30 }.map { it.label() },
                 referenceTotal = references.size, referenceIn10 = refIn10.map { it.label() }, referenceIn30 = refIn30.map { it.label() },
                 graphMissingGt = gtAll.filter { !it.isInGraph() }.map { it.label() }, fp30 = fp30,
-                llmClarify = llm("clarify"), llmAnalyze = llm("analyze"), callMs = callMs()
+                llmClarify = llm("clarify"), llmAnalyze = llm("analyze"), callMs = callMs(),
+                unconfirmedExclusions = unconfirmedTexts,
+                summaryHead = analysis.summary.lines().take(10).joinToString("\n")
             )
         } catch (e: Throwable) {
             return partial("clarify 단계 예외: " + e.javaClass.simpleName + ": " + (e.message ?: "").take(200))

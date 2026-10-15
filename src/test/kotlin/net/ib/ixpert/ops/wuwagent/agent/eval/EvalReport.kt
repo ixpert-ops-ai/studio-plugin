@@ -105,12 +105,14 @@ object EvalReport {
                 sb.appendLine("- Stage 3 요구사항 구간 전달 확인: " + if (r.delivered.isEmpty()) "(대상 없음)" else r.delivered.joinToString(", ") { "${it.identifier}[${it.source}]=${it.inStage3 ?: "미관찰"}" } + " (Stage 3 호출 ${r.stage3Calls}회)")
             }
             if (r.turns != null) sb.appendLine("- 제외 확정: ${r.excludedFiles}" + if (r.ok) ", 최종 목록에 포함된 제외 파일: ${r.excludedInTargets}, Stage 3 섹션에 나타난 제외 파일명: ${r.excludedNameInStage3Sections}, 본문에 나타난 제외 파일명(참고): ${r.excludedNameInStage3Body}" else " (분석 실패로 최종 목록 비교 불가)")
+            if (r.unconfirmedExclusions.isNotEmpty()) sb.appendLine("- 제외 미확정(의도 기록): ${r.unconfirmedExclusions}")
+            r.summaryHead?.let { h -> sb.appendLine("- 분석 요약 앞부분(화면 표시 원문):"); h.lines().forEach { l -> sb.appendLine("    > ${cell(l)}") } }
             r.turns?.let {
                 sb.appendLine("- 턴: 엔진 질문 ${it.engineQuestions}회, 답한 질문 ${it.answeredQuestions}회, 처리한 발화 ${it.utterancesProcessed}개, 대본이 질문보다 먼저 끝남=${it.scriptEndedBeforeQuestion}, 대체 답변 ${it.fallbackAnswersUsed}회, 규칙 답변 ${it.ruleAnswersUsed}회(${it.ruleAnswerText ?: "-"}), 답변 뒤에도 질문 남음=${it.questionRemainedAfterFallback}, 정제 완료(isReadyForStage1)=${it.readyForStage1}, 마지막 미확정 ${it.unresolvedAtEnd}개")
                 sb.appendLine("- 엔진 질문 원문: ${if (it.engineQuestionTexts.isEmpty()) "(없음)" else it.engineQuestionTexts.joinToString(" / ") { q -> "\"${cell(q)}\"" }}")
                 it.remainingQuestion?.let { q -> sb.appendLine("- 분석으로 넘어갈 때 남은 질문: \"${cell(q)}\"") }
                 it.utterances.forEachIndexed { i, u ->
-                    sb.appendLine("- 발화 ${i + 1} \"${cell(u.statement)}\" -> 화면 안내: \"${cell(u.echo)}\", 다음 질문: \"${cell(u.openQuestion)}\", 거부 항목 ${u.rejectedBefore}->${u.rejectedAfter}, 시드 토큰 ${u.seedBefore}->${u.seedAfter}, 분석 시작 선언=${u.ready}")
+                    sb.appendLine("- 발화 ${i + 1} \"${cell(u.statement)}\" -> 화면 안내: \"${cell(u.echo)}\", 다음 질문: \"${cell(u.openQuestion)}\", 거부 항목 ${u.rejectedBefore}->${u.rejectedAfter}, 시드 토큰 ${u.seedBefore}->${u.seedAfter}, 분석 시작 선언=${u.ready}, payload=${u.exclusionPayload}")
                 }
             }
             sb.appendLine("- LLM 호출: clarify ${r.llmClarify}, analyze ${r.llmAnalyze}")

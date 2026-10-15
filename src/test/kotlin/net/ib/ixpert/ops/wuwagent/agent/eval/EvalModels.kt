@@ -74,7 +74,8 @@ data class UtteranceLog(
     val rejectedAfter: Int,
     val seedBefore: Int,
     val seedAfter: Int,
-    val ready: Boolean
+    val ready: Boolean,
+    val exclusionPayload: String? = null   // 화면 payload의 excludedFiles·pendingExclusions 원문(JSON)
 )
 
 data class DeliveredCheck(val identifier: String, val source: String, val inStage3: Boolean?)
@@ -114,7 +115,9 @@ data class RunResult(
     val fp30: Int,                  // GT(required·reference 모두)와 무관한 상위 30 파일 수. GT가 불완전하면 상한
     val llmClarify: LlmStats,
     val llmAnalyze: LlmStats,
-    val callMs: List<Long>
+    val callMs: List<Long>,
+    val unconfirmedExclusions: List<String> = emptyList(), // 의도에 기록된 제외 미확정(문장과 후보)
+    val summaryHead: String? = null                       // 분석 요약(화면에 보이는 결과)의 앞부분 원문
 )
 
 data class ScenarioSummary(
