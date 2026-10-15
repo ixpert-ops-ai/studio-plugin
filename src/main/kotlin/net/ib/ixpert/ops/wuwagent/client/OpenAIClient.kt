@@ -11,11 +11,28 @@ import net.ib.ixpert.ops.wuwagent.service.DebugManager
 import java.io.IOException
 
 @Suppress("UnstableApiUsage")
-class OpenAIClient : LLMClient {
+class OpenAIClient(
+    // 테스트에서 가짜 서버로 보내기 위한 설정 주입 지점. null이면 저장된 설정(SettingsState)을 쓴다.
+    private val settingsOverride: (() -> net.ib.ixpert.ops.wuwagent.setting.SettingsState.State)? = null
+) : LLMClient {
     private val logger = Logger.getInstance(OpenAIClient::class.java)
     private val gson = Gson()
 
     companion object {
+        /** 도구 호출 스트림이 중간에 끊겨(인자 JSON 해석 불가) 다시 호출한 횟수와, 다시 호출해도 끊겨 실패로 남은 횟수. 평가 보고서가 읽는다. */
+        val streamRetryCount = java.util.concurrent.atomic.AtomicInteger()
+        val streamRetryFailedCount = java.util.concurrent.atomic.AtomicInteger()
+
+        /** 도구 호출 인자가 하나라도 JSON으로 해석되지 않으면 절단으로 본다. 토큰 상한(length)으로 끝난 응답은 같은 요청이 다시 같은 곳에서 끊기므로 제외한다. */
+        internal fun isTruncatedToolCall(response: net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse?): Boolean {
+            val choice = response?.choices?.firstOrNull() ?: return false
+            if (choice.finishReason == "length") return false
+            return choice.message?.toolCalls.orEmpty().any { call ->
+                val args = call.function.arguments
+                args.isNotBlank() && try { JsonParser.parseString(args); false } catch (_: Exception) { true }
+            }
+        }
+
         /**
          * apiType 기준으로 chat completions 엔드포인트 URL을 명시적으로 조합합니다.
          * - 이미 "/chat/completions"로 끝나면 그대로 사용
@@ -38,6 +55,7 @@ class OpenAIClient : LLMClient {
     }
 
     private fun getEffectiveSettings(): net.ib.ixpert.ops.wuwagent.setting.SettingsState.State {
+        settingsOverride?.let { return it() }
         return try {
             net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
         } catch (_: Throwable) {
@@ -228,7 +246,31 @@ class OpenAIClient : LLMClient {
         }
     }
 
+    /**
+     * 스트림 절단(도구 인자 JSON 해석 불가)일 때만 1회 다시 호출한다. 타임아웃·연결 오류 등 예외는 그대로 던지고 다시 호출하지 않는다.
+     * 다시 호출해도 끊기면 그 응답을 그대로 돌려주어 호출한 쪽이 지금처럼 실패로 처리하게 한다(실패 횟수만 기록).
+     */
     override fun chatWithTools(
+        systemPrompt: String,
+        messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
+        maxTokens: Int?,
+        tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>?,
+        toolChoice: Any?,
+        temperature: Double?
+    ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
+        val first = chatWithToolsOnce(systemPrompt, messages, maxTokens, tools, toolChoice, temperature)
+        if (!isTruncatedToolCall(first) || TaskCancellationToken.isCancelled.get()) return first
+        streamRetryCount.incrementAndGet()
+        logger.warn("OpenAIClient (ToolCalling): 스트림 절단 감지(도구 인자 JSON 해석 불가) → 1회 재시도")
+        val second = chatWithToolsOnce(systemPrompt, messages, maxTokens, tools, toolChoice, temperature)
+        if (isTruncatedToolCall(second)) {
+            streamRetryFailedCount.incrementAndGet()
+            logger.warn("OpenAIClient (ToolCalling): 재시도 후에도 스트림 절단 — 실패로 처리")
+        }
+        return second
+    }
+
+    private fun chatWithToolsOnce(
         systemPrompt: String,
         messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>,
         maxTokens: Int?,

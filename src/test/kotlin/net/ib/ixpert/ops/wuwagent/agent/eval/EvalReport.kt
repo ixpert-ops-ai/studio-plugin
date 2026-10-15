@@ -1,6 +1,7 @@
 package net.ib.ixpert.ops.wuwagent.agent.eval
 
 import com.google.gson.GsonBuilder
+import net.ib.ixpert.ops.wuwagent.client.OpenAIClient
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -183,6 +184,7 @@ object EvalReport {
         sb.appendLine("- /v1/models: HTTP ${server.httpStatus}, 모델 목록에 있음=${server.modelListed}, 목록=${server.listedModels}")
         sb.appendLine("- 시나리오당 ${runs}회 반복, 호출 상한 ${callTimeoutSec}초, 총 소요 ${elapsedMs / 1000}초, git ${git}")
         sb.appendLine("- 경로: 운영과 같은 OpenAIClient(tool call 포함)를 MeteredLlmClient로 감싸 호출 시간·결과를 기록. 토큰 수·TTFB는 내용을 바꾸지 않는 로컬 투명 프록시가 서버 응답에서 직접 기록(응답에 usage가 없으면 '미제공')")
+        sb.appendLine("- 스트림 절단 재시도(도구 호출 인자 JSON 해석 불가 시 1회): ${OpenAIClient.streamRetryCount.get()}회, 재시도 후에도 절단: ${OpenAIClient.streamRetryFailedCount.get()}회. 타임아웃은 재시도하지 않음")
         sb.appendLine("- 대체 답변 \"${LiveEvalTest.FALLBACK_ANSWER}\": 대본이 끝난 뒤 남은 엔진 질문에 1회 사용. 사용 ${allTurns.sumOf { it.fallbackAnswersUsed }}회 / 실행 ${allTurns.size}회, 대체 답변 뒤에도 질문이 남은 실행 ${allTurns.count { it.questionRemainedAfterFallback }}회")
         sb.appendLine("- 대화 경로: UI와 같은 순서. 대본 발화는 processUtterance(App.tsx:295 '/clarify-utterance'), 마지막은 processTurn(userStatement=null, 확정 선언)(App.tsx:312-316 '/analyze-confirm'). 체크박스 거부(/analyze-confirm의 verdict 변경)는 평가 도구에서 쓰지 않는다.")
         sb.appendLine("- 판정(단언)은 하지 않는다. 이 보고서는 기준값을 잡는 용도다.")
