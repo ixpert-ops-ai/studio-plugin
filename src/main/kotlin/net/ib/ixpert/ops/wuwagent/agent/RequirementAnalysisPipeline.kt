@@ -358,6 +358,11 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                     appendLine(formattedReasoning)
                 }
             }
+            // Stage 3에서 제거된 후보와 판정 누락 후보(출력 축소 형식은 제거 사유를 받지 않는다)
+            verificationOutput.noticeLines(validatedTargetFiles.map { it.path }.toSet()).takeIf { it.isNotEmpty() }?.let { lines ->
+                appendLine()
+                lines.forEach { appendLine(it) }
+            }
             appendLine()
             val koreanIntent = when(discoveryResult.metadata.changeIntent.name) {
                 "MODIFY" -> "수정"

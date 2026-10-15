@@ -34,11 +34,44 @@ class FileRelevanceVerifier(
         val fileVerdicts: List<FileVerdict>?,
         val reasoning: String?
     )
+
+    /** 출력 축소 형식(V2): 후보 번호만 쓰고, 제거 대상은 사유를 쓰지 않는다. */
+    private data class RequiredFile(
+        val n: Int?,
+        val reason: String?
+    )
+
+    private data class CompactResponse(
+        val requiredFiles: List<RequiredFile>?,
+        val removedFiles: List<Int>?,
+        val reasoning: String?
+    )
     
     data class VerificationOutput(
         val files: List<TargetFileSpec>,
-        val reasoning: String
-    )
+        val reasoning: String,
+        val removed: List<String> = emptyList(),   // Stage 3에서 제거된 후보 경로(사유는 받지 않는다)
+        val unjudged: List<String> = emptyList()   // 제거·유지 어느 쪽에도 없어 유지된 후보 경로(판정 누락)
+    ) {
+        /** 결과 요약에 보일 안내 줄. keptPaths에 남은 파일은 제외 목록에서 뺀다. 둘 다 비면 빈 목록. */
+        fun noticeLines(keptPaths: Set<String> = emptySet()): List<String> {
+            val lines = mutableListOf<String>()
+            fun names(paths: List<String>): String {
+                val n = paths.map { it.substringAfterLast('/') }
+                return n.take(NOTICE_NAME_LIMIT).joinToString(", ") + if (n.size > NOTICE_NAME_LIMIT) " 외 ${n.size - NOTICE_NAME_LIMIT}개" else ""
+            }
+            val shownRemoved = removed.filter { it !in keptPaths }
+            if (shownRemoved.isNotEmpty()) lines.add("- Stage 3에서 제외된 후보 ${shownRemoved.size}개: ${names(shownRemoved)} (사유: 제공하지 않음)")
+            if (unjudged.isNotEmpty()) lines.add("- 판정 누락으로 유지된 후보: ${names(unjudged)}")
+            return lines
+        }
+    }
+
+    companion object {
+        /** REQUIRED 사유가 이보다 짧으면 근거 미제시로 보고 제거한다(V2의 40자 이내 사유를 고려해 10자에서 낮춤). */
+        const val MIN_REASON_LENGTH = 5
+        const val NOTICE_NAME_LIMIT = 10
+    }
 
     fun verify(userQuery: String, candidates: List<TargetFileSpec>, additionalSystemPrompt: String = ""): VerificationOutput {
         if (candidates.isEmpty()) return VerificationOutput(candidates, "")
@@ -71,6 +104,13 @@ class FileRelevanceVerifier(
               · 요구사항의 복잡도 대비 과설계인 경우 (단순 기능에 별도 계층 분리 등)
               · 기존 패키지에 동일 역할의 클래스/파일이 이미 존재하는 경우
             - 신규 파일이 REQUIRED가 되려면, 기존 파일에 해당 책임을 추가했을 때 단일 책임 원칙이 명백히 위반되는 경우여야 합니다.
+
+            ## 출력 형식(중요)
+            - 후보 파일마다 [번호]가 붙어 있습니다. 경로를 다시 쓰지 말고 번호만 사용하세요.
+            - 제거할 후보는 removedFiles에 번호만 넣고 사유는 쓰지 마세요.
+            - 수정이 필요한 후보는 requiredFiles에 번호와 구체적인 수정 내용(reason)을 쓰세요.
+            - JSON은 들여쓰기·줄바꿈 없이 한 줄로 출력하세요.
+            - 각 reason은 40자 이내 한 문장으로 쓰고, reasoning은 '1) ...', '2) ...' 형식으로 두 항목 이내로 쓰세요.
         """.trimIndent()
 
         val tool = net.ib.ixpert.ops.wuwagent.model.ToolDefinition(
@@ -81,35 +121,35 @@ class FileRelevanceVerifier(
                 parameters = net.ib.ixpert.ops.wuwagent.model.FunctionParameters(
                     type = "object",
                     properties = mapOf(
-                        "fileVerdicts" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                        "requiredFiles" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
                             type = "array",
-                            description = "각 후보 파일에 대한 판정 결과 목록",
+                            description = "수정이 필요한 후보 목록",
                             items = net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
                                 type = "object",
                                 properties = mapOf(
-                                    "filePath" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
-                                        type = "string",
-                                        description = "후보 파일의 전체 경로"
-                                    ),
-                                    "verdict" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
-                                        type = "string",
-                                        description = "판정 결과 (REQUIRED 또는 UNNECESSARY)",
-                                        enum = listOf("REQUIRED", "UNNECESSARY")
+                                    "n" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                                        type = "integer",
+                                        description = "후보 번호"
                                     ),
                                     "reason" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
                                         type = "string",
-                                        description = "판정 사유 (REQUIRED인 경우 구체적인 수정 내용)"
+                                        description = "구체적인 수정 내용(40자 이내)"
                                     )
                                 ),
-                                required = listOf("filePath", "verdict", "reason")
+                                required = listOf("n", "reason")
                             )
+                        ),
+                        "removedFiles" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                            type = "array",
+                            description = "제거할 후보 번호 목록(사유 불필요)",
+                            items = net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(type = "integer")
                         ),
                         "reasoning" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
                             type = "string",
-                            description = "전체 판정 근거 종합 요약 (반드시 1), 2), 3)과 같이 번호를 매겨서 항목별로 작성할 것)"
+                            description = "전체 판정 근거 요약('1) ...' 형식)"
                         )
                     ),
-                    required = listOf("fileVerdicts", "reasoning")
+                    required = listOf("requiredFiles", "removedFiles", "reasoning")
                 )
             )
         )
@@ -139,6 +179,9 @@ class FileRelevanceVerifier(
         }
         
         val verifiedTopFiles = mutableListOf<TargetFileSpec>()
+        val removedPaths = mutableListOf<String>()
+        val unjudgedPaths = mutableListOf<String>()
+        var compactHandled = false
         val toolCall = response?.toolCalls?.firstOrNull { it.function.name == "submit_verification" }
         var argsStr = toolCall?.function?.arguments
         var finalReasoning = ""
@@ -154,6 +197,17 @@ class FileRelevanceVerifier(
         }
         
         if (argsStr != null) {
+            val compact = parseCompact(argsStr)
+            if (compact != null) {
+                finalReasoning = compact.reasoning ?: ""
+                applyCompact(compact, topFiles, verifiedTopFiles, removedPaths, unjudgedPaths)
+                compactHandled = true
+            }
+        }
+
+        if (compactHandled) {
+            // 출력 축소 형식 처리 완료
+        } else if (argsStr != null) {
             try {
                 val cleanedStr = argsStr
                     .replace(Regex("^```(?:json)?\\s*"), "")
@@ -165,7 +219,7 @@ class FileRelevanceVerifier(
                 // 후처리 로직: reason이 비어있거나 너무 짧으면 UNNECESSARY로 강등
                 val verdicts = rawVerdicts.map { verdict ->
                     val reasonLen = verdict.reason?.trim()?.length ?: 0
-                    if (verdict.verdict == "REQUIRED" && reasonLen < 10) {
+                    if (verdict.verdict == "REQUIRED" && reasonLen < MIN_REASON_LENGTH) {
                         verdict.copy(verdict = "UNNECESSARY", reason = "판정 근거 미제시로 제외")
                     } else {
                         verdict
@@ -187,6 +241,8 @@ class FileRelevanceVerifier(
                     if (normalizedVerdict != "UNNECESSARY") {
                         val reason = verdictObj?.reason ?: "Stage 3 검증 통과 (명시적 사유 없음)"
                         verifiedTopFiles.add(spec.copy(description = reason))
+                    } else {
+                        removedPaths.add(spec.path)
                     }
                 }
                 
@@ -231,7 +287,68 @@ class FileRelevanceVerifier(
             verifiedTopFiles.addAll(topFiles.filter { it.type != "CREATE" && it.type != "신규" }.take(3))
         }
         
-        return VerificationOutput(verifiedTopFiles + autoKept, finalReasoning)
+        val keptPaths = (verifiedTopFiles + autoKept).map { it.path }.toSet()
+        return VerificationOutput(
+            files = verifiedTopFiles + autoKept,
+            reasoning = finalReasoning,
+            removed = removedPaths.filter { it !in keptPaths },
+            unjudged = unjudgedPaths
+        )
+    }
+
+    /** 새 형식(requiredFiles/removedFiles)이면 해석한 결과, 아니거나 해석할 수 없으면 null(구 형식 폴백). */
+    private fun parseCompact(argsStr: String): CompactResponse? {
+        return try {
+            val cleaned = argsStr
+                .replace(Regex("^```(?:json)?\\s*"), "")
+                .replace(Regex("\\s*```$"), "")
+                .trim()
+            val el = com.google.gson.JsonParser.parseString(cleaned)
+            if (!el.isJsonObject) return null
+            val o = el.asJsonObject
+            if (!o.has("requiredFiles") && !o.has("removedFiles")) return null
+            gson.fromJson(cleaned, CompactResponse::class.java)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 규칙 R3: removedFiles에만 있으면 제거, requiredFiles에 있으면 유지(양쪽에 있어도 유지), 둘 다 없으면 유지하고 판정 누락으로 기록.
+     * 범위 밖 번호는 무시한다. 사유가 MIN_REASON_LENGTH보다 짧은 requiredFiles 항목은 근거 미제시로 제거한다.
+     */
+    private fun applyCompact(
+        res: CompactResponse,
+        topFiles: List<TargetFileSpec>,
+        kept: MutableList<TargetFileSpec>,
+        removed: MutableList<String>,
+        unjudged: MutableList<String>
+    ) {
+        val n = topFiles.size
+        val required = LinkedHashMap<Int, String?>()
+        res.requiredFiles?.forEach { r ->
+            val idx = r.n
+            if (idx != null && idx in 1..n && !required.containsKey(idx)) required[idx] = r.reason
+        }
+        val removedSet = res.removedFiles?.filter { it in 1..n }?.toSet() ?: emptySet()
+        if (required.isEmpty() && removedSet.isEmpty()) {
+            logger.warn("Stage 3: 판정 목록이 비어 있어 모든 후보를 유지하고 판정 누락으로 기록합니다.")
+        }
+        topFiles.forEachIndexed { i, spec ->
+            val num = i + 1
+            when {
+                required.containsKey(num) -> {
+                    val reason = required[num]?.trim() ?: ""
+                    if (reason.length < MIN_REASON_LENGTH) removed.add(spec.path)
+                    else kept.add(spec.copy(description = reason))
+                }
+                num in removedSet -> removed.add(spec.path)
+                else -> {
+                    kept.add(spec.copy(description = "Stage 3 판정 누락으로 유지"))
+                    unjudged.add(spec.path)
+                }
+            }
+        }
     }
 
     private fun buildBatchPrompt(userQuery: String, specs: List<TargetFileSpec>, graph: ProjectGraph, mdRoot: Path): String {
@@ -240,8 +357,8 @@ class FileRelevanceVerifier(
             appendLine(userQuery)
             appendLine()
             appendLine("## 후보 파일 목록")
-            specs.forEach { spec ->
-                appendLine("- ${spec.path}")
+            specs.forEachIndexed { index, spec ->
+                appendLine("- [${index + 1}] ${spec.path}")
                 appendLine("--- 정보 ---")
                 if (spec.type == "CREATE" || spec.type == "신규") {
                     appendLine("- (신규 제안)")
@@ -254,8 +371,7 @@ class FileRelevanceVerifier(
             }
             appendLine()
             appendLine("## 지시사항")
-            appendLine("위 후보 파일 목록 각각에 대해 판정 결과(REQUIRED 또는 UNNECESSARY)와 사유를 반환하세요.")
-            appendLine("전체 판정 근거 요약(reasoning)을 작성할 때는 가독성을 위해 반드시 '1) ...', '2) ...' 와 같이 번호를 매겨서 작성하세요.")
+            appendLine("위 후보 파일 목록에서 수정이 필요한 후보는 requiredFiles에, 제거할 후보는 removedFiles(번호만)에 담고 reasoning을 작성하세요.")
         }
     }
 
