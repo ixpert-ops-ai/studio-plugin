@@ -1018,7 +1018,11 @@ class Stage0ClarificationEngine(
                     emptyList()
                 }
                 if (candidates.isNotEmpty() && excludedFiles.containsAll(candidates)) null
-                else UnconfirmedExclusion(evidence = evidence, candidateFiles = candidates)
+                else UnconfirmedExclusion(
+                    evidence = evidence,
+                    candidateFiles = candidates,
+                    statement = state.userStatements.firstOrNull { it.contains(evidence, ignoreCase = true) }
+                )
             }
             .distinctBy { it.evidence }
 

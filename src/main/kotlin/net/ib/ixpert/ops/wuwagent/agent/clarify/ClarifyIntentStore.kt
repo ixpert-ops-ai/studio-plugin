@@ -231,7 +231,7 @@ object ClarifyIntentStore {
             retentionAudit = domainRetentionAudit,
             unresolvedItems = domainUnresolvedItems,
             unconfirmedExclusions = dto.unconfirmedExclusions?.mapNotNull { u ->
-                u.evidence?.let { e -> UnconfirmedExclusion(e, u.candidateFiles ?: emptyList()) }
+                u.evidence?.let { e -> UnconfirmedExclusion(e, u.candidateFiles ?: emptyList(), u.statement) }
             } ?: emptyList(),
             contractVersion = versionStr
         )
@@ -278,7 +278,8 @@ internal data class ClarifyIntentJson(
 
 internal data class UnconfirmedExclusionJson(
     val evidence: String? = null,
-    val candidateFiles: List<String>? = null
+    val candidateFiles: List<String>? = null,
+    val statement: String? = null
 )
 
 internal data class IntentConstraintJson(

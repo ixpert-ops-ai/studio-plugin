@@ -70,7 +70,8 @@ data class UnresolvedItem(
  */
 data class UnconfirmedExclusion(
     val evidence: String,
-    val candidateFiles: List<String> = emptyList()
+    val candidateFiles: List<String> = emptyList(),
+    val statement: String? = null   // 증거 구문이 들어 있는 사용자 발화 전체(표시용). 없으면 evidence를 쓴다.
 )
 
 /**
@@ -83,7 +84,7 @@ fun ClarifyIntent.exclusionSummaryLines(): List<String> {
     }
     unconfirmedExclusions.forEach { u ->
         val target = if (u.candidateFiles.isEmpty()) "대상 파일을 특정하지 못했습니다" else "후보: ${u.candidateFiles.joinToString { it.substringAfterLast('/') }}"
-        lines.add("- ⚠️ 제외 요청이 확정되지 않았습니다: '${u.evidence}' (${target}). 분석 결과에 포함될 수 있습니다. 제외하려면 /clarify 단계에서 목록의 체크를 해제하세요.")
+        lines.add("- ⚠️ 제외 요청이 확정되지 않았습니다: '${u.statement ?: u.evidence}' (${target}). 분석 결과에 포함될 수 있습니다. 제외하려면 /clarify 단계에서 목록의 체크를 해제하세요.")
     }
     return lines
 }
