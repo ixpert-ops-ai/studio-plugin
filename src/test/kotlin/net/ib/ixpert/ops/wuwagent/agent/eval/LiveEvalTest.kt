@@ -208,6 +208,8 @@ class LiveEvalTest {
 
             metered.phase = "analyze"
             proxy.phase = "analyze"
+            // 화면에 보이는 분석 결과 원문(UI는 onChunk로 받아 그대로 표시한다. RequirementAnalysisResult.summary는 판정 근거 요약일 뿐이다)
+            val shown = StringBuilder()
             val analysis: RequirementAnalysisResult = try {
                 kotlinx.coroutines.runBlocking {
                     RequirementAnalysisPipeline(metered).analyze(
@@ -216,7 +218,7 @@ class LiveEvalTest {
                         projectGraph = graph,
                         clarifyIntent = resolved.effectiveIntent,
                         analyzeInput = resolved
-                    )
+                    ) { chunk -> shown.append(chunk) }
                 }
             } catch (e: Throwable) {
                 // 분석 단계 예외: clarify 결과는 그대로 남긴다.
@@ -274,7 +276,7 @@ class LiveEvalTest {
                 graphMissingGt = gtAll.filter { !it.isInGraph() }.map { it.label() }, fp30 = fp30,
                 llmClarify = llm("clarify"), llmAnalyze = llm("analyze"), callMs = callMs(),
                 unconfirmedExclusions = unconfirmedTexts,
-                summaryHead = analysis.summary.lines().take(10).joinToString("\n")
+                summaryHead = shown.toString().let { t -> val i = t.indexOf("### 요구사항 분석 요약"); if (i >= 0) t.substring(i).lines().take(10).joinToString("\n") else "(요약 헤더 없음)" }
             )
         } catch (e: Throwable) {
             return partial("clarify 단계 예외: " + e.javaClass.simpleName + ": " + (e.message ?: "").take(200))
