@@ -43,12 +43,15 @@ class FileRelevanceVerifierCitationTest {
         assertEquals("원문", substituteCandidateNumbers("원문", emptyList()).text)
     }
 
-    // N4 이름(번호)에서 번호가 가리키는 후보와 이름이 같으면(확장자 유무·대소문자 무관) 번호만 지운다.
+    // N4 이름(번호)에서 번호가 가리키는 후보 이름이 그 이름으로 끝나면(확장자 유무·대소문자 무관, 접미사 포함) 번호만 지운다.
     @Test
     fun n4_numberIsDroppedWhenNameMatchesCandidate() {
         val r = substituteCandidateNumbers("BDao(3)와 sql_b.xml(4), aservice(1)", paths)
         assertEquals("BDao와 sql_b.xml, aservice", r.text)
         assertTrue(r.mismatches.isEmpty())
+        val s = substituteCandidateNumbers("Dao(3) 와 DEM(1)", listOf("/a/ACMDEM.java", "/a/Other.java", "/a/ECMBDao.java"))
+        assertEquals("Dao 와 DEM", s.text)
+        assertTrue(s.mismatches.isEmpty())
     }
 
     // N5 이름과 번호가 가리키는 후보가 다르면 원문을 두고 불일치로 기록한다.
@@ -59,12 +62,19 @@ class FileRelevanceVerifierCitationTest {
         assertEquals(listOf("BDao(5) → C.java"), r.mismatches)
     }
 
-    // N6 이름 뒤에 번호가 여러 개이고 그중 하나가 이름과 같으면 불일치가 아니라 파일명 목록으로 바꾼다. 어느 것과도 다르면 원문과 불일치 기록.
+    // N6 이름 뒤에 번호가 여러 개이면 가리키는 후보가 모두 그 이름으로 끝날 때만 파일명 목록으로 바꾼다. 하나라도 다르면 원문과 불일치 기록.
     @Test
     fun n6_multiNumberAfterNameReplacesParenthesesWhenOneMatches() {
-        val r = substituteCandidateNumbers("AService(1,2) 그리고 BDao(5,6)", paths)
-        assertEquals("AService(AService.java, AServiceImpl.java) 그리고 BDao(5,6)", r.text)
-        assertEquals(listOf("BDao(5,6) → C.java, D.java"), r.mismatches)
+        val own = listOf("/a/ECMTrxMapper.java", "/a/ECMTrxMapper.xml", "/a/Other.java")
+        val ok = substituteCandidateNumbers("TrxMapper(1,2)는 조회 전용", own)
+        assertEquals("TrxMapper(ECMTrxMapper.java, ECMTrxMapper.xml)는 조회 전용", ok.text)
+        assertTrue(ok.mismatches.isEmpty())
+        val r = substituteCandidateNumbers("TrxMapper(1,3) 그리고 AService(1,2)", own + "/a/AService.java")
+        assertEquals("TrxMapper(1,3) 그리고 AService(1,2)", r.text)
+        assertEquals(2, r.mismatches.size)
+        val impl = substituteCandidateNumbers("AService(1,2)", paths)
+        assertEquals("AService(1,2)", impl.text)
+        assertEquals(listOf("AService(1,2) → AService.java, AServiceImpl.java"), impl.mismatches)
     }
 
     // 저장된 덤프 응답에 치환을 적용한 결과를 출력한다(LLM 호출 없음). -Deval.numcite=true 일 때만 실행.
