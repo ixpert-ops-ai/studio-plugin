@@ -48,7 +48,7 @@ class AnthropicTestClientTest {
     fun tearDown() = server.stop(0)
 
     private fun client(key: String? = "test-key-not-real") =
-        AnthropicTestClient(model = "claude-sonnet-5", baseUrl = "http://127.0.0.1:${server.address.port}", keyProvider = { key })
+        AnthropicTestClient(model = "claude-sonnet-5-5", baseUrl = "http://127.0.0.1:${server.address.port}", keyProvider = { key })
 
     private val graph = ProjectGraph(generatedAt = "now", projectRoot = "/", files = emptyMap(), relationships = emptyList(), statistics = GraphStatistics())
 
@@ -62,14 +62,24 @@ class AnthropicTestClientTest {
         assertEquals(listOf("/src/A.java"), out.files.map { it.path })
         assertEquals(listOf("/src/B.java"), out.removed)
         val body = JsonParser.parseString(lastBody.get()).asJsonObject
-        assertEquals("claude-sonnet-5", body.get("model").asString)
+        assertEquals("claude-sonnet-5-5", body.get("model").asString)
         assertEquals(4000, body.get("max_tokens").asInt)
-        assertEquals(0.1, body.get("temperature").asDouble, 1e-9)
+        // Sonnet 5.5: temperature는 보내지 않고, thinking은 between_tools(다른 필드 없음)
+        assertFalse("temperature를 보내면 400", body.has("temperature"))
+        assertFalse(body.has("top_p")); assertFalse(body.has("top_k"))
+        assertEquals(setOf("type"), body.getAsJsonObject("thinking").keySet())
+        assertEquals("between_tools", body.getAsJsonObject("thinking").get("type").asString)
         assertTrue(body.get("system").asString.contains("코드 변경 범위 검증자"))
         assertTrue(body.getAsJsonArray("messages").all { it.asJsonObject.get("role").asString != "system" })
         val tool = body.getAsJsonArray("tools").single().asJsonObject
         assertEquals("submit_verification", tool.get("name").asString)
         assertEquals("object", tool.getAsJsonObject("input_schema").get("type").asString)
+        assertTrue("strict:true가 도구 정의 최상위에 있어야 함", tool.get("strict").asBoolean)
+        val schema = tool.getAsJsonObject("input_schema")
+        assertFalse(schema.get("additionalProperties").asBoolean)
+        val item = schema.getAsJsonObject("properties").getAsJsonObject("requiredFiles").getAsJsonObject("items")
+        assertFalse("중첩 object에도 additionalProperties:false", item.get("additionalProperties").asBoolean)
+        assertEquals(setOf("requiredFiles", "removedFiles", "reasoning"), schema.getAsJsonObject("properties").keySet())
         assertEquals("auto", body.getAsJsonObject("tool_choice").get("type").asString)
         for (k in listOf("stream", "chat_template_kwargs", "enable_thinking", "extra_body")) assertFalse("$k 를 보내면 안 됨", body.has(k))
         assertEquals("2023-06-01", lastHeaders.get()["anthropic-version"])
@@ -132,12 +142,32 @@ class AnthropicTestClientTest {
         assertEquals(before, java.io.File(System.getProperty("java.io.tmpdir")).listFiles { f -> f.name.startsWith("anthropic_req") }!!.size)
     }
 
+    // A6 모델 목록 조회(GET /v1/models): id 목록을 읽고, 헤더는 키·버전만 보낸다.
+    @Test
+    fun a6_modelListIsReadFromModelsEndpoint() {
+        reply = """{"data":[{"id":"claude-opus-5-5","type":"model"},{"id":"claude-sonnet-5-5","type":"model"}],"has_more":false}"""
+        val ids = client().listModelIds()
+        assertEquals(listOf("claude-opus-5-5", "claude-sonnet-5-5"), ids)
+        assertEquals("test-key-not-real", lastHeaders.get()["x-api-key"])
+        assertEquals("", lastBody.get())
+    }
+
     // 스모크: 짧은 chat 1회 + Stage 3 스키마(실제 검증기 경로) tool 호출 1회. 합성 내용만 보낸다. 키가 없으면 skip.
     @Test
     fun smoke_realApiWithSyntheticContent() {
-        val c = AnthropicTestClient()
-        if (!c.hasKey()) println("[ANTHROPIC] ANTHROPIC_API_KEY 없음 — 스모크 skip")
-        Assume.assumeTrue("ANTHROPIC_API_KEY 없음", c.hasKey())
+        val probe = AnthropicTestClient()
+        if (!probe.hasKey()) println("[ANTHROPIC] ANTHROPIC_API_KEY 없음 — 스모크 skip")
+        Assume.assumeTrue("ANTHROPIC_API_KEY 없음", probe.hasKey())
+        // 모델 ID는 목록 조회 결과에서 Sonnet 5.5 항목의 id를 그대로 쓴다. 없으면 목록 원문만 출력하고 멈춘다.
+        val raw = probe.modelsRaw()
+        val ids = probe.listModelIds()
+        val target = ids.firstOrNull { it.contains("sonnet-5-5") }
+        println("[ANTHROPIC] 모델 목록 원문: $raw")
+        if (target == null) println("[ANTHROPIC] 목록에 Sonnet 5.5 항목이 없어 중단")
+        Assume.assumeTrue("목록에 Sonnet 5.5 없음", target != null)
+        println("[ANTHROPIC] Sonnet 5.5 항목 id=$target (후보 ${ids.filter { it.contains("sonnet-5-5") }})")
+        val c = AnthropicTestClient(model = target!!)
+        println("[ANTHROPIC] 설정: ${c.configSummary()}")
         val chat = c.chat("", "OK 라고만 답하세요.", 20, null)
         println("[ANTHROPIC] chat 응답: ${chat?.message?.content}")
         val specs = listOf(
@@ -146,7 +176,11 @@ class AnthropicTestClientTest {
             TargetFileSpec(3, "/demo/UnrelatedBanner.java", "MODIFY", "")
         )
         val out = FileRelevanceVerifier(c, graph, Paths.get("nonexistent-docs")).verify("주문 서비스에서 주문 취소 시 사유를 저장한다(합성 예시).", specs)
-        println("[ANTHROPIC] Stage3 남음=${out.files.map { it.path }} 제거=${out.removed} 판정누락=${out.unjudged}")
-        c.usages.forEach { println("[ANTHROPIC] ${it.kind}: model=${it.model} stop_reason=${it.stopReason} in=${it.inputTokens} out=${it.outputTokens} ${it.ms}ms") }
+        println("[ANTHROPIC] Stage3 남음=${out.files.map { it.path }} 제거=${out.removed} 판정누락=${out.unjudged} 요약=${out.reasoning}")
+        c.usages.forEach {
+            println("[ANTHROPIC] ${it.kind}: model=${it.model} stop_reason=${it.stopReason} in=${it.inputTokens} out=${it.outputTokens} ${it.ms}ms thinking블록=${it.thinkingBlocks}(${it.thinkingChars}자) 도구호출=${it.toolCalled} 거절분류=${it.refusalCategory}")
+        }
+        val refused = c.usages.firstOrNull { it.stopReason == "refusal" }
+        if (refused != null) println("[ANTHROPIC] 거절 발생: category=${refused.refusalCategory} — 스키마를 바꾸지 않고 여기서 멈춘다")
     }
 }
