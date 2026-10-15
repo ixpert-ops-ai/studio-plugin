@@ -349,7 +349,9 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             
             // Stage 3(Batch)에서 판정한 전체 요약 근거가 있다면 우선적으로 보여줌
             if (verificationOutput.reasoning.isNotBlank()) {
-                appendLine(verificationOutput.reasoning.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n"))
+                val citation = verificationOutput.displayReasoning()
+                if (citation.mismatches.isNotEmpty()) logger.warn("Stage 3 요약의 번호-이름 불일치 ${citation.mismatches.size}건: ${citation.mismatches}")
+                appendLine(citation.text.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n"))
             } else {
                 appendLine("> ⚠️ **검증 단계 파싱 실패**: LLM 응답 포맷 오류로 인해 Stage 1/2 후보 결과를 모두 유지합니다. 결과를 직접 확인하세요.")
                 appendLine()

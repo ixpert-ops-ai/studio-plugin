@@ -51,8 +51,12 @@ class FileRelevanceVerifier(
         val files: List<TargetFileSpec>,
         val reasoning: String,
         val removed: List<String> = emptyList(),   // Stage 3에서 제거된 후보 경로(사유는 받지 않는다)
-        val unjudged: List<String> = emptyList()   // 제거·유지 어느 쪽에도 없어 유지된 후보 경로(판정 누락)
+        val unjudged: List<String> = emptyList(),  // 제거·유지 어느 쪽에도 없어 유지된 후보 경로(판정 누락)
+        val candidatePaths: List<String> = emptyList()  // 이번 호출의 번호표(1번부터의 후보 경로 순서)
     ) {
+        /** 화면에 보일 요약: 모델이 인용한 후보 번호를 파일명으로 바꾼다(판정·저장 값은 그대로). */
+        fun displayReasoning(): CitationResult = substituteCandidateNumbers(reasoning, candidatePaths)
+
         /** 결과 요약에 보일 안내 줄. keptPaths에 남은 파일은 제외 목록에서 뺀다. 둘 다 비면 빈 목록. */
         fun noticeLines(keptPaths: Set<String> = emptySet()): List<String> {
             val lines = mutableListOf<String>()
@@ -71,6 +75,42 @@ class FileRelevanceVerifier(
         /** REQUIRED 사유가 이보다 짧으면 근거 미제시로 보고 제거한다(V2의 40자 이내 사유를 고려해 10자에서 낮춤). */
         const val MIN_REASON_LENGTH = 5
         const val NOTICE_NAME_LIMIT = 10
+        const val CITATION_NAME_LIMIT = 3
+
+        // 앞에 파일 이름이 붙을 수 있는 괄호 인용. 괄호 안은 정수와 쉼표·공백만 허용한다.
+        private val NUMBER_CITATION = Regex("""((?:[A-Za-z0-9_][A-Za-z0-9_.\-]*)?)\(\s*(\d+(?:[\s,]+\d+)*)\s*\)""")
+        private val DIGITS = Regex("""\d+""")
+
+        data class CitationResult(val text: String, val mismatches: List<String>)
+
+        private fun joinCitedNames(names: List<String>): String =
+            names.take(CITATION_NAME_LIMIT).joinToString(", ") + if (names.size > CITATION_NAME_LIMIT) " 외 ${names.size - CITATION_NAME_LIMIT}개" else ""
+
+        /**
+         * 요약 속 `(번호,번호)` 인용을 번호표(paths, 1번부터)의 파일명으로 바꾼다.
+         * - 1~N 밖의 번호가 하나라도 있거나 정수·쉼표·공백 외 문자가 있으면 원문을 둔다.
+         * - `이름(번호)`는 번호가 가리키는 후보와 이름이 같을 때만 번호를 지우고, 다르면 원문을 두고 mismatches에 기록한다.
+         */
+        fun substituteCandidateNumbers(text: String, paths: List<String>): CitationResult {
+            if (paths.isEmpty() || text.isEmpty()) return CitationResult(text, emptyList())
+            val files = paths.map { it.substringAfterLast('/').substringAfterLast('\\') }
+            val mismatches = mutableListOf<String>()
+            val out = NUMBER_CITATION.replace(text) { m ->
+                val prefix = m.groupValues[1]
+                val nums = DIGITS.findAll(m.groupValues[2]).map { it.value.toIntOrNull() ?: 0 }.distinct().toList()
+                if (nums.any { it < 1 || it > files.size }) return@replace m.value
+                val names = nums.map { files[it - 1] }
+                if (prefix.isEmpty()) {
+                    "(" + joinCitedNames(names) + ")"
+                } else if (names.any { n -> n.equals(prefix, ignoreCase = true) || n.substringBeforeLast('.').equals(prefix, ignoreCase = true) }) {
+                    if (names.size == 1) prefix else prefix + "(" + joinCitedNames(names) + ")"
+                } else {
+                    mismatches.add(m.value + " → " + names.joinToString(", "))
+                    m.value
+                }
+            }
+            return CitationResult(out, mismatches)
+        }
     }
 
     fun verify(userQuery: String, candidates: List<TargetFileSpec>, additionalSystemPrompt: String = ""): VerificationOutput {
@@ -292,7 +332,8 @@ class FileRelevanceVerifier(
             files = verifiedTopFiles + autoKept,
             reasoning = finalReasoning,
             removed = removedPaths.filter { it !in keptPaths },
-            unjudged = unjudgedPaths
+            unjudged = unjudgedPaths,
+            candidatePaths = topFiles.map { it.path }
         )
     }
 
