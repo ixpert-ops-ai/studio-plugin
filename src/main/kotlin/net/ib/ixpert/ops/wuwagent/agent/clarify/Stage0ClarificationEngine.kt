@@ -1006,6 +1006,22 @@ class Stage0ClarificationEngine(
             .mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
             .distinct()
 
+        // 제외 요청 문장이 제외 확정으로 이어지지 않은 경우의 기록(표시 전용, 판정에는 쓰지 않는다).
+        // SCOPE_LIMIT('~만 수정')은 파일 제외가 아니므로 대상이 아니다. 후보 파일은 증거 구문의 결정론적 탐색 결과다.
+        val unconfirmedExclusions = constraints
+            .filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT && !it.evidence.isNullOrBlank() }
+            .mapNotNull { c ->
+                val evidence = c.evidence!!
+                val candidates = try {
+                    resolveExclusionCandidates(evidence).candidates.map { it.path }.distinct()
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                if (candidates.isNotEmpty() && excludedFiles.containsAll(candidates)) null
+                else UnconfirmedExclusion(evidence = evidence, candidateFiles = candidates)
+            }
+            .distinctBy { it.evidence }
+
         val allStatements = listOf(state.originalRequirement) + state.userStatements
         val classNames = graph.files.values.map { it.className }
         val auxiliaryIdentifiers = IdentifierRetentionChecker.extractAuxiliaryIdentifiers(
@@ -1062,9 +1078,24 @@ class Stage0ClarificationEngine(
                 scopeModifierDropped = retentionResult.scopeModifierDropped
             ),
             unresolvedItems = unresolvedItems,
+            unconfirmedExclusions = unconfirmedExclusions,
             contractVersion = ClarifyIntent.CURRENT_INTENT_VERSION
         )
     }
+
+    /** 화면 payload용: 확정된 제외 파일과, 제안 상태로 대기 중인 제외 후보(확정 전). 판정에는 쓰지 않는다. */
+    data class ExclusionView(val excludedFiles: List<String>, val pendingExclusions: List<String>)
+
+    fun exclusionView(state: Stage0State): ExclusionView = ExclusionView(
+        excludedFiles = state.items
+            .filter { it.verdict == Verdict.REJECTED }
+            .mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+            .distinct(),
+        pendingExclusions = state.items
+            .filter { it.source == HintSource.PROPOSED_EXCLUSION && it.verdict == Verdict.PENDING }
+            .mapNotNull { (it.hint as? LinkHint.ExistingRef)?.filePath }
+            .distinct()
+    )
 
     private fun refineRequirement(
         original: String,

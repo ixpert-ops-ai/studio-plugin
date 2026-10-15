@@ -166,6 +166,8 @@ class WebviewActionRouter(private val project: Project) {
                                 "isExhausted" to turnResult.isExhausted,
                                 "isReadyForStage1" to turnResult.isReadyForStage1,
                                 "taskSummary" to turnResult.taskSummary,
+                                "excludedFiles" to engine.exclusionView(turnResult.state).excludedFiles,
+                                "pendingExclusions" to engine.exclusionView(turnResult.state).pendingExclusions,
                                 "dialogueHistory" to turnResult.state.dialogueHistory
                             )
                             val jsonPayload = com.google.gson.Gson().toJson(payload)
@@ -241,6 +243,8 @@ class WebviewActionRouter(private val project: Project) {
                             "isExhausted" to turnResult.isExhausted,
                             "isReadyForStage1" to turnResult.isReadyForStage1,
                             "taskSummary" to turnResult.taskSummary,
+                            "excludedFiles" to session.engine.exclusionView(turnResult.state).excludedFiles,
+                            "pendingExclusions" to session.engine.exclusionView(turnResult.state).pendingExclusions,
                             "dialogueHistory" to turnResult.state.dialogueHistory
                         )
                         ApplicationManager.getApplication().invokeLater {
@@ -291,6 +295,8 @@ class WebviewActionRouter(private val project: Project) {
                                     "isExhausted" to turnResult.isExhausted,
                                     "isReadyForStage1" to turnResult.isReadyForStage1,
                                     "taskSummary" to turnResult.taskSummary,
+                                    "excludedFiles" to session.engine.exclusionView(turnResult.state).excludedFiles,
+                                    "pendingExclusions" to session.engine.exclusionView(turnResult.state).pendingExclusions,
                                     "echoBackMessage" to turnResult.echoBackMessage,
                                     "dialogueHistory" to turnResult.state.dialogueHistory
                                 )

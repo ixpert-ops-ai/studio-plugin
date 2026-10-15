@@ -2,6 +2,7 @@ package net.ib.ixpert.ops.wuwagent.agent
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import net.ib.ixpert.ops.wuwagent.agent.clarify.model.exclusionSummaryLines
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AdaptiveFileDiscovery
@@ -340,6 +341,11 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
 
         val formattedOutput = buildString {
             appendLine("### 요구사항 분석 요약")
+            // 제외 결과 표시(동작 변경 없음): 확정된 제외 파일과 확정되지 않은 제외 요청 문장
+            clarifyIntent?.exclusionSummaryLines()?.takeIf { it.isNotEmpty() }?.let { lines ->
+                lines.forEach { appendLine(it) }
+                appendLine()
+            }
             
             // Stage 3(Batch)에서 판정한 전체 요약 근거가 있다면 우선적으로 보여줌
             if (verificationOutput.reasoning.isNotBlank()) {

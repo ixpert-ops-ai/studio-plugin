@@ -32,6 +32,9 @@ data class ClarifyIntent(
     // 사용자가 직접 발화/지정한 식별자 중 대화 종료 시점까지 미확정(PENDING)으로 남은 항목 목록
     val unresolvedItems: List<UnresolvedItem> = emptyList(),
 
+    // 제외 요청 문장(EXCLUDE_COMPONENT)이 제외 확정으로 이어지지 않은 목록. 표시 전용이며 판정(excludedFiles, 후보, 최종 목록)에는 쓰지 않는다.
+    val unconfirmedExclusions: List<UnconfirmedExclusion> = emptyList(),
+
     // 계약 버전
     val contractVersion: String = CURRENT_INTENT_VERSION
 ) {
@@ -60,6 +63,30 @@ data class UnresolvedItem(
     val lastQuestion: String?,     // 실제 제시된 확인 질문 원문 (미질의 시 null)
     val lastAskedTurn: Int?        // 질문이 실제 제시된 턴 번호 (미질의 시 null)
 )
+
+/**
+ * 확정되지 않은 제외 요청. 사용자가 "~는 건드리지 말고"처럼 말했지만 해당 파일이 제외 확정(REJECTED)되지 않은 경우의 기록.
+ * candidateFiles가 비어 있으면 증거 구문으로 대상 파일을 특정하지 못한 경우다.
+ */
+data class UnconfirmedExclusion(
+    val evidence: String,
+    val candidateFiles: List<String> = emptyList()
+)
+
+/**
+ * 분석 결과 요약에 보일 제외 확정·미확정 줄(표시 전용). 둘 다 없으면 빈 목록이라 아무 줄도 보이지 않는다.
+ */
+fun ClarifyIntent.exclusionSummaryLines(): List<String> {
+    val lines = mutableListOf<String>()
+    if (excludedFiles.isNotEmpty()) {
+        lines.add("- ✅ 제외 확정: ${excludedFiles.joinToString { it.substringAfterLast('/') }}")
+    }
+    unconfirmedExclusions.forEach { u ->
+        val target = if (u.candidateFiles.isEmpty()) "대상 파일을 특정하지 못했습니다" else "후보: ${u.candidateFiles.joinToString { it.substringAfterLast('/') }}"
+        lines.add("- ⚠️ 제외 요청이 확정되지 않았습니다: '${u.evidence}' (${target}). 분석 결과에 포함될 수 있습니다. 제외하려면 /clarify 단계에서 목록의 체크를 해제하세요.")
+    }
+    return lines
+}
 
 /**
  * 식별자 보존 검사 감사 기록
