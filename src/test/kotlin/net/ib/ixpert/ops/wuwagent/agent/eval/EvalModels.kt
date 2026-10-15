@@ -61,7 +61,20 @@ data class TurnStats(
     val fallbackAnswersUsed: Int = 0,                 // 대본에 없는 엔진 질문에 대체 답변을 쓴 횟수(1회 한도)
     val questionRemainedAfterFallback: Boolean = false, // 대체 답변 뒤에도 질문이 남아 그대로 분석으로 진행했는지
     val remainingQuestion: String? = null,            // 분석으로 넘어갈 때 남아 있던 엔진 질문
-    val engineQuestionTexts: List<String> = emptyList()
+    val engineQuestionTexts: List<String> = emptyList(),
+    val utterances: List<UtteranceLog> = emptyList()
+)
+
+/** 대본 발화 한 건을 UI 경로(processUtterance)로 보낸 결과: 화면에 나가는 안내문과 질문, 판정·시드 변화. */
+data class UtteranceLog(
+    val statement: String,
+    val echo: String?,
+    val openQuestion: String?,
+    val rejectedBefore: Int,
+    val rejectedAfter: Int,
+    val seedBefore: Int,
+    val seedAfter: Int,
+    val ready: Boolean
 )
 
 data class DeliveredCheck(val identifier: String, val source: String, val inStage3: Boolean?)

@@ -49,15 +49,26 @@
     {
       "id": "D5E", "group": "probe", "graphKey": "survey_admin",
       "sr": "설문 발송 채널에 브랜드메시지 추가",
-      "script": ["알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야"],
-      "answerRules": [{"questionContains": "제외", "answer": "네, 제외해 주세요"}],
       "gtMatch": "harness-contains", "onlyType": "MODIFY", "gtStatus": "confirmed",
       "expectExcluded": ["src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchJob.java", "src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRunner.java"],
       "gt": [
         {"name": "survey_list.jsp"}, {"name": "survey_write.jsp"}, {"name": "survey.list.js"}, {"name": "survey.write.js"},
         {"name": "SurveyServiceImpl.java"}, {"name": "sql_survey.xml"}, {"name": "AlimtalkChnlDto.java"}, {"name": "AlimtalkTmplDto.java"}
       ],
-      "note": "확인용(기준선 아님): D5와 같은 SR·발화에 제외 확인 질문('제외'가 들어간 질문)에만 '네, 제외해 주세요'로 답하도록 한 테스트 전용 대본. 제외 확정(excludedFiles), 최종 목록에서 제외 파일이 빠졌는지, 정제문을 기록한다."
+      "script": ["알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야", "네, 제외해 주세요"],
+      "note": "확인용(기준선 아님): D5와 같은 SR·발화 뒤에 제외를 승인하는 두 번째 발화 '네, 제외해 주세요'를 UI 경로(입력창)로 보낸다. 제외 확정(excludedFiles), 화면 안내, 정제문을 기록한다."
+    },
+    {
+      "id": "D5N", "group": "probe", "graphKey": "survey_admin",
+      "sr": "설문 발송 채널에 브랜드메시지 추가",
+      "gtMatch": "harness-contains", "onlyType": "MODIFY", "gtStatus": "confirmed",
+      "expectExcluded": ["src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchJob.java", "src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRunner.java"],
+      "gt": [
+        {"name": "survey_list.jsp"}, {"name": "survey_write.jsp"}, {"name": "survey.list.js"}, {"name": "survey.write.js"},
+        {"name": "SurveyServiceImpl.java"}, {"name": "sql_survey.xml"}, {"name": "AlimtalkChnlDto.java"}, {"name": "AlimtalkTmplDto.java"}
+      ],
+      "script": ["알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야", "네"],
+      "note": "확인용(기준선 아님): D5E와 같고 두 번째 발화가 한 글자 '네'."
     },
     {
       "id": "S1", "group": "synthetic", "graphKey": "member_market",

@@ -166,6 +166,7 @@ class UsageProxy(private val target: String, private val dumpDir: File? = null) 
         system.contains("소프트웨어 요구사항 정제 전문가") -> "clarify:정제문 생성"
         system.contains("ConstraintKind") -> "clarify:제약 추출"
         system.contains("개방형 질문") -> "clarify:개방형 질문"
+        system.contains("발화 번역 전문가") -> "clarify:발화 번역(UI)"
         system.contains("당신은 프로젝트 아키텍트입니다.") -> "analyze:신규 파일 탐지"
         system.contains("당신은 코드 변경 범위 검증자입니다.") -> "analyze:Stage3 검증"
         system.contains("능동적으로 탐색하는 전문 AI 분석 에이전트") -> "분석:시드 선정(tool)"

@@ -109,6 +109,9 @@ object EvalReport {
                 sb.appendLine("- 턴: 엔진 질문 ${it.engineQuestions}회, 답한 질문 ${it.answeredQuestions}회, 처리한 발화 ${it.utterancesProcessed}개, 대본이 질문보다 먼저 끝남=${it.scriptEndedBeforeQuestion}, 대체 답변 ${it.fallbackAnswersUsed}회, 규칙 답변 ${it.ruleAnswersUsed}회(${it.ruleAnswerText ?: "-"}), 답변 뒤에도 질문 남음=${it.questionRemainedAfterFallback}, 정제 완료(isReadyForStage1)=${it.readyForStage1}, 마지막 미확정 ${it.unresolvedAtEnd}개")
                 sb.appendLine("- 엔진 질문 원문: ${if (it.engineQuestionTexts.isEmpty()) "(없음)" else it.engineQuestionTexts.joinToString(" / ") { q -> "\"${cell(q)}\"" }}")
                 it.remainingQuestion?.let { q -> sb.appendLine("- 분석으로 넘어갈 때 남은 질문: \"${cell(q)}\"") }
+                it.utterances.forEachIndexed { i, u ->
+                    sb.appendLine("- 발화 ${i + 1} \"${cell(u.statement)}\" -> 화면 안내: \"${cell(u.echo)}\", 다음 질문: \"${cell(u.openQuestion)}\", 거부 항목 ${u.rejectedBefore}->${u.rejectedAfter}, 시드 토큰 ${u.seedBefore}->${u.seedAfter}, 분석 시작 선언=${u.ready}")
+                }
             }
             sb.appendLine("- LLM 호출: clarify ${r.llmClarify}, analyze ${r.llmAnalyze}")
             if (r.ok) {
@@ -179,7 +182,8 @@ object EvalReport {
         sb.appendLine("- 시나리오당 ${runs}회 반복, 호출 상한 ${callTimeoutSec}초, 총 소요 ${elapsedMs / 1000}초, git ${git}")
         sb.appendLine("- 경로: 운영과 같은 OpenAIClient(tool call 포함)를 MeteredLlmClient로 감싸 호출 시간·결과를 기록. 토큰 수·TTFB는 내용을 바꾸지 않는 로컬 투명 프록시가 서버 응답에서 직접 기록(응답에 usage가 없으면 '미제공')")
         sb.appendLine("- 대체 답변 \"${LiveEvalTest.FALLBACK_ANSWER}\": 대본이 끝난 뒤 남은 엔진 질문에 1회 사용. 사용 ${allTurns.sumOf { it.fallbackAnswersUsed }}회 / 실행 ${allTurns.size}회, 대체 답변 뒤에도 질문이 남은 실행 ${allTurns.count { it.questionRemainedAfterFallback }}회")
-        sb.appendLine("- 판정(단언)은 하지 않는다. 첫 측정은 기준값을 잡는 용도다.")
+        sb.appendLine("- 대화 경로: UI와 같은 순서. 대본 발화는 processUtterance(App.tsx:295 '/clarify-utterance'), 마지막은 processTurn(userStatement=null, 확정 선언)(App.tsx:312-316 '/analyze-confirm'). 체크박스 거부(/analyze-confirm의 verdict 변경)는 평가 도구에서 쓰지 않는다.")
+        sb.appendLine("- 판정(단언)은 하지 않는다. 이 보고서는 기준값을 잡는 용도다.")
         sb.appendLine()
         for ((key, title) in groups) {
             val list = summaries.filter { it.scenario.group == key }

@@ -7,6 +7,7 @@ import net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeInputResolver
 import net.ib.ixpert.ops.wuwagent.agent.clarify.IdentifierRetentionChecker
 import net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine
 import net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0GraphScanner
+import net.ib.ixpert.ops.wuwagent.agent.clarify.model.Verdict
 import net.ib.ixpert.ops.wuwagent.client.OpenAIClient
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import org.junit.Assume
@@ -125,9 +126,22 @@ class LiveEvalTest {
             result.openQuestion?.let { questionTexts.add(it) }
             var answered = 0
             var processed = 0
+            val utteranceLog = ArrayList<UtteranceLog>()
+            // UI 경로(App.tsx:295 '/clarify-utterance' 입력창 -> WebviewActionRouter -> engine.processUtterance)로 대본 발화를 보낸다.
+            fun sendUtterance(text: String) {
+                val before = result
+                result = engine.processUtterance(result.state, text)
+                utteranceLog.add(UtteranceLog(
+                    statement = text, echo = result.echoBackMessage, openQuestion = result.openQuestion,
+                    rejectedBefore = before.state.items.count { it.verdict == Verdict.REJECTED },
+                    rejectedAfter = result.state.items.count { it.verdict == Verdict.REJECTED },
+                    seedBefore = before.state.seedSet.size, seedAfter = result.state.seedSet.size,
+                    ready = result.isReadyForStage1
+                ))
+            }
             for (stmt in sc.scriptOrEmpty()) {
                 val awaiting = result.openQuestion != null
-                result = engine.processTurn(result.state, Stage0ClarificationEngine.UserInput(userStatement = stmt))
+                sendUtterance(stmt)
                 processed++
                 if (awaiting) answered++
                 result.openQuestion?.let { questionTexts.add(it) }
@@ -143,12 +157,20 @@ class LiveEvalTest {
                 val rule = sc.rulesOrEmpty().firstOrNull { !it.questionContains.isNullOrEmpty() && q.contains(it.questionContains) && !it.answer.isNullOrEmpty() }
                 val reply = rule?.answer ?: FALLBACK_ANSWER
                 if (rule != null) { ruleUsed = 1; ruleText = rule.answer } else fallbackUsed = 1
-                result = engine.processTurn(result.state, Stage0ClarificationEngine.UserInput(userStatement = reply))
+                sendUtterance(reply)
                 answered++
                 result.openQuestion?.let { questionTexts.add(it) }
                 remainedAfterFallback = result.openQuestion != null && !result.isReadyForStage1
             }
-            val intent = engine.buildClarifyIntent(result.state)
+            // 대본 발화가 '분석 시작' 선언(COMPLETE)이면 UI도 곧바로 의도를 만든다. 아니면 '확정' 버튼(App.tsx:312-316)과 같이
+            // 현재 판정(체크박스는 건드리지 않음)과 userStatement=null, 완결 선언으로 processTurn을 호출한다.
+            val finalState = if (result.isReadyForStage1) result.state else {
+                val verdicts = result.state.items.associate { it.id to it.verdict }
+                engine.processTurn(result.state, Stage0ClarificationEngine.UserInput(
+                    verdictUpdates = verdicts, rejectionReasonUpdates = emptyMap(), userStatement = null, isCompletionDeclared = true
+                )).state
+            }
+            val intent = engine.buildClarifyIntent(finalState)
             val audit = intent.retentionAudit
             turns = TurnStats(
                 engineQuestions = questionTexts.size,
@@ -162,7 +184,8 @@ class LiveEvalTest {
                 fallbackAnswersUsed = fallbackUsed,
                 questionRemainedAfterFallback = remainedAfterFallback,
                 remainingQuestion = if (result.openQuestion != null && !result.isReadyForStage1) result.openQuestion else null,
-                engineQuestionTexts = questionTexts
+                engineQuestionTexts = questionTexts,
+                utterances = utteranceLog
             )
 
             val resolved = AnalyzeInputResolver.resolve(rawInput = intent.refinedRequirement, inMemoryIntent = intent)
