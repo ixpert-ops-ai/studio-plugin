@@ -159,20 +159,20 @@ class ExclusionDisplayTest {
 
         val withCandidates = none.copy(unconfirmedExclusions = listOf(UnconfirmedExclusion("알림톡 배치는 건드리지 말고", listOf("a/AlimtalkTemplateBatchJob.java", "a/AlimtalkTemplateBatchRunner.java"))))
         assertEquals(
-            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '알림톡 배치는 건드리지 말고' (후보: AlimtalkTemplateBatchJob.java, AlimtalkTemplateBatchRunner.java). 분석 결과에 포함될 수 있습니다. 제외하려면 /clarify 단계에서 목록의 체크를 해제하세요."),
+            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '알림톡 배치는 건드리지 말고' (후보: AlimtalkTemplateBatchJob.java, AlimtalkTemplateBatchRunner.java). 분석 결과에 포함될 수 있습니다. 제외하려면 /clarify에서 해당 파일의 체크를 해제한 뒤 확정하세요."),
             withCandidates.exclusionSummaryLines()
         )
 
         // 증거 구문이 아니라 사용자 발화 전체를 인용한다(S3 예: '로그인 쪽 컨트롤러는 건드리지 마세요.')
         val quoted = none.copy(unconfirmedExclusions = listOf(UnconfirmedExclusion("건드리지 마세요", emptyList(), "로그인 쪽 컨트롤러는 건드리지 마세요.")))
         assertEquals(
-            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '로그인 쪽 컨트롤러는 건드리지 마세요.' (대상 파일을 특정하지 못했습니다). 분석 결과에 포함될 수 있습니다. 제외하려면 /clarify 단계에서 목록의 체크를 해제하세요."),
+            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '로그인 쪽 컨트롤러는 건드리지 마세요.'. 대상 파일을 찾지 못해 제외하지 못했습니다. 아래 결과 목록에 해당 파일이 포함됐는지 확인하세요."),
             quoted.exclusionSummaryLines()
         )
 
         val noTarget = none.copy(unconfirmedExclusions = listOf(UnconfirmedExclusion("건드리지 마세요")))
         assertEquals(
-            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '건드리지 마세요' (대상 파일을 특정하지 못했습니다). 분석 결과에 포함될 수 있습니다. 제외하려면 /clarify 단계에서 목록의 체크를 해제하세요."),
+            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '건드리지 마세요'. 대상 파일을 찾지 못해 제외하지 못했습니다. 아래 결과 목록에 해당 파일이 포함됐는지 확인하세요."),
             noTarget.exclusionSummaryLines()
         )
 

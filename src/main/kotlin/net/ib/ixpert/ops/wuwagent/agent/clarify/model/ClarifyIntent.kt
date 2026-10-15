@@ -83,8 +83,13 @@ fun ClarifyIntent.exclusionSummaryLines(): List<String> {
         lines.add("- ✅ 제외 확정: ${excludedFiles.joinToString { it.substringAfterLast('/') }}")
     }
     unconfirmedExclusions.forEach { u ->
-        val target = if (u.candidateFiles.isEmpty()) "대상 파일을 특정하지 못했습니다" else "후보: ${u.candidateFiles.joinToString { it.substringAfterLast('/') }}"
-        lines.add("- ⚠️ 제외 요청이 확정되지 않았습니다: '${u.statement ?: u.evidence}' (${target}). 분석 결과에 포함될 수 있습니다. 제외하려면 /clarify 단계에서 목록의 체크를 해제하세요.")
+        val quoted = u.statement ?: u.evidence
+        if (u.candidateFiles.isEmpty()) {
+            // 후보 목록에 대상이 없으면 체크를 해제할 수 없다. 결과 화면에는 파일을 제외하는 기능이 없으므로 확인을 안내한다.
+            lines.add("- ⚠️ 제외 요청이 확정되지 않았습니다: '${quoted}'. 대상 파일을 찾지 못해 제외하지 못했습니다. 아래 결과 목록에 해당 파일이 포함됐는지 확인하세요.")
+        } else {
+            lines.add("- ⚠️ 제외 요청이 확정되지 않았습니다: '${quoted}' (후보: ${u.candidateFiles.joinToString { it.substringAfterLast('/') }}). 분석 결과에 포함될 수 있습니다. 제외하려면 /clarify에서 해당 파일의 체크를 해제한 뒤 확정하세요.")
+        }
     }
     return lines
 }
