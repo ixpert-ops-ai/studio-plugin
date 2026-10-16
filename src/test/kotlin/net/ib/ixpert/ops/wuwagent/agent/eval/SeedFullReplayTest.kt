@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * B-45 시드 선정 전체 경로 전/후 재생: 운영 AgenticSeedSelector.selectSeeds를 첫 호출부터 그대로 돌리고,
  * 도구 목록의 rationale 설명만 전(e34b94d 이전 문구)/후(현재 문구)로 바꿔 보내는 얇은 래퍼 클라이언트를 쓴다.
  * 실행: ./gradlew test --tests "net.ib.ixpert.ops.wuwagent.agent.eval.SeedFullReplayTest" -DrunLiveLlmTests=true -i
- * 옵션: -Deval.seed.variants=after(전/후 중 일부만) -Deval.seed.ids=D1,S2 -Deval.replay.runs=3 -Deval.replay.parallel=4 -Deval.out=<폴더> -Deval.seed.dumps=dumps_op -Deval.seed.live=live_eval_20261016_143658.json
+ * 옵션: -Deval.seed.order=true(정제문 절 순서 진단, D1 전용) -Deval.seed.variants=after(전/후 중 일부만) -Deval.seed.ids=D1,S2 -Deval.replay.runs=3 -Deval.replay.parallel=4 -Deval.out=<폴더> -Deval.seed.dumps=dumps_op -Deval.seed.live=live_eval_20261016_143658.json
  */
 class SeedFullReplayTest {
 
@@ -98,7 +98,8 @@ class SeedFullReplayTest {
         val base = OpenAIClient()
         val pool = Executors.newFixedThreadPool(parallel)
         val futures = ArrayList<java.util.concurrent.Future<RunOut>>()
-        val variants = System.getProperty("eval.seed.variants")?.split(",")?.map { it.trim() } ?: listOf("before", "after")
+        val orderMode = System.getProperty("eval.seed.order") == "true"   // 정제문 절 순서 진단: orig/reorder, 두 조건 모두 현재 rationale 설명
+        val variants = System.getProperty("eval.seed.variants")?.split(",")?.map { it.trim() } ?: if (orderMode) listOf("orig", "reorder") else listOf("before", "after")
         for (run in 1..runs) for (id in ids) for (variant in variants) {
             futures.add(pool.submit(Callable {
                 val client = RewritingClient(base, if (variant == "before") BEFORE_DESCRIPTION else null)
@@ -108,7 +109,7 @@ class SeedFullReplayTest {
                 var seeds = emptyList<String>()
                 var reasoning = ""
                 try {
-                    val res = AgenticSeedSelector(client).selectSeeds(srOf.getValue(id), graph)
+                    val res = AgenticSeedSelector(client).selectSeeds(if (variant == "reorder") Stage3OrderReplayTest.reorder(srOf.getValue(id)) else srOf.getValue(id), graph)
                     seeds = res.seedClasses
                     reasoning = res.reasoning
                 } catch (e: Throwable) {
@@ -137,7 +138,7 @@ class SeedFullReplayTest {
         sb.appendLine("|---|---|---|---|---|---|---|---|---|---|")
         for (id in ids) for (v in variants) {
             val r = results.filter { it.id == id && it.variant == v }
-            sb.appendLine("| $id | ${keyOf.getValue(id)} | ${if (v == "before") "전" else "후"} | ${r.count { it.keyInSeeds }}/${r.size} | ${r.count { it.keyInToolResults }}/${r.size} | ${"%.1f".format(r.map { it.turns }.average())} | ${"%.0f".format(r.map { it.ms }.average() / 1000)} | ${r.map { it.seeds.sorted() }.toSet().size} | ${r.count { it.usedGuardOrFallback }} | ${r.count { it.error != null }} |")
+            sb.appendLine("| $id | ${keyOf.getValue(id)} | ${when (v) { "before" -> "전"; "after" -> "후"; "orig" -> "원본"; else -> "변형(절 순서)" }} | ${r.count { it.keyInSeeds }}/${r.size} | ${r.count { it.keyInToolResults }}/${r.size} | ${"%.1f".format(r.map { it.turns }.average())} | ${"%.0f".format(r.map { it.ms }.average() / 1000)} | ${r.map { it.seeds.sorted() }.toSet().size} | ${r.count { it.usedGuardOrFallback }} | ${r.count { it.error != null }} |")
         }
         sb.appendLine()
         sb.appendLine("## 회차별 최종 seed_classes")
