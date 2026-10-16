@@ -600,3 +600,32 @@
 - **시드 단계 개선안(제안만)**: (1) 화면 관련 SR(`isExplicitFrontendByKeyword` 등)이면 시드에서 3홉 이내의 VIEW/SCRIPT 리소스를 그래프만으로 후보에 더한다(D1의 jsp·js 4개가 3홉, LLM 호출 없음, 후보 수 증가로 Stage 3 입력만 늘고 출력은 늘지 않음). (2) inspect_node_detail 결과에 연결된 VIEW/SCRIPT/매퍼 리소스를 함께 보여 에이전트가 조회 대상으로 삼게 한다(D1 jsp 2개는 결과에도 안 나옴). (3) 이미 inspect한 1홉 Controller(S3 KmcisController)를 확정에서 빼는 경우를 줄이도록 확정 단계에서 inspect한 후보를 한 번 더 보여 준다(프롬프트 변경이라 별도 승인 필요).
 - **E 미채택 결론(사용자 판정)**: 같은 K에서 이득이 없고(57/57), Stage 3 시간이 +51%이며, K를 늘리면 `/implement`가 후보 수만큼 호출해 상한이 없어서 채택하지 않는다. D1 GT 손실은 Stage 3 판단 문제, D5는 시드·그래프 단계 손실로 정리한다(위 D5 GT 정의 주의 참고). E 변형 검증기와 재생 테스트(`Stage3RankReplayTest`)는 그대로 둔다.
 - **새 기준선 후보**: live_eval_20261016_143658 (코드: HEAD 213e9f4 + 재생 도구 오류 처리 보정). 총 1998초, 실패 0, 300초 초과 0. 시드 선정(1069초)이 54%를 차지하고 clarify 합(발화 번역·제약 추출·정제문 합 533초, 요약은 임계 경로 밖)과 Stage 3(308초)이 뒤를 잇는다.
+
+### [B-45] D1·S2 시드 선정 전체 경로 재생, 개선안 1 오프라인 시뮬레이션, D5 GT 초안 (2026-10-16)
+- **기준선 확정**: live_eval_20261016_143658(총 1,998초, 실패 0, 300초 초과 0)을 기준선으로 확정한다. 근거는 아래 재생에서 후 조건만의 `SurveyServiceImpl` 누락이 없었다는 것이다. 같은 코드의 반복 실행이 없으므로 시드 경로 변동(D1·D2·S3)은 변동 범위로 본다(아래 비결정성 참고).
+- **D1·S2 시드 선정 전체 경로 재생(커밋 `SeedFullReplayTest`, 사전 예측 `pred_seed_full.md`)**: 운영 `AgenticSeedSelector.selectSeeds`를 첫 호출부터 그대로 호출(temperature 0.0, max_tokens 2048, tool_choice auto, 도구 실행 동일), 도구 목록의 rationale 설명만 전(e34b94d 이전 문구)/후(현재)로 바꿔 시나리오당 전/후 각 3회. SR은 143658 dumps_op의 첫 시드 호출 사용자 메시지에서 추출.
+
+  | 시나리오 | 핵심 파일 | 조건 | 시드에 포함 | 도구 결과에 등장 | 평균 턴 | 구간 평균(초, 동시 4개 부하) | 집합 종류 | Guard 2/fallback |
+  |---|---|---|---|---|---|---|---|---|
+  | D1 | SurveyServiceImpl | 전 | 2/3 | 3/3 | 5.0 | 206 | 3 | 0 |
+  | D1 | SurveyServiceImpl | 후 | 2/3 | 2/3 | 5.0 | 169 | 3 | 0 |
+  | S2 | MemberStatus | 전 | 2/3 | 3/3 | 5.0 | 150 | 3 | 0 |
+  | S2 | MemberStatus | 후 | 3/3 | 3/3 | 4.0 | 127 | 3 | 0 |
+
+  판정: 후 조건에서만 누락이 2/3 이상이 아니므로(D1은 전/후 모두 2/3 포함) 규칙에 해당하지 않아 기준선 확정. 예측과의 차이: D1 후 포함은 예측 1/3, 실측 2/3, S2 전 포함 예측 3/3 실측 2/3, S2 후 예측 1/3 실측 3/3(예측이 틀렸고 ②가 시드를 잃게 한다는 증거는 없음). 평균 턴은 예측(D1 4~5, S2 5)과 같고 Guard 2/fallback 0.
+- **비결정성 발견**: temperature 0.0인데도 같은 조건에서 3회가 서로 다른 seed_classes 3종류를 냈다(D1·S2 전/후 모두 집합 종류 3). 시드 선정은 단일 실행으로 작은 차이를 가를 수 없고, 평가 간 시드·후보 차이(D1 시드 7→4개 등)는 이 변동 안에 있다. 이후 시드 단계 변경은 시나리오당 3회 이상의 반복 재생으로 판정한다. 마지막 호출 하나만 재생한 값(D5 첫 호출 confirm 0/10)은 더 일정했으나 전체 경로는 앞 턴에서 갈라진다.
+- **개선안 1 오프라인 시뮬레이션(읽기·계산만, `sim_resources.js`)**: 143658의 시나리오별 최종 시드와 Stage 3 후보를 기준으로 메타그래프(무방향: relationships, dependsOn/dependedBy, 리소스 linkedTo)에서 VIEW/SCRIPT/MYBATIS_MAPPER 리소스를 센다.
+  - (a) 시드에서 홉 수별 누적(리소스 수 / 기존 후보에 없는 수 / 후보 밖 GT 회수): D1 1홉 0/0/0, 2홉 1/0/0, 3홉 46/45/4(survey_list.jsp, survey_write.jsp, survey.list.js, survey.write.js)(후보 밖 GT 6개 중). D5·D5E·D5N 2홉 47/45/4(같은 4개), 1홉 0. D2·D3 0/0/0(후보 밖 GT 2개는 SVC·SVCImpl로 리소스가 아님). D4 2홉 2/0/0. S1 3홉 13/13, S2 3홉 10/9, S3 2홉 49/46(회수 GT 0). 즉 VIEW/SCRIPT는 한 번에 45~49개가 같은 홉에 몰려 들어오고 홉 수만으로는 가려낼 수 없다.
+  - (b) 상한·조건별(3홉 이내, 기존 후보에 없는 것, 추가 후보 수 / 회수 GT): (i) 시드당 가까운 3개: D1 3/0, D5 3/0, S1 6, S2 4, S3 4, 회수 0. (ii) 전체 가까운 10개: D1 10/0, D5 10/0, 그 외 최대 10, 회수 0. (iii) 시드 이름 첫 토큰이 같은 것만: D1 0/0(시드가 Alimtalk*라 survey와 안 겹침), D5 13/4, S1 2, S2 5, S3 1. (iv) 기존 후보에서 2홉: D1 45/4, D5 45/4, S3 46/0. (v) 기존 후보에서 3홉 이내이면서 리소스 이름 토큰이 후보 이름 토큰(service, impl, dto 등 일반어 제외)과 겹치는 것만: D1 13/4, D2 0, D3 0, D4 0, D5 13/4, S1 2/0, S2 5/0, S3 2/0(8개 시나리오 합 추가 35개, 회수 GT 8개 중 D1·D5의 같은 4개씩).
+  - (c) Stage 3 시간 증가 추정: V2는 출력이 시간을 정한다(후보당 입력 약 100토큰은 프리필이라 후보 13개에 +1~2초, removedFiles에 번호 하나는 약 2~3토큰으로 후보당 약 0.3초, 유지되어 reason을 쓰면 약 3초). (v)의 D1 +13개는 약 +5~6초(Stage 3 36~48초 대비 +12%), 상한 없는 45개는 +16~19초. 8개 합 추가 35개 기준 시나리오 평균 +1~2초.
+  - (d) 권장: 적용한다면 조건 (v)(기존 후보 3홉 이내 + 후보 이름 토큰이 겹치는 VIEW/SCRIPT/MAPPER)에 전체 최대 15개 상한. 회수는 D1의 4개로 한정되어 일반화 근거가 약하다(S1~S3·D2~D4는 회수 0, 추가 후보만 2~5개). D5는 사용자 지시("SurveyServiceImpl만 수정")로 이 4개가 제외 대상이라(아래 GT 초안) 추가가 오히려 해가 된다. 화면 SR 키워드(`isExplicitFrontendByKeyword`)로 켜는 조건은 D1 정제문에 해당 단어가 없어(어드민·화면·UI·jsp 등 없음) 이 경우를 놓친다. 구현은 하지 않았고, 적용 여부는 D5 GT 확정과 D1형(리소스 군집) 시나리오가 더 있는지 보고 판단한다.
+- **D5 GT 정의 초안(사용자 확정 대기, 커밋·시나리오 파일 변경 없음)**: D5·D5E·D5N 대본 "알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야"에 맞춰 현재 GT 8개(D1과 동일)를 나눈다. D1의 GT는 바꾸지 않는다.
+
+  | GT 파일 | 분류 | 근거 |
+  |---|---|---|
+  | SurveyServiceImpl.java | 유지(required) | 사용자가 수정 대상으로 명시 |
+  | survey_list.jsp, survey_write.jsp, survey.list.js, survey.write.js | 제외 | "SurveyServiceImpl만 수정" 지시와 충돌하는 화면 파일 |
+  | sql_survey.xml | 판단 필요 | SurveyServiceImpl이 호출하는 SurveyDao의 SQL(linkedTo SurveyDao). 서비스만 수정이면 제외, 채널 조회 SQL 변경이 필요하면 reference/required |
+  | AlimtalkChnlDto.java, AlimtalkTmplDto.java | 판단 필요 | batch 패키지 파일이 아니라 dto 패키지 DTO이고 알림톡 배치 Repository와 SurveyDao/SurveyDaoImpl이 함께 사용(usedByTypes), SurveyServiceImpl의 직접 의존은 아님. "알림톡 배치 금지"에 DTO가 포함되는지는 업무 판단 |
+
+  143658 D5·D5E·D5N 최종 목록은 SurveyServiceImpl 1개뿐이다. 새 GT로 다시 계산한 Recall@10(LLM 재호출 없음): 원래 1/8(13%) → 안 A(판단 필요를 reference): required 1/1(100%), reference 상위 10 0/3 → 안 B(판단 필요를 required): 1/4(25%) → 안 C(판단 필요를 제외): 1/1(100%).
