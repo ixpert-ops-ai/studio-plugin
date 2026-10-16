@@ -89,8 +89,9 @@ class FileRelevanceVerifier(
         /**
          * 요약 속 `(번호,번호)` 인용을 번호표(paths, 1번부터)의 파일명으로 바꾼다.
          * - 1~N 밖의 번호가 하나라도 있거나 정수·쉼표·공백 외 문자가 있으면 원문을 둔다.
-         * - `이름(번호들)`는 번호가 가리키는 후보가 모두 그 이름으로 끝날 때(확장자 유무·대소문자 무관)만 치환한다(번호 1개면 번호만 지우고, 여러 개면 괄호를 파일명 목록으로 바꾼다).
-         *   하나라도 다르면 원문을 두고 mismatches에 기록한다.
+         * - `이름(번호들)`: 가리키는 후보가 모두 그 이름과 정확히 같으면(확장자·대소문자 무시) 번호 1개는 번호만 지우고, 여러 개는 괄호를 파일명 목록으로 바꾼다.
+         *   모두 그 이름으로 끝나기만 하면(접미사 일치) 번호 자리에 파일명을 넣는다(DEM(1) → DEM(ACMBTBAPC024DEM.java)).
+         *   하나라도 어느 쪽도 아니면 원문을 두고 mismatches에 기록한다.
          */
         fun substituteCandidateNumbers(text: String, paths: List<String>): CitationResult {
             if (paths.isEmpty() || text.isEmpty()) return CitationResult(text, emptyList())
@@ -103,8 +104,10 @@ class FileRelevanceVerifier(
                 val names = nums.map { files[it - 1] }
                 if (prefix.isEmpty()) {
                     "(" + joinCitedNames(names) + ")"
-                } else if (names.all { n -> n.endsWith(prefix, ignoreCase = true) || n.substringBeforeLast('.').endsWith(prefix, ignoreCase = true) }) {
+                } else if (names.all { n -> n.equals(prefix, ignoreCase = true) || n.substringBeforeLast('.').equals(prefix, ignoreCase = true) }) {
                     if (names.size == 1) prefix else prefix + "(" + joinCitedNames(names) + ")"
+                } else if (names.all { n -> n.endsWith(prefix, ignoreCase = true) || n.substringBeforeLast('.').endsWith(prefix, ignoreCase = true) }) {
+                    prefix + "(" + joinCitedNames(names) + ")"
                 } else {
                     mismatches.add(m.value + " → " + names.joinToString(", "))
                     m.value

@@ -43,14 +43,14 @@ class FileRelevanceVerifierCitationTest {
         assertEquals("원문", substituteCandidateNumbers("원문", emptyList()).text)
     }
 
-    // N4 이름(번호)에서 번호가 가리키는 후보 이름이 그 이름으로 끝나면(확장자 유무·대소문자 무관, 접미사 포함) 번호만 지운다.
+    // N4 이름(번호)에서 후보 이름이 정확히 같으면(확장자 유무·대소문자 무관) 번호만 지우고, 접미사로만 일치하면 번호 자리에 파일명을 넣는다.
     @Test
     fun n4_numberIsDroppedWhenNameMatchesCandidate() {
         val r = substituteCandidateNumbers("BDao(3)와 sql_b.xml(4), aservice(1)", paths)
         assertEquals("BDao와 sql_b.xml, aservice", r.text)
         assertTrue(r.mismatches.isEmpty())
         val s = substituteCandidateNumbers("Dao(3) 와 DEM(1)", listOf("/a/ACMDEM.java", "/a/Other.java", "/a/ECMBDao.java"))
-        assertEquals("Dao 와 DEM", s.text)
+        assertEquals("Dao(ECMBDao.java) 와 DEM(ACMDEM.java)", s.text)
         assertTrue(s.mismatches.isEmpty())
     }
 
