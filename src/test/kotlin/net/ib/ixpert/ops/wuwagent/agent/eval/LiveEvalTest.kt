@@ -262,6 +262,9 @@ class LiveEvalTest {
                     isReference = references.any { g -> matchesGt(sc, g, t.path) })
             }
             val fp30 = eligible.count { t -> gtAll.none { g -> matchesGt(sc, g, t.path) } }
+            // 제외 대상 노출: 사용자 지시로 나타나면 안 되는 파일이 최종 목록(필터 전 전체)에 나타난 수
+            val mustNot = sc.mustNotAppearOrEmpty()
+            val mustNotInTargets = mustNot.filter { g -> sorted.any { matchesGt(sc, g, it.path) } }.map { it.label() }
 
             // 누락 식별자가 Stage 3 입력(요구사항 구간)에 실제로 들어갔는지: Stage 3 검증기 호출에서 잘라 확인
             val segment = stage3Segment(metered.stage3UserContents.toList())
@@ -298,7 +301,8 @@ class LiveEvalTest {
                 llmClarify = llm("clarify"), llmAnalyze = llm("analyze"), callMs = callMs(),
                 unconfirmedExclusions = unconfirmedTexts,
                 summaryHead = shown.toString().let { t -> val i = t.indexOf("### 요구사항 분석 요약"); if (i >= 0) t.substring(i).lines().take(10).joinToString("\n") else "(요약 헤더 없음)" },
-                summaryAtConfirm = summaryAtConfirm
+                summaryAtConfirm = summaryAtConfirm,
+                mustNotAppearTotal = mustNot.size, mustNotAppearInTargets = mustNotInTargets
             )
         } catch (e: Throwable) {
             return partial("clarify 단계 예외: " + e.javaClass.simpleName + ": " + (e.message ?: "").take(200))

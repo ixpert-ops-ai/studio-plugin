@@ -44,6 +44,7 @@ data class EvalScenario(
     val gtStatus: String? = null,         // draft | confirmed
     val onlyType: String? = null,         // 하네스 규칙 유지용: 이 type의 targetFiles만 GT 판정에 쓴다(예: MODIFY)
     val expectExcluded: List<String>? = null, // 제외될 것으로 기대하는 파일 경로(없으면 비움)
+    val mustNotAppear: List<EvalGt>? = null,  // 사용자 지시로 최종 목록에 나타나면 안 되는 파일(gtMatch 규칙으로 판정). 나타난 수를 보고서에 기록한다
     val extraCandidates: List<EvalExtra>? = null,
     val note: String? = null,
     val answerRules: List<EvalAnswerRule>? = null
@@ -53,6 +54,7 @@ data class EvalScenario(
     fun matchMode(): String = gtMatch ?: "path"
     fun status(): String = gtStatus ?: "draft"
     fun expectExcludedOrEmpty(): List<String> = expectExcluded ?: emptyList()
+    fun mustNotAppearOrEmpty(): List<EvalGt> = mustNotAppear ?: emptyList()
     fun extrasOrEmpty(): List<EvalExtra> = extraCandidates ?: emptyList()
     fun rulesOrEmpty(): List<EvalAnswerRule> = answerRules ?: emptyList()
 }

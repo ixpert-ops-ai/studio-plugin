@@ -52,6 +52,7 @@ object EvalReport {
         val deliveredText = if (deliveredAll.isEmpty()) "-" else "${deliveredAll.count { it.inStage3 == true }}/${deliveredAll.size}" + (if (deliveredAll.any { it.inStage3 == null }) " (미관찰 ${deliveredAll.count { it.inStage3 == null }})" else "")
         val excludedText = if (clarifyRuns.isEmpty()) "-" else "확정 ${f1(clarifyRuns.map { it.excludedFiles.size }.average())}개, 위반 ${okRuns.sumOf { it.excludedInTargets.size }}" +
             (clarifyRuns.mapNotNull { it.expectedExcludedConfirmed }.let { if (it.isEmpty()) "" else ", 기대 제외 확정 ${it.count { b -> b }}/${it.size}" })
+        val mustNotText = if (okRuns.isEmpty() || okRuns.first().mustNotAppearTotal == 0) "-" else "${f1(okRuns.map { it.mustNotAppearInTargets.size }.average())}/${okRuns.first().mustNotAppearTotal}"
         val turns = clarifyRuns.mapNotNull { it.turns }
         val turnText = if (turns.isEmpty()) "-" else "질문 ${f1(turns.map { it.engineQuestions }.average())}, 답함 ${f1(turns.map { it.answeredQuestions }.average())}, 대본 먼저 끝남 ${turns.count { it.scriptEndedBeforeQuestion }}/${turns.size}, 대체 답변 ${turns.sumOf { it.fallbackAnswersUsed }}회, 규칙 답변 ${turns.sumOf { it.ruleAnswersUsed }}회(그래도 질문 남음 ${turns.count { it.questionRemainedAfterFallback }})"
         val fp = if (okRuns.isEmpty()) "-" else f1(okRuns.map { it.fp30 }.average())
@@ -59,7 +60,7 @@ object EvalReport {
             val total = okRuns.first().referenceTotal
             "${f1(okRuns.map { it.referenceIn10.size }.average())}/${total} | ${f1(okRuns.map { it.referenceIn30.size }.average())}/${total}"
         }
-        return "| ${sc.id} | ${okRuns.size}/${runs.size} | ${recallCell(recalls(runs) { it.gtHit30 }, draft)} | ${recallCell(recalls(runs) { it.gtHit10 }, draft)} | $fp | ${refText} | $missingAvg / $deliveredText | $excludedText | $turnText | ${medianMs} / ${maxMs} | $timeouts / $badCalls |"
+        return "| ${sc.id} | ${okRuns.size}/${runs.size} | ${recallCell(recalls(runs) { it.gtHit30 }, draft)} | ${recallCell(recalls(runs) { it.gtHit10 }, draft)} | $fp | ${refText} | $missingAvg / $deliveredText | $excludedText | $mustNotText | $turnText | ${medianMs} / ${maxMs} | $timeouts / $badCalls |"
     }
 
     private fun callRow(c: ProxyCall, origin: Long): String {
@@ -106,6 +107,7 @@ object EvalReport {
                 sb.appendLine("- Stage 3 요구사항 구간 전달 확인: " + if (r.delivered.isEmpty()) "(대상 없음)" else r.delivered.joinToString(", ") { "${it.identifier}[${it.source}]=${it.inStage3 ?: "미관찰"}" } + " (Stage 3 호출 ${r.stage3Calls}회)")
             }
             if (r.turns != null) sb.appendLine("- 제외 확정: ${r.excludedFiles}" + if (r.ok) ", 최종 목록에 포함된 제외 파일: ${r.excludedInTargets}, Stage 3 섹션에 나타난 제외 파일명: ${r.excludedNameInStage3Sections}, 본문에 나타난 제외 파일명(참고): ${r.excludedNameInStage3Body}" else " (분석 실패로 최종 목록 비교 불가)")
+            if (r.ok && r.mustNotAppearTotal > 0) sb.appendLine("- 제외 대상 노출: ${r.mustNotAppearInTargets.size}/${r.mustNotAppearTotal} ${r.mustNotAppearInTargets}")
             if (r.unconfirmedExclusions.isNotEmpty()) sb.appendLine("- 제외 미확정(의도 기록): ${r.unconfirmedExclusions}")
             r.summaryAtConfirm?.let { sb.appendLine("- 확정 시점 작업 요약 상태: $it (하네스는 생각 시간이 0이라 대부분 PENDING이 정상이며 판정 기준이 아니다)") }
             r.summaryHead?.let { h -> sb.appendLine("- 분석 요약 앞부분(화면 표시 원문):"); h.lines().forEach { l -> sb.appendLine("    > ${cell(l)}") } }
@@ -199,8 +201,8 @@ object EvalReport {
             if (list.any { it.scenario.status() != "confirmed" }) sb.appendLine("GT가 초안인 시나리오가 있어 해당 Recall은 확정값이 아니다((초안) 표기).")
             sb.appendLine("(Recall 분모는 required이면서 그래프에 있는 GT만. reference는 상위 N 안에 들었는지만 표시. 분석이 실패한 실행도 clarify 결과(누락·제외·턴)는 집계에 포함)")
             sb.appendLine()
-            sb.appendLine("| 시나리오 | 성공 | Recall@30 평균(최소~최대) | Recall@10 | 오탐@30 | reference 상위10 | reference 상위30 | 누락 식별자 평균 / Stage 3 전달 | 제외 | 턴(평균) | 응답 ms 중앙 / 최대 | 타임아웃 / 실패·null |")
-            sb.appendLine("|---|---|---|---|---|---|---|---|---|---|---|---|")
+            sb.appendLine("| 시나리오 | 성공 | Recall@30 평균(최소~최대) | Recall@10 | 오탐@30 | reference 상위10 | reference 상위30 | 누락 식별자 평균 / Stage 3 전달 | 제외 | 제외 대상 노출(D5 계열, 최종 목록 중/대상) | 턴(평균) | 응답 ms 중앙 / 최대 | 타임아웃 / 실패·null |")
+            sb.appendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
             list.forEach { sb.appendLine(scenarioRow(it)) }
             sb.appendLine()
         }
