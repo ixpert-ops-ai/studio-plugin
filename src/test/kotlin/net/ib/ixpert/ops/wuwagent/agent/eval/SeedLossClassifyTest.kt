@@ -13,7 +13,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * B-46 후보 밖 GT 분류(LLM 호출 없음): 기준 평가의 최종 시드로 운영 GraphExpander(maxHop 3, AdaptiveFileDiscovery.kt:46-47)를 그대로 돌려
+ * B-46 후보 밖 GT 분류(LLM 호출 없음): 기준 평가의 최종 시드로 운영 GraphExpander(maxHop 3, AdaptiveFileDiscovery.kt:38-40)를 그대로 돌려
  * 후보 밖 GT가 (가) 그래프에 없음, (나) 시드에서 3홉 밖, (다) 홉 안인데 후보에 못 듦 중 어디인지 분류한다.
  * 실행: ./gradlew test --tests "net.ib.ixpert.ops.wuwagent.agent.eval.SeedLossClassifyTest" -Deval.seedloss=true -i
  * 운영의 srText·frontend 힌트를 완전히 복원하지는 못하므로 재현 계산이다(srText는 기준 평가의 첫 시드 호출 사용자 메시지에서 추출).
