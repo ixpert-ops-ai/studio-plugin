@@ -645,3 +645,38 @@
   - 순차 재생의 턴별 기록은 gradle 로그(재생 도구가 selectSeeds를 그대로 호출하며 출력한 로그)에서 복원했고, 결과 원문은 도구가 출력한 요약 줄이다.
 - **후보 밖 GT 16개 분류(SeedLossClassifyTest, LLM 호출 없음)**: 기준 평가(143658)의 최종 시드로 운영 `GraphExpander`(maxHop 3, `AdaptiveFileDiscovery.kt:46-47`)를 그대로 돌려 분류했다. 재현 검증: 실제 Stage 3 후보(그래프에 있는 파일)가 재현한 확장 결과에 D1 14/14, D2 17/17, D5 16/16, S2 15/15, S3 11/11 모두 들어 있다(srText는 첫 시드 호출 사용자 메시지에서 추출, 운영 입력을 완전히 복원한 것은 아니므로 재현 계산). 분류: (가) 그래프에 없음 0, (나) 시드에서 3홉 밖 0, (다-a) 확장기는 도달했으나 후보에서 탈락(RelevanceScorer minScore 55, 30개 상한) 8, (다-b) 3홉 안인데 확장기가 도달하지 못함(조건부 확장·도메인 필터) 8. 시나리오별: D1(6) SurveyServiceImpl 다-a(확장 hop 2 via DEPENDED_BY from ReviewDto), AlimtalkChnlDto 다-a(hop 1 via SAME_PACKAGE), survey_list.jsp·survey_write.jsp·survey.list.js·survey.write.js 다-b(BFS 3홉). D2(2) APCMMTrcdIsSVC·APCMMTrcdIsSVCImpl 다-a(hop 1 via DEPENDED_BY from APCMMTrcdIsBIZ). D5(6, GT 안 A 확정 전 8개 기준) survey_list.jsp·survey_write.jsp·survey.list.js·survey.write.js 다-b(BFS 2홉), AlimtalkChnlDto·AlimtalkTmplDto 다-a(hop 1 via SAME_PACKAGE from SurveyDto). S2(1) AdminController 다-a(hop 1 via SAME_PACKAGE from AdminService). S3(1) KmcisController 다-a(hop 1 via DEPENDED_BY from KmcisServiceImpl). 안 A 기준(D5 required가 SurveyServiceImpl 1개)으로는 후보 밖 required GT가 10개(D1 6, D2 2, S2 1, S3 1)다.
 - **해석**: 후보 밖 GT는 그래프에 없어서(가)도 홉이 멀어서(나)도 아니다. 8개는 확장기가 이미 도달했는데 점수·상한에서 탈락했고(시드 쪽이 아니라 RelevanceScorer 쪽 문제), 8개는 VIEW/SCRIPT 리소스가 3홉 안인데 확장기 규칙으로 미도달이다. 홉 확장(개선안 1) 보류는 유지하며, (나)=0이라 홉 수를 늘려서 얻을 효과의 근거는 더 줄었다. 시드 선정 자체의 손실은 D1처럼 시드 LLM이 설문 클래스를 고르지 않는 경우(다-a의 SurveyServiceImpl은 확장기가 hop 2로 도달했으나 점수에서 탈락)와 겹쳐 있다.
+
+### [B-47] RelevanceScorer 점수 분석: 후보에서 탈락한 GT의 원인은 minScore 55 (2026-10-16)
+- **정정**: B-46의 "GraphExpander(maxHop 3, `AdaptiveFileDiscovery.kt:46-47`)"는 `:38-40`이 맞다(`:46`은 RelevanceScorer 생성, `fileLimit=30, minScore=55`). B-46의 (다-b) 8개는 D5 GT 안 A 기준으로는 D1의 jsp·js 4개뿐이다(D5의 화면 파일 4개는 GT가 아니게 됐다). 그래서 VIEW/SCRIPT 확장의 효과 근거는 D1 한 시나리오이고 개선안 1 보류는 유지한다.
+- **점수 산식(`RelevanceScorer.kt`, FileNode)**: 총점 = hop 점수(`:61` hop0 40, hop1 30, hop2 15, 그 외 0) + 이름 일치(`:75-79` 직접 일치 50, 번역 일치 30, 약한 번역 15에 IDF 가중) + 메서드 일치(`:100` 최대 30) + 레이어 정렬(`:105` 시드 layerHint(SERVICE/BIZ/PRESENTATION)와 맞으면 15) + 주석 일치(`:114` SR 명사·동사가 한글 주석에 있으면 20) + 유형 보너스(`:120` Mapper/Dao 계열 10) + 핵심 체인 보너스(`:127-129` 저장소 계열에 한해 BIZ_TO_DOWNSTREAM 55, SERVICE_TO_REPO_OR_BIZ 20), 합산 `:133`. 적용 순서: `totalScore >= minScore`이면 통과(`:173`), 미만이어도 보호(Seed Class·Judge Pick·Frontend Hint 1순위, Seed Direct Dependency 2순위)이면 구제(`:189`). Seed Direct Dependency는 DAO·Mapper·DEM·DQM 같은 저장소 계열의 1홉 하향 의존에만 붙는다(`:157`). 마지막에 보호 등급, 점수 내림차순 정렬 후 `fileLimit`(30)로 자른다(`:490` 이후). 운영은 `minScore = 55`, 상한 30(`AdaptiveFileDiscovery.kt:46`).
+- **탈락 GT 8개의 점수(기준 평가 143658의 시드, 운영 GraphExpander·RelevanceScorer를 그대로 재현)**: 재현 검증으로 T=55 결과가 실제 Stage 3 후보와 8개 시나리오 모두 전부 일치(D1 14/14, D2 17/17, D3 9/9, D4 9/9, D5 16/16, S1 8/8, S2 15/15, S3 11/11).
+
+  | 시나리오 | 탈락 GT | 총점 | hop 점수 | 레이어 | 키워드·유형 합(총점-hop-레이어) | 보호 | 통과 후보 최저점(보호 제외) |
+  |---|---|---|---|---|---|---|---|
+  | D1 | SurveyServiceImpl (SERVICE, 2홉 DEPENDED_BY) | 50 | 15 | 15 | 20 | 없음 | SurveyPartExportJob 55 |
+  | D1 | AlimtalkChnlDto (DTO, 1홉 SAME_PACKAGE) | 45 | 30 | 15 | 0 | 없음 | 55 |
+  | D2 | APCMMTrcdIsSVC (SERVICE_INTERFACE, 1홉 USED_BY_TYPE) | 45 | 30 | 15 | 0 | 없음 | APCSRMnChArtcListInqrBIZ 56 |
+  | D2 | APCMMTrcdIsSVCImpl (SERVICE, 1홉 DEPENDED_BY) | 45 | 30 | 15 | 0 | 없음 | 56 |
+  | D5 | AlimtalkChnlDto (1홉 SAME_PACKAGE) | 45 | 30 | 15 | 0 | 없음 | AddressDto 55 |
+  | D5 | AlimtalkTmplDto (1홉 SAME_PACKAGE) | 45 | 30 | 15 | 0 | 없음 | 55 |
+  | S2 | AdminController (REST_CONTROLLER, 1홉 SAME_PACKAGE) | 45 | 30 | 15 | 0 | 없음 | AdminMemberResponse 60 |
+  | S3 | KmcisController (CONTROLLER, 1홉 DEPENDED_BY) | 45 | 30 | 15 | 0 | 없음 | UserServiceImpl 65 |
+
+  (키워드·유형 합은 이름·메서드·주석·유형 항목의 합을 총점에서 역산한 값이다.)
+- **탈락 원인 판정**: 8개 모두 55 미만으로 탈락했고 30개 상한 때문이 아니다(모든 시나리오의 스코어러 후보 수가 30 미만, 상한 밖 0). 사전 예측(minScore)과 일치.
+- **구조적 원인(점수 기준을 바꾸지 않고 회수할 수 있는 이유)**: 7개는 정확히 45점이다 = hop 1 점수 30 + 레이어 정렬 15 + 키워드 일치 0. 시드의 1홉 이웃은 SR 키워드(이름·주석·메서드)가 맞지 않으면 최대 45점이라 55에 10점 모자라고, 구제 경로(Seed Direct Dependency)는 저장소 계열에만 있어 Controller·Service·DTO 이웃에는 없다. D1 SurveyServiceImpl은 15(hop 2)+15+20(주석 일치)=50이다. SR이 신규 클래스 이름(Bizgo, BrandMessage 등)으로 쓰여 기존 이웃 파일 이름과 키워드가 겹치지 않는 경우에 특히 그렇다.
+- **minScore 시뮬레이션(운영 코드 그대로, 상한 30 유지, 기준: 안 A GT, 8개 시나리오 합)**:
+
+  | minScore | required 회수(후보 안 required GT 수, 전체 34개) | 새로 들어온 GT 밖 파일 | 55 대비 추가 파일 | 30개 상한에 닿은 시나리오 |
+  |---|---|---|---|---|
+  | 55(운영) | 24 | 0 | 0 | 0 |
+  | 50 | 25 (+1) | 17 | 18 | D2(17→30) |
+  | 45 | 28 (+4) | 33 | 39 | D2(30) |
+  | 40 | 28 (+4) | 35 | 41 | D2(30) |
+
+  시나리오별(55→50→45→40 후보 수 / required 회수): D1 14→16→18→19 / 2→3→4→4 (8개 중). D2 17→30→30→30 / 3→3→3→3 (5개 중, 50~54점 비 GT 13개가 먼저 들어와 상한 30을 채우고 45점인 SVC·SVCImpl은 상한에서 잘림). D3 9→9→13→14 / 5/5 유지. D4 9 고정 / 4/4. D5 16→16→20→20 / required 1/1, reference 1→1→3→3(3개 중). S1 8→8→9→9 / 3/3. S2 15→15→23→23 / 3→3→4→4(4개 중), 새 GT 밖 7개. S3 11→14→16→16 / 3→3→4→4(4개 중), 새 GT 밖 3~4개.
+- **사전 판정 기준 결과(required 4개 이상 회수 + 새 GT 밖 파일이 회수 수의 2배 이하 + 어떤 시나리오도 후보 30개 초과 없음)**: 충족하는 기준값이 없다. 50은 +1(<4), 45는 +4이나 새 GT 밖 33 > 회수의 2배(8), 40은 +4에 35 > 8. D2는 50 이하에서 상한 30에 닿아 회수 효과도 막힌다. 따라서 "점수 기준 변경 설계안"은 만들지 않고 기록만 한다.
+- **Stage 3 시간 증가 추정(추가 후보 1개당)**: Stage 3 응답 20개(154520·143658)의 인자는 평균 530자(required 4.0개, removed 9.9개, 요약 210자), removed 번호 1개는 약 2.5자, required 1개는 reason 약 29자+구조 약 25자. 회귀로 구한 시간은 기본 3.4초 + required당 4.6초 + removed당 0.85초(글자·토큰 환산 하한은 required 2.6초, removed 0.17초). V2의 제거 비율(약 71%)을 가정하면 추가 후보 1개의 기대 시간은 약 0.9~1.9초이고 프리필은 무시할 수 있다. minScore 45(추가 39개)는 합계 약 +35~74초(시나리오 평균 +4~9초), D2의 50 이하(추가 13개)는 약 +12~25초.
+- **구조 개선안(1개, 구현하지 않음)**: 55 미만으로 탈락한 1홉 호출자(DEPENDED_BY·USED_BY_TYPE)이면서 Controller·Service·BIZ 계열인 파일을 Seed Direct Dependency처럼 보호(시드당 3개 상한)한다(`RelevanceScorer.kt:157` 부근). 재현 계산으로 8개 시나리오에서 해당 파일은 4개뿐이다: D2 APCMMTrcdIsSVC·APCMMTrcdIsSVCImpl(required GT), S3 KmcisController(required GT), D5 IpsController(GT 밖). 즉 required 3개 회수에 GT 밖 1개 추가, 후보 수는 어느 시나리오도 30 근처에 가지 않는다. 한계: 회수는 후보까지이고 그 뒤 Stage 3 유지 여부는 별도다(아래).
+- **회수 후 Stage 3 유지 여부(저장 자료만, 모든 덤프 폴더 조사)**: D2 APCMMTrcdIsSVC·SVCImpl, S3 KmcisController는 어느 평가에서도 Stage 3 후보에 들어간 적이 없어 "기록 없음". D1 SurveyServiceImpl은 후보였던 4개 기록 모두 제거됐다: dumps_ui(구 형식) UNNECESSARY "설문 발송 서비스로, 브랜드메시지 채널 추가는 배치 구조(BatchRunner/Job/Repository)와 Bizgo API를 통해 처리되며, 설문 발송 채널 로직 자체의 수정은 요구사항에 명시되지 않았습니다."; dumps_ui2(구 형식) UNNECESSARY "설문 발송 서비스 구현체로, 브랜드메시지 채널 추가는 배치 구조(BizgoApiService, BrandMessageTemplateBatch*)를 통해 구현되며 설문 발송 로직 자체를 수정할 필요는 없습니다."; dumps_ui3(V2)와 dumps_defer(V2)는 removedFiles에 포함(요약: "설문/주소 관련 기존 파일(8~21)은 브랜드메시지 배치 신규 개발과 무관하여 제거"). 즉 D1은 후보에 들어와도 Stage 3이 지금까지 4/4번 제거했다.
+- **결론**: 후보에서 빠진 GT 8개의 직접 원인은 minScore 55(30개 상한이 아님)이고, 7개는 hop1+레이어 45점에서 10점 부족하다. minScore를 낮추는 방식은 오탐이 회수의 2배를 넘어 기각 기준에 걸리고(특히 D2는 상한을 채워 효과도 막힘), 구조 개선안(1홉 호출자 보호)은 오탐이 적게 늘지만 required 3개 회수에 그치고 D1에는 효과가 없다. D1은 시드 LLM, 점수, Stage 3의 세 단계가 모두 막는다.
