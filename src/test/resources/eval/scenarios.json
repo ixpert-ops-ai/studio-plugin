@@ -6,10 +6,12 @@
       "script": ["외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."],
       "gtMatch": "harness-contains", "onlyType": "MODIFY", "gtStatus": "confirmed",
       "gt": [
-        {"name": "survey_list.jsp"}, {"name": "survey_write.jsp"}, {"name": "survey.list.js"}, {"name": "survey.write.js"},
-        {"name": "SurveyServiceImpl.java"}, {"name": "sql_survey.xml"}, {"name": "AlimtalkChnlDto.java"}, {"name": "AlimtalkTmplDto.java"}
+        {"name": "survey_list.jsp", "reason": "사용자 미확인(하네스 원본 gtFiles: Stage0EngineRoutedBaselineHarnessTest.kt, 근거 기록 없음)"}, {"name": "survey_write.jsp", "reason": "사용자 미확인(하네스 원본 gtFiles: Stage0EngineRoutedBaselineHarnessTest.kt, 근거 기록 없음)"},
+        {"name": "survey.list.js", "reason": "사용자 미확인(하네스 원본 gtFiles: Stage0EngineRoutedBaselineHarnessTest.kt, 근거 기록 없음)"}, {"name": "survey.write.js", "reason": "사용자 확정(2026-10-16): 설문 작성 화면의 알림톡 채널·템플릿 렌더링 수정 대상"},
+        {"name": "SurveyServiceImpl.java", "reason": "사용자 확정(2026-10-16): 발송 채널(알림톡) 분기 로직 수정 대상"},
+        {"name": "sql_survey.xml", "reason": "사용자 미확인(하네스 원본 gtFiles: Stage0EngineRoutedBaselineHarnessTest.kt, 근거 기록 없음)"}, {"name": "AlimtalkChnlDto.java", "reason": "사용자 미확인(하네스 원본 gtFiles: Stage0EngineRoutedBaselineHarnessTest.kt, 근거 기록 없음)"}, {"name": "AlimtalkTmplDto.java", "reason": "사용자 미확인(하네스 원본 gtFiles: Stage0EngineRoutedBaselineHarnessTest.kt, 근거 기록 없음)"}
       ],
-      "note": "Stage0EngineRoutedBaselineHarnessTest의 survey_admin LlmOn 시나리오(SR, 발화, GT, MODIFY 필터)를 그대로 옮김"
+      "note": "Stage0EngineRoutedBaselineHarnessTest의 survey_admin LlmOn 시나리오(SR, 발화, GT, MODIFY 필터)를 그대로 옮김. GT 중 SurveyServiceImpl.java와 survey.write.js는 사용자가 2026-10-16에 required로 확정했고 나머지 6개는 role을 유지하되 사용자 미확인이다"
     },
     {
       "id": "D2", "group": "dev", "graphKey": "apc",
