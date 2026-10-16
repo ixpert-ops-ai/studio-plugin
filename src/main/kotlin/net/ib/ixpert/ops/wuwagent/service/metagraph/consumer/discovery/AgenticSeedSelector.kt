@@ -491,7 +491,7 @@ class AgenticGraphTools(
                             ),
                             "rationale" to PropertyDefinition(
                                 type = "string",
-                                description = "해당 클래스들을 Seed로 선정한 구체적 근거 및 구현 역할 설명"
+                                description = "해당 클래스들을 Seed로 선정한 근거와 구현 역할. 클래스당 한 문장 이하로 간결하게 작성"
                             )
                         ),
                         required = listOf("seed_classes", "rationale")
