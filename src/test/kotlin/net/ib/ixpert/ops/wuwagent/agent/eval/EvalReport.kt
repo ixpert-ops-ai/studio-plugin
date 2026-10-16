@@ -107,6 +107,7 @@ object EvalReport {
             }
             if (r.turns != null) sb.appendLine("- 제외 확정: ${r.excludedFiles}" + if (r.ok) ", 최종 목록에 포함된 제외 파일: ${r.excludedInTargets}, Stage 3 섹션에 나타난 제외 파일명: ${r.excludedNameInStage3Sections}, 본문에 나타난 제외 파일명(참고): ${r.excludedNameInStage3Body}" else " (분석 실패로 최종 목록 비교 불가)")
             if (r.unconfirmedExclusions.isNotEmpty()) sb.appendLine("- 제외 미확정(의도 기록): ${r.unconfirmedExclusions}")
+            r.summaryAtConfirm?.let { sb.appendLine("- 확정 시점 작업 요약 상태: $it (하네스는 생각 시간이 0이라 대부분 PENDING이 정상이며 판정 기준이 아니다)") }
             r.summaryHead?.let { h -> sb.appendLine("- 분석 요약 앞부분(화면 표시 원문):"); h.lines().forEach { l -> sb.appendLine("    > ${cell(l)}") } }
             r.turns?.let {
                 sb.appendLine("- 턴: 엔진 질문 ${it.engineQuestions}회, 답한 질문 ${it.answeredQuestions}회, 처리한 발화 ${it.utterancesProcessed}개, 대본이 질문보다 먼저 끝남=${it.scriptEndedBeforeQuestion}, 대체 답변 ${it.fallbackAnswersUsed}회, 규칙 답변 ${it.ruleAnswersUsed}회(${it.ruleAnswerText ?: "-"}), 답변 뒤에도 질문 남음=${it.questionRemainedAfterFallback}, 정제 완료(isReadyForStage1)=${it.readyForStage1}, 마지막 미확정 ${it.unresolvedAtEnd}개")
@@ -184,6 +185,7 @@ object EvalReport {
         sb.appendLine("- /v1/models: HTTP ${server.httpStatus}, 모델 목록에 있음=${server.modelListed}, 목록=${server.listedModels}")
         sb.appendLine("- 시나리오당 ${runs}회 반복, 호출 상한 ${callTimeoutSec}초, 총 소요 ${elapsedMs / 1000}초, git ${git}")
         sb.appendLine("- 경로: 운영과 같은 OpenAIClient(tool call 포함)를 MeteredLlmClient로 감싸 호출 시간·결과를 기록. 토큰 수·TTFB는 내용을 바꾸지 않는 로컬 투명 프록시가 서버 응답에서 직접 기록(응답에 usage가 없으면 '미제공')")
+        sb.appendLine("- 작업 요약: ${if (LiveEvalTest.deferSummary) "턴 응답 밖에서 생성(라우터와 동일)" else "턴 안에서 생성(이전 방식)"}, 화면에 전달된 요약 ${LiveEvalTest.summaryDelivered.get()}회, 시작 전에 폐기되어 호출이 줄어든 요약 ${LiveEvalTest.summarySkipped.get()}회")
         sb.appendLine("- 스트림 절단 재시도(도구 호출 인자 JSON 해석 불가 시 1회): ${OpenAIClient.streamRetryCount.get()}회, 재시도 후에도 절단: ${OpenAIClient.streamRetryFailedCount.get()}회. 타임아웃은 재시도하지 않음")
         sb.appendLine("- 대체 답변 \"${LiveEvalTest.FALLBACK_ANSWER}\": 대본이 끝난 뒤 남은 엔진 질문에 1회 사용. 사용 ${allTurns.sumOf { it.fallbackAnswersUsed }}회 / 실행 ${allTurns.size}회, 대체 답변 뒤에도 질문이 남은 실행 ${allTurns.count { it.questionRemainedAfterFallback }}회")
         sb.appendLine("- 대화 경로: UI와 같은 순서. 대본 발화는 processUtterance(App.tsx:295 '/clarify-utterance'), 마지막은 processTurn(userStatement=null, 확정 선언)(App.tsx:312-316 '/analyze-confirm'). 체크박스 거부(/analyze-confirm의 verdict 변경)는 평가 도구에서 쓰지 않는다.")

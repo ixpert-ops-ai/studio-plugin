@@ -12,8 +12,17 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 class Stage0ClarificationEngine(
     private val scanner: Stage0GraphScanner,
     private val graph: ProjectGraph,
-    private val llmClient: net.ib.ixpert.ops.wuwagent.client.LLMClient? = null
+    private val llmClient: net.ib.ixpert.ops.wuwagent.client.LLMClient? = null,
+    // true면 턴 결과에 작업 요약을 넣지 않는다(taskSummary=null). 요약은 summaryScheduler로 턴 응답 밖에서 만든다.
+    private val deferTaskSummary: Boolean = false
 ) {
+    /** 화면 표시용 작업 요약을 턴 응답과 따로 만드는 도구(deferTaskSummary=true인 호출자가 쓴다). */
+    val summaryScheduler = TaskSummaryScheduler { state -> buildTaskSummary(state) }
+
+    /** 지금 상태로 작업 요약을 만든다(LLM 1회). 턴 안에서 만들던 것과 같은 입력이다. */
+    fun buildTaskSummary(state: Stage0State): String? =
+        generateTaskSummary(state.originalRequirement, state.items, state.userStatements)
+
     /**
      * 사용자 입력 데이터 구조
      */
@@ -357,7 +366,7 @@ class Stage0ClarificationEngine(
             seedSet = initialTokens
         )
 
-        val taskSummary = generateTaskSummary(originalRequirement, combinedItems)
+        val taskSummary = if (deferTaskSummary) null else generateTaskSummary(originalRequirement, combinedItems)
 
         return Stage0TurnResult(
             state = state,
@@ -594,7 +603,7 @@ class Stage0ClarificationEngine(
             userStatements = updatedStatements
         )
 
-        val taskSummary = generateTaskSummary(state.originalRequirement, finalMergedItems, updatedStatements)
+        val taskSummary = if (deferTaskSummary) null else generateTaskSummary(state.originalRequirement, finalMergedItems, updatedStatements)
 
         return Stage0TurnResult(
             state = nextState,
@@ -972,7 +981,7 @@ class Stage0ClarificationEngine(
 
         val isExhausted = isReady || (translated.kind == UserActionKind.INCLUDE_TOKEN && updatedItems.none { it.verdict == Verdict.PENDING })
         val openQ = if (isReady) null else checkOpenQuestionTrigger(updatedSeedSet, updatedItems)
-        val taskSummary = generateTaskSummary(state.originalRequirement, updatedItems, updatedStatements)
+        val taskSummary = if (deferTaskSummary) null else generateTaskSummary(state.originalRequirement, updatedItems, updatedStatements)
 
         return Stage0TurnResult(
             state = nextState,

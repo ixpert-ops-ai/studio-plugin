@@ -30,6 +30,11 @@ class LiveEvalTest {
         const val MODEL = "Qwen/Qwen3.8-27B-FP8"
         /** 대본에 없는 엔진 질문에 한 번만 쓰는 대체 답변 */
         const val FALLBACK_ANSWER = "잘 모르겠어요, 말씀드린 범위로 진행해 주세요"
+
+        /** 작업 요약을 라우터와 같이 턴 응답 밖에서 만든다(기본 true). -Deval.deferSummary=false면 이전처럼 턴 안에서 만든다. */
+        val deferSummary: Boolean get() = System.getProperty("eval.deferSummary") != "false"
+        val summaryDelivered = java.util.concurrent.atomic.AtomicInteger()
+        val summarySkipped = java.util.concurrent.atomic.AtomicInteger()
     }
 
     private val graphCache = HashMap<String, ProjectGraph?>()
@@ -101,6 +106,8 @@ class LiveEvalTest {
         var excluded: List<String> = emptyList()
         var unconfirmedTexts: List<String> = emptyList()
         var expectConfirmed: Boolean? = null
+        var summaryEngine: Stage0ClarificationEngine? = null
+        var summaryAtConfirm: String? = null
         val gtAll = sc.gtOrEmpty()
 
         fun partial(error: String) = RunResult(
@@ -121,9 +128,17 @@ class LiveEvalTest {
             metered.phase = "clarify"
             proxy.phase = "clarify"
             val scanner = Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)
-            val engine = Stage0ClarificationEngine(scanner, graph, metered)
+            val engine = Stage0ClarificationEngine(scanner, graph, metered, deferTaskSummary = deferSummary)
+            summaryEngine = engine
+            // 라우터(scheduleTaskSummary)와 같다: 턴 응답을 돌려준 뒤 요약을 따로 만들고, 새 턴이 오면 이전 요약은 폐기된다.
+            fun scheduleSummary(r: Stage0ClarificationEngine.Stage0TurnResult) {
+                if (!deferSummary) return
+                if (r.isReadyForStage1) engine.summaryScheduler.invalidate()
+                else engine.summaryScheduler.schedule(r.state) { _, _ -> summaryDelivered.incrementAndGet() }
+            }
 
             var result = engine.initSession(sc.sr)
+            scheduleSummary(result)
             val questionTexts = ArrayList<String>()
             result.openQuestion?.let { questionTexts.add(it) }
             var answered = 0
@@ -133,6 +148,7 @@ class LiveEvalTest {
             fun sendUtterance(text: String) {
                 val before = result
                 result = engine.processUtterance(result.state, text)
+                scheduleSummary(result)
                 utteranceLog.add(UtteranceLog(
                     statement = text, echo = result.echoBackMessage, openQuestion = result.openQuestion,
                     rejectedBefore = before.state.items.count { it.verdict == Verdict.REJECTED },
@@ -170,6 +186,11 @@ class LiveEvalTest {
             }
             // 대본 발화가 '분석 시작' 선언(COMPLETE)이면 UI도 곧바로 의도를 만든다. 아니면 '확정' 버튼(App.tsx:312-316)과 같이
             // 현재 판정(체크박스는 건드리지 않음)과 userStatement=null, 완결 선언으로 processTurn을 호출한다.
+            // 확정 버튼: 그 순간 카드에 보이던 요약 상태를 기록하고, 대기 중인 요약은 폐기한다
+            if (deferSummary) {
+                summaryAtConfirm = if (result.isReadyForStage1) "해당 없음(COMPLETE 발화로 바로 분석)" else engine.summaryScheduler.currentStatus.name
+                engine.summaryScheduler.invalidate()
+            }
             val finalState = if (result.isReadyForStage1) result.state else {
                 val verdicts = result.state.items.associate { it.id to it.verdict }
                 engine.processTurn(result.state, Stage0ClarificationEngine.UserInput(
@@ -276,10 +297,14 @@ class LiveEvalTest {
                 graphMissingGt = gtAll.filter { !it.isInGraph() }.map { it.label() }, fp30 = fp30,
                 llmClarify = llm("clarify"), llmAnalyze = llm("analyze"), callMs = callMs(),
                 unconfirmedExclusions = unconfirmedTexts,
-                summaryHead = shown.toString().let { t -> val i = t.indexOf("### 요구사항 분석 요약"); if (i >= 0) t.substring(i).lines().take(10).joinToString("\n") else "(요약 헤더 없음)" }
+                summaryHead = shown.toString().let { t -> val i = t.indexOf("### 요구사항 분석 요약"); if (i >= 0) t.substring(i).lines().take(10).joinToString("\n") else "(요약 헤더 없음)" },
+                summaryAtConfirm = summaryAtConfirm
             )
         } catch (e: Throwable) {
             return partial("clarify 단계 예외: " + e.javaClass.simpleName + ": " + (e.message ?: "").take(200))
+        } finally {
+            // 시간 측정(totalMs)이 끝난 뒤에 남은 요약 호출을 정리해 다음 시나리오 호출과 섞이지 않게 한다.
+            summaryEngine?.summaryScheduler?.let { s -> s.awaitIdle(300_000); summarySkipped.addAndGet(s.skipped) }
         }
     }
 

@@ -117,7 +117,8 @@ data class RunResult(
     val llmAnalyze: LlmStats,
     val callMs: List<Long>,
     val unconfirmedExclusions: List<String> = emptyList(), // 의도에 기록된 제외 미확정(문장과 후보)
-    val summaryHead: String? = null                       // 분석 요약(화면에 보이는 결과)의 앞부분 원문
+    val summaryHead: String? = null,                      // 분석 요약(화면에 보이는 결과)의 앞부분 원문
+    val summaryAtConfirm: String? = null                  // 확정 시점에 카드에 보이던 작업 요약 상태(NONE/PENDING/READY/FAILED 또는 해당 없음)
 )
 
 data class ScenarioSummary(

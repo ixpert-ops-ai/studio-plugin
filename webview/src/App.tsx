@@ -215,6 +215,8 @@ interface ClarifyPayload {
   isExhausted?: boolean;
   isReadyForStage1?: boolean;
   taskSummary?: string | null;
+  summaryTurn?: number | null;     // 요약을 따로 만드는 턴의 번호(없으면 요약이 payload에 포함된 이전 방식)
+  summaryFailed?: boolean;
   echoBackMessage?: string | null;
   dialogueHistory?: DialogueTurn[];
 }
@@ -414,7 +416,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
             )
           )}
 
-          {payload.taskSummary && (
+          {(payload.taskSummary || payload.summaryTurn != null) && (
             <div style={{
               fontSize: '12px',
               lineHeight: '1.6',
@@ -429,7 +431,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', fontWeight: 600, color: '#93c5fd' }}>
                 <span>💡 실시간 작업 분석 요약</span>
               </div>
-              {payload.taskSummary}
+              {payload.taskSummary ? payload.taskSummary : (payload.summaryFailed ? '요약을 만들지 못했습니다' : '요약 갱신 중…')}
             </div>
           )}
 
@@ -1106,6 +1108,24 @@ function App() {
       }
 
       const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
+
+      if (data.subType === 'analyze_clarify_summary') {
+        // 작업 요약은 턴 응답과 따로 도착한다: 같은 카드의 taskSummary만 채운다.
+        if (messageId) {
+          try {
+            const info = JSON.parse(data.content);
+            // 카드의 턴 번호와 같은 요약만 반영한다(늦게 도착한 이전 턴의 요약이 최신 카드를 덮어쓰지 않도록)
+            setMessages(prev => prev.map(m =>
+              m.id === messageId && m.subType === 'analyze_clarify' && (m.clarifyData as any)?.summaryTurn === info?.turn
+                ? { ...m, clarifyData: { ...((m.clarifyData as any) || {}), taskSummary: info?.taskSummary ?? null, summaryFailed: !!info?.failed } as any }
+                : m
+            ));
+          } catch (e) {
+            console.error('Failed to parse analyze_clarify_summary JSON', e);
+          }
+        }
+        return;
+      }
 
       if (data.subType === 'analyze_clarify') {
         if (messageId) {

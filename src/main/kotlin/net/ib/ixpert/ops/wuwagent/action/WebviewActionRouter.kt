@@ -148,7 +148,7 @@ class WebviewActionRouter(private val project: Project) {
                             } catch (e: Exception) {
                                 null
                             }
-                            val engine = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine(scanner, projectGraph, llmClient)
+                            val engine = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine(scanner, projectGraph, llmClient, deferTaskSummary = true)
                             val turnResult = engine.initSession(initialRequirement, previousContract)
 
                             net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.saveSession(
@@ -159,8 +159,11 @@ class WebviewActionRouter(private val project: Project) {
                                 turnResult
                             )
 
+                            // 작업 요약은 턴 응답을 기다리게 하지 않고 따로 만들어 같은 카드에 채운다(턴 번호로 짝을 맞춘다)
+                            val summaryTurn = scheduleTaskSummary(bridge, engine, turnResult.state, messageId)
                             val payload = mapOf(
                                 "originalRequirement" to initialRequirement,
+                                "summaryTurn" to summaryTurn,
                                 "items" to turnResult.state.items,
                                 "openQuestion" to turnResult.openQuestion,
                                 "isExhausted" to turnResult.isExhausted,
@@ -236,8 +239,10 @@ class WebviewActionRouter(private val project: Project) {
 
                     if (!isCompletionDeclared && !turnResult.isReadyForStage1) {
                         // 다음 턴 대화 진행
+                        val summaryTurn = scheduleTaskSummary(bridge, session.engine, turnResult.state, messageId)
                         val nextPayload = mapOf(
                             "originalRequirement" to session.initialRequirement,
+                            "summaryTurn" to summaryTurn,
                             "items" to turnResult.state.items,
                             "openQuestion" to turnResult.openQuestion,
                             "isExhausted" to turnResult.isExhausted,
@@ -252,6 +257,7 @@ class WebviewActionRouter(private val project: Project) {
                         }
                         return@invokeLater
                     }
+                    session.engine.summaryScheduler.invalidate()
 
                     // Stage 1 전이용 ClarifyIntent 생성 및 저장 (ClarificationContract는 Analyze에서 생산)
                     val clarifyIntent = session.engine.buildClarifyIntent(turnResult.state)
@@ -288,8 +294,10 @@ class WebviewActionRouter(private val project: Project) {
                             session.lastTurnResult = turnResult
 
                             if (!turnResult.isReadyForStage1) {
+                                val summaryTurn = scheduleTaskSummary(bridge, session.engine, turnResult.state, messageId)
                                 val nextPayload = mapOf(
                                     "originalRequirement" to session.initialRequirement,
+                                    "summaryTurn" to summaryTurn,
                                     "items" to turnResult.state.items,
                                     "openQuestion" to turnResult.openQuestion,
                                     "isExhausted" to turnResult.isExhausted,
@@ -306,6 +314,7 @@ class WebviewActionRouter(private val project: Project) {
                                 }
                                 return@executeOnPooledThread
                             }
+                            session.engine.summaryScheduler.invalidate()
 
                             // COMPLETE 상태 전이: ClarifyIntent 생성 및 저장
                             val clarifyIntent = session.engine.buildClarifyIntent(turnResult.state)
@@ -1483,6 +1492,25 @@ class WebviewActionRouter(private val project: Project) {
                 }
             }
         }
+    }
+
+    /** 작업 요약(화면 표시 전용)을 턴 응답과 따로 만들어 같은 카드에 채운다. 새 턴·확정이 오면 이전 요약은 폐기된다. */
+    private fun scheduleTaskSummary(
+        bridge: JcefBridge,
+        engine: net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine,
+        state: net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0State,
+        messageId: String
+    ): Int {
+        fun send(payload: Map<String, Any>) {
+            val json = com.google.gson.Gson().toJson(payload)
+            ApplicationManager.getApplication().invokeLater {
+                bridge.sendMessage("analyze_clarify_summary", json, messageId)
+            }
+        }
+        return engine.summaryScheduler.schedule(
+            state,
+            fail = { turn -> send(mapOf("turn" to turn, "failed" to true)) }
+        ) { turn, summary -> send(mapOf("turn" to turn, "taskSummary" to summary)) }
     }
 
     private fun executeAnalyzePipeline(
