@@ -149,8 +149,10 @@ class SeedRationaleReplayTest {
                 }
                 turn++
             }
-        } catch (e: Exception) {
-            error = "${e.javaClass.simpleName}: ${(e.message ?: "").take(120)}"
+        } catch (e: Throwable) {
+            // 운영 클라이언트의 logger.error가 테스트 환경에서는 AssertionError로 던져지므로 Throwable로 받아 원인 예외를 기록한다
+            val cause = generateSequence(e) { it.cause }.last()
+            error = "${cause.javaClass.simpleName}: ${(cause.message ?: e.message ?: "").take(120)}"
         }
         val reached = !confirmed && !endedWithoutTool && error == null && turn > MAX_TURNS
         val ms = turnMs.sum()
@@ -191,7 +193,17 @@ class SeedRationaleReplayTest {
         // 전/후를 번갈아 제출해 서버 부하 편향을 줄인다
         for (run in 1..maxRuns) for (c in cases) {
             if (run > (runsFor[c.id] ?: defaultRuns)) continue
-            for (variant in listOf("before", "after")) futures.add(pool.submit(Callable { runOne(client, c, variant, run, temperature) }))
+            for (variant in listOf("before", "after")) futures.add(pool.submit(Callable {
+                // 서버가 스트림을 끊는 등 인프라 오류는 해당 회차를 처음부터 최대 2회 다시 시도한다(시도 수는 로그에 남는다)
+                var out = runOne(client, c, variant, run, temperature)
+                var attempts = 1
+                while (out.error != null && attempts < 3) {
+                    println("[SEED] ${c.id} $variant run$run 오류 재시도 $attempts: ${out.error}")
+                    out = runOne(client, c, variant, run, temperature)
+                    attempts++
+                }
+                out
+            }))
         }
         val results = futures.map { it.get() }
         pool.shutdown()
