@@ -17,7 +17,7 @@
 | SR-04 | member-market (SPRING_BOOT_JPA) | 기존 기능 수정 | | 1 | 0 |
 | SR-05 | member-market | 제외 지시 포함 | | 2 | 2 |
 | SR-06 | member-market | 모호(clarify 질문 필요) | **holdout** | 2 | 0 |
-| SR-07 | ISM (SPRING_MVC_MYBATIS, 그래프만) | 제외 지시 포함 | | 3 | 3 |
+| SR-07 | ISM (SPRING_MVC_MYBATIS, 그래프만) | 기존 기능 수정 | | 2 | 0 |
 | SR-08 | ISM (그래프만) | 모호(clarify 질문 필요) | | 3 | 0 |
 | SR-09 | ISM (그래프만) | 기존 패턴 따른 신규 추가 | **holdout** | 5 | 0 |
 | SR-10 | APC (ANYFRAME_AP, 그래프만) | 기존 기능 수정 | **holdout** | 1 | 0 |
@@ -156,24 +156,26 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 
 ---
 
-## SR-07 · ISM · 제외 지시 포함 · holdout 아님 · **[그래프 관계만 근거]**
-**SR 원문:** FAQ 관리 화면의 목록에서 사용을 중지한 FAQ는 기본으로 숨겨 주세요. 고객이 보는 FAQ 화면은 건드리지 마세요.
+## SR-07 · ISM · 기존 기능 수정 · holdout 아님 · **[그래프 관계만 근거]**
+**SR 원문:** FAQ 관리 화면의 목록에서 사용을 중지한 FAQ는 기본으로 숨겨 주세요.
 
-- **기능 묶음:** FaqMgmtController(GET `/system/faqMgmt/getFaqList`) → FaqMgmtServiceImpl.`getFaqList` → PrFaqInfoMapper(`getFaqList`) → prFaqInfo.xml. 비슷한 이름의 다른 묶음: FaqController → FaqServiceImpl → FaqMapper(+FaqMapper.xml), PrFaqController → PrFaqServiceImpl → PrFaqMapper.
-- **근거 출처:** 그래프의 의존·메서드 이름뿐(소스 미확인). 사용 여부 컬럼의 존재는 확인하지 못했다.
+- **기능 묶음:** 목록 조회 경로가 둘이다. FaqMgmtController(GET `/system/faqMgmt/getFaqList`) → FaqMgmtServiceImpl.`getFaqList` → PrFaqInfoMapper(rwdb, `getFaqList`·`getFaqListCount`) → prFaqInfo.xml(`getFaqList`, `getFaqListCount`). PrFaqController(GET `/system/prFaq/getFaqList`) → PrFaqServiceImpl.`getFaqList` → PrFaqMapper(rodb) → PrFaqMapper.xml(`getFaqList`, `getFaqListCount`). 두 경로 모두 테이블 PR_FAQ_INFO를 읽는다.
+- **근거 출처:** 그래프의 의존·메서드 이름과 사용자 확정. 소스는 확인하지 못했고, FAQ 쪽 엔티티·DTO의 한글 주석에는 "사용여부"가 없고 "게시여부"가 있다.
 
 | 파일명 | 역할 | 근거(20자 이내) | 사용자 확인 |
 |---|---|---|---|
-| FaqMgmtServiceImpl.java | required | 관리 목록 조회 서비스 | |
-| ? PrFaqInfoMapper.java | required | ? 관리 목록 조회 매퍼 | |
-| ? prFaqInfo.xml | required | ? 목록 SQL 조건 | |
-| FaqMgmtController.java | reference | 목록 요청 진입점 | |
-| FaqServiceImpl.java | mustNotAppear | 고객용 FAQ 서비스 | |
-| FaqController.java | mustNotAppear | 고객용 FAQ 진입점 | |
-| FaqMapper.java | mustNotAppear | 고객용 FAQ 매퍼 | |
+| PrFaqMapper.xml | required | 목록 SQL, PR_FAQ_INFO 조회 | 확정(2026-10-20) |
+| prFaqInfo.xml | required | 목록 SQL, PR_FAQ_INFO 조회 | 확정(2026-10-20) |
+| PrFaqController.java | reference | 목록 진입점(/system/prFaq) | |
+| PrFaqServiceImpl.java | reference | 목록 서비스(prFaq) | |
+| PrFaqMapper.java | reference | 목록 매퍼(rodb) | |
+| PrFaqRequest.java | reference | 목록 요청 값 | |
+| FaqMgmtController.java | reference | 목록 진입점(/system/faqMgmt) | |
+| FaqMgmtServiceImpl.java | reference | 목록 서비스(faqMgmt) | |
+| PrFaqInfoMapper.java | reference | 목록 매퍼(rwdb) | |
 
 - **대본:** "사용 여부가 '중지'인 것만 숨기면 됩니다. 목록 화면에서 다시 보는 버튼은 없어도 돼요."
-- **사용자 확인:** /system/prFaq는 관리자 화면의 FAQ 관리 API 경로.
+- **사용자 확정(2026-10-20):** /system/prFaq는 관리자 화면의 FAQ 관리 API 경로. 호출 화면 미확정, 두 목록 경로 모두 PR_FAQ_INFO를 읽음. 그래서 required는 두 목록 SQL XML이다. 제외 지시는 없다(mustNotAppear 비움).
 - **겹침:** 없음(D4 케어회원 조회와 다른 기능).
 
 이 SR이 실제 업무에서 나올 법한가?  [  ] 예  [  ] 아니오  [  ] 고쳐야 함: ____________
@@ -269,7 +271,7 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 ---
 
 ## SR-12 · APC · 모호(clarify 질문 필요) · holdout 아님 · **[그래프 관계만 근거]**
-**SR 원문:** 앱 버전이 최신인지 판단하는 기준을 바꿔 주세요.
+**SR 원문:** 앱 버전이 최신인지 판단하는 기준을 바꿔 주세요. 스토어별로 구분하고, OS별로도 구분하며, 노출 대상으로 표시된 버전만 쓰도록 해 주세요.
 
 - **기대 질문:** (1) 관리 화면에서 보이는 "최신 버전" 표시를 말씀하시나요, 앱이 업데이트 안내를 받을지 판단하는 쪽을 말씀하시나요? (2) 최신으로 보는 새 기준은 무엇인가요(버전 번호, 등록일, OS별)?
 - **기능 묶음:** 앱 쪽 판단: APCCSAppVerMngtBIZ(`chkSappVerCmpr`, `chkChgePsbSappVer`, `selAppVerUpdtInf`) → ACAOTBAPC003DEM(`selNewSappVer`, `selMidlSappVer`) / ACAOTBAPC003DVO. 관리 화면 쪽: APCADUpdtVerMngtSVC·SVCImpl → APCADUpdtVerMngtBIZ(`selLtSappVer`, `selLtMidlSappVer`) → ACAOTBAPC003DEM.
@@ -278,13 +280,13 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 | 파일명 | 역할 | 근거(20자 이내) | 사용자 확인 |
 |---|---|---|---|
 | APCCSAppVerMngtBIZ.java | required | 앱 쪽 최신 판단 규칙 | |
-| ? ACAOTBAPC003DEM.java | required | ? 최신 버전 조회 쿼리 | |
+| ? ACAOTBAPC003DEM.java | required | ? 최신 버전 조회 쿼리. crtl_ver_expsr_yn='Y'(사용자 확정) | |
 | ACAOTBAPC003DVO.java | reference | 버전 필드 보유 | |
 | APCADUpdtVerMngtBIZ.java | mustNotAppear | 관리 화면 쪽은 이번 범위 밖 | |
 
-- **대본(질문에 대한 답):** "앱이 업데이트 안내를 받을지 판단하는 쪽이에요. 같은 OS 안에서 버전 번호가 가장 높은 것을 최신으로 보세요. 관리 화면은 그대로 두세요."
+- **대본(질문에 대한 답):** "앱이 업데이트 안내를 받을지 판단하는 쪽이에요. 같은 OS 안에서 버전 번호가 가장 높은 것을 최신으로 보세요. 스토어별로 따로 보고, OS별로도 따로 보고, 노출 대상으로 표시된 버전만 쓰세요. 관리 화면은 그대로 두세요."
 - **근거 보충(그래프):** ACAOTBAPC003DEM·ACAOTBAPC003DVO는 앱 쪽 APCCSAppVerMngtBIZ와 관리 화면 쪽 APCADUpdtVerMngtBIZ가 함께 의존한다(DEM의 dependedBy는 이 두 BIZ뿐). OS 구분 필드는 DVO의 `getMblOsDvC`(모바일OS구분코드)로 확인했다.
-- **사용자:** 추가 조건 있음(내용 대기). 대본과 정답은 내용을 받을 때까지 바꾸지 않았다.
+- **사용자 확정(2026-10-20):** 스토어별 구분, OS별 구분, 노출 대상으로 표시된 버전만 사용(crtl_ver_expsr_yn='Y'). required/reference 구성은 바꾸지 않았다.
 - **겹침:** 없음.
 
 이 SR이 실제 업무에서 나올 법한가?  [  ] 예  [  ] 아니오  [  ] 고쳐야 함: ____________
