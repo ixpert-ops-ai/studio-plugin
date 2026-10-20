@@ -758,3 +758,56 @@
 - **읽기 확인 4a (PatternExtractor.kt:91-92)**: `extractSnippet`은 `File(file.path)`로 소스를 읽는다. `file.path`는 그래프의 프로젝트 기준 상대 경로이고(`FileNode.path`, MetaGraphModels.kt:135), `basePath`와 결합하는 코드는 없다. 그러나 `PatternExtractor`는 `SpecEnricher.kt`에서 타입으로만 쓰일 뿐 생성하는 곳이 main과 test 전체에 없다(`PatternExtractor(`, `SpecEnricher`, `RelationExpander(` 호출 grep 결과 없음. analyze.search 패키지에서 밖으로 import되는 것은 `Stage0GraphScanner.kt:3`의 `KeywordDecomposer`뿐). 결론: **운영에서는 스니펫이 들어가지 않음**(호출 경로 없음).
 - **읽기 확인 4b (FileRelevanceVerifier.kt:423-431)**: `mdRoot.resolve("<파일명>.md")`에서 파일명은 확장자를 포함한다(예: `UserServiceImpl.java.md`). `mdRoot`는 `RequirementAnalysisPipeline.kt:235`에서 `project?.basePath ?: projectRoot?.absolutePath ?: ""`에 `docs`를 붙이므로 평가에서는 저장소의 `docs/`다. 저장소 `docs/`에는 파일 9개(하위 `adr/` 포함)가 있고 `*.java.md`, `*.xml.md`, `*.js.md` 형태의 파일이 없다. 측정 대상 시나리오 정답 파일 96개의 `<파일명>.md`와 일치하는 파일도 0개다. 결론: **현재 저장소 `docs/`에는 일치하는 .md가 없다**(평가에서 이 경로로 들어가는 문서 없음). 고치지 않았다.
 - **부수 관찰**: ISM(`C:/scrad/workspace/ism-pjt/ism-api-bo`)과 APC(`C:/scrad/workspace/apc-pjt`) 그래프의 `projectRoot`에는 소스가 없고 `.wuwagent`만 있다. 분석 실행은 그곳의 `shadow_logs.jsonl`에 덧붙이고 계약 파일을 저장한다(RequirementAnalysisPipeline.kt:331, :423-425, ShadowLogger.kt:34-37). 이번 측정에서도 갱신된다.
+
+### [B-50] 기준선 3회 확정, srType 결정, SR-08 재측정, 제외 문장 경로 읽기 확인 (2026-10-20)
+- **기준선 채택**: 110533을 새 SR 첫 기준선(1회)으로 채택하고(사용자 승인), 같은 조건으로 2회 더 측정했다(`live_eval_20261020_155718`, `live_eval_20261020_165435`). 회차마다 별도 Gradle 실행, 기본 16개, holdout 제외, 사내 Qwen, UI 경로, `-Deval.first=SR-07,SR-11`. 총 소요 3,358 / 3,381 / 3,384초. 사전 예측 `pred_eval_arch23.md`(실행 전 저장).
+- **srType 결정(사용자, 커밋 192a99f)**: D1 기존 패턴 신규 추가, D2 기존 기능 수정, D3 기존 패턴 신규 추가, D4 모호, D5·D5E·D5N 제외 지시, S1 기존 기능 수정, S2 기존 패턴 신규 추가, S3 제외 지시. `-Deval.first` 단위 테스트를 추가했고 검증은 전체 470/42/17, clarify 177/1/3, 실패 메시지 diff 0, 하네스 EXACT_MATCH 5종·MATCH_EXCLUDING 2종 일치, selftest 24/24(469에서 늘어난 1개는 `EvalScenariosArchTest.evalFirstMovesTheChosenScenariosToTheFrontAndKeepsTheRestInOrder`).
+- **SR-08 재측정**: 1차는 524로 실패했다(총 182초). 이 run의 서버 오류 호출 3건은 모두 HTTP 524, 약 125초: #2 작업 요약, #4 작업 요약, #5 제약 추출. 2차는 성공했다(214초, Recall 3/3, uncertain 제외 1/1, required 유지 BadWordMgmtServiceImpl·StBwInfoMapper·stBwInfo.xml, 최종 목록 4개, 엔진 질문 0회). 이후 2회 반복에서도 SR-08은 모두 성공했다(238초, 210초, 엔진 질문 0회). 기대 질문(비슷한 단어의 기준 등)은 한 번도 나오지 않았다.
+- **3회 기준선 결과**(SR-08은 110533에서 실패라 1회차 값으로 재측정 2차를 썼다):
+
+  | 시나리오 | 회차별 hit/분모 | Recall 최소/평균/최대 | 시간(초) 회차별 |
+  |---|---|---|---|
+  | SR-07 | 1/2, 1/2, 1/2 | 50/50/50% | 223, 213, 215 |
+  | SR-11 | 4/4 x3 | 100% | 305, 323, 312 |
+  | D1 | 2/8, 2/8, 0/8 | 0/17/25% | 359, 334, 321 |
+  | D2 | 1/5 x3 | 20% | 218, 195, 193 |
+  | D3 | 4/5, 5/5, 5/5 | 80/93/100% | 220, 239, 236 |
+  | D4 | 4/4 x3 | 100% | 119, 129, 123 |
+  | D5 | 1/1 x3 | 100% | 228, 220, 210 |
+  | S1 | 3/3 x3 | 100% | 158, 126, 159 |
+  | S2 | 3/4, 3/4, 2/4 | 50/67/75% | 149, 157, 179 |
+  | S3 | 3/4, 1/4, 1/4 | 25/42/75% | 163, 185, 180 |
+  | SR-01 | 1/2 x3 | 50% | 210, 170, 208 |
+  | SR-02 | 4/4 x3 | 100% | 244, 240, 213 |
+  | SR-04 | 1/1 x3 | 100% | 158, 161, 150 |
+  | SR-05 | 2/2 x3 | 100% | 180, 181, 206 |
+  | SR-08 | 3/3 x3 | 100% | 214(재측정 2차), 238, 210 |
+  | SR-12 | 2/2 x3 | 100% | 267, 269, 267 |
+
+  required 네 갈래 합계(분모 54):
+
+  | 구분 | 회차 | 분모 | 유지 | Stage 3 제거 | 제외 | 손실 |
+  |---|---|---|---|---|---|---|
+  | 새 SR 8개 | 1, 2, 3 | 20, 20, 20 | 18, 18, 18 | 1, 1, 1 | 0, 0, 0 | 1, 1, 1 |
+  | 기존 8개 | 1 | 34 | 21 | 5 | 0 | 8 |
+  | 기존 8개 | 2 | 34 | 20 | 4 | 0 | 10 |
+  | 기존 8개 | 3 | 34 | 17 | 5 | 0 | 12 |
+  | 전체 16개 | 1, 2, 3 | 54 | 39, 38, 35 | 6, 5, 6 | 0, 0, 0 | 9, 11, 13 |
+
+  - 새 SR은 3회 모두 같다(유지 18/20). 기존 8개는 회차마다 흔들린다(유지 21 → 20 → 17).
+  - **3회 중 2회 이상 Stage 3에서 제거**: D1 AlimtalkTmplDto(3/3), D2 APCMMTrcdIsBIZ(3/3), S3 CallbackInfoDto(2/3), S3 KmcisService(2/3), SR-07 PrFaqMapper.xml(2/3). 1회만: D2 APCMMTrcdIsSVC·SVCImpl, D3 ACMBTBAPC024DEM, SR-07 prFaqInfo.xml, D1 sql_survey.xml.
+  - **3회 중 2회 이상 Stage 1~2에서 손실**: D1 survey_list.jsp·survey_write.jsp·survey.list.js·survey.write.js·AlimtalkChnlDto(모두 3/3), D2 APCMMTrcdIsInfSVO(3/3), S2 AdminController(3/3), S3 KmcisController(3/3), SR-01 ips_common.js(3/3), D2 APCMMTrcdIsSVC·SVCImpl(2/3). 1회만: D1 SurveyServiceImpl, S2 AuthService.
+  - **제외 대상 노출**: D5 0/3, 0/3, 0/3. SR-05 0/2 x3. SR-12 1/1 x3(APCADUpdtVerMngtBIZ가 3회 모두 최종 목록에 나타남).
+  - **서버 오류**: 1회차(110533) SR-08에서 HTTP 524 2건(분석 실패 1건), 2회차와 3회차는 0건. 300초 넘은 호출은 3회 모두 0건.
+- **예측 대조**: 시나리오별 시간은 16개 모두 ±25% 범위 안. 분석 실패 0건 예측은 2·3회차에서 맞고, 서버 오류도 0건. 네 갈래 합계는 2회차(유지 38, 제거 5, 손실 11)가 ±3 범위 안, 3회차는 유지 35(범위 36~42 밖)와 손실 13(범위 6~12 밖)으로 벗어났다. 반복성 예측 중 D2의 SVC·SVCImpl이 반복 제거된다는 것은 틀렸다(Stage 3 제거는 1회, 나머지는 Stage 1~2 손실 2회). D1 화면 리소스 4개 손실, 제외 노출 3종(D5 0, SR-05 0, SR-12 1/1 x3)은 맞았다.
+- **읽기 확인 3a(SR-12 제외 노출)**:
+  - 대본의 제외 문장은 "관리 화면은 그대로 두세요."다. 발화 번역(110533 덤프 #168)은 ADD_CONSTRAINT(SCOPE_LIMIT)를 냈고 안내 문구는 "…관리 화면 비수정)을 추가했습니다."였다. EXCLUDE가 아니라 `excludedFiles`는 비어 있다(후보 항목 15개 중 `APCADUpdtVerMngtBIZ`가 없었다).
+  - 제약 추출(#170)은 EXCLUDE_COMPONENT "관리 화면 수정 제외"를 정상으로 냈지만 증거 구문 "관리 화면은 그대로 두세요."가 후보 294개(289개 고유)로 풀려 단일 대상이 없고 `pendingExclusions=[]`, 엔진 질문 0회였다. 결과 요약의 미확정 경고에 후보 294개 이름이 모두 나열됐다.
+  - `APCADUpdtVerMngtBIZ`는 시드가 아니다(시드 3개 `APCCSAppVerMngtBIZ`, `ACAOTBAPC003DEM`, `APCCSAppInfSVO`, 시드 근거에 이 파일은 "SR상 변경 제외"라고 적혀 있다). 후보 단계(그래프 확장)에서 Stage 3 후보 9개 중 4번으로 들어왔고, Stage 3이 유지했다(사유 "스토어/OS별 최신버전 조회 로직 수정").
+  - 결론: UI 경로에서 발화로 한 제외가 `excludedFiles`에 들어가지 않는 기존 문제와 같은 계열이다. 다만 SR-12에서는 확인 단계가 없는 것에 더해 증거 구문이 294개 후보로 풀려 대상이 특정되지 않았다.
+- **읽기 확인 3b(SR-08 524)**:
+  - 실패한 호출: 110533은 #164 작업 요약(`generateTaskSummary`, `Stage0ClarificationEngine.kt:722-`)과 #165 발화 번역(`ClarifyUtteranceTranslator.translate`). 재측정 1차는 #2·#4 작업 요약과 #5 제약 추출(`extractConstraints`, `:1156-`). 모두 비스트림 `chat` 호출이고 약 125초 만에 524로 끝났다.
+  - 운영 코드는 HTTP 오류를 재시도하지 않는다. `OpenAIClient.chat`은 `IOException`을 잡아 "[Error] OpenAI 서버 통신 실패…" 문자열을 응답 내용으로 돌려준다(`OpenAIClient.kt:215-226`). 재시도는 `chatWithTools`의 도구 호출 인자 절단에만 있다(`:253-270`).
+  - 사용자 화면: 발화 번역 실패는 "발화 의도를 파악하는 중 오류가 발생했습니다. 다시 말씀해 주세요."(`ClarifyUtteranceTranslator.kt:123-127`, 엔진 `:924`, 라우터 `WebviewActionRouter.kt:308`로 전달). 제약 추출 실패는 조용히 기본 제약으로 대체된다(`Stage0ClarificationEngine.kt:1205-1208`). 정제문 실패는 원문으로 대체된다(`:1146-1149`). 작업 요약 실패는 null이고 화면에 "요약을 만들지 못했습니다"가 나온다(`App.tsx:434`).
+  - 평가에서만 다른 점: 테스트에서는 `logger.error`가 AssertionError를 던지고, 이것은 `catch (e: Exception)`에 잡히지 않아 clarify 단계 예외로 run이 중단된다. 운영(IDE)에서는 같은 524가 위 안내문이나 기본값으로 이어지고 세션은 계속된다.
+- **다음 단계**: 제외 발화가 실제로 결과에서 빠지게 하는 설계는 별도 문서화한다(안 A 추천, 안 C는 다음 단계, B-51).
