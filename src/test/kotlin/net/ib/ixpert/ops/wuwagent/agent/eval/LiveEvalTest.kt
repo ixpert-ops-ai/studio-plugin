@@ -141,6 +141,7 @@ class LiveEvalTest {
             scheduleSummary(result)
             val questionTexts = ArrayList<String>()
             result.openQuestion?.let { questionTexts.add(it) }
+            val initialQuestion = result.openQuestion
             var answered = 0
             var processed = 0
             val utteranceLog = ArrayList<UtteranceLog>()
@@ -212,6 +213,7 @@ class LiveEvalTest {
                 questionRemainedAfterFallback = remainedAfterFallback,
                 remainingQuestion = if (result.openQuestion != null && !result.isReadyForStage1) result.openQuestion else null,
                 engineQuestionTexts = questionTexts,
+                initialQuestion = initialQuestion,
                 utterances = utteranceLog
             )
 
@@ -262,6 +264,8 @@ class LiveEvalTest {
                     isReference = references.any { g -> matchesGt(sc, g, t.path) })
             }
             val fp30 = eligible.count { t -> gtAll.none { g -> matchesGt(sc, g, t.path) } }
+            // required GT 네 갈래: 후보는 모든 Stage 3 호출의 후보 줄 합집합, 최종 목록은 analysis.targetFiles(hit30과 같은 판정)
+            val split = GtSplit.classify(required, hit30, metered.stage3UserContents.isNotEmpty(), GtSplit.candidatePaths(metered.stage3UserContents.toList()), excluded) { g, p -> matchesGt(sc, g, p) }
             // 제외 대상 노출: 사용자 지시로 나타나면 안 되는 파일이 최종 목록(필터 전 전체)에 나타난 수
             val mustNot = sc.mustNotAppearOrEmpty()
             val mustNotInTargets = mustNot.filter { g -> sorted.any { matchesGt(sc, g, it.path) } }.map { it.label() }
@@ -302,7 +306,10 @@ class LiveEvalTest {
                 unconfirmedExclusions = unconfirmedTexts,
                 summaryHead = shown.toString().let { t -> val i = t.indexOf("### 요구사항 분석 요약"); if (i >= 0) t.substring(i).lines().take(10).joinToString("\n") else "(요약 헤더 없음)" },
                 summaryAtConfirm = summaryAtConfirm,
-                mustNotAppearTotal = mustNot.size, mustNotAppearInTargets = mustNotInTargets
+                mustNotAppearTotal = mustNot.size, mustNotAppearInTargets = mustNotInTargets,
+                gtKept = split.kept, gtStage3Removed = split.stage3Removed, gtOutsideExcluded = split.outsideExcluded,
+                gtOutsideLost = split.outsideLost, gtUnobserved = split.unobserved,
+                gtTotalCertain = required.count { !it.isUncertain() }, gtHit30Certain = hit30.count { !it.isUncertain() }
             )
         } catch (e: Throwable) {
             return partial("clarify 단계 예외: " + e.javaClass.simpleName + ": " + (e.message ?: "").take(200))

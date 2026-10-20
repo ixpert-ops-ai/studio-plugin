@@ -62,7 +62,8 @@ data class TurnStats(
     val questionRemainedAfterFallback: Boolean = false, // 대체 답변 뒤에도 질문이 남아 그대로 분석으로 진행했는지
     val remainingQuestion: String? = null,            // 분석으로 넘어갈 때 남아 있던 엔진 질문
     val engineQuestionTexts: List<String> = emptyList(),
-    val utterances: List<UtteranceLog> = emptyList()
+    val utterances: List<UtteranceLog> = emptyList(),
+    val initialQuestion: String? = null                 // initSession 직후 엔진이 낸 첫 질문(없으면 null). 턴별 질문 블록용
 )
 
 /** 대본 발화 한 건을 UI 경로(processUtterance)로 보낸 결과: 화면에 나가는 안내문과 질문, 판정·시드 변화. */
@@ -120,7 +121,15 @@ data class RunResult(
     val summaryHead: String? = null,                      // 분석 요약(화면에 보이는 결과)의 앞부분 원문
     val summaryAtConfirm: String? = null,                 // 확정 시점에 카드에 보이던 작업 요약 상태(NONE/PENDING/READY/FAILED 또는 해당 없음)
     val mustNotAppearTotal: Int = 0,                      // 시나리오의 제외 대상(mustNotAppear) 파일 수
-    val mustNotAppearInTargets: List<String> = emptyList() // 그중 최종 목록에 나타난 파일
+    val mustNotAppearInTargets: List<String> = emptyList(), // 그중 최종 목록에 나타난 파일
+    // required GT 네 갈래(GtSplit). 합이 gtTotal과 다르면 보고서에 "합계 불일치"로 표시한다
+    val gtKept: List<String> = emptyList(),
+    val gtStage3Removed: List<String> = emptyList(),
+    val gtOutsideExcluded: List<String> = emptyList(),
+    val gtOutsideLost: List<String> = emptyList(),
+    val gtUnobserved: List<String> = emptyList(),         // Stage 3 호출이 관찰되지 않아 제거/후보 밖을 가를 수 없는 항목
+    val gtTotalCertain: Int = 0,                          // uncertain 제외 Recall 분모
+    val gtHit30Certain: Int = 0
 )
 
 data class ScenarioSummary(

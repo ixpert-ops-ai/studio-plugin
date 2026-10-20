@@ -1,0 +1,523 @@
+{
+  "scenarios": [
+    {
+      "id": "SR-01",
+      "group": "arch",
+      "graphKey": "survey_admin",
+      "sr": "비밀번호를 연속으로 틀렸을 때 계정이 잠기는 기준을 지금보다 엄격하게(현재 5회에서 3회로) 바꾸고, 잠겼다는 안내 문구도 그에 맞게 고쳐 주세요.",
+      "script": [
+        "3회로 바꾸고, 잠금 해제 방식은 지금 그대로 두세요."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/UserServiceImpl.java",
+          "reason": "실패 5회 비교(:716,:943)"
+        },
+        {
+          "name": "src/main/webapp/resources/js/common/ips_common.js",
+          "reason": "4003 안내문에 \"5회\""
+        },
+        {
+          "name": "/login.js",
+          "reason": "4003 응답 화면 처리",
+          "role": "reference"
+        },
+        {
+          "name": "/UserDto.java",
+          "reason": "실패 횟수 값 보관",
+          "role": "reference",
+          "uncertain": true
+        },
+        {
+          "name": "mysql/sql_user.xml",
+          "reason": "실패 횟수 갱신, 변경 불필요",
+          "role": "reference"
+        }
+      ],
+      "archType": "SPRING_MVC_MYBATIS",
+      "srType": "기존 기능 수정",
+      "note": "docs/eval_sr_drafts.md SR-01 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    },
+    {
+      "id": "SR-02",
+      "group": "arch",
+      "graphKey": "survey_admin",
+      "sr": "관리자가 사용자별로 최근 로그인 기록(성공·실패 모두)을 조회할 수 있게 해 주세요. 지금 있는 사용자 목록 조회와 같은 방식으로 만들면 됩니다.",
+      "script": [
+        "한 사용자를 정해서 최근 30일 기록을 보고 싶어요."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/UserServiceImpl.java",
+          "reason": "procType 분기 추가 필요"
+        },
+        {
+          "name": "/UserDao.java",
+          "reason": "조회 메서드 선언 추가"
+        },
+        {
+          "name": "/UserDaoImpl.java",
+          "reason": "DAO 구현 추가"
+        },
+        {
+          "name": "mysql/sql_user.xml",
+          "reason": "조회 SQL 추가(로그인 이력은 mysql만)"
+        },
+        {
+          "name": "/LoginUserDto.java",
+          "reason": "이력 필드를 이미 보유",
+          "role": "reference"
+        },
+        {
+          "name": "/IpsController.java",
+          "reason": "요청 진입점만 거침",
+          "role": "reference",
+          "uncertain": true
+        }
+      ],
+      "archType": "SPRING_MVC_MYBATIS",
+      "srType": "기존 패턴 신규 추가",
+      "note": "docs/eval_sr_drafts.md SR-02 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    },
+    {
+      "id": "SR-03",
+      "group": "arch",
+      "graphKey": "survey_admin",
+      "sr": "설문 참여 결과 내보내기 파일에 실패 건수 대비 비율(실패율)이 함께 나오게 해 주세요. 내보내기를 실행하는 화면 쪽은 그대로 두세요.",
+      "script": [
+        "실패율은 백분율로 소수점 한 자리까지 보여 주세요."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/SurveyPartExportRunner.java",
+          "reason": "내보내는 항목 구성"
+        },
+        {
+          "name": "/SurveyPartExportJob.java",
+          "reason": "스케줄에서 호출만",
+          "role": "reference"
+        },
+        {
+          "name": "/SurveyPartExportCli.java",
+          "reason": "실행 인자 처리",
+          "role": "reference",
+          "uncertain": true
+        },
+        {
+          "name": "/sql_batch.xml",
+          "reason": "실패 건수 이미 조회",
+          "role": "reference"
+        }
+      ],
+      "mustNotAppear": [
+        {
+          "name": "/IpsController.java",
+          "reason": "실행 화면은 그대로(:482)"
+        }
+      ],
+      "archType": "SPRING_MVC_MYBATIS",
+      "srType": "제외 지시",
+      "holdout": true,
+      "note": "docs/eval_sr_drafts.md SR-03 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    },
+    {
+      "id": "SR-04",
+      "group": "arch",
+      "graphKey": "member_market",
+      "sr": "상품을 검색어로 찾을 때 판매 중이 아닌 상품(예약 중·판매 완료)은 결과에 나오지 않게 해 주세요.",
+      "script": [
+        "판매 중인 상품만 보이면 됩니다."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/ProductRepository.java",
+          "reason": "검색 쿼리에 상태 조건 없음"
+        },
+        {
+          "name": "/ProductService.java",
+          "reason": "검색 분기만 호출",
+          "role": "reference"
+        },
+        {
+          "name": "/ProductStatus.java",
+          "reason": "SALE 값 정의",
+          "role": "reference"
+        },
+        {
+          "name": "/ProductController.java",
+          "reason": "요청 진입점",
+          "role": "reference"
+        }
+      ],
+      "archType": "SPRING_BOOT_JPA",
+      "srType": "기존 기능 수정",
+      "note": "docs/eval_sr_drafts.md SR-04 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    },
+    {
+      "id": "SR-05",
+      "group": "arch",
+      "graphKey": "member_market",
+      "sr": "조직(학교·회사 등) 목록에는 운영 중인 조직만 보이게 해 주세요. 관리자 화면의 조직 목록은 그대로 두세요.",
+      "script": [
+        "활성 상태인 조직만요. 대기 중인 조직도 숨겨 주세요."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/OrganizationService.java",
+          "reason": "목록 조회에 상태 필터 필요"
+        },
+        {
+          "name": "/OrganizationRepository.java",
+          "reason": "Repository 쿼리에 상태 조건을 넣는 관례(ProductRepository, ChatRoomRepository)"
+        },
+        {
+          "name": "/OrganizationStatus.java",
+          "reason": "ACTIVE 값 정의",
+          "role": "reference"
+        },
+        {
+          "name": "/OrganizationController.java",
+          "reason": "요청 진입점",
+          "role": "reference"
+        }
+      ],
+      "mustNotAppear": [
+        {
+          "name": "/AdminService.java",
+          "reason": "관리자 목록은 그대로"
+        },
+        {
+          "name": "/AdminOrganizationResponse.java",
+          "reason": "관리자 화면용 응답"
+        }
+      ],
+      "archType": "SPRING_BOOT_JPA",
+      "srType": "제외 지시",
+      "note": "docs/eval_sr_drafts.md SR-05 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    },
+    {
+      "id": "SR-06",
+      "group": "arch",
+      "graphKey": "member_market",
+      "sr": "이미지 올리기를 더 안전하게 해 주세요.",
+      "script": [
+        "용량은 5MB까지, 파일 형식은 jpg와 png만요. 넘으면 '이미지는 5MB 이하 jpg/png만 가능합니다'라고 알려 주세요. 개수 제한은 없습니다."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/FileService.java",
+          "reason": "저장 전 검사가 없음"
+        },
+        {
+          "name": "/ErrorCode.java",
+          "reason": "새 오류 코드 필요"
+        },
+        {
+          "name": "/ImageController.java",
+          "reason": "업로드 진입점",
+          "role": "reference"
+        },
+        {
+          "name": "/GlobalExceptionHandler.java",
+          "reason": "BusinessException 이미 처리",
+          "role": "reference"
+        },
+        {
+          "name": "/application.yml",
+          "reason": "현재 10MB, 용량 설정으로 해결하는 것도 정당",
+          "role": "reference"
+        }
+      ],
+      "archType": "SPRING_BOOT_JPA",
+      "srType": "모호",
+      "holdout": true,
+      "expectedQuestions": "(1) 무엇을 제한할까요(용량, 파일 형식, 개수)? (2) 제한을 넘으면 사용자에게 어떻게 안내할까요?",
+      "note": "docs/eval_sr_drafts.md SR-06 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    },
+    {
+      "id": "SR-07",
+      "group": "arch",
+      "graphKey": "ism",
+      "sr": "FAQ 관리 화면의 목록에서 게시하지 않은 FAQ는 기본으로 숨겨 주세요.",
+      "script": [
+        "게시하지 않은 것만 숨기면 됩니다. 목록 화면에서 다시 보는 버튼은 없어도 돼요."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/PrFaqMapper.xml",
+          "reason": "목록 SQL, PR_FAQ_INFO 조회 [사용자 확정(2026-10-20)]"
+        },
+        {
+          "name": "/prFaqInfo.xml",
+          "reason": "목록 SQL, PR_FAQ_INFO 조회 [사용자 확정(2026-10-20)]"
+        },
+        {
+          "name": "/PrFaqController.java",
+          "reason": "목록 진입점(/system/prFaq)",
+          "role": "reference"
+        },
+        {
+          "name": "/PrFaqServiceImpl.java",
+          "reason": "목록 서비스(prFaq)",
+          "role": "reference"
+        },
+        {
+          "name": "/PrFaqMapper.java",
+          "reason": "목록 매퍼(rodb)",
+          "role": "reference"
+        },
+        {
+          "name": "/PrFaqRequest.java",
+          "reason": "목록 요청 값",
+          "role": "reference"
+        },
+        {
+          "name": "/FaqMgmtController.java",
+          "reason": "목록 진입점(/system/faqMgmt)",
+          "role": "reference"
+        },
+        {
+          "name": "/FaqMgmtServiceImpl.java",
+          "reason": "목록 서비스(faqMgmt)",
+          "role": "reference"
+        },
+        {
+          "name": "/PrFaqInfoMapper.java",
+          "reason": "목록 매퍼(rwdb)",
+          "role": "reference"
+        }
+      ],
+      "archType": "SPRING_MVC_MYBATIS",
+      "srType": "기존 기능 수정",
+      "note": "docs/eval_sr_drafts.md SR-07 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    },
+    {
+      "id": "SR-08",
+      "group": "arch",
+      "graphKey": "ism",
+      "sr": "금칙어를 등록할 때 비슷한 단어도 막아 주세요.",
+      "script": [
+        "띄어쓰기를 없앤 뒤 대소문자 구분 없이 같으면 같은 단어로 보세요. 수정할 때도 똑같이 하고, 걸리면 등록을 막아 주세요."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/BadWordMgmtServiceImpl.java",
+          "reason": "중복 검사 서비스"
+        },
+        {
+          "name": "/StBwInfoMapper.java",
+          "reason": "존재 여부 조회 매퍼",
+          "uncertain": true
+        },
+        {
+          "name": "/stBwInfo.xml",
+          "reason": "비교 SQL",
+          "uncertain": true
+        },
+        {
+          "name": "/BadWordMgmtController.java",
+          "reason": "저장 요청 진입점",
+          "role": "reference"
+        },
+        {
+          "name": "/badWordMgmt_ko.properties",
+          "reason": "중복 안내 문구",
+          "role": "reference",
+          "uncertain": true
+        }
+      ],
+      "archType": "SPRING_MVC_MYBATIS",
+      "srType": "모호",
+      "expectedQuestions": "(1) \"비슷한 단어\"의 기준은 무엇인가요(띄어쓰기, 대소문자, 일부 포함, 발음)? (2) 수정할 때도 같은 검사를 하나요? (3) 걸리면 등록을 막나요, 경고만 하나요?",
+      "note": "docs/eval_sr_drafts.md SR-08 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    },
+    {
+      "id": "SR-09",
+      "group": "arch",
+      "graphKey": "ism",
+      "sr": "브랜드 관리에서 브랜드를 삭제하는 것처럼, 삭제하지 않고 사용을 잠시 중지했다가 다시 쓸 수 있는 기능을 추가해 주세요.",
+      "script": [
+        "중지된 브랜드는 목록에서 흐리게 보이게 해 주세요. 중지·재개는 관리자만 합니다."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/BrandServiceImpl.java",
+          "reason": "삭제와 같은 패턴 구현"
+        },
+        {
+          "name": "/ECPDTBISM002TrxMapper.java",
+          "reason": "쓰기 매퍼에 상태 변경 추가"
+        },
+        {
+          "name": "/ECPDTBISM002Trx.xml",
+          "reason": "쓰기 SQL(updateBrand 등)에 상태 변경"
+        },
+        {
+          "name": "/BrandController.java",
+          "reason": "사용자 미확인: 새 요청 경로가 필요할 수 있음",
+          "role": "reference"
+        },
+        {
+          "name": "/BrandService.java",
+          "reason": "사용자 미확인: 새 메서드 선언이 필요할 수 있음",
+          "role": "reference"
+        },
+        {
+          "name": "/BrandMgmtServiceImpl.java",
+          "reason": "컨트롤러가 함께 사용",
+          "role": "reference",
+          "uncertain": true
+        },
+        {
+          "name": "/ECPDTBISM002Mapper.java",
+          "reason": "읽기 매퍼(변경 없음)",
+          "role": "reference"
+        }
+      ],
+      "archType": "SPRING_MVC_MYBATIS",
+      "srType": "기존 패턴 신규 추가",
+      "holdout": true,
+      "note": "docs/eval_sr_drafts.md SR-09 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    },
+    {
+      "id": "SR-10",
+      "group": "arch",
+      "graphKey": "apc",
+      "sr": "앱카드 공지 팝업을 등록하거나 고칠 때, 노출 종료 일시가 시작 일시보다 앞서면 저장되지 않게 막아 주세요.",
+      "script": [
+        "등록과 수정 둘 다요. 막을 때는 '종료 일시는 시작 일시 이후여야 합니다'라고 알려 주세요."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/APCADNtccnPopMngtBIZ.java",
+          "reason": "등록·수정 업무 규칙 위치"
+        },
+        {
+          "name": "/APCADNtccnPopMngtSVCImpl.java",
+          "reason": "앞뒤 처리만 담당",
+          "role": "reference",
+          "uncertain": true
+        },
+        {
+          "name": "/ACAOTBAPC018DVO.java",
+          "reason": "시작·종료 일시 필드",
+          "role": "reference"
+        },
+        {
+          "name": "/ACAOTBAPC018DEM.java",
+          "reason": "저장 쿼리, 변경 없음",
+          "role": "reference"
+        }
+      ],
+      "archType": "ANYFRAME_AP",
+      "srType": "기존 기능 수정",
+      "holdout": true,
+      "note": "docs/eval_sr_drafts.md SR-10 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    },
+    {
+      "id": "SR-11",
+      "group": "arch",
+      "graphKey": "apc",
+      "sr": "앱카드 배너 관리에 삭제 기능을 추가해 주세요. 공지 팝업 관리의 삭제와 같은 방식으로 하면 됩니다.",
+      "script": [
+        "배너를 하나씩 삭제하는 것만요. 삭제 전에 확인창을 띄우는 건 화면 쪽에서 합니다."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/APCADSpacdBnnrMngtSVC.java",
+          "reason": "삭제 메서드 선언 추가"
+        },
+        {
+          "name": "/APCADSpacdBnnrMngtSVCImpl.java",
+          "reason": "삭제 구현 추가"
+        },
+        {
+          "name": "/APCADSpacdBnnrMngtBIZ.java",
+          "reason": "삭제 업무 추가"
+        },
+        {
+          "name": "/ACAOTBAPC004DEM.java",
+          "reason": "삭제 메서드가 없음"
+        },
+        {
+          "name": "/APCADSpacdBnnrMngtSVO.java",
+          "reason": "삭제 입력값 필요 시",
+          "role": "reference",
+          "uncertain": true
+        },
+        {
+          "name": "/APCADNtccnPopMngtBIZ.java",
+          "reason": "본보기(delNtccnPop)",
+          "role": "reference"
+        },
+        {
+          "name": "/ACAOTBAPC018DEM.java",
+          "reason": "본보기 삭제 쿼리",
+          "role": "reference"
+        }
+      ],
+      "archType": "ANYFRAME_AP",
+      "srType": "기존 패턴 신규 추가",
+      "note": "docs/eval_sr_drafts.md SR-11 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    },
+    {
+      "id": "SR-12",
+      "group": "arch",
+      "graphKey": "apc",
+      "sr": "앱 버전이 최신인지 판단하는 기준을 바꿔 주세요. 스토어별로 구분하고, OS별로도 구분하며, 노출 대상으로 표시된 버전만 쓰도록 해 주세요.",
+      "script": [
+        "앱이 업데이트 안내를 받을지 판단하는 쪽이에요. 같은 OS 안에서 버전 번호가 가장 높은 것을 최신으로 보세요. 스토어별로 따로 보고, OS별로도 따로 보고, 노출 대상으로 표시된 버전만 쓰세요. 관리 화면은 그대로 두세요."
+      ],
+      "gtMatch": "harness-contains",
+      "gtStatus": "draft",
+      "gt": [
+        {
+          "name": "/APCCSAppVerMngtBIZ.java",
+          "reason": "앱 쪽 최신 판단 규칙"
+        },
+        {
+          "name": "/ACAOTBAPC003DEM.java",
+          "reason": "최신 버전 조회 쿼리. crtl_ver_expsr_yn='Y'(사용자 확정)",
+          "uncertain": true
+        },
+        {
+          "name": "/ACAOTBAPC003DVO.java",
+          "reason": "버전 필드 보유",
+          "role": "reference"
+        }
+      ],
+      "mustNotAppear": [
+        {
+          "name": "/APCADUpdtVerMngtBIZ.java",
+          "reason": "관리 화면 쪽은 이번 범위 밖"
+        }
+      ],
+      "archType": "ANYFRAME_AP",
+      "srType": "모호",
+      "expectedQuestions": "(1) 관리 화면에서 보이는 \"최신 버전\" 표시를 말씀하시나요, 앱이 업데이트 안내를 받을지 판단하는 쪽을 말씀하시나요? (2) 최신으로 보는 새 기준은 무엇인가요(버전 번호, 등록일, OS별)?",
+      "note": "docs/eval_sr_drafts.md SR-12 (2026-10-20 사용자 승인 89b8b70). 정답은 사용자 확인 전 초안이며 uncertain=true는 문서에서 '?'가 붙은 행"
+    }
+  ]
+}

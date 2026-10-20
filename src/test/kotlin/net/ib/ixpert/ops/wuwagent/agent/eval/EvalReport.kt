@@ -60,7 +60,69 @@ object EvalReport {
             val total = okRuns.first().referenceTotal
             "${f1(okRuns.map { it.referenceIn10.size }.average())}/${total} | ${f1(okRuns.map { it.referenceIn30.size }.average())}/${total}"
         }
-        return "| ${sc.id} | ${okRuns.size}/${runs.size} | ${recallCell(recalls(runs) { it.gtHit30 }, draft)} | ${recallCell(recalls(runs) { it.gtHit10 }, draft)} | $fp | ${refText} | $missingAvg / $deliveredText | $excludedText | $mustNotText | $turnText | ${medianMs} / ${maxMs} | $timeouts / $badCalls |"
+        val certainValues = okRuns.filter { it.gtTotalCertain > 0 }.map { it.gtHit30Certain.toDouble() / it.gtTotalCertain }
+        val archText = "${sc.archType ?: "-"} / ${sc.srType ?: "-"}" + (if (sc.isHoldout()) " / holdout" else "")
+        return "| ${sc.id} | ${okRuns.size}/${runs.size} | ${recallCell(recalls(runs) { it.gtHit30 }, draft)} | ${recallCell(recalls(runs) { it.gtHit10 }, draft)} | $fp | ${refText} | $missingAvg / $deliveredText | $excludedText | $mustNotText | $turnText | ${medianMs} / ${maxMs} | $timeouts / $badCalls | $archText | ${splitCell(okRuns)} | ${recallCell(certainValues, draft)} |"
+    }
+
+    /** 실행들의 required GT 네 갈래 합. 합이 gtTotal과 다른 실행이 있으면 "합계 불일치"를 붙인다. */
+    private fun splitCell(okRuns: List<RunResult>): String {
+        val runs = okRuns.filter { it.gtTotal > 0 }
+        if (runs.isEmpty()) return "-"
+        val removedNames = runs.flatMap { it.gtStage3Removed }.distinct()
+        val unobs = runs.sumOf { it.gtUnobserved.size }
+        val mismatch = runs.count { it.gtKept.size + it.gtStage3Removed.size + it.gtOutsideExcluded.size + it.gtOutsideLost.size + it.gtUnobserved.size != it.gtTotal }
+        return "유지 ${runs.sumOf { it.gtKept.size }} / Stage 3 제거 ${runs.sumOf { it.gtStage3Removed.size }}${if (removedNames.isEmpty()) "" else " " + removedNames.map { n -> cell(n) }} / 제외 ${runs.sumOf { it.gtOutsideExcluded.size }} / 손실 ${runs.sumOf { it.gtOutsideLost.size }}" +
+            (if (unobs > 0) " / 미관찰 $unobs" else "") + " (분모 ${runs.sumOf { it.gtTotal }}, 실행 ${runs.size}회)" + (if (mismatch > 0) " **합계 불일치 ${mismatch}회**" else "")
+    }
+
+    private data class SplitSum(val scenarios: Int, val total: Int, val kept: Int, val removed: Int, val excluded: Int, val lost: Int, val unobserved: Int, val removedScenarios: Int, val mismatch: Int)
+
+    private fun splitSum(list: List<ScenarioSummary>): SplitSum {
+        val withData = list.filter { s -> s.runs.any { it.ok && it.gtTotal > 0 } }
+        val runs = withData.flatMap { s -> s.runs.filter { it.ok && it.gtTotal > 0 } }
+        return SplitSum(
+            withData.size, runs.sumOf { it.gtTotal }, runs.sumOf { it.gtKept.size }, runs.sumOf { it.gtStage3Removed.size },
+            runs.sumOf { it.gtOutsideExcluded.size }, runs.sumOf { it.gtOutsideLost.size }, runs.sumOf { it.gtUnobserved.size },
+            withData.count { s -> s.runs.any { it.ok && it.gtStage3Removed.isNotEmpty() } },
+            runs.count { it.gtKept.size + it.gtStage3Removed.size + it.gtOutsideExcluded.size + it.gtOutsideLost.size + it.gtUnobserved.size != it.gtTotal }
+        )
+    }
+
+    private fun headLines(summaries: List<ScenarioSummary>, sb: StringBuilder) {
+        sb.appendLine("- holdout 시나리오: ${if (EvalScenarios.includeHoldout()) "포함(-Deval.includeHoldout=true)" else "제외(기본, 개선 판단에 쓰지 않음)"}")
+        val s = splitSum(summaries)
+        sb.appendLine("- required GT 전체 합(진행 판단용, 시나리오 ${s.scenarios}개 x 실행): ${s.total}건 중 유지 ${s.kept}, Stage 3 제거 ${s.removed}, 후보 밖(제외 지시) ${s.excluded}, 후보 밖(Stage 1~2 손실) ${s.lost}${if (s.unobserved > 0) ", 미관찰 ${s.unobserved}" else ""}. " +
+            (if (s.mismatch > 0) "**합계 불일치 ${s.mismatch}건**" else "합계 일치") + ". Stage 3 제거가 나온 시나리오 ${s.removedScenarios}/${s.scenarios}. 시나리오별 Recall은 기록만 하고 판정에 쓰지 않는다.")
+        sb.appendLine()
+    }
+
+    private val measuredArch = listOf("SPRING_MVC_MYBATIS", "ANYFRAME_AP", "SPRING_BOOT_JPA")
+    private val unmeasuredArch = listOf("SPRING_BOOT_MYBATIS", "SPRING_BOOT_JDBC", "CUSTOM")
+    private val srTypes = listOf("기존 기능 수정", "기존 패턴 신규 추가", "제외 지시", "모호")
+
+    private fun typeTable(title: String, keys: List<String>, keyOf: (ScenarioSummary) -> String?, summaries: List<ScenarioSummary>, sb: StringBuilder) {
+        sb.appendLine("### $title")
+        sb.appendLine()
+        sb.appendLine("| 구분 | 시나리오 | required GT 합(분모) | 유지 | Stage 3 제거 | 후보 밖(제외) | 후보 밖(손실) | 미관찰 | Stage 3 제거가 나온 시나리오 | 비고 |")
+        sb.appendLine("|---|---|---|---|---|---|---|---|---|---|")
+        for (k in keys) {
+            val list = summaries.filter { keyOf(it) == k }
+            val s = splitSum(list)
+            sb.appendLine("| $k | ${list.joinToString(", ") { it.scenario.id }.ifEmpty { "-" }} | ${s.total} | ${s.kept} | ${s.removed} | ${s.excluded} | ${s.lost} | ${s.unobserved} | ${s.removedScenarios}/${s.scenarios} | ${if (list.isEmpty()) "해당 시나리오 없음" else if (s.mismatch > 0) "합계 불일치 ${s.mismatch}건" else ""} |")
+        }
+        val rest = summaries.filter { keyOf(it) == null || keyOf(it) !in keys }
+        if (rest.isNotEmpty()) { val s = splitSum(rest); sb.appendLine("| (미지정) | ${rest.joinToString(", ") { it.scenario.id }} | ${s.total} | ${s.kept} | ${s.removed} | ${s.excluded} | ${s.lost} | ${s.unobserved} | ${s.removedScenarios}/${s.scenarios} | 값을 임의로 정하지 않음 |") }
+        sb.appendLine()
+    }
+
+    private fun typeSections(summaries: List<ScenarioSummary>, sb: StringBuilder) {
+        sb.appendLine("## 유형별 required GT 합계")
+        sb.appendLine()
+        typeTable("아키텍처 유형(archType)", measuredArch, { it.scenario.archType }, summaries, sb)
+        for (u in unmeasuredArch) sb.appendLine("- $u: 미측정 유형")
+        sb.appendLine()
+        typeTable("SR 유형(srType)", srTypes, { it.scenario.srType }, summaries, sb)
     }
 
     private fun callRow(c: ProxyCall, origin: Long): String {
@@ -88,7 +150,7 @@ object EvalReport {
 
     private fun detail(s: ScenarioSummary, calls: List<ProxyCall>, sb: StringBuilder) {
         val sc = s.scenario
-        sb.appendLine("### ${sc.id} (${sc.group}, 그래프 ${sc.graphKey}, GT ${sc.status()})")
+        sb.appendLine("### ${sc.id} (${sc.group}, 그래프 ${sc.graphKey}, GT ${sc.status()}, 유형 ${sc.archType ?: "-"} / ${sc.srType ?: "-"}${if (sc.isHoldout()) ", holdout" else ""})")
         sb.appendLine()
         sb.appendLine("- SR: ${cell(sc.sr)}")
         sb.appendLine("- 발화 대본: ${if (sc.scriptOrEmpty().isEmpty()) "(없음)" else sc.scriptOrEmpty().joinToString(" / ") { cell(it) }}")
@@ -118,6 +180,15 @@ object EvalReport {
                 it.utterances.forEachIndexed { i, u ->
                     sb.appendLine("- 발화 ${i + 1} \"${cell(u.statement)}\" -> 화면 안내: \"${cell(u.echo)}\", 다음 질문: \"${cell(u.openQuestion)}\", 거부 항목 ${u.rejectedBefore}->${u.rejectedAfter}, 시드 토큰 ${u.seedBefore}->${u.seedAfter}, 분석 시작 선언=${u.ready}, payload=${u.exclusionPayload}")
                 }
+                // 턴별 질문(기대 질문과의 일치는 자동 판정하지 않고 사람이 본다)
+                sb.appendLine("- 턴별 질문:")
+                sb.appendLine("    초기 질문 \"${cell(it.initialQuestion ?: "(없음)")}\"")
+                val extra = it.fallbackAnswersUsed + it.ruleAnswersUsed > 0
+                it.utterances.forEachIndexed { i, u ->
+                    val label = if (extra && i == it.utterances.lastIndex) (if (it.ruleAnswersUsed > 0) "규칙 답변" else "대체 답변") else "발화 ${i + 1}"
+                    sb.appendLine("    $label \"${cell(u.statement)}\" → 질문 \"${cell(u.openQuestion ?: "(없음)")}\"")
+                }
+                sc.expectedQuestions?.let { q -> sb.appendLine("    기대 질문(참고, 자동 판정 안 함): ${cell(q)}") }
             }
             sb.appendLine("- LLM 호출: clarify ${r.llmClarify}, analyze ${r.llmAnalyze}")
             if (r.ok) {
@@ -176,13 +247,14 @@ object EvalReport {
         val mdFile = File(outDir, "live_eval_$stamp.md")
         val jsonFile = File(outDir, "live_eval_$stamp.json")
         val git = gitHead()
-        val groups = listOf("dev" to "개발용 시나리오", "synthetic" to "합성 시나리오", "real" to "실제 업무 SR", "probe" to "확인용(기준선 아님)")
+        val groups = listOf("dev" to "개발용 시나리오", "synthetic" to "합성 시나리오", "arch" to "아키텍처 유형별 SR", "real" to "실제 업무 SR", "probe" to "확인용(기준선 아님)")
         val calls = proxyCalls.sortedBy { it.seq }
         val allTurns = summaries.flatMap { it.runs }.mapNotNull { it.turns }
 
         val sb = StringBuilder()
         sb.appendLine("# 실사용 평가 보고서 ($stamp)")
         sb.appendLine()
+        headLines(summaries, sb)
         sb.appendLine("- 서버: ${server.server}, 모델: ${server.model}, 온도: 0.1(OpenAIClient 기본값), 응답에 찍힌 모델: ${firstModel ?: "미관찰"}")
         sb.appendLine("- /v1/models: HTTP ${server.httpStatus}, 모델 목록에 있음=${server.modelListed}, 목록=${server.listedModels}")
         sb.appendLine("- 시나리오당 ${runs}회 반복, 호출 상한 ${callTimeoutSec}초, 총 소요 ${elapsedMs / 1000}초, git ${git}")
@@ -201,11 +273,12 @@ object EvalReport {
             if (list.any { it.scenario.status() != "confirmed" }) sb.appendLine("GT가 초안인 시나리오가 있어 해당 Recall은 확정값이 아니다((초안) 표기).")
             sb.appendLine("(Recall 분모는 required이면서 그래프에 있는 GT만. reference는 상위 N 안에 들었는지만 표시. 분석이 실패한 실행도 clarify 결과(누락·제외·턴)는 집계에 포함)")
             sb.appendLine()
-            sb.appendLine("| 시나리오 | 성공 | Recall@30 평균(최소~최대) | Recall@10 | 오탐@30 | reference 상위10 | reference 상위30 | 누락 식별자 평균 / Stage 3 전달 | 제외 | 제외 대상 노출(D5 계열, 최종 목록 중/대상) | 턴(평균) | 응답 ms 중앙 / 최대 | 타임아웃 / 실패·null |")
-            sb.appendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+            sb.appendLine("| 시나리오 | 성공 | Recall@30 평균(최소~최대) | Recall@10 | 오탐@30 | reference 상위10 | reference 상위30 | 누락 식별자 평균 / Stage 3 전달 | 제외 | 제외 대상 노출(D5 계열, 최종 목록 중/대상) | 턴(평균) | 응답 ms 중앙 / 최대 | 타임아웃 / 실패·null | 유형(archType / srType / holdout) | required GT 네 갈래(실행 합) | Recall@30 (uncertain 제외) |")
+            sb.appendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
             list.forEach { sb.appendLine(scenarioRow(it)) }
             sb.appendLine()
         }
+        typeSections(summaries, sb)
         lastAnalyzeCallTable(summaries, calls, sb)
         sb.appendLine("## 시나리오별 상세")
         sb.appendLine()
@@ -215,7 +288,7 @@ object EvalReport {
         val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
         val header = mapOf(
             "generatedAt" to stamp, "server" to server, "responseModel" to firstModel, "runsPerScenario" to runs,
-            "callTimeoutSec" to callTimeoutSec, "elapsedMs" to elapsedMs, "git" to git,
+            "callTimeoutSec" to callTimeoutSec, "elapsedMs" to elapsedMs, "git" to git, "includeHoldout" to EvalScenarios.includeHoldout(),
             "fallbackAnswer" to LiveEvalTest.FALLBACK_ANSWER, "fallbackUsed" to allTurns.sumOf { it.fallbackAnswersUsed }
         )
         jsonFile.writeText(gson.toJson(mapOf("header" to header, "scenarios" to summaries, "calls" to calls)), Charsets.UTF_8)

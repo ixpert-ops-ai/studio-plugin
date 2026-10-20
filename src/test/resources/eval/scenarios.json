@@ -1,7 +1,7 @@
 {
   "scenarios": [
     {
-      "id": "D1", "group": "dev", "graphKey": "survey_admin",
+      "id": "D1", "group": "dev", "graphKey": "survey_admin", "archType":"SPRING_MVC_MYBATIS",
       "sr": "설문 발송 채널에 브랜드메시지 추가",
       "script": ["외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."],
       "gtMatch": "harness-contains", "onlyType": "MODIFY", "gtStatus": "confirmed",
@@ -14,7 +14,7 @@
       "note": "Stage0EngineRoutedBaselineHarnessTest의 survey_admin LlmOn 시나리오(SR, 발화, GT, MODIFY 필터)를 그대로 옮김. GT 중 SurveyServiceImpl.java와 survey.write.js는 사용자가 2026-10-16에 required로 확정했고 나머지 6개는 role을 유지하되 사용자 미확인이다"
     },
     {
-      "id": "D2", "group": "dev", "graphKey": "apc",
+      "id": "D2", "group": "dev", "graphKey": "apc", "archType":"ANYFRAME_AP",
       "sr": "aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회",
       "script": ["aCMBTBAPC024DEM을 통해서 조회하는 로직을 추가해줘"],
       "gtMatch": "harness-contains", "gtStatus": "confirmed",
@@ -22,7 +22,7 @@
       "note": "하네스 APC DEM Isolated(LlmOn) 시나리오"
     },
     {
-      "id": "D3", "group": "dev", "graphKey": "apc",
+      "id": "D3", "group": "dev", "graphKey": "apc", "archType":"ANYFRAME_AP",
       "sr": "교통카드 발급업체 변경 후, 이전 모바일교통카드 이용회원 체크 및 재발급 안내를 위한 신규서비스 개발 건. 교통카드 구 발급정보 조회 신규서비스 개발 (SAPACMM0802S01 기존서비스 참고). APCMMTrcdIsInfSVO 수정, APCMMTrcdIsSVC.java 신규서비스 추가, aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회",
       "script": [],
       "gtMatch": "harness-contains", "gtStatus": "confirmed",
@@ -30,7 +30,7 @@
       "note": "하네스 APC Transit Card 시나리오(발화 없음)"
     },
     {
-      "id": "D4", "group": "dev", "graphKey": "ism",
+      "id": "D4", "group": "dev", "graphKey": "ism", "archType":"SPRING_MVC_MYBATIS",
       "sr": "케어회원 관리 화면 조회",
       "script": [],
       "gtMatch": "harness-contains", "gtStatus": "confirmed",
@@ -38,7 +38,7 @@
       "note": "하네스 ISM Core 시나리오"
     },
     {
-      "id": "D5", "group": "dev", "graphKey": "survey_admin",
+      "id": "D5", "group": "dev", "graphKey": "survey_admin", "archType":"SPRING_MVC_MYBATIS",
       "sr": "설문 발송 채널에 브랜드메시지 추가",
       "script": ["알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야"],
       "gtMatch": "harness-contains", "onlyType": "MODIFY", "gtStatus": "confirmed",
@@ -52,7 +52,7 @@
       "note": "Stage0ThreeScenarioLiveLlmObservationTest 시나리오 2(제외·범위 제약)의 SR·발화. GT는 사용자 확정 안 A(B-45): required는 SurveyServiceImpl 1개, sql_survey.xml과 알림톡 DTO 2개는 reference, 화면 파일 4개(jsp/js)는 대본 지시와 충돌해 GT에서 뺐다. 제외 대상(mustNotAppear)은 AlimtalkTemplateBatch* 3개. 제외 확정(excludedFiles)이 실제로 생기는지는 미확인이라 기대 제외 파일을 적지 않고 결과만 기록한다."
     },
     {
-      "id": "D5E", "group": "probe", "graphKey": "survey_admin",
+      "id": "D5E", "group": "probe", "graphKey": "survey_admin", "archType":"SPRING_MVC_MYBATIS",
       "sr": "설문 발송 채널에 브랜드메시지 추가",
       "gtMatch": "harness-contains", "onlyType": "MODIFY", "gtStatus": "confirmed",
       "expectExcluded": ["src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchJob.java", "src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRunner.java"],
@@ -67,7 +67,7 @@
       "note": "확인용(기준선 아님): D5와 같은 SR·발화 뒤에 제외를 승인하는 두 번째 발화 '네, 제외해 주세요'를 UI 경로(입력창)로 보낸다. 제외 확정(excludedFiles), 화면 안내, 정제문을 기록한다."
     },
     {
-      "id": "D5N", "group": "probe", "graphKey": "survey_admin",
+      "id": "D5N", "group": "probe", "graphKey": "survey_admin", "archType":"SPRING_MVC_MYBATIS",
       "sr": "설문 발송 채널에 브랜드메시지 추가",
       "gtMatch": "harness-contains", "onlyType": "MODIFY", "gtStatus": "confirmed",
       "expectExcluded": ["src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchJob.java", "src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRunner.java"],
@@ -82,7 +82,7 @@
       "note": "확인용(기준선 아님): D5E와 같고 두 번째 발화가 한 글자 '네'."
     },
     {
-      "id": "S1", "group": "synthetic", "graphKey": "member_market",
+      "id": "S1", "group": "synthetic", "graphKey": "member_market", "archType":"SPRING_BOOT_JPA",
       "sr": "채팅방 목록에서 안 읽은 메시지 개수가 이상하게 나와서 고치고 싶어요.",
       "script": ["목록 조회하는 쪽이에요."],
       "gtMatch": "path", "gtStatus": "draft",
@@ -103,7 +103,7 @@
       "note": "합성: 기존 기능 수정. 안 읽은 수 계산 위치: ChatRoomRepository.countUnreadMessages(:24-26 JPQL, sender != 나 AND isRead = false)를 ChatService.getMyChatRooms(:37-38)가 방마다 호출하고 ChatRoomResponse.from(:26, :47)이 unreadCount에 담는다. 웹은 ChatListView.vue(:35-36 배지), stores/chat.js(:21 합계), TheHeader.vue(:144). 읽음 처리는 ChatService.markAsRead(:99-103) -> ChatMessageRepository.markAllAsRead(:15-17). GT는 사용자 확인 전까지 초안"
     },
     {
-      "id": "S2", "group": "synthetic", "graphKey": "member_market",
+      "id": "S2", "group": "synthetic", "graphKey": "member_market", "archType":"SPRING_BOOT_JPA",
       "sr": "관리자 화면에서 문제 있는 회원을 이용 정지시킬 수 있게 해주세요.",
       "script": ["정지된 회원은 로그인도 막아야 해요."],
       "gtMatch": "path", "gtStatus": "draft",
@@ -124,7 +124,7 @@
       "note": "합성: 신규 개발. GT는 수정·참조할 기존 파일이며 사용자 확인 전까지 초안"
     },
     {
-      "id": "S3", "group": "synthetic", "graphKey": "survey_admin",
+      "id": "S3", "group": "synthetic", "graphKey": "survey_admin", "archType":"SPRING_MVC_MYBATIS",
       "sr": "본인인증 요청이 끝난 뒤 돌아오는 결과 처리를 손봐야 해요.",
       "script": ["로그인 쪽 컨트롤러는 건드리지 마세요."],
       "gtMatch": "path", "gtStatus": "draft",
