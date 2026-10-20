@@ -702,3 +702,59 @@
   - **사전 판정**: 변형에서도 Stage 3 유지 0/3, 시드 포함 0/3(둘 다 원본과 같거나 1/3 이하) → **"단계 판단 문제"**. 정제문 앞에 적용 대상을 두는 clarify 쪽 설계안은 만들지 않는다. 예측(변형 각 1/3)은 둘 다 0/3으로 달랐으나 판정은 예측과 같다.
   - **Stage 3 제거 사유가 나오는 프롬프트 위치(보고만, 변경 없음)**: `FileRelevanceVerifier.kt:131-132` 역할("수정하지 않아도 요구사항 구현에 아무런 영향이 없는 파일"만 제거), `:138` 판정 원칙("제거할 확실한 근거가 없으면 유지"), `:143-150` 신규 파일 판정 원칙(`:146` "요구사항이 단일 기능 추가/수정이고, 기존 파일 1~2개 수정으로 구현 가능한 경우", `:147` "기존 REQUIRED 파일의 수정으로 동일한 목적을 달성할 수 있는 경우", `:149` "기존 패키지에 동일 역할의 클래스/파일이 이미 존재하는 경우", `:150` 단일 책임 원칙), 신규 후보의 정보 블록은 `buildBatchPrompt`의 `(신규 제안)` 출력(`:409`)과 신규 파일 제안의 reason(`RequirementAnalysisPipeline.kt:193`, `NewFileDetector.kt:129-132` 스키마)으로 만들어지며 덤프에서는 "…Runner 클래스를 신규 개발하여 설문 발송 채널에 브랜드메시지 처리를 추가한다"처럼 새 파일이 요구 전체를 수행하는 것으로 읽히는 문장이 들어 있다. 시드 선정 쪽 위치는 B-46의 `AgenticSeedSelector.kt:49-50`(1~4개, 신규 개발이어도 기준 클래스를 Seed로)과 같다.
 - **새 평가 SR 초안**: 아키텍처 유형별 평가 SR 12개(holdout 4개)의 초안을 `docs/eval_sr_drafts.md`에 만들었고 사용자 승인을 기다린다(승인 전에는 시나리오 파일에 반영하지 않는다).
+
+### [B-49] 아키텍처 유형별 SR 첫 측정(기본 16개, holdout 제외)과 읽기 확인 (2026-10-20)
+- **측정 조건**: 사내 Qwen(Qwen/Qwen3.8-27B-FP8), UI 경로, 프록시 덤프(`dumps_arch1`), 1회, 기본 대상 16개(기존 8 + 새 SR 8, holdout SR-03·06·09·10 제외). 실행 순서는 SR-07, SR-11을 먼저 두고 나머지는 기존 순서(`-Deval.first`, 커밋 f26d774). 보고서 `live_eval_20261020_110533`, git f26d774, 총 3,358초. 사전 예측 `pred_eval_arch1.md`(실행 전 저장, 이후 수정 없음).
+- **예측 대조(다른 점만)**:
+  - 분석 실패 0건 예측에 실패 1건: SR-08이 clarify 단계에서 `OpenAI 서버 통신 실패: HTTP response code: 524`로 중단됐다(분석 단계가 아니라 clarify 단계, 아래 참조). 300초 넘은 호출 0건은 예측대로(최대 호출 125초). 타임아웃 0건.
+  - 총 시간 예측 약 3,140초에 실측 3,357초(+217초, +7%). 시나리오별 차이가 큰 것: SR-07 예측 120초에 실측 223초(+103), SR-11 240초에 305초(+65), S1 119초에 158초(+39), D1 333초에 359초(+26), D5 200초에 228초(+28). 나머지는 ±35초 안(D2 -35, S3 -32).
+  - required GT 가장 많은 칸 예측: SR-04, SR-05, SR-12는 "유지"로 맞았다. SR-01은 유지 1, 후보 밖(손실) 1로 동률(예측 유지). SR-02는 "후보 밖(손실)" 예측에 실측 4/4 유지(손실 0). SR-07은 "후보 밖(손실)" 예측에 실측 유지 1, Stage 3 제거 1(손실 0). SR-11은 "Stage 3 제거" 예측에 실측 4/4 유지(제거 0). SR-08은 측정 못 함.
+- **시나리오별 결과**(hit30 = 유지 = Recall@30의 분자, 분모는 required GT):
+
+  | 시나리오 | 유형 | 시간(초) | 분석 | Recall 전체(uncertain 제외) | 유지 / Stage 3 제거 / 제외 / 손실 / 미관찰 | 최종 목록 수 |
+  |---|---|---|---|---|---|---|
+  | SR-07 | MVC_MYBATIS / 기존 수정 | 223 | 성공 | 1/2 (1/2) | 1 / **1**(PrFaqMapper.xml) / 0 / 0 / 0 | 6 |
+  | SR-11 | ANYFRAME / 신규 추가 | 305 | 성공 | 4/4 (4/4) | 4 / 0 / 0 / 0 / 0 | 4 |
+  | D1 | MVC_MYBATIS | 359 | 성공 | 2/8 (2/8) | 2 / 1(AlimtalkTmplDto) / 0 / 5 / 0 | 10 |
+  | D2 | ANYFRAME | 218 | 성공 | 1/5 (1/5) | 1 / 3(APCMMTrcdIsSVC, SVCImpl, BIZ) / 0 / 1 / 0 | 2 |
+  | D3 | ANYFRAME | 220 | 성공 | 4/5 (4/5) | 4 / 1(ACMBTBAPC024DEM) / 0 / 0 / 0 | 4 |
+  | D4 | MVC_MYBATIS | 119 | 성공 | 4/4 (4/4) | 4 / 0 / 0 / 0 / 0 | 7 |
+  | D5 | MVC_MYBATIS | 228 | 성공 | 1/1 (1/1) | 1 / 0 / 0 / 0 / 0 | 1 |
+  | S1 | JPA | 158 | 성공 | 3/3 (3/3) | 3 / 0 / 0 / 0 / 0 | 4 |
+  | S2 | JPA | 149 | 성공 | 3/4 (3/4) | 3 / 0 / 0 / 1(AdminController) / 0 | 6 |
+  | S3 | MVC_MYBATIS | 163 | 성공 | 3/4 (3/4) | 3 / 0 / 0 / 1(KmcisController) / 0 | 4 |
+  | SR-01 | MVC_MYBATIS / 기존 수정 | 210 | 성공 | 1/2 (1/2) | 1 / 0 / 0 / 1(ips_common.js) / 0 | 2 |
+  | SR-02 | MVC_MYBATIS / 신규 추가 | 244 | 성공 | 4/4 (4/4) | 4 / 0 / 0 / 0 / 0 | 9 |
+  | SR-04 | JPA / 기존 수정 | 158 | 성공 | 1/1 (1/1) | 1 / 0 / 0 / 0 / 0 | 2 |
+  | SR-05 | JPA / 제외 지시 | 180 | 성공 | 2/2 (2/2) | 2 / 0 / 0 / 0 / 0 | 3 |
+  | SR-08 | MVC_MYBATIS / 모호 | 158 | **실패**(clarify 단계, HTTP 524) | 측정 못 함 | 측정 못 함 | 0 |
+  | SR-12 | ANYFRAME / 모호 | 267 | 성공 | 2/2 (1/1) | 2 / 0 / 0 / 0 / 0 | 5 |
+
+  네 갈래 합이 gtTotal과 다른 성공 실행은 없다(합계 일치). 시나리오 15개가 집계 대상이고 SR-08은 실패라 제외된다.
+- **진행 판단용 합계(required 전체 합)**:
+  - 전체 51건 중 유지 36, Stage 3 제거 6, 후보 밖(제외 지시) 0, 후보 밖(Stage 1~2 손실) 9. Stage 3 제거가 나온 시나리오 4/15.
+  - 새 SR(SR-08 제외 7개) 17건 중 유지 15, Stage 3 제거 1(SR-07의 PrFaqMapper.xml), 제외 0, 손실 1(SR-01의 ips_common.js). Stage 3 제거가 나온 시나리오 1/7.
+  - 기존 8개 34건 중 유지 21, Stage 3 제거 5(D1 1, D2 3, D3 1), 제외 0, 손실 8(D1 5, D2 1, S2 1, S3 1). Stage 3 제거가 나온 시나리오 3/8.
+- **유형별 합계**(보고서 "유형별 required GT 합계"):
+
+  | 구분 | 시나리오 | 분모 | 유지 | Stage 3 제거 | 제외 | 손실 | 제거가 나온 시나리오 |
+  |---|---|---|---|---|---|---|---|
+  | SPRING_MVC_MYBATIS | SR-07, D1, D4, D5, S3, SR-01, SR-02 (SR-08은 측정 못 함) | 25 | 16 | 2 | 0 | 7 | 2/7 |
+  | ANYFRAME_AP | SR-11, D2, D3, SR-12 | 16 | 11 | 4 | 0 | 1 | 2/4 |
+  | SPRING_BOOT_JPA | S1, S2, SR-04, SR-05 | 10 | 9 | 0 | 0 | 1 | 0/4 |
+  | 기존 기능 수정(srType) | SR-07, SR-01, SR-04 | 5 | 3 | 1 | 0 | 1 | 1/3 |
+  | 기존 패턴 신규 추가 | SR-11, SR-02 | 8 | 8 | 0 | 0 | 0 | 0/2 |
+  | 제외 지시 | SR-05 | 2 | 2 | 0 | 0 | 0 | 0/1 |
+  | 모호 | SR-08(측정 못 함), SR-12 | 2 | 2 | 0 | 0 | 0 | 0/1 |
+  | (srType 미지정) | D1~D5, S1~S3 | 34 | 21 | 5 | 0 | 8 | 3/8 |
+
+  SPRING_BOOT_MYBATIS, SPRING_BOOT_JDBC, CUSTOM은 미측정 유형이다.
+- **관찰(판정 없음)**:
+  - Stage 3이 required GT를 지운 시나리오는 SR-07(1), D1(1), D2(3), D3(1) 네 곳이다. 새 SR 중에서는 SR-07 한 곳이다. D1에서는 SurveyServiceImpl이 이번에 유지됐다(과거 저장 4건과 재생 6건은 모두 제거였다). 제거된 것은 AlimtalkTmplDto였다. 1회 실행이라 우연인지 판단할 수 없다.
+  - D2의 APCMMTrcdIsSVC, SVCImpl 제거(3건)는 B-48의 1-e 재생과 같은 파일이다. D3에서는 이번에 SVC, SVCImpl이 유지됐고 ACMBTBAPC024DEM이 제거됐다(143658에서는 5/5).
+  - 제외 대상 노출(mustNotAppear): SR-05 0/2, SR-12 1/1(APCADUpdtVerMngtBIZ가 최종 목록에 나타남), D5 0/3. SR-12의 노출은 DEM·DVO를 두 BIZ가 함께 의존하는 구조와 같은 방향의 관찰이다(문서의 근거 보충 줄).
+  - 엔진 질문은 SR-05, SR-12에서 0회였고, SR-12의 기대 질문 두 가지는 나오지 않았다(SR-12 원문에 스토어·OS·노출 조건이 이미 들어 있다). SR-08은 clarify 단계에서 중단돼 질문 기록이 없다.
+- **SR-08 실패(원문)**: `clarify 단계 예외: AssertionError: [Error] OpenAI 서버 통신 실패: Server returned HTTP response code: 524 for URL: http://vllm.ixpertops.cloud/v1/chat/completions`. 이 run의 clarify 호출은 3건이었다: 제약 추출 9.8초(정상), 이어서 "기타: 당신은 엔터프라이즈 시스템 분석 어시스턴트입니다…"(125.5초, finish_reason 없음)와 "발화 번역(UI)"(125.3초, finish_reason 없음)이 약 125초 만에 끝났다. 서버(또는 앞단 게이트웨이) 응답 오류이고 재시도하지 않았다(스트림 재시도는 도구 호출 인자 절단에만 있고 HTTP 오류에는 없음). 이번 지시 범위 밖이라 재실행하지 않았다.
+- **읽기 확인 4a (PatternExtractor.kt:91-92)**: `extractSnippet`은 `File(file.path)`로 소스를 읽는다. `file.path`는 그래프의 프로젝트 기준 상대 경로이고(`FileNode.path`, MetaGraphModels.kt:135), `basePath`와 결합하는 코드는 없다. 그러나 `PatternExtractor`는 `SpecEnricher.kt`에서 타입으로만 쓰일 뿐 생성하는 곳이 main과 test 전체에 없다(`PatternExtractor(`, `SpecEnricher`, `RelationExpander(` 호출 grep 결과 없음. analyze.search 패키지에서 밖으로 import되는 것은 `Stage0GraphScanner.kt:3`의 `KeywordDecomposer`뿐). 결론: **운영에서는 스니펫이 들어가지 않음**(호출 경로 없음).
+- **읽기 확인 4b (FileRelevanceVerifier.kt:423-431)**: `mdRoot.resolve("<파일명>.md")`에서 파일명은 확장자를 포함한다(예: `UserServiceImpl.java.md`). `mdRoot`는 `RequirementAnalysisPipeline.kt:235`에서 `project?.basePath ?: projectRoot?.absolutePath ?: ""`에 `docs`를 붙이므로 평가에서는 저장소의 `docs/`다. 저장소 `docs/`에는 파일 9개(하위 `adr/` 포함)가 있고 `*.java.md`, `*.xml.md`, `*.js.md` 형태의 파일이 없다. 측정 대상 시나리오 정답 파일 96개의 `<파일명>.md`와 일치하는 파일도 0개다. 결론: **현재 저장소 `docs/`에는 일치하는 .md가 없다**(평가에서 이 경로로 들어가는 문서 없음). 고치지 않았다.
+- **부수 관찰**: ISM(`C:/scrad/workspace/ism-pjt/ism-api-bo`)과 APC(`C:/scrad/workspace/apc-pjt`) 그래프의 `projectRoot`에는 소스가 없고 `.wuwagent`만 있다. 분석 실행은 그곳의 `shadow_logs.jsonl`에 덧붙이고 계약 파일을 저장한다(RequirementAnalysisPipeline.kt:331, :423-425, ShadowLogger.kt:34-37). 이번 측정에서도 갱신된다.
