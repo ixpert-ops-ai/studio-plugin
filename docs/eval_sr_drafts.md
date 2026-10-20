@@ -29,7 +29,7 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 ---
 
 ## SR-01 · survey_admin · 기존 기능 수정 · holdout 아님
-**SR 원문:** 비밀번호를 연속으로 틀렸을 때 계정이 잠기는 기준을 지금보다 느슨하게(현재 5회에서 10회로) 바꾸고, 잠겼다는 안내 문구도 그에 맞게 고쳐 주세요.
+**SR 원문:** 비밀번호를 연속으로 틀렸을 때 계정이 잠기는 기준을 지금보다 엄격하게(현재 5회에서 3회로) 바꾸고, 잠겼다는 안내 문구도 그에 맞게 고쳐 주세요.
 
 - **기능 묶음:** IpsController(`/ajax/{pageName}`) → UserServiceImpl(`getLoginStatus` `:664-717`, `checkUserPwdError` `:925-944`, 실패 5회 비교 `:716`, `:943`) → UserDaoImpl → UserDao → sql_user.xml(LOGIN_FAIL_CNT 갱신). 화면: login.js(4003 처리 `:190`), common/ips_common.js(4003 안내문 `:142` "5회 이상 로그인 실패하여…").
 - **근거 출처:** 소스 확인(survey_admin).
@@ -40,9 +40,10 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 | src/main/webapp/resources/js/common/ips_common.js | required | 4003 안내문에 "5회" | |
 | login.js | reference | 4003 응답 화면 처리 | |
 | ? UserDto.java | reference | ? 실패 횟수 값 보관 | |
-| sql_user.xml (mssql·mysql·oracle 3종) | reference | ? 잠금 갱신, 변경 불필요 | |
+| mysql/sql_user.xml | reference | 실패 횟수 갱신, 변경 불필요 | |
 
-- **대본(clarify 질문에 답할 내용):** "10회로 바꾸고, 잠금 해제 방식은 지금 그대로 두세요."
+- **대본(clarify 질문에 답할 내용):** "3회로 바꾸고, 잠금 해제 방식은 지금 그대로 두세요."
+- **사용자 확인 반영:** SR 원문과 대본을 "5회 → 3회(엄격하게)"로 바꿨다. 실패 횟수 SQL(`updatePasswordFail`, `LOGIN_FAIL_CNT`)은 mysql/sql_user.xml에만 있어 reference를 그 1개로 줄였다(mssql·oracle 쪽 sql_user.xml에는 해당 id와 컬럼이 없음, 소스 확인).
 - **다른 기능 묶음과 겹침:** 없음(S3 본인인증 결과와 다른 기능, 같은 파일을 쓰지만 required가 다름).
 
 이 SR이 실제 업무에서 나올 법한가?  [  ] 예  [  ] 아니오  [  ] 고쳐야 함: ____________
@@ -172,6 +173,7 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 | FaqMapper.java | mustNotAppear | 고객용 FAQ 매퍼 | |
 
 - **대본:** "사용 여부가 '중지'인 것만 숨기면 됩니다. 목록 화면에서 다시 보는 버튼은 없어도 돼요."
+- **사용자 확인:** /system/prFaq는 관리자 화면의 FAQ 관리 API 경로.
 - **겹침:** 없음(D4 케어회원 조회와 다른 기능).
 
 이 SR이 실제 업무에서 나올 법한가?  [  ] 예  [  ] 아니오  [  ] 고쳐야 함: ____________
@@ -281,6 +283,8 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 | APCADUpdtVerMngtBIZ.java | mustNotAppear | 관리 화면 쪽은 이번 범위 밖 | |
 
 - **대본(질문에 대한 답):** "앱이 업데이트 안내를 받을지 판단하는 쪽이에요. 같은 OS 안에서 버전 번호가 가장 높은 것을 최신으로 보세요. 관리 화면은 그대로 두세요."
+- **근거 보충(그래프):** ACAOTBAPC003DEM·ACAOTBAPC003DVO는 앱 쪽 APCCSAppVerMngtBIZ와 관리 화면 쪽 APCADUpdtVerMngtBIZ가 함께 의존한다(DEM의 dependedBy는 이 두 BIZ뿐). OS 구분 필드는 DVO의 `getMblOsDvC`(모바일OS구분코드)로 확인했다.
+- **사용자:** 추가 조건 있음(내용 대기). 대본과 정답은 내용을 받을 때까지 바꾸지 않았다.
 - **겹침:** 없음.
 
 이 SR이 실제 업무에서 나올 법한가?  [  ] 예  [  ] 아니오  [  ] 고쳐야 함: ____________
