@@ -17,7 +17,7 @@ class EvalScenariosD5GtTest {
 
     @Test
     fun d5FamilyUsesPlanAGtAndMustNotAppear() {
-        for (id in listOf("D5", "D5E", "D5N")) {
+        for (id in listOf("D5", "D5E", "D5N", "D5X")) {
             val sc = byId.getValue(id)
             assertEquals("$id required", listOf("SurveyServiceImpl.java"), sc.gtOrEmpty().filter { it.countsForRecall() }.map { it.label() })
             assertEquals("$id reference", listOf("sql_survey.xml", "AlimtalkChnlDto.java", "AlimtalkTmplDto.java"), sc.gtOrEmpty().filter { it.isReference() }.map { it.label() })
@@ -31,6 +31,7 @@ class EvalScenariosD5GtTest {
         assertEquals(8, d1.gtOrEmpty().size)
         assertTrue("D1 GT는 모두 required", d1.gtOrEmpty().all { it.countsForRecall() })
         assertTrue("D1에는 제외 대상이 없다", d1.mustNotAppearOrEmpty().isEmpty())
-        for (id in byId.keys - setOf("D5", "D5E", "D5N")) assertTrue("$id 에는 제외 대상이 없다", byId.getValue(id).mustNotAppearOrEmpty().isEmpty())
+        // SR-05X는 SR-05와 같은 제외 대상 2개를 가진다(B-51 확인용 probe)
+        for (id in byId.keys - setOf("D5", "D5E", "D5N", "D5X", "SR-05X")) assertTrue("$id 에는 제외 대상이 없다", byId.getValue(id).mustNotAppearOrEmpty().isEmpty())
     }
 }
