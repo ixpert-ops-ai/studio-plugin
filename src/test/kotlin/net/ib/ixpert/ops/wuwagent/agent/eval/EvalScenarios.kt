@@ -103,6 +103,10 @@ object EvalScenarios {
         val all = (base + real.map { it.copy(group = "real") }).filter { includeHoldout() || !it.isHoldout() }
         val only = System.getProperty("eval.only")?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
         // group == probe(확인용)는 기준선에 섞이지 않도록 eval.only로 지정했을 때만 돈다.
-        return if (only.isNullOrEmpty()) all.filter { it.group != "probe" } else all.filter { it.id in only }
+        val selected = if (only.isNullOrEmpty()) all.filter { it.group != "probe" } else all.filter { it.id in only }
+        // -Deval.first=SR-07,SR-11: 지정한 시나리오를 앞으로 옮기고 나머지는 원래 순서를 유지한다(목록 구성은 바꾸지 않는다).
+        val first = System.getProperty("eval.first")?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+        if (first.isEmpty()) return selected
+        return first.mapNotNull { id -> selected.firstOrNull { it.id == id } } + selected.filter { it.id !in first }
     }
 }
