@@ -136,7 +136,7 @@ object ClarifyUtteranceTranslator {
         }
     }
 
-    private fun isCompletionUtterance(text: String): Boolean {
+    internal fun isCompletionUtterance(text: String): Boolean {
         val normalized = text.lowercase().replace(" ", "")
         val completionKeywords = listOf(
             "분석시작", "시작해줘", "시작하자", "분석진행", "진행해줘",

@@ -327,7 +327,9 @@ class Stage0ClarificationEngine(
         }
 
         // B-12: 사용자 초기 발화 식별자 3분기 분해
-        val userResolution = resolveUserUtteredIdentifiers(originalRequirement, currentTurn = 1)
+        // SR 원문의 제약 추출은 resolveUserUtteredIdentifiers가 안에서 하던 호출과 같다(호출 수 불변). 제외 제안에도 같은 결과를 쓴다.
+        val initConstraints = if (originalRequirement.isBlank()) null else extractConstraints(listOf(originalRequirement))
+        val userResolution = resolveUserUtteredIdentifiers(originalRequirement, initConstraints, currentTurn = 1)
         val userConfirmedItems = userResolution.confirmedItems.filter { it.verdict == Verdict.CONFIRMED }
         val userPendingItems = userResolution.confirmedItems.filter { it.verdict == Verdict.PENDING } + 
             userResolution.newCreationItems.filter { it.verdict == Verdict.PENDING }
@@ -339,7 +341,18 @@ class Stage0ClarificationEngine(
                 val p = (cand.hint as? LinkHint.ExistingRef)?.filePath
                 p == null || (p !in userConfirmedPaths && p !in userPendingPaths)
             }
-        val openQ = userResolution.unconfirmedQuestion ?: checkOpenQuestionTrigger(initialTokens, initialCandidates)
+        // 제외 문장이 SR 원문에 있으면(사용자 발화가 아니어도) 같은 제외 제안 흐름을 탄다. 제외 단어가 있고 LLM이 있을 때만 제약 추출 1회.
+        val exclusionWork: MutableList<RequirementItem>? =
+            if (llmClient != null && ExclusionWords.containsExclusionWord(originalRequirement)) {
+                (userConfirmedItems + userPendingItems + initialCandidates + frozenRejectedItems).toMutableList()
+            } else null
+        var srOutcome: UiExclusionOutcome? = null
+        if (exclusionWork != null && initConstraints != null) {
+            srExclusionConstraints[originalRequirement] = initConstraints
+            srOutcome = proposeExclusionsForUtterance(originalRequirement, initConstraints, exclusionWork, 1, emptyList())
+        }
+
+        val openQ = userResolution.unconfirmedQuestion ?: srOutcome?.question ?: checkOpenQuestionTrigger(initialTokens, initialCandidates)
 
         // 미확인 식별자 확인 질문이 openQuestion으로 채택된 경우 lastQuestion 및 lastAskedTurn 기록
         val finalUserPendingItems = if (userResolution.unconfirmedQuestion != null && openQ == userResolution.unconfirmedQuestion) {
@@ -358,12 +371,20 @@ class Stage0ClarificationEngine(
         }
 
         // 초기 items = 사용자 확정 항목 + 사용자 미확인(PENDING) 항목 + 새로 발견된 후보군 + 이전 세션 거부 동결 항목
-        val combinedItems = userConfirmedItems + finalUserPendingItems + initialCandidates + frozenRejectedItems
+        val combinedItems = if (exclusionWork != null) {
+            exclusionWork.map { w -> finalUserPendingItems.find { it.id == w.id } ?: w }
+        } else {
+            userConfirmedItems + finalUserPendingItems + initialCandidates + frozenRejectedItems
+        }
+
+        // SR 원문의 제외 요청에 대한 안내는 대화 기록에 남긴다(같은 요청으로 다시 묻지 않는지 판단하는 근거이기도 하다).
+        val initEcho = listOfNotNull(srOutcome?.note, srOutcome?.question).joinToString("\n").ifBlank { null }
 
         val state = Stage0State(
             originalRequirement = originalRequirement,
             items = combinedItems,
-            seedSet = initialTokens
+            seedSet = initialTokens,
+            dialogueHistory = if (initEcho != null) listOf(DialogueHistoryItem(role = "assistant", content = initEcho)) else emptyList()
         )
 
         val taskSummary = if (deferTaskSummary) null else generateTaskSummary(originalRequirement, combinedItems)
@@ -373,7 +394,8 @@ class Stage0ClarificationEngine(
             openQuestion = openQ,
             isExhausted = initialCandidates.isEmpty() && userConfirmedItems.isEmpty(),
             isReadyForStage1 = false,
-            taskSummary = taskSummary
+            taskSummary = taskSummary,
+            echoBackMessage = initEcho
         )
     }
 
@@ -406,110 +428,14 @@ class Stage0ClarificationEngine(
 
         if (!userInput.userStatement.isNullOrBlank()) {
             val stmt = userInput.userStatement.trim()
-            val lowerStmt = stmt.lowercase()
 
             // 2-0. 이전 턴에서 제안된 배제 후보(PROPOSED_EXCLUSION)에 대한 긍정/부정 답변 확인
-            val pendingExclusions = updatedItems.filter { it.source == HintSource.PROPOSED_EXCLUSION && it.verdict == Verdict.PENDING }
-            if (pendingExclusions.isNotEmpty()) {
-                val cleanStmt = lowerStmt.replace(Regex("[^a-zA-Z0-9가-힣]"), "").trim()
-                val affirmativeTokens = setOf("응", "네", "맞아", "제외해", "제외해줘", "빼줘", "yes", "y", "확인", "그래", "오케이", "ok", "제외")
-                val negativeTokens = setOf("아니", "아니요", "포함해", "건드려", "no", "n", "취소", "유지")
-                val isAffirmative = cleanStmt in affirmativeTokens
-                val isNegative = cleanStmt in negativeTokens
-
-                if (isAffirmative) {
-                    // 모든 토큰이 정확히 번역/매칭된 고신뢰(HIGH_CONFIDENCE) 후보만 "응"으로 일괄 제외 확정
-                    val highConfidenceExclusions = pendingExclusions.filter { it.confidence == ConfidenceBucket.HIGH_CONFIDENCE }
-                    if (highConfidenceExclusions.isNotEmpty()) {
-                        for (i in updatedItems.indices) {
-                            if (updatedItems[i].source == HintSource.PROPOSED_EXCLUSION && 
-                                updatedItems[i].verdict == Verdict.PENDING &&
-                                updatedItems[i].confidence == ConfidenceBucket.HIGH_CONFIDENCE) {
-                                updatedItems[i] = updatedItems[i].copy(
-                                    verdict = Verdict.REJECTED,
-                                    source = HintSource.USER_CONFIRMED,
-                                    rejectionReason = RejectionReason.FILE_MISMATCH
-                                )
-                            }
-                        }
-                        echoMsg = "배제 요청하신 파일 목록을 분석 대상에서 제외(REJECTED) 확정했습니다."
-                    } else {
-                        // 부분 번역(LOW_CONFIDENCE)인 경우 일반 "응"으로 일괄 제외하지 않고 세부 선택 요구
-                        echoMsg = "모호한 배제 후보가 포함되어 있어 일괄 제외되지 않았습니다. 특정 파일을 지정하거나 체크박스로 선택해 주세요."
-                    }
-                } else if (isNegative) {
-                    // "아니요"/취소 시: 제안된 배제 후보 중 사용자가 직접 명시했던 식별자는 USER_UTTERED/PENDING으로 복원하고
-                    // 인접 자동 탐색된 후보만 state.items에서 완전히 제거
-                    for (i in updatedItems.indices.reversed()) {
-                        val itm = updatedItems[i]
-                        if (itm.source == HintSource.PROPOSED_EXCLUSION && itm.verdict == Verdict.PENDING) {
-                            if (itm.utteredIdentifier != null) {
-                                val origHint = itm.hint
-                                val restoredId = when (origHint) {
-                                    is LinkHint.ExistingRef -> RequirementItem.deriveId(origHint)
-                                    is LinkHint.NewCreation -> RequirementItem.deriveId(origHint, itm.utteredIdentifier)
-                                }
-                                updatedItems[i] = itm.copy(
-                                    id = restoredId,
-                                    source = HintSource.USER_UTTERED,
-                                    verdict = Verdict.PENDING,
-                                    statement = "사용자 명시 식별자: ${itm.utteredIdentifier}"
-                                )
-                            } else {
-                                updatedItems.removeAt(i)
-                            }
-                        }
-                    }
-                    echoMsg = "배제 요청을 취소하고 분석 대상을 그대로 유지합니다."
-                }
-            }
+            // (processUtterance와 공용 함수. 여기서는 기존의 정확 일치 판정(lenient=false)을 그대로 쓴다.)
+            applyPendingExclusionAnswer(updatedItems, stmt, lenient = false).echo?.let { echoMsg = it }
 
             // 2-1. 발화로부터 EXCLUDE_COMPONENT 제약 추출 및 배제 후보 탐색
             val currentConstraints = extractConstraints(listOf(stmt))
-            val excludeConstraints = currentConstraints.filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT }
-            for (ec in excludeConstraints) {
-                val evidence = ec.evidence ?: continue
-                val resolution = resolveExclusionCandidates(evidence)
-                val confidence = if (resolution.isAllTokensTranslated) ConfidenceBucket.HIGH_CONFIDENCE else ConfidenceBucket.LOW_CONFIDENCE
-
-                for (file in resolution.candidates) {
-                    val fileName = file.path.substringAfterLast("/")
-                    val isDirectlyUttered = IdentifierRetentionChecker.containsIdentifier(evidence, file.className) ||
-                            IdentifierRetentionChecker.containsIdentifier(evidence, fileName) ||
-                            IdentifierRetentionChecker.containsIdentifier(evidence, fileName.substringBeforeLast("."))
-                    val utteredId = if (isDirectlyUttered) file.className else null
-
-                    val hint = LinkHint.ExistingRef(file.path, listOf(file.className))
-                    val item = RequirementItem(
-                        id = RequirementItem.deriveId(hint, "exclude:${file.path}"),
-                        statement = "배제 후보: $fileName (${ec.value})",
-                        source = HintSource.PROPOSED_EXCLUSION,
-                        hint = hint,
-                        anchorRationale = "사용자 배제 발화('${evidence}') 매칭 제외 후보",
-                        verdict = Verdict.PENDING,
-                        confidence = confidence,
-                        provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
-                        utteredTurn = currentTurn,
-                        utteredIdentifier = utteredId
-                    )
-                    val existingIndex = updatedItems.indexOfFirst { 
-                        it.id == item.id || (it.hint as? LinkHint.ExistingRef)?.filePath == file.path 
-                    }
-                    if (existingIndex >= 0) {
-                        if (updatedItems[existingIndex].verdict == Verdict.PENDING) {
-                            val existing = updatedItems[existingIndex]
-                            updatedItems[existingIndex] = item.copy(
-                                utteredTurn = existing.utteredTurn ?: currentTurn
-                            )
-                        }
-                    } else {
-                        updatedItems.add(item)
-                    }
-                }
-                if (resolution.question != null) {
-                    exclusionQuestion = resolution.question
-                }
-            }
+            proposeExclusionsLegacy(currentConstraints, updatedItems, currentTurn)?.let { exclusionQuestion = it }
 
             val utteredTokens = scanner.extractTokens(stmt, emptySet())
             newSeedTokens = state.seedSet + utteredTokens
@@ -707,6 +633,284 @@ class Stage0ClarificationEngine(
         val question = "배제 요청하신 '${evidence}' 중 '${untransNames}'에 해당하는 정확한 클래스를 특정하지 못했습니다. 다음 '${transNames}' 관련 후보($candidateNames) 중 제외할 대상을 선택하시거나, 정확한 클래스/패키지명을 알려주세요."
 
         return ExclusionCandidateResolution(evidence, unionCandidates, false, question)
+    }
+
+    // ── 제외 제안·확인 (processTurn과 processUtterance 공용, B-51) ─────────────────────────────
+
+    /** 제외 제안 후보가 이 수를 넘으면 항목을 만들지 않고 "파일명을 알려 주세요" 안내만 한다. */
+    private val exclusionProposalLimit = 10
+
+    /** SR 원문에서 추출한 제약(제외 단어가 있을 때만). 확정 시 미확정 제외 표시에 쓴다. 세션(엔진 인스턴스) 안에서만 유지된다. */
+    private val srExclusionConstraints = HashMap<String, List<IntentConstraint>>()
+
+    private data class PendingAnswerOutcome(val echo: String?, val handled: Boolean)
+
+    /**
+     * 이전 턴에서 제안한 배제 후보(PROPOSED_EXCLUSION, PENDING)에 대한 사용자의 답을 items에 반영한다.
+     * - lenient=false: processTurn의 기존 판정(정확 일치 단어 집합) 그대로.
+     * - lenient=true: UI 경로(processUtterance)의 완화 판정(ExclusionWords.judgeAnswer). 긍정어 포함+부정어 없음=확정, 부정어만=취소,
+     *   둘이 섞인 답("네 근데 Runner는 빼지 마세요")은 확정하지 않고 다시 묻지도 않으며 미확정으로 남긴다.
+     * handled=true면 이 발화는 제외 제안에 대한 답으로 소비됐다(lenient 모드에서만 true).
+     */
+    private fun applyPendingExclusionAnswer(items: MutableList<RequirementItem>, stmt: String, lenient: Boolean): PendingAnswerOutcome {
+        val pendingExclusions = items.filter { it.source == HintSource.PROPOSED_EXCLUSION && it.verdict == Verdict.PENDING }
+        if (pendingExclusions.isEmpty()) return PendingAnswerOutcome(null, false)
+
+        val answer = if (lenient) {
+            ExclusionWords.judgeAnswer(stmt)
+        } else {
+            val cleanStmt = stmt.lowercase().replace(Regex("[^a-zA-Z0-9가-힣]"), "").trim()
+            val affirmativeTokens = setOf("응", "네", "맞아", "제외해", "제외해줘", "빼줘", "yes", "y", "확인", "그래", "오케이", "ok", "제외")
+            val negativeTokens = setOf("아니", "아니요", "포함해", "건드려", "no", "n", "취소", "유지")
+            when {
+                cleanStmt in affirmativeTokens -> ExclusionAnswer.AFFIRM
+                cleanStmt in negativeTokens -> ExclusionAnswer.NEGATE
+                else -> ExclusionAnswer.OTHER
+            }
+        }
+
+        var echo: String? = null
+        when (answer) {
+            ExclusionAnswer.AFFIRM -> {
+                // 모든 토큰이 정확히 번역/매칭된 고신뢰(HIGH_CONFIDENCE) 후보만 "응"으로 일괄 제외 확정
+                val highConfidenceExclusions = pendingExclusions.filter { it.confidence == ConfidenceBucket.HIGH_CONFIDENCE }
+                if (highConfidenceExclusions.isNotEmpty()) {
+                    for (i in items.indices) {
+                        if (items[i].source == HintSource.PROPOSED_EXCLUSION &&
+                            items[i].verdict == Verdict.PENDING &&
+                            items[i].confidence == ConfidenceBucket.HIGH_CONFIDENCE) {
+                            items[i] = items[i].copy(
+                                verdict = Verdict.REJECTED,
+                                source = HintSource.USER_CONFIRMED,
+                                rejectionReason = RejectionReason.FILE_MISMATCH
+                            )
+                        }
+                    }
+                    echo = "배제 요청하신 파일 목록을 분석 대상에서 제외(REJECTED) 확정했습니다."
+                } else {
+                    // 부분 번역(LOW_CONFIDENCE)인 경우 일반 "응"으로 일괄 제외하지 않고 세부 선택 요구
+                    echo = "모호한 배제 후보가 포함되어 있어 일괄 제외되지 않았습니다. 특정 파일을 지정하거나 체크박스로 선택해 주세요."
+                }
+            }
+            ExclusionAnswer.NEGATE -> {
+                // "아니요"/취소 시: 제안된 배제 후보 중 사용자가 직접 명시했던 식별자는 USER_UTTERED/PENDING으로 복원하고
+                // 인접 자동 탐색된 후보만 state.items에서 완전히 제거
+                for (i in items.indices.reversed()) {
+                    val itm = items[i]
+                    if (itm.source == HintSource.PROPOSED_EXCLUSION && itm.verdict == Verdict.PENDING) {
+                        if (itm.utteredIdentifier != null) {
+                            val origHint = itm.hint
+                            val restoredId = when (origHint) {
+                                is LinkHint.ExistingRef -> RequirementItem.deriveId(origHint)
+                                is LinkHint.NewCreation -> RequirementItem.deriveId(origHint, itm.utteredIdentifier)
+                            }
+                            items[i] = itm.copy(
+                                id = restoredId,
+                                source = HintSource.USER_UTTERED,
+                                verdict = Verdict.PENDING,
+                                statement = "사용자 명시 식별자: ${itm.utteredIdentifier}"
+                            )
+                        } else {
+                            items.removeAt(i)
+                        }
+                    }
+                }
+                echo = "배제 요청을 취소하고 분석 대상을 그대로 유지합니다."
+            }
+            ExclusionAnswer.MIXED -> {
+                echo = "일부만 지키라는 답변은 제외로 확정하지 않았습니다. 제외 후보는 미확정으로 남기며 다시 묻지 않습니다. 제외할 파일은 아래 목록에서 직접 체크하거나 파일명을 알려 주세요."
+            }
+            ExclusionAnswer.OTHER -> {}
+        }
+        return PendingAnswerOutcome(echo, lenient && answer != ExclusionAnswer.OTHER)
+    }
+
+    private fun buildProposedExclusionItem(
+        file: FileNode, evidence: String, value: String, confidence: ConfidenceBucket, currentTurn: Int, utteredId: String?
+    ): RequirementItem {
+        val fileName = file.path.substringAfterLast("/")
+        val hint = LinkHint.ExistingRef(file.path, listOf(file.className))
+        return RequirementItem(
+            id = RequirementItem.deriveId(hint, "exclude:${file.path}"),
+            statement = "배제 후보: $fileName ($value)",
+            source = HintSource.PROPOSED_EXCLUSION,
+            hint = hint,
+            anchorRationale = "사용자 배제 발화('${evidence}') 매칭 제외 후보",
+            verdict = Verdict.PENDING,
+            confidence = confidence,
+            provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
+            utteredTurn = currentTurn,
+            utteredIdentifier = utteredId
+        )
+    }
+
+    private fun upsertProposedExclusion(items: MutableList<RequirementItem>, item: RequirementItem, filePath: String, currentTurn: Int) {
+        val existingIndex = items.indexOfFirst { it.id == item.id || (it.hint as? LinkHint.ExistingRef)?.filePath == filePath }
+        if (existingIndex >= 0) {
+            if (items[existingIndex].verdict == Verdict.PENDING) {
+                val existing = items[existingIndex]
+                items[existingIndex] = item.copy(utteredTurn = existing.utteredTurn ?: currentTurn)
+            }
+        } else {
+            items.add(item)
+        }
+    }
+
+    /** processTurn의 기존 제외 제안(후보 수 제한 없음, 기존 질문 문구). 마지막 질문을 돌려준다. */
+    private fun proposeExclusionsLegacy(constraints: List<IntentConstraint>, items: MutableList<RequirementItem>, currentTurn: Int): String? {
+        var question: String? = null
+        for (ec in constraints.filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT }) {
+            val evidence = ec.evidence ?: continue
+            val resolution = resolveExclusionCandidates(evidence)
+            val confidence = if (resolution.isAllTokensTranslated) ConfidenceBucket.HIGH_CONFIDENCE else ConfidenceBucket.LOW_CONFIDENCE
+
+            for (file in resolution.candidates) {
+                val fileName = file.path.substringAfterLast("/")
+                val isDirectlyUttered = IdentifierRetentionChecker.containsIdentifier(evidence, file.className) ||
+                        IdentifierRetentionChecker.containsIdentifier(evidence, fileName) ||
+                        IdentifierRetentionChecker.containsIdentifier(evidence, fileName.substringBeforeLast("."))
+                val utteredId = if (isDirectlyUttered) file.className else null
+                upsertProposedExclusion(items, buildProposedExclusionItem(file, evidence, ec.value, confidence, currentTurn, utteredId), file.path, currentTurn)
+            }
+            if (resolution.question != null) {
+                question = resolution.question
+            }
+        }
+        return question
+    }
+
+    private data class ExclusionTarget(val path: String, val className: String)
+
+    /** 제외 요청의 증거 구문 안에 사용자가 직접 적은 기존 파일명(클래스명, 확장자 포함 파일명)에 해당하는 그래프 파일. */
+    private fun explicitExistingTargets(evidence: String): List<ExclusionTarget> {
+        val out = LinkedHashMap<String, ExclusionTarget>()
+        for (id in IdentifierRetentionChecker.extractIdentifiers(listOf(evidence))) {
+            val baseName = id.substringBeforeLast(".")
+            val file = graph.files.values.find { fileNode ->
+                val fName = fileNode.path.substringAfterLast("/")
+                val fBase = fName.substringBeforeLast(".")
+                fileNode.className.equals(id, ignoreCase = true) || fileNode.className.equals(baseName, ignoreCase = true) ||
+                        fName.equals(id, ignoreCase = true) || fBase.equals(id, ignoreCase = true) || fBase.equals(baseName, ignoreCase = true)
+            }
+            if (file != null) { out[file.path] = ExclusionTarget(file.path, file.className); continue }
+            val resource = graph.resourceNodes.find { rNode ->
+                val rName = rNode.path.substringAfterLast("/")
+                val rBase = rName.substringBeforeLast(".")
+                rName.equals(id, ignoreCase = true) || rBase.equals(id, ignoreCase = true) || rBase.equals(baseName, ignoreCase = true)
+            }
+            if (resource != null) out[resource.path] = ExclusionTarget(resource.path, resource.path.substringAfterLast("/").substringBeforeLast("."))
+        }
+        return out.values.toList()
+    }
+
+    /** question: 화면에 보일 확인 질문/안내(제외 요청 하나당 1회), note: 파일명을 직접 적어 바로 제외한 경우의 안내. */
+    private data class UiExclusionOutcome(val question: String?, val note: String?)
+
+    /**
+     * UI 경로(processUtterance, initSession)의 제외 제안. 제약 추출에서 EXCLUDE_COMPONENT로 분류된 요청마다:
+     * - 증거 구문에 파일명을 직접 적었으면 그 파일을 바로 제외한다(사용자가 "파일명을 알려 주시면 제외합니다"에 답한 경우).
+     * - 후보 탐색(증거 구문, 후보가 없으면 발화 전체) 결과가 1~10개면 제외 제안 항목을 만들고 확인 질문을 한다.
+     * - 10개를 넘으면 항목을 만들지 않고 "파일명을 알려 주세요", 0개면 "대상을 찾지 못했습니다"를 알린다(조용히 버리지 않는다).
+     * - 같은 증거 구문으로 이미 안내한 적이 있으면(대화 기록) 다시 묻지 않는다.
+     */
+    private fun proposeExclusionsForUtterance(
+        stmt: String,
+        constraints: List<IntentConstraint>,
+        items: MutableList<RequirementItem>,
+        currentTurn: Int,
+        history: List<DialogueHistoryItem>
+    ): UiExclusionOutcome {
+        val questions = mutableListOf<String>()
+        val directNames = mutableListOf<String>()
+        val excludeConstraints = constraints
+            .filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT && !it.evidence.isNullOrBlank() }
+            .distinctBy { it.evidence }
+        for (ec in excludeConstraints) {
+            val evidence = ec.evidence!!
+            if (history.any { it.role == "assistant" && it.content.contains("'$evidence'") }) continue
+
+            val explicit = explicitExistingTargets(evidence)
+            if (explicit.isNotEmpty()) {
+                for (t in explicit) {
+                    val fileName = t.path.substringAfterLast("/")
+                    val idx = items.indexOfFirst { (it.hint as? LinkHint.ExistingRef)?.filePath == t.path }
+                    if (idx >= 0) {
+                        items[idx] = items[idx].copy(verdict = Verdict.REJECTED, source = HintSource.USER_CONFIRMED, rejectionReason = RejectionReason.FILE_MISMATCH)
+                    } else {
+                        val hint = LinkHint.ExistingRef(t.path, listOf(t.className))
+                        items.add(RequirementItem(
+                            id = RequirementItem.deriveId(hint, "exclude:${t.path}"),
+                            statement = "제외 지정: $fileName",
+                            source = HintSource.USER_CONFIRMED,
+                            hint = hint,
+                            anchorRationale = "사용자가 파일명을 지정한 제외 요청('${evidence}')",
+                            verdict = Verdict.REJECTED,
+                            confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                            provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
+                            utteredTurn = currentTurn,
+                            rejectionReason = RejectionReason.FILE_MISMATCH
+                        ))
+                    }
+                    directNames.add(fileName)
+                }
+                continue
+            }
+
+            var resolution = resolveExclusionCandidates(evidence)
+            if (resolution.candidates.isEmpty()) {
+                // 증거 구문에 대상 명사가 없으면("건드리지 마세요") 발화 전체로 한 번 더 찾는다.
+                val whole = resolveExclusionCandidates(stmt)
+                if (whole.candidates.isNotEmpty()) resolution = whole
+            }
+            val files = resolution.candidates.distinctBy { it.path }
+            val message = when {
+                files.isEmpty() ->
+                    "'${evidence}'에 해당하는 대상을 찾지 못했습니다. 제외할 파일명을 알려 주시면 제외합니다."
+                files.size > exclusionProposalLimit ->
+                    "'${evidence}' 관련 파일이 ${files.size}개라 특정하지 못했습니다. 파일명을 알려 주시면 제외합니다."
+                else -> {
+                    val high = resolution.isAllTokensTranslated
+                    val confidence = if (high) ConfidenceBucket.HIGH_CONFIDENCE else ConfidenceBucket.LOW_CONFIDENCE
+                    val names = files.joinToString(", ") { it.path.substringAfterLast("/") }
+                    val text = if (high) {
+                        "'${evidence}' 관련 다음 파일을 분석 대상에서 제외할까요? ($names) \"네\"라고 답하거나 아래 목록에서 체크해 주세요. 제외하지 않으려면 \"아니요\"라고 답해 주세요."
+                    } else {
+                        "'${evidence}'와 정확히 일치하지는 않지만 관련될 수 있는 파일입니다. ($names) 제외할 파일은 아래 목록에서 직접 체크하거나 파일명을 알려 주세요. (\"네\"로 한꺼번에 제외하지는 않습니다.)"
+                    }
+                    for (file in files) {
+                        // 사용자가 직접 적은 파일명이 아니므로 utteredIdentifier는 두지 않는다(두면 Stage 3에 "미확정 식별자"로 전달된다).
+                        val item = buildProposedExclusionItem(file, evidence, ec.value, confidence, currentTurn, null)
+                            .copy(lastQuestion = text, lastAskedTurn = currentTurn)
+                        upsertProposedExclusion(items, item, file.path, currentTurn)
+                    }
+                    text
+                }
+            }
+            questions.add(message)
+        }
+        val note = if (directNames.isEmpty()) null else "다음 파일을 분석 대상에서 제외했습니다: ${directNames.distinct().joinToString(", ")}"
+        return UiExclusionOutcome(if (questions.isEmpty()) null else questions.joinToString("\n"), note)
+    }
+
+    /** 확정 시 제외 확정으로 이어지지 않고 남은 제안(PENDING)을 미확정 제외로 되돌린다(증거 구문은 제안 근거 문구에서 읽는다). */
+    private fun unconfirmedFromPendingProposals(state: Stage0State): List<UnconfirmedExclusion> {
+        val evidencePattern = Regex("""사용자 배제 발화\('(.*)'\) 매칭""")
+        return state.items
+            .filter { it.source == HintSource.PROPOSED_EXCLUSION && it.verdict == Verdict.PENDING }
+            .mapNotNull { item ->
+                val evidence = evidencePattern.find(item.anchorRationale ?: "")?.groupValues?.get(1) ?: return@mapNotNull null
+                val path = (item.hint as? LinkHint.ExistingRef)?.filePath ?: return@mapNotNull null
+                evidence to path
+            }
+            .groupBy({ it.first }, { it.second })
+            .map { (evidence, paths) ->
+                UnconfirmedExclusion(
+                    evidence = evidence,
+                    candidateFiles = paths.distinct(),
+                    statement = state.userStatements.firstOrNull { it.contains(evidence, ignoreCase = true) }
+                        ?: state.originalRequirement.takeIf { it.contains(evidence, ignoreCase = true) }
+                )
+            }
     }
 
     fun findExclusionCandidates(evidence: String): List<FileNode> {
@@ -915,13 +1119,24 @@ class Stage0ClarificationEngine(
      */
     fun processUtterance(state: Stage0State, utterance: String): Stage0TurnResult {
         val trimmed = utterance.trim()
-        val translated = ClarifyUtteranceTranslator.translate(trimmed, state.items, llmClient)
+
+        // 직전에 제외 제안(예/아니요 질문)을 했다면 이 발화가 그 답인지 먼저 본다. 답이면 번역기를 거치지 않는다(제안 1회, 답 1회).
+        val answerItems = state.items.toMutableList()
+        val answer = if (trimmed.isNotBlank() && !ClarifyUtteranceTranslator.isCompletionUtterance(trimmed)) {
+            applyPendingExclusionAnswer(answerItems, trimmed, lenient = true)
+        } else {
+            PendingAnswerOutcome(null, false)
+        }
+        val translated = if (answer.handled) {
+            TranslatedAction(kind = UserActionKind.UNKNOWN, rawStatement = trimmed, clarificationMessage = answer.echo)
+        } else {
+            ClarifyUtteranceTranslator.translate(trimmed, state.items, llmClient)
+        }
         val updatedStatements = if (trimmed.isNotBlank()) state.userStatements + trimmed else state.userStatements
 
-        var updatedItems = state.items
+        var updatedItems: List<RequirementItem> = if (answer.handled) answerItems else state.items
         var updatedSeedSet = state.seedSet
         var isReady = false
-        val echoMsg = translated.clarificationMessage
 
         when (translated.kind) {
             UserActionKind.EXCLUDE -> {
@@ -964,6 +1179,23 @@ class Stage0ClarificationEngine(
             }
         }
 
+        // "X는 건드리지 마" 계열: 번역기가 EXCLUDE로 내지 않은 제외 요청은 제약 추출 -> 후보 탐색 -> 제안/안내로 이어 간다.
+        // 제외 단어가 있는 발화에서만 제약 추출(LLM 1회)을 추가로 한다.
+        var exclusionQuestion: String? = null
+        var exclusionNote: String? = null
+        if (!answer.handled && translated.kind != UserActionKind.EXCLUDE && translated.kind != UserActionKind.COMPLETE &&
+            llmClient != null && ExclusionWords.containsExclusionWord(trimmed)) {
+            val constraints = extractConstraints(listOf(trimmed))
+            val working = updatedItems.toMutableList()
+            val outcome = proposeExclusionsForUtterance(trimmed, constraints, working, state.userStatements.size + 2, state.dialogueHistory)
+            updatedItems = working
+            exclusionQuestion = outcome.question
+            exclusionNote = outcome.note
+        }
+        // 안내문에는 확인 질문도 함께 남긴다(같은 제외 요청으로 다시 묻지 않는지 대화 기록으로 판단한다).
+        val echoMsg = listOfNotNull(translated.clarificationMessage, exclusionNote, exclusionQuestion)
+            .joinToString("\n").ifBlank { null }
+
         val newDialogueHistory = state.dialogueHistory.toMutableList()
         if (trimmed.isNotBlank()) {
             newDialogueHistory.add(DialogueHistoryItem(role = "user", content = trimmed))
@@ -980,7 +1212,7 @@ class Stage0ClarificationEngine(
         )
 
         val isExhausted = isReady || (translated.kind == UserActionKind.INCLUDE_TOKEN && updatedItems.none { it.verdict == Verdict.PENDING })
-        val openQ = if (isReady) null else checkOpenQuestionTrigger(updatedSeedSet, updatedItems)
+        val openQ = if (isReady) null else (exclusionQuestion ?: checkOpenQuestionTrigger(updatedSeedSet, updatedItems))
         val taskSummary = if (deferTaskSummary) null else generateTaskSummary(state.originalRequirement, updatedItems, updatedStatements)
 
         return Stage0TurnResult(
@@ -1017,7 +1249,8 @@ class Stage0ClarificationEngine(
 
         // 제외 요청 문장이 제외 확정으로 이어지지 않은 경우의 기록(표시 전용, 판정에는 쓰지 않는다).
         // SCOPE_LIMIT('~만 수정')은 파일 제외가 아니므로 대상이 아니다. 후보 파일은 증거 구문의 결정론적 탐색 결과다.
-        val unconfirmedExclusions = constraints
+        // SR 원문에 있던 제외 요청(initSession에서 제약 추출을 한 경우)과, 답 없이 확정되어 남은 제외 제안(PENDING)도 미확정 제외로 표시한다.
+        val unconfirmedFromConstraints = (constraints + srExclusionConstraints[state.originalRequirement].orEmpty())
             .filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT && !it.evidence.isNullOrBlank() }
             .mapNotNull { c ->
                 val evidence = c.evidence!!
@@ -1031,9 +1264,10 @@ class Stage0ClarificationEngine(
                     evidence = evidence,
                     candidateFiles = candidates,
                     statement = state.userStatements.firstOrNull { it.contains(evidence, ignoreCase = true) }
+                        ?: state.originalRequirement.takeIf { it.contains(evidence, ignoreCase = true) }
                 )
             }
-            .distinctBy { it.evidence }
+        val unconfirmedExclusions = (unconfirmedFromConstraints + unconfirmedFromPendingProposals(state)).distinctBy { it.evidence }
 
         val allStatements = listOf(state.originalRequirement) + state.userStatements
         val classNames = graph.files.values.map { it.className }
