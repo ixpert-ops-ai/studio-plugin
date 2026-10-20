@@ -85,14 +85,20 @@ fun ClarifyIntent.exclusionSummaryLines(): List<String> {
     unconfirmedExclusions.forEach { u ->
         val quoted = u.statement ?: u.evidence
         if (u.candidateFiles.isEmpty()) {
-            // 후보 목록에 대상이 없으면 체크를 해제할 수 없다. 결과 화면에는 파일을 제외하는 기능이 없으므로 확인을 안내한다.
-            lines.add("- ⚠️ 제외 요청이 확정되지 않았습니다: '${quoted}'. 대상 파일을 찾지 못해 제외하지 못했습니다. 아래 결과 목록에 해당 파일이 포함됐는지 확인하세요.")
+            // 확정하면 대화 세션이 닫히므로 이 결과 화면에서는 제외할 수 없다. 실제로 가능한 다음 행동만 안내한다.
+            lines.add("- ⚠️ 제외 요청이 확정되지 않았습니다: '${quoted}'. 대상 파일을 찾지 못해 제외하지 못했습니다. 이번 결과에 해당 파일이 포함됐을 수 있으니 결과 목록을 확인하세요. $EXCLUSION_NEXT_ACTION")
         } else {
-            lines.add("- ⚠️ 제외 요청이 확정되지 않았습니다: '${quoted}' (후보: ${u.candidateFiles.joinToString { it.substringAfterLast('/') }}). 분석 결과에 포함될 수 있습니다. 제외하려면 /clarify에서 해당 파일의 체크를 해제한 뒤 확정하세요.")
+            val names = u.candidateFiles.map { it.substringAfterLast('/') }
+            val shown = names.take(UNCONFIRMED_NAME_LIMIT).joinToString()
+            val more = if (names.size > UNCONFIRMED_NAME_LIMIT) " 외 ${names.size - UNCONFIRMED_NAME_LIMIT}개" else ""
+            lines.add("- ⚠️ 제외 요청이 확정되지 않았습니다: '${quoted}' (후보: ${shown}${more}). 이번 결과에 포함될 수 있습니다. $EXCLUSION_NEXT_ACTION")
         }
     }
     return lines
 }
+
+private const val UNCONFIRMED_NAME_LIMIT = 5
+private const val EXCLUSION_NEXT_ACTION = "다음 분석에서는 분석 중 나타나는 Stage 3 후보 확인 카드에서 해당 파일의 체크를 해제하거나, 새 세션(/clarify)에서 파일명을 지정해 다시 요청해 주세요."
 
 /**
  * 식별자 보존 검사 감사 기록

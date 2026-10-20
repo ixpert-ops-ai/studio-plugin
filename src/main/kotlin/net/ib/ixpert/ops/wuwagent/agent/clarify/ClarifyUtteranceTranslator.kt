@@ -247,11 +247,14 @@ object ClarifyUtteranceTranslator {
                     value = constraintVal,
                     rawStatement = rawUtterance
                 )
+                // 모델이 준 안내문(message)은 쓰지 않는다. "제외했습니다"처럼 실제와 다른 말을 할 수 있어서, 실제 상태(제약으로 기록, 파일 제외는 미적용)를 고정 문구로 말한다.
+                val exclusionLike = ExclusionWords.containsExclusionWord(rawUtterance) || ExclusionWords.containsExclusionWord(constraintVal)
+                val note = if (exclusionLike) " 이 제약만으로는 파일이 분석에서 제외되지 않습니다. 특정 파일을 빼려면 파일명을 지정해 주세요." else ""
                 TranslatedAction(
                     kind = UserActionKind.ADD_CONSTRAINT,
                     constraint = constraint,
                     rawStatement = rawUtterance,
-                    clarificationMessage = message ?: "제약 조건이 추가되었습니다: $constraintVal"
+                    clarificationMessage = "제약 조건으로 기록했습니다: $constraintVal.$note"
                 )
             }
             "COMPLETE" -> {

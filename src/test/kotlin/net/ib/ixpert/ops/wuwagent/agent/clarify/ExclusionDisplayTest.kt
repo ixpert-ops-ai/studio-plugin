@@ -20,6 +20,7 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.Relationship
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.RelationshipType
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.SpringFileType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -157,24 +158,38 @@ class ExclusionDisplayTest {
         val none = ClarifyIntent(originalRequirement = "원문", refinedRequirement = "정제문", graphHash = "h")
         assertEquals(emptyList<String>(), none.exclusionSummaryLines())
 
+        // 다음 행동 안내는 실제로 가능한 것만 말한다(확정하면 세션이 닫혀 "/clarify에서 체크 해제"는 불가). B-51 0단계에서 고정.
+        val nextAction = "다음 분석에서는 분석 중 나타나는 Stage 3 후보 확인 카드에서 해당 파일의 체크를 해제하거나, 새 세션(/clarify)에서 파일명을 지정해 다시 요청해 주세요."
+
         val withCandidates = none.copy(unconfirmedExclusions = listOf(UnconfirmedExclusion("알림톡 배치는 건드리지 말고", listOf("a/AlimtalkTemplateBatchJob.java", "a/AlimtalkTemplateBatchRunner.java"))))
         assertEquals(
-            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '알림톡 배치는 건드리지 말고' (후보: AlimtalkTemplateBatchJob.java, AlimtalkTemplateBatchRunner.java). 분석 결과에 포함될 수 있습니다. 제외하려면 /clarify에서 해당 파일의 체크를 해제한 뒤 확정하세요."),
+            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '알림톡 배치는 건드리지 말고' (후보: AlimtalkTemplateBatchJob.java, AlimtalkTemplateBatchRunner.java). 이번 결과에 포함될 수 있습니다. $nextAction"),
             withCandidates.exclusionSummaryLines()
         )
 
         // 증거 구문이 아니라 사용자 발화 전체를 인용한다(S3 예: '로그인 쪽 컨트롤러는 건드리지 마세요.')
         val quoted = none.copy(unconfirmedExclusions = listOf(UnconfirmedExclusion("건드리지 마세요", emptyList(), "로그인 쪽 컨트롤러는 건드리지 마세요.")))
         assertEquals(
-            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '로그인 쪽 컨트롤러는 건드리지 마세요.'. 대상 파일을 찾지 못해 제외하지 못했습니다. 아래 결과 목록에 해당 파일이 포함됐는지 확인하세요."),
+            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '로그인 쪽 컨트롤러는 건드리지 마세요.'. 대상 파일을 찾지 못해 제외하지 못했습니다. 이번 결과에 해당 파일이 포함됐을 수 있으니 결과 목록을 확인하세요. $nextAction"),
             quoted.exclusionSummaryLines()
         )
 
         val noTarget = none.copy(unconfirmedExclusions = listOf(UnconfirmedExclusion("건드리지 마세요")))
         assertEquals(
-            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '건드리지 마세요'. 대상 파일을 찾지 못해 제외하지 못했습니다. 아래 결과 목록에 해당 파일이 포함됐는지 확인하세요."),
+            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '건드리지 마세요'. 대상 파일을 찾지 못해 제외하지 못했습니다. 이번 결과에 해당 파일이 포함됐을 수 있으니 결과 목록을 확인하세요. $nextAction"),
             noTarget.exclusionSummaryLines()
         )
+
+        // 후보 이름은 최대 5개만 쓰고 나머지는 "외 N개"로 쓴다(SR-12는 후보가 294개였다).
+        val many = none.copy(unconfirmedExclusions = listOf(UnconfirmedExclusion("관리 화면은 그대로 두세요", (1..7).map { "a/File$it.java" })))
+        assertEquals(
+            listOf("- ⚠️ 제외 요청이 확정되지 않았습니다: '관리 화면은 그대로 두세요' (후보: File1.java, File2.java, File3.java, File4.java, File5.java 외 2개). 이번 결과에 포함될 수 있습니다. $nextAction"),
+            many.exclusionSummaryLines()
+        )
+        val five = none.copy(unconfirmedExclusions = listOf(UnconfirmedExclusion("x는 빼줘", (1..5).map { "a/File$it.java" })))
+        assertFalse("정확히 5개면 '외 N개'를 붙이지 않는다", Regex(" 외 \\d+개").containsMatchIn(five.exclusionSummaryLines().single()))
+        assertTrue("5개 이하면 후보 이름을 모두 쓴다", five.exclusionSummaryLines().single().contains("(후보: File1.java, File2.java, File3.java, File4.java, File5.java)"))
+        assertFalse("확정하면 세션이 닫히므로 이전 안내는 쓰지 않는다", many.exclusionSummaryLines().single().contains("/clarify에서 해당 파일의 체크를 해제"))
 
         val both = none.copy(excludedFiles = listOf("x/Job.java"), unconfirmedExclusions = noTarget.unconfirmedExclusions)
         assertEquals(2, both.exclusionSummaryLines().size)
