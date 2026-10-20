@@ -19,7 +19,7 @@
 | SR-06 | member-market | 모호(clarify 질문 필요) | **holdout** | 2 | 0 |
 | SR-07 | ISM (SPRING_MVC_MYBATIS, 그래프만) | 기존 기능 수정 | | 2 | 0 |
 | SR-08 | ISM (그래프만) | 모호(clarify 질문 필요) | | 3 | 0 |
-| SR-09 | ISM (그래프만) | 기존 패턴 따른 신규 추가 | **holdout** | 5 | 0 |
+| SR-09 | ISM (그래프만) | 기존 패턴 따른 신규 추가 | **holdout** | 3 | 0 |
 | SR-10 | APC (ANYFRAME_AP, 그래프만) | 기존 기능 수정 | **holdout** | 1 | 0 |
 | SR-11 | APC (그래프만) | 기존 패턴 따른 신규 추가 | | 4 | 0 |
 | SR-12 | APC (그래프만) | 모호(clarify 질문 필요) | | 2 | 1 |
@@ -61,11 +61,12 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 | UserServiceImpl.java | required | procType 분기 추가 필요 | |
 | UserDao.java | required | 조회 메서드 선언 추가 | |
 | UserDaoImpl.java | required | DAO 구현 추가 | |
-| sql_user.xml (mssql·mysql·oracle 3종) | required | ? 조회 SQL을 3종 모두 | |
+| mysql/sql_user.xml | required | 조회 SQL 추가(로그인 이력은 mysql만) | |
 | LoginUserDto.java | reference | 이력 필드를 이미 보유 | |
 | IpsController.java | reference | ? 요청 진입점만 거침 | |
 
 - **대본:** "한 사용자를 정해서 최근 30일 기록을 보고 싶어요."
+- **사용자 확인 반영:** 로그인 이력 SQL(`insertLoginHistory`, `updateLoginHistory`)은 mysql/sql_user.xml에만 있고 mssql·oracle 쪽에는 없다. 런타임에는 `mybatis-context.xml:97`의 `DATABASE_VENDOR`로 한 폴더만 로드되므로 required를 mysql 1개로 줄였다.
 - **겹침:** 없음.
 
 이 SR이 실제 업무에서 나올 법한가?  [  ] 예  [  ] 아니오  [  ] 고쳐야 함: ____________
@@ -122,7 +123,7 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 | 파일명 | 역할 | 근거(20자 이내) | 사용자 확인 |
 |---|---|---|---|
 | OrganizationService.java | required | 목록 조회에 상태 필터 필요 | |
-| OrganizationRepository.java | required | ? 유형+상태 조회 메서드 | |
+| OrganizationRepository.java | required | Repository 쿼리에 상태 조건을 넣는 관례(ProductRepository, ChatRoomRepository) | |
 | OrganizationStatus.java | reference | ACTIVE 값 정의 | |
 | OrganizationController.java | reference | 요청 진입점 | |
 | AdminService.java | mustNotAppear | 관리자 목록은 그대로 | |
@@ -145,9 +146,10 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 | 파일명 | 역할 | 근거(20자 이내) | 사용자 확인 |
 |---|---|---|---|
 | FileService.java | required | 저장 전 검사가 없음 | |
-| ? ErrorCode.java | required | ? 새 오류 코드 필요 | |
+| ErrorCode.java | required | 새 오류 코드 필요 | |
 | ImageController.java | reference | 업로드 진입점 | |
-| ? GlobalExceptionHandler.java | reference | ? 오류 응답으로 변환 | |
+| GlobalExceptionHandler.java | reference | BusinessException 이미 처리 | |
+| application.yml | reference | 현재 10MB, 용량 설정으로 해결하는 것도 정당 | |
 
 - **대본(질문에 대한 답):** "용량은 5MB까지, 파일 형식은 jpg와 png만요. 넘으면 '이미지는 5MB 이하 jpg/png만 가능합니다'라고 알려 주세요. 개수 제한은 없습니다."
 - **겹침:** 없음.
@@ -157,7 +159,7 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 ---
 
 ## SR-07 · ISM · 기존 기능 수정 · holdout 아님 · **[그래프 관계만 근거]**
-**SR 원문:** FAQ 관리 화면의 목록에서 사용을 중지한 FAQ는 기본으로 숨겨 주세요.
+**SR 원문:** FAQ 관리 화면의 목록에서 게시하지 않은 FAQ는 기본으로 숨겨 주세요.
 
 - **기능 묶음:** 목록 조회 경로가 둘이다. FaqMgmtController(GET `/system/faqMgmt/getFaqList`) → FaqMgmtServiceImpl.`getFaqList` → PrFaqInfoMapper(rwdb, `getFaqList`·`getFaqListCount`) → prFaqInfo.xml(`getFaqList`, `getFaqListCount`). PrFaqController(GET `/system/prFaq/getFaqList`) → PrFaqServiceImpl.`getFaqList` → PrFaqMapper(rodb) → PrFaqMapper.xml(`getFaqList`, `getFaqListCount`). 두 경로 모두 테이블 PR_FAQ_INFO를 읽는다.
 - **근거 출처:** 그래프의 의존·메서드 이름과 사용자 확정. 소스는 확인하지 못했고, FAQ 쪽 엔티티·DTO의 한글 주석에는 "사용여부"가 없고 "게시여부"가 있다.
@@ -174,7 +176,8 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 | FaqMgmtServiceImpl.java | reference | 목록 서비스(faqMgmt) | |
 | PrFaqInfoMapper.java | reference | 목록 매퍼(rwdb) | |
 
-- **대본:** "사용 여부가 '중지'인 것만 숨기면 됩니다. 목록 화면에서 다시 보는 버튼은 없어도 돼요."
+- **대본:** "게시하지 않은 것만 숨기면 됩니다. 목록 화면에서 다시 보는 버튼은 없어도 돼요."
+- **표현 변경 근거:** FAQ 엔티티·DTO에는 게시여부만 있고 사용여부 없음(그래프). 정답 행은 바꾸지 않았다.
 - **사용자 확정(2026-10-20):** /system/prFaq는 관리자 화면의 FAQ 관리 API 경로. 호출 화면 미확정, 두 목록 경로 모두 PR_FAQ_INFO를 읽음. 그래서 required는 두 목록 SQL XML이다. 제외 지시는 없다(mustNotAppear 비움).
 - **겹침:** 없음(D4 케어회원 조회와 다른 기능).
 
@@ -208,19 +211,19 @@ holdout: SR-03(제외 지시), SR-06(모호), SR-09(신규 추가), SR-10(수정
 **SR 원문:** 브랜드 관리에서 브랜드를 삭제하는 것처럼, 삭제하지 않고 사용을 잠시 중지했다가 다시 쓸 수 있는 기능을 추가해 주세요.
 
 - **기능 묶음:** BrandController(`/pd/brandMgmt/…`) → BrandServiceImpl(`modifyBrand`, `deleteBrand`) / BrandMgmtServiceImpl(`saveBrand`) → ECPDTBISM002TrxMapper(`insertBrand`, `updateBrand`, `deleteBrand`, `updateBrandInfo`) → ECPDTBISM002Trx.xml. 읽기: ECPDTBISM002Mapper → ECPDTBISM002.xml.
-- **근거 출처:** 그래프의 의존·메서드 이름뿐(소스 미확인). 사용 여부 컬럼이 있는지 확인하지 못했다.
+- **근거 출처:** 그래프의 의존·메서드 이름뿐(소스 미확인). 사용여부 필드가 이미 있어 DB 변경 없음(그래프: ECPDTBISM002 엔티티, BrandSaveRequest, BrandResponse 등의 한글 주석에 "사용여부"). 사용자 확인: required는 BrandServiceImpl, ECPDTBISM002TrxMapper, ECPDTBISM002Trx.xml 3개.
 
 | 파일명 | 역할 | 근거(20자 이내) | 사용자 확인 |
 |---|---|---|---|
-| ? BrandController.java | required | ? 새 요청 경로 필요 | |
-| ? BrandService.java | required | ? 새 메서드 선언 | |
 | BrandServiceImpl.java | required | 삭제와 같은 패턴 구현 | |
 | ECPDTBISM002TrxMapper.java | required | 쓰기 매퍼에 상태 변경 추가 | |
-| ? ECPDTBISM002Trx.xml | required | ? 상태 변경 SQL | |
+| ECPDTBISM002Trx.xml | required | 쓰기 SQL(updateBrand 등)에 상태 변경 | |
+| BrandController.java | reference | 사용자 미확인: 새 요청 경로가 필요할 수 있음 | |
+| BrandService.java | reference | 사용자 미확인: 새 메서드 선언이 필요할 수 있음 | |
 | BrandMgmtServiceImpl.java | reference | ? 컨트롤러가 함께 사용 | |
 | ECPDTBISM002Mapper.java | reference | 읽기 매퍼(변경 없음) | |
 
-- **대본:** "중지된 브랜드는 목록에서 흐리게 보이고, 상품 등록 때는 고를 수 없게 해 주세요. 중지·재개는 관리자만 합니다."
+- **대본:** "중지된 브랜드는 목록에서 흐리게 보이게 해 주세요. 중지·재개는 관리자만 합니다."
 - **겹침:** 없음.
 
 이 SR이 실제 업무에서 나올 법한가?  [  ] 예  [  ] 아니오  [  ] 고쳐야 함: ____________
