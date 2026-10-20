@@ -59,7 +59,14 @@ class EvalScenariosArchTest {
         assertEquals(setOf("기존 기능 수정", "기존 패턴 신규 추가", "제외 지시", "모호"), arch.map { it.srType }.toSet())
         val existing = parse("/eval/scenarios.json")
         assertTrue("기존 시나리오 archType", existing.all { it.archType != null })
-        assertTrue("기존 시나리오 srType은 임의로 정하지 않는다", existing.all { it.srType == null })
+        // 사용자 확정(2026-10-20): D4와 D2는 판단 여지가 있어 결정을 그대로 고정한다
+        assertEquals(
+            mapOf(
+                "D1" to "기존 패턴 신규 추가", "D2" to "기존 기능 수정", "D3" to "기존 패턴 신규 추가", "D4" to "모호",
+                "D5" to "제외 지시", "D5E" to "제외 지시", "D5N" to "제외 지시", "S1" to "기존 기능 수정", "S2" to "기존 패턴 신규 추가", "S3" to "제외 지시"
+            ),
+            existing.associate { it.id to it.srType }
+        )
         assertEquals("SPRING_BOOT_JPA", existing.first { it.id == "S1" }.archType)
         assertEquals("ANYFRAME_AP", existing.first { it.id == "D2" }.archType)
     }
@@ -81,6 +88,33 @@ class EvalScenariosArchTest {
         } finally {
             if (keep == null) System.clearProperty("eval.includeHoldout") else System.setProperty("eval.includeHoldout", keep)
             if (keepOnly != null) System.setProperty("eval.only", keepOnly)
+        }
+    }
+
+    @Test
+    fun evalFirstMovesTheChosenScenariosToTheFrontAndKeepsTheRestInOrder() {
+        val keepFirst = System.getProperty("eval.first")
+        val keepOnly = System.getProperty("eval.only")
+        val keepHoldout = System.getProperty("eval.includeHoldout")
+        try {
+            System.clearProperty("eval.only")
+            System.clearProperty("eval.includeHoldout")
+            System.clearProperty("eval.first")
+            val base = EvalScenarios.loadAll().map { it.id }
+            System.setProperty("eval.first", "SR-07,SR-11")
+            val moved = EvalScenarios.loadAll().map { it.id }
+            assertEquals(listOf("SR-07", "SR-11") + base.filter { it != "SR-07" && it != "SR-11" }, moved)
+            assertEquals("목록 구성은 바뀌지 않는다", base.sorted(), moved.sorted())
+            // 목록에 없는 ID(holdout 제외 상태의 SR-03)는 무시되고, 지정한 순서가 유지된다
+            System.setProperty("eval.first", "SR-03,S1,D1")
+            assertEquals(listOf("S1", "D1") + base.filter { it != "S1" && it != "D1" }, EvalScenarios.loadAll().map { it.id })
+            // eval.only와 함께 쓰면 선택된 것 안에서만 앞으로 옮긴다
+            System.setProperty("eval.only", "D1,D2,S1")
+            System.setProperty("eval.first", "S1")
+            assertEquals(listOf("S1", "D1", "D2"), EvalScenarios.loadAll().map { it.id })
+        } finally {
+            fun restore(k: String, v: String?) { if (v == null) System.clearProperty(k) else System.setProperty(k, v) }
+            restore("eval.first", keepFirst); restore("eval.only", keepOnly); restore("eval.includeHoldout", keepHoldout)
         }
     }
 
