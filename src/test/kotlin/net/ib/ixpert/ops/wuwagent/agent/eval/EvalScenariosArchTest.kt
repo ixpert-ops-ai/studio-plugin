@@ -63,7 +63,9 @@ class EvalScenariosArchTest {
         assertEquals(
             mapOf(
                 "D1" to "기존 패턴 신규 추가", "D2" to "기존 기능 수정", "D3" to "기존 패턴 신규 추가", "D4" to "모호",
-                "D5" to "제외 지시", "D5E" to "제외 지시", "D5N" to "제외 지시", "S1" to "기존 기능 수정", "S2" to "기존 패턴 신규 추가", "S3" to "제외 지시"
+                "D5" to "제외 지시", "D5E" to "제외 지시", "D5N" to "제외 지시", "S1" to "기존 기능 수정", "S2" to "기존 패턴 신규 추가", "S3" to "제외 지시",
+                // B-51 확인용(probe): 제외 확인 질문에 답하는 변형. 기준선 기본 실행에는 들어가지 않는다.
+                "D5X" to "제외 지시", "SR-05X" to "제외 지시"
             ),
             existing.associate { it.id to it.srType }
         )
