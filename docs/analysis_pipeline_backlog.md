@@ -811,3 +811,43 @@
   - 사용자 화면: 발화 번역 실패는 "발화 의도를 파악하는 중 오류가 발생했습니다. 다시 말씀해 주세요."(`ClarifyUtteranceTranslator.kt:123-127`, 엔진 `:924`, 라우터 `WebviewActionRouter.kt:308`로 전달). 제약 추출 실패는 조용히 기본 제약으로 대체된다(`Stage0ClarificationEngine.kt:1205-1208`). 정제문 실패는 원문으로 대체된다(`:1146-1149`). 작업 요약 실패는 null이고 화면에 "요약을 만들지 못했습니다"가 나온다(`App.tsx:434`).
   - 평가에서만 다른 점: 테스트에서는 `logger.error`가 AssertionError를 던지고, 이것은 `catch (e: Exception)`에 잡히지 않아 clarify 단계 예외로 run이 중단된다. 운영(IDE)에서는 같은 524가 위 안내문이나 기본값으로 이어지고 세션은 계속된다.
 - **다음 단계**: 제외 발화가 실제로 결과에서 빠지게 하는 설계는 별도 문서화한다(안 A 추천, 안 C는 다음 단계, B-51).
+
+### [B-51] 제외 발화가 실제로 결과에서 빠지게 하는 변경(0단계 문구, 1단계 안 A)과 평가 (2026-10-20)
+- **상태: 합격 기준 1개 미충족, 커밋은 로컬에만 두고 push하지 않았다.** 로컬 커밋: e6858c8(0단계), 60ebdf1(1단계), a0a2951과 66510a2(평가 변형), 이 문서.
+- **1번 사전 확인(`resolveExclusionCandidates`, LLM 없음)**: 코드와 `DomainDictionary` 내장 사전을 따라 한 재현이다. 재현은 실측과 먼저 대조했다(SR-12 "관리 화면은 그대로 두세요." 294개와 앞 10개, D5 "알림톡 배치는 건드리지 말고" 2개, "건드리지 마세요" 0개가 모두 일치).
+
+  | 입력 | 후보 수 | 앞쪽 | 대상 포함 |
+  |---|---|---|---|
+  | survey_admin "로그인 쪽 컨트롤러" | 0(교집합 없음) | 없음 | IpsController 아니오 |
+  | survey_admin "로그인 쪽 컨트롤러는 건드리지 마세요"(발화 전체) | 12(부분 매칭, 저신뢰) | AuthDto, UserDto, LoginUserDto, UserServiceImpl, AlimtalkTemplateBatchRunner, AuthVal, ApiService, ApiServiceImpl, IbCenterApiService, IbCenterApiServiceImpl | IpsController 11번째 |
+  | survey_admin "알림톡 배치" | 2 | AlimtalkTemplateBatchJob, AlimtalkTemplateBatchRunner | AlimtalkTemplateBatchRepository 아니오 |
+  | APC "관리 화면" | 12 | APCADSpacdTskCtlMngtBIZ, APCCOSpacdLgnBIZ, APCCOMbotSvProcsBIZ 등 | APCADUpdtVerMngtBIZ 아니오(증거 "관리 화면은 그대로 두세요."일 때는 294개 중 5번째) |
+  | member-market "관리자 화면의 조직 목록" | 81 | AdminManageResponse, AdminService, AdminRole, LoginRequest 등 | AdminService 2번째, AdminOrganizationResponse 20번째, OrganizationService(required)도 38번째로 포함 |
+
+  이 결과로 후보 상한 10개가 필요하다는 점이 확인됐다(81개 제안이면 required 파일을 제외 후보로 보여 주게 된다).
+- **0단계(e6858c8, 문구만)**: ADD_CONSTRAINT 안내는 모델의 message를 쓰지 않고 실제 상태를 말한다("제약 조건으로 기록했습니다: …. 이 제약만으로는 파일이 분석에서 제외되지 않습니다. 특정 파일을 빼려면 파일명을 지정해 주세요."; 제외 단어가 없는 제약에는 뒷문장이 없다). 위치 `ClarifyUtteranceTranslator.kt:254` 근방. 미확정 제외 경고(`ClarifyIntent.kt` `exclusionSummaryLines`)는 "다음 분석에서는 분석 중 나타나는 Stage 3 후보 확인 카드에서 해당 파일의 체크를 해제하거나, 새 세션(/clarify)에서 파일명을 지정해 다시 요청해 주세요."로 바꾸고 후보 이름을 5개까지만 쓴다("외 N개"). 단위 테스트 `ExclusionHonestMessageTest`(3개)와 `ExclusionDisplayTest.e5`가 문구를 고정한다.
+- **1단계(60ebdf1, 안 A)**: `Stage0ClarificationEngine.kt`에서 processTurn의 제외 답변 처리와 제안을 함수로 추출(processTurn은 기존 정확 일치 판정·무제한 후보·기존 질문 그대로)하고 `processUtterance`와 `initSession`(SR 원문)에서 호출한다. 제약 추출은 제외 단어(`ExclusionWords`)가 있는 발화에서만 1회 추가하고, SR 원문은 init의 기존 제약 추출 결과를 그대로 쓴다(호출 수 불변). 후보 탐색은 증거 구문, 후보가 없으면 발화 전체로 한 번 더. 후보 1~10개면 제안과 확인 질문, 10개 초과는 "N개라 특정하지 못했습니다. 파일명을 알려 주시면 제외합니다", 0개는 "대상을 찾지 못했습니다"를 알린다. 증거 구문에 파일명을 직접 적으면 바로 제외한다. 같은 증거 구문으로는 한 번만 묻는다(대화 기록으로 판단). 답은 긍정어 포함+부정어 없음=확정, 부정어만=취소, 섞이면(예: "네 근데 Runner는 빼지 마세요") 확정하지 않고 다시 묻지도 않고 미확정으로 남긴다. 답으로 읽는 발화는 6단어·30자 이하로 제한한다(긴 제외 요청이 "아니요"로 오인되는 것을 막기 위해). 답 없이 확정하면 제외하지 않고 미확정 제외로 표시한다(제안 항목에도 반영). 확정된 파일만 `excludedFiles`에 들어간다. 저장 형식(`ClarifyIntent` v1.2)과 analyze는 바꾸지 않았다. 단위 테스트 `ExclusionProposalFlowTest` 13개.
+- **검증**(`run_c4_accept.sh`): 전체 486/42/17(470에서 +3 ExclusionHonestMessageTest, +13 ExclusionProposalFlowTest), clarify 패키지 193/1/3, 실패 메시지 diff 0, 하네스 EXACT_MATCH 5종·MATCH_EXCLUDING 2종 일치, selftest 24/24. 0단계 직후 실행에서 `ExclusionDisplayTest.e5`의 신규 단언 오류(문구 "제외 요청"에 "외 "가 들어 있음)를 고친 뒤 통과했다.
+- **평가**(`live_eval_20261020_175239`, 사내 Qwen, UI 경로, 1회, 사전 예측 `pred_excl_a.md`, 총 1,374초): D5X는 D5N과 같은 대본이다(두 번째 발화 "네"). SR-05X는 SR-05에 예/아니요 질문이 없어(후보 81개) 안내에 파일명 두 개를 적어 답하는 변형으로 바꿨다.
+
+  | 시나리오 | 총(초) | clarify 시간 새 / 기준선 3회 | clarify 호출 새 / 기준선 | 엔진 질문 새 / 기준선 | Recall(uncertain 제외) | 제외 대상 노출 | excludedFiles |
+  |---|---|---|---|---|---|---|---|
+  | D5 | 236 | 117 / 97, 98, 83 | 8 / 7, 7, 7 | 2 / 2, 2, 2 | 1/1 (1/1) | 0/3 | [] |
+  | D5X | 238 | 141 / 97, 98, 83 | 9 / 7, 7, 7 | 3 / 2, 2, 2 | 1/1 (1/1) | 0/3 | Runner, Job |
+  | S3 | 201 | 110 / 84, 55, 53 | 8 / 6, 5, 5 | 1 / 0, 0, 0 | 2/4 (2/4) | - | [] |
+  | SR-05 | 155 | 94 / 75, 102, 102 | 6 / 5, 6, 6 | 1 / 0, 0, 0 | **1/2** (1/2) | 0/2 | [] |
+  | SR-05X | 184 | 143 / 75, 102, 102 | 8 / 5, 6, 6 | 1 / 0, 0, 0 | **1/2** (1/2) | 0/2 | AdminOrganizationResponse |
+  | SR-12 | 358 | 170 / 113, 119, 95 | 8 / 6, 6, 5 | 1 / 0, 0, 0 | 2/2 (1/1) | 1/1 | [] |
+
+  서버 오류 0건, 300초 넘는 호출 0건, 분석 실패 0건.
+- **합격 기준 판정**:
+  - D5X에서 Job과 Runner가 최종 목록에 없다 → 충족(excludedFiles에 둘 다 들어갔고 최종 목록은 SurveyServiceImpl 하나).
+  - 제외 요청 하나당 추가 질문 1회 이하 → 충족(D5 제외 확인 1회, S3·SR-05·SR-05X·SR-12 안내 1회).
+  - 제외 단어가 없는 시나리오의 clarify 호출 수 → 대상 6개는 모두 제외 단어가 있어 평가로는 해당 없음. 단위 테스트(f9)로 고정했다. 제외 단어가 있는 6개는 호출이 1~3건 늘었다(제약 추출 1회, 확인 질문이 남아 쓰인 대체 답변의 번역 호출 등).
+  - **대상 6개의 required 유지 수 → 미충족.** 합 8, B-50 3회 시나리오별 최솟값의 합 9. SR-05와 SR-05X가 각각 1/2(기준선 2/2 x3)다. 두 run 모두 Stage 3이 OrganizationRepository를 제거했다(사유 "이미 findByStatus 메서드가 존재하므로 추가 수정 불필요"). 후보 목록(Service, Controller, Repository, Status)과 요구사항 문장은 기준선과 거의 같고(정제문 표현만 조금 다름), 제외 흐름이 Stage 3 입력에 들어가는 경로는 없다(init 안내와 미확정 제외 표시는 화면용). 1회 실행이라 변경의 효과인지 Stage 3 판정의 변동인지 가를 수 없다(기준선 3회는 모두 유지).
+- **예측 대조(다른 점만)**: SR-05 Recall 2/2 예측에 1/2. SR-05X의 excludedFiles 두 파일 예측(약 70%)에 한 파일만(아래 결함). SR-12 clarify 시간 증가 +15~35초 예측에 +51~75초(확인 질문이 남아 대체 답변 경로의 번역 호출과 요약 호출이 더 쓰인 영향이 크다고 보이나 호출별로 분리하지는 않았다). 그 밖(D5, D5X, S3의 노출과 excludedFiles, SR-12 노출 1/1, 안내 문구)은 예측대로.
+- **관찰된 결함(수정하지 않음)**:
+  - SR-05X: 번역기가 두 번째 발화를 EXCLUDE로 분류해 파일 하나(AdminOrganizationResponse)만 제외하고 "AdminService.java는 현재 후보 목록에 존재하지 않아 제외할 수 없습니다"라고 안내했다. 이 발화가 EXCLUDE이면 제외 흐름을 건너뛰기 때문에 파일명을 직접 적은 AdminService는 처리되지 않았고, 안내문도 그래프에 있는 파일에 대해 사실과 다르다(후보 목록에 없을 뿐).
+  - 평가 대본은 제외 질문에 이름이나 "네"로 답하지 않으면 대체 답변("잘 모르겠어요…")이 쓰인다. 이 답은 답으로 읽히지 않아(OTHER) 번역기를 거친다.
+  - SR-12(후보 294개)와 S3(후보 12개)는 파일명을 알려 주지 않으면 노출이 그대로다. 클래스명을 모르는 사용자는 이 흐름으로 해결되지 않는다.
+- **다음 단계 기록**: 안 C(Stage 3 후보 확인 카드에서 제외 요청에 해당하는 후보를 사전 해제 표시)는 후보 294개를 실제 후보 9개와 교집합해 하나로 좁히므로, 대상 클래스명을 모르는 사용자(SR-12 유형)에 맞다. 웹뷰 변경이 필요해 이번 범위에서 제외했다. 안 A의 보완으로는 번역기가 EXCLUDE를 내도 증거 구문에 다른 파일명이 있으면 제외 흐름을 이어 가는 것을 후보로 둔다.
