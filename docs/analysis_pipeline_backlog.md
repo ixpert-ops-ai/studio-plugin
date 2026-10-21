@@ -868,3 +868,45 @@
 
     제외 대상 노출 0/2 x3, 서버 오류 0건, 분석 실패 0건. 엔진 질문은 안내 1회.
   - **판정**: 3회 중 3회 유지(합격 기준: 2회 이상 유지)이므로 안 A 실행 175239의 SR-05·SR-05X 제거는 Stage 3 판정의 변동이다. 이 판정으로 B-51의 "required 유지 수 미충족"은 해소된 것으로 본다(175239의 SR-05X는 기준선 비교 대상이 아닌 변형이다). SR-05X에서 번역기가 EXCLUDE를 내면 파일명 직접 제외 흐름이 건너뛰어지는 결함은 그대로 남아 있다(다음 수정 후보).
+
+### [B-52] 발화에 적힌 파일명을 번역기 분류와 상관없이 제외하는 보완((나) 수정)과 SR-05X 판정 (2026-10-21)
+- **상태: 지정한 합격 기준 3개는 모두 충족했지만, 수정의 목적(명시한 파일을 모두 제외하고 안내를 사실대로)은 실측에서 달성되지 않아 push하지 않았다.** 로컬 커밋: 1d52f97(수정과 테스트), 이 문서. 원격은 271f3d0 그대로.
+- **1번 위치(읽기, 수정 전 기준)**:
+  - a. 번역기가 EXCLUDE를 낼 때 파일명 직접 제외 흐름을 건너뛰는 분기: `Stage0ClarificationEngine.kt:1186`(`processUtterance`의 `translated.kind != UserActionKind.EXCLUDE` 조건).
+  - b. "후보 목록에 존재하지 않아" 안내를 만드는 곳: 코드가 만드는 고정 문구는 `ClarifyUtteranceTranslator.kt:216`(EXCLUDE인데 targetId가 후보에 없을 때 `message ?: "지정하신 파일은 현재 후보 목록에 존재하지 않습니다."`)뿐이고, SR-05X에서 본 "AdminService.java는 현재 후보 목록에 존재하지 않아 제외할 수 없습니다"는 모델이 번역 응답의 `message`에 쓴 문장이다. EXCLUDE 분기가 그 `message`를 그대로 안내로 쓴다(`ClarifyUtteranceTranslator.kt:205-210`). 이 분기를 고정 문구로 바꾸려 했으나 `Stage0UtteranceProcessTest.testPhase33_…`가 모델 message를 그대로 확인해서 되돌렸고, 대신 엔진이 파일명 안내를 만들면 번역기 안내를 뺀다.
+  - c. 그래프 전체에서 파일명을 찾는 기존 함수: 있다. `explicitExistingTargets`(`Stage0ClarificationEngine.kt:785`, `graph.files`와 `graph.resourceNodes` 검색, 안 A에서 만듦)와 B-12의 `resolveUserUtteredIdentifiers`(`:100`, `:135`). 새 함수는 만들지 않고 이것을 `explicitFileMentions`로 확장했다(그래프에 없는 파일명도 돌려줌, 약 +30줄).
+- **변경(1d52f97, `Stage0ClarificationEngine.kt`만, 번역기는 수정 없음)**: 번역기가 EXCLUDE(또는 UNKNOWN, ADD_CONSTRAINT)를 내도, 번역기가 처리한 파일 말고 다른 파일명이 발화에 더 적혀 있으면 제약 추출 1회를 하고(`:1222` `needExtraction`), 제약 추출이 EXCLUDE_COMPONENT로 분류한 증거 구문 안의 파일명을 처리한다. 후보 항목에 있으면 제외 확정("다음 파일을 분석 대상에서 제외했습니다"), 후보에는 없지만 그래프에 있으면 REJECTED 항목으로 제외 목록에 넣고 "후보에는 없었지만 제외 목록에 넣었습니다", 그래프에 없으면 "<이름>을(를) 찾지 못했습니다"(`:855-886`, 안내 조합 `:920`). 확인 질문은 하지 않는다. 안내를 만들면 번역기 안내를 빼는 조건은 `:1238`.
+- **검증**: 전체 490/42/17(486에서 +4, 새 테스트 g1~g4), clarify 197/1/3, 실패 메시지 diff 0, 하네스 EXACT_MATCH 5종·MATCH_EXCLUDING 2종 일치, selftest 24/24.
+- **2-a 지시 항목과 테스트 대응**(`ExclusionProposalFlowTest`):
+
+  | 지시 항목 | 테스트 |
+  |---|---|
+  | 파일명 2개 + EXCLUDE 분류 → 2개 모두 제외 | `g1_twoFileNamesWithAnExcludeClassificationExcludeBoth` |
+  | 후보에는 없지만 그래프에 있는 파일 → 제외, 안내가 사실과 맞음 | `g2_fileNotInTheCandidatesButInTheGraphIsExcludedAndSaidSo` |
+  | 그래프에 없는 파일명 → excludedFiles 변화 없음, "찾지 못했습니다" | `g3_fileNameMissingFromTheGraphIsReportedAndNothingIsExcluded` |
+  | 파일명이 없는 발화 → 기존 결과와 같음 | `g4_utteranceWithoutFileNamesFollowsTheExistingFlow`(추가로 f1, f6, f7) |
+  | 기존 단일 EXCLUDE → 결과 변화 없음 | `f11_singleExcludeByTheTranslatorIsUnchanged`와 기존 `Stage0UtteranceProcessTest.testInvariantA_ExcludeStatusReflectionAndIntentExtraction`(12개 모두 통과) |
+
+  빠진 항목은 없다. 다만 g1~g3은 제약 추출 응답을 EXCLUDE_COMPONENT로 고정해 두었다. 실측에서는 모델이 같은 발화를 SCOPE_LIMIT으로 분류했는데(아래), 이 경우를 다루는 테스트가 없었다(테스트 공백).
+- **2-b 번역기 안내를 빼는 조건(`:1238`)**: "파일명 안내(`exclusionNote`)를 하나라도 만들었을 때"다(`exclusionNote != null`, 그리고 번역기가 EXCLUDE이거나 UNKNOWN+후보 외). 추출한 파일명을 모두 처리했는지는 보지 않는다. "찾지 못했습니다" 줄도 안내에 포함된다.
+- **2-c 파일명 2개 중 1개만 그래프에 있을 때(코드 `:920-924`)**: 엔진 안내에 두 파일의 결과가 모두 나온다(찾은 파일은 "다음 파일을…제외했습니다" 또는 "후보에는 없었지만…" 줄, 못 찾은 파일은 "…을(를) 찾지 못했습니다." 줄이 줄바꿈으로 이어짐). 테스트 `g3`가 못 찾은 줄과 제외 목록을 확인하지만 찾은 파일의 안내 줄 문구 자체는 단언하지 않았다(코드로 확인).
+- **측정(`live_eval_20261021_131050`, SR-05X 3회, 사내 Qwen, 사전 예측 `pred_excl_b.md`)**:
+
+  | 회차 | 총(초) | clarify(초/호출) | excludedFiles | 제외 대상 노출 | required 유지 | 엔진 질문 |
+  |---|---|---|---|---|---|---|
+  | 1 | 209 | 158 / 9 | AdminOrganizationResponse만 | 0/2 | 2/2 | 1 |
+  | 2 | 193 | 139 / 9 | AdminOrganizationResponse만 | 0/2 | 2/2 | 1 |
+  | 3 | 193 | 147 / 9 | AdminOrganizationResponse만 | 0/2 | 2/2 | 1 |
+
+  화면 안내(발화 2): 1회차 "AdminOrganizationResponse.java 파일을 분석 후보에서 제외했습니다. AdminService.java는 현재 후보 목록에 존재하지 않아 제외할 수 없습니다.", 2회차 "…파일을 후보 목록에서 제외했습니다. AdminService.java는 현재 후보 목록에 존재하지 않아 제외할 수 없습니다.", 3회차 1회차와 같은 문장. 모두 번역기(모델) 안내 하나뿐이고 엔진 안내는 나오지 않았다. 서버 오류와 분석 실패는 0건.
+- **판정**:
+  - 합격 기준(제외 대상 노출 0/2 x3, 엔진 질문 기존보다 늘지 않음(1회, 안 A와 같음), required 유지 3회 중 2회 이상(3/3)) 3개는 모두 충족한다. 다만 노출 0/2는 이번 수정의 효과가 아니다. Admin 파일은 수정 전에도 결과에 나오지 않았다(SR-05X 175239도 0/2).
+  - **수정의 목적은 달성되지 않았다.** AdminService는 3회 모두 제외되지 않았고(excludedFiles에 없음), 사실과 다른 안내("존재하지 않아 제외할 수 없습니다", AdminService는 그래프에 있다)가 3회 모두 나왔다.
+  - **원인**: 발화 2의 제약 추출(호출 c6, c21, c36)이 이 문장을 EXCLUDE_COMPONENT가 아니라 SCOPE_LIMIT("AdminService.java와 AdminOrganizationResponse.java 파일 수정 제외")으로 3회 모두 분류했고, `proposeExclusionsForUtterance`가 EXCLUDE_COMPONENT인 증거 구문만 처리해서(`:847`) 파일명 처리 흐름이 시작되지 않았다. 추가된 제약 추출 호출(회차당 +1, clarify 호출 8 -> 9)은 효과 없이 시간만 늘렸다. 번역기 안내를 빼는 조건도 안내를 만들었을 때만 켜져서 모델 문장이 그대로 남았다.
+  - Stage 3 변동 가림은 필요 없다(required 유지 3/3).
+- **push 보류 사유**: 2-c의 의도(두 파일의 결과가 모두 화면에 나옴)가 실측에서 충족되지 않았다. 기준 3개는 충족이라 규칙상 push할 수 있으나, 동작하지 않는 보완을 올리는 것이라 보류하고 사용자 판단에 맡긴다.
+- **다음 수정 후보(수정하지 않음)**:
+  - 파일명 처리 대상을 EXCLUDE_COMPONENT 증거 구문으로만 한정하지 말고, 번역기가 EXCLUDE를 낸 발화(번역기가 제외 의도로 분류했다는 신호)에서는 SCOPE_LIMIT로 분류된 증거 구문의 파일명도 제외 대상으로 읽는다. SCOPE_LIMIT은 원래 "OrderServiceImpl만 수정" 같은 한정이라 파일명이 "수정할 파일"일 수 있으므로, 번역기가 EXCLUDE를 낸 경우나 증거 구문에 "제외, 빼"가 함께 있는 경우로 좁혀야 한다.
+  - 번역기가 EXCLUDE를 낼 때 모델이 쓴 `message`를 쓰지 않고 고정 문구로 바꾸기(현재 `Stage0UtteranceProcessTest`가 모델 message를 확인하고 있어 그 테스트도 함께 바꿔야 한다).
+  - 제약 추출이 SCOPE_LIMIT/EXCLUDE_COMPONENT로 갈리는 응답을 모두 담는 테스트 추가.
+- **B-51 마무리**: B-51의 "SR-05X는 (나) 이후 판정" 항목은 이 문서의 판정으로 닫는다. SR-05X는 required 유지 3/3, 제외 대상 노출 0/2 x3으로 기준은 충족하지만 AdminService 제외와 안내의 정정은 되지 않았다.
