@@ -1306,6 +1306,14 @@ class WebviewActionRouter(private val project: Project) {
                     com.intellij.openapi.project.ProjectManager.getInstance().openProjects.forEach { p ->
                         net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(p).sendMessage("selected_model", targetModel)
                     }
+
+                    // 모델이 바뀌었으므로 서버 목록 기준으로 상태 램프 재확인 (진행 중이면 합류)
+                    net.ib.ixpert.ops.wuwagent.service.ServerStatusService.checkAsync()
+                }
+
+                // ── Server Status: 하단 ↻ 클릭 시 서버 상태 즉시 재확인 ──────────────
+                "/checkServer" -> {
+                    net.ib.ixpert.ops.wuwagent.service.ServerStatusService.checkAsync()
                 }
 
                 // ── Chat History: 대화 저장 ──────────────

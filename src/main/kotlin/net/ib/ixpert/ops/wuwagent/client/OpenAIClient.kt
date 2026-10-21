@@ -8,6 +8,7 @@ import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse
 import net.ib.ixpert.ops.wuwagent.model.OllamaMessage
 import net.ib.ixpert.ops.wuwagent.service.DebugManager
+import net.ib.ixpert.ops.wuwagent.service.ServerStatusService
 import java.io.IOException
 
 @Suppress("UnstableApiUsage")
@@ -192,11 +193,13 @@ class OpenAIClient : LLMClient {
                     DebugManager.getInstance().addLog(debugEntry)
                 }
             } catch (_: Exception) {}
+            reportRequestSuccess()
             result
         } catch (e: IOException) {
             // 사용자에게는 분류된 안내 메시지만 노출하고, 원본 예외는 logger에만 남긴다.
             val errorMsg = "[Error] " + LlmErrorMessages.describe(e, serverUrl)
             logger.error("OpenAIClient: LLM 호출 실패 (원본: ${e.message})", e)
+            reportRequestFailure(e)
             try {
                 if (debugEntry != null) {
                     debugEntry.durationMs = System.currentTimeMillis() - startMs
@@ -209,6 +212,7 @@ class OpenAIClient : LLMClient {
         } catch (e: Exception) {
             val errorMsg = "[Error] " + LlmErrorMessages.describe(e, serverUrl)
             logger.error("OpenAIClient: 예상치 못한 전송/파싱 오류 (원본: ${e.message})", e)
+            reportRequestFailure(e)
             try {
                 if (debugEntry != null) {
                     debugEntry.durationMs = System.currentTimeMillis() - startMs
@@ -300,10 +304,12 @@ class OpenAIClient : LLMClient {
                 }
             } catch (_: Exception) {}
             
+            reportRequestSuccess()
             gson.fromJson(responseString, net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse::class.java)
         } catch (e: Exception) {
             val errorMsg = e.message ?: "Unknown error"
             logger.error("OpenAI API ToolCalling Failed: $errorMsg", e)
+            reportRequestFailure(e)
             
             try {
                 if (debugEntry != null) {
@@ -318,31 +324,45 @@ class OpenAIClient : LLMClient {
         }
     }
 
+    /** 실제 LLM 요청 결과를 서버 상태 램프에 반영 (추가 네트워크 호출 없음). 사용자 취소는 반영하지 않는다. */
+    private fun reportRequestSuccess() {
+        if (TaskCancellationToken.isCancelled.get()) return
+        try { ServerStatusService.onRequestSuccess() } catch (_: Exception) {}
+    }
+
+    private fun reportRequestFailure(e: Throwable) {
+        if (TaskCancellationToken.isCancelled.get()) return
+        try { ServerStatusService.onRequestFailure(e) } catch (_: Exception) {}
+    }
+
     override fun fetchModels(baseUrl: String, apiKey: String): List<String>? {
-        val cleanUrl = baseUrl.trimEnd('/')
-        if (cleanUrl.isBlank()) return null
-
+        if (baseUrl.trimEnd('/').isBlank()) return null
         return try {
-            val url = "$cleanUrl/v1/models"
-            val response = HttpRequests.request(url).tuner {
-                if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
-                it.connectTimeout = 5000
-                it.readTimeout = 5000
-            }.readString()
-
-            val json = JsonParser.parseString(response).asJsonObject
-
-            // 1순위: 표준 OpenAI 형식 (data[].id)
-            val data = json.getAsJsonArray("data")
-            val standardModels = data?.mapNotNull { it.asJsonObject.get("id")?.asString }
-            if (!standardModels.isNullOrEmpty()) return standardModels
-
-            // 2순위: AIPro 형식 (modelList[].name)
-            val modelList = json.getAsJsonArray("modelList")
-            modelList?.mapNotNull { it.asJsonObject.get("name")?.asString }
+            fetchModelsOrThrow(baseUrl, apiKey)
         } catch (e: Exception) {
             logger.warn("OpenAIClient: fetchModels failed", e)
             null
         }
+    }
+
+    override fun fetchModelsOrThrow(baseUrl: String, apiKey: String): List<String>? {
+        val cleanUrl = baseUrl.trimEnd('/')
+        val url = "$cleanUrl/v1/models"
+        val response = HttpRequests.request(url).tuner {
+            if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
+            it.connectTimeout = 5000
+            it.readTimeout = 5000
+        }.readString()
+
+        val json = JsonParser.parseString(response).asJsonObject
+
+        // 1순위: 표준 OpenAI 형식 (data[].id)
+        val data = json.getAsJsonArray("data")
+        val standardModels = data?.mapNotNull { it.asJsonObject.get("id")?.asString }
+        if (!standardModels.isNullOrEmpty()) return standardModels
+
+        // 2순위: AIPro 형식 (modelList[].name)
+        val modelList = json.getAsJsonArray("modelList")
+        return modelList?.mapNotNull { it.asJsonObject.get("name")?.asString }
     }
 }

@@ -10,7 +10,7 @@ import com.intellij.openapi.startup.ProjectActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import net.ib.ixpert.ops.wuwagent.service.WuwLlmService
+import net.ib.ixpert.ops.wuwagent.service.ServerStatusService
 import net.ib.ixpert.ops.wuwagent.setting.SettingsState
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -55,14 +55,12 @@ class ModelValidationStartupActivity : ProjectActivity {
             SettingsState.ApiType.AIPRO -> settings.aiproServerUrl
         }
 
-        // WuwLlmService.getClient()로 기존 apiType 분기(Ollama /api/tags vs
-        // OpenAI Compatible /v1/models)를 그대로 재사용한다.
-        // ※ WuwLlmService.fetchModels(...) 래퍼는 성공/실패 시 항상 Messages 다이얼로그를
-        //   띄우는 UI 헬퍼라 백그라운드 자동 검증에는 부적합 — LLMClient.fetchModels()를 직접 호출.
+        // 서버 조회는 ServerStatusService로 위임 (하단 상태 램프와 동일한 확인 로직).
+        // 모델 목록 조회만 하며 LLM 생성 호출은 하지 않는다. 실패(다운/네트워크 오류/미지원)는 models == null.
         val models = try {
             withTimeoutOrNull(TIMEOUT_MS) {
                 withContext(Dispatchers.IO) {
-                    WuwLlmService.getClient().fetchModels(baseUrl, settings.effectiveApiKey())
+                    ServerStatusService.check().models
                 }
             }
         } catch (e: Exception) {

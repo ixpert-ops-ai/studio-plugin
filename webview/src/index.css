@@ -602,10 +602,56 @@ body {
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
-  font-size: 10px;
-  color: #999;
+  font-size: 11px;
+  color: #aaa;
   letter-spacing: 0.2px;
 }
+
+.model-status-footer {
+  gap: 6px;
+  min-width: 0;
+}
+
+.model-status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 서버 상태 램프 — 어두운/밝은 배경 모두에서 구분되도록 테두리를 함께 사용 */
+.server-lamp {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 1px solid rgba(128, 128, 128, 0.55);
+  background: transparent;           /* CHECKING: 빈 원 */
+}
+.server-lamp.ok              { background: #2ea043; border-color: #1f7a31; }
+.server-lamp.model-not-found { background: #e8890c; border-color: #b36a00; }
+.server-lamp.unreachable     { background: #e5484d; border-color: #b3261e; }
+
+.server-refresh-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: inherit;
+  opacity: 0.8;
+  cursor: pointer;
+}
+.server-refresh-btn:hover { opacity: 1; background: rgba(128, 128, 128, 0.2); }
+.server-refresh-btn.spinning { cursor: default; opacity: 0.9; }
+.server-refresh-btn.spinning svg { animation: server-refresh-spin 0.9s linear infinite; }
+@keyframes server-refresh-spin { to { transform: rotate(360deg); } }
 
 .model-status-footer strong {
   margin-left: 2px;

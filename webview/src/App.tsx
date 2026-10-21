@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Settings, Plus, MessageSquare, Square, Terminal, ArrowRight, ArrowDown, ChevronUp, ChevronDown, X, Info } from 'lucide-react';
+import { Settings, Plus, MessageSquare, Square, RefreshCw, ArrowRight, ArrowDown, ChevronUp, ChevronDown, X, Info } from 'lucide-react';
 import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -566,12 +566,50 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
 // ─────────────────────────────────────────────
 //  메인 App
 // ─────────────────────────────────────────────
+
+type ServerState = 'CHECKING' | 'OK' | 'MODEL_NOT_FOUND' | 'UNREACHABLE';
+interface ServerStatusInfo {
+  state: ServerState;
+  latencyMs?: number;
+  lastCheckedAt?: number;
+  failingSince?: number;
+  errorSummary?: string;
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const fmtHM = (ms?: number) => { if (ms == null) return ''; const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const fmtHMS = (ms?: number) => { if (ms == null) return ''; const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
+
+// 모델명 뒤에 붙는 상태 텍스트 (CHECKING/OK는 없음)
+const serverStatusSuffix = (s: ServerStatusInfo): string => {
+  if (s.state === 'MODEL_NOT_FOUND') return ' · 서버에 없는 모델';
+  if (s.state === 'UNREACHABLE') return ` · 연결 안 됨 (${fmtHM(s.failingSince)}~)`;
+  return '';
+};
+
+// 램프 툴팁 (서버 주소는 노출하지 않음)
+const serverStatusTooltip = (s: ServerStatusInfo): string => {
+  switch (s.state) {
+    case 'OK':
+      return `${s.latencyMs != null ? `응답 ${s.latencyMs}ms · ` : ''}마지막 확인 ${fmtHMS(s.lastCheckedAt)} · ↻로 다시 확인`;
+    case 'MODEL_NOT_FOUND':
+      return `설정 모델이 서버 목록에 없음 · 마지막 확인 ${fmtHMS(s.lastCheckedAt)}`;
+    case 'UNREACHABLE':
+      return `서버 응답 없음 (${s.errorSummary ?? '알 수 없는 오류'}) · ${fmtHMS(s.failingSince)}부터 · ↻로 다시 확인`;
+    default:
+      return '서버 상태 확인 중…';
+  }
+};
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([{
     id: '1', role: 'ai', content: '무엇을 도와드릴까요?'
   }]);
   const [inputText, setInputText] = useState('');
   const [selectedModel, setSelectedModel] = useState<string>('Loading...');
+  // 서버 상태 램프 (IDE가 server_status 메시지로 전달. 자동 재확인 없음 — 클릭/IDE 이벤트로만 갱신)
+  const [serverStatus, setServerStatus] = useState<ServerStatusInfo>({ state: 'CHECKING' });
+  const [refreshClicked, setRefreshClicked] = useState(false);
   const chatListRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isNearBottom = useRef(true); // 사용자가 하단 근처에 있는지 추적 (자동 스크롤용)
@@ -806,6 +844,21 @@ function App() {
 
       if (data.subType === 'selected_model') {
         setSelectedModel(data.content);
+        return;
+      }
+
+      if (data.subType === 'server_status') {
+        const num = (v: unknown) => (v === '' || v == null ? undefined : Number(v));
+        const state = (['CHECKING', 'OK', 'MODEL_NOT_FOUND', 'UNREACHABLE'] as const)
+          .find(s => s === data.status) ?? 'CHECKING';
+        setServerStatus({
+          state,
+          latencyMs: num(data.latencyMs),
+          lastCheckedAt: num(data.lastCheckedAt),
+          failingSince: num(data.failingSince),
+          errorSummary: data.errorSummary || undefined,
+        });
+        if (state !== 'CHECKING') setRefreshClicked(false);
         return;
       }
 
@@ -1195,6 +1248,16 @@ function App() {
     setShowChatListPopup(true);
     setIsChatListLoading(true);
     window.sendToIde?.(JSON.stringify({ command: '/listChats' }));
+  };
+
+  // 확인 중(IDE 확인 진행 또는 방금 클릭)에는 중복 클릭을 무시한다
+  const isServerChecking = serverStatus.state === 'CHECKING' || refreshClicked;
+  // 확인 중에는 램프/텍스트/툴팁 모두 CHECKING으로 표시 (클릭 직후 IDE 응답 전에도 즉시 회색)
+  const shownStatus: ServerStatusInfo = isServerChecking ? { ...serverStatus, state: 'CHECKING' } : serverStatus;
+  const handleRefreshServer = () => {
+    if (isServerChecking || !window.sendToIde) return;
+    setRefreshClicked(true);
+    window.sendToIde(JSON.stringify({ command: '/checkServer' }));
   };
 
   const handleSend = () => {
@@ -1673,8 +1736,25 @@ function App() {
           )}
         </div>
         <div className="model-status-footer">
-          <Terminal size={10} className="inline mr-1 opacity-60" />
-          <span>Model: <strong>{selectedModel}</strong></span>
+          <span
+            className={`server-lamp ${shownStatus.state.toLowerCase().replace(/_/g, '-')}`}
+            title={serverStatusTooltip(shownStatus)}
+            role="img"
+            aria-label={serverStatusTooltip(shownStatus)}
+          />
+          <span className="model-status-text">
+            Model: <strong>{selectedModel}</strong>
+            {serverStatusSuffix(shownStatus)}
+          </span>
+          <button
+            type="button"
+            className={`server-refresh-btn${isServerChecking ? ' spinning' : ''}`}
+            title="서버 상태 다시 확인"
+            aria-label="서버 상태 다시 확인"
+            onClick={handleRefreshServer}
+          >
+            <RefreshCw size={14} />
+          </button>
         </div>
       </div>
     </div>

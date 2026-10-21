@@ -9,6 +9,7 @@ import net.ib.ixpert.ops.wuwagent.model.OllamaChatRequest
 import net.ib.ixpert.ops.wuwagent.model.OllamaChatResponse
 import net.ib.ixpert.ops.wuwagent.model.OllamaMessage
 import net.ib.ixpert.ops.wuwagent.service.DebugManager
+import net.ib.ixpert.ops.wuwagent.service.ServerStatusService
 import java.io.IOException
 
 @Suppress("UnstableApiUsage")
@@ -177,6 +178,7 @@ class OllamaClient : LLMClient {
                     DebugManager.getInstance().addLog(debugEntry)
                 }
             } catch (_: Exception) {}
+                reportRequestSuccess()
                 return result
             } catch (e: IOException) {
                 lastException = e
@@ -216,6 +218,7 @@ class OllamaClient : LLMClient {
         // 모든 재시도 실패 시 — 사용자에게는 분류된 안내 메시지만 노출, 원본은 logger에만 남긴다.
         val finalException = lastException ?: Exception("Unknown error")
         val errorMsg = "[Error] " + LlmErrorMessages.describe(finalException, serverUrl)
+        reportRequestFailure(finalException)
         logger.error("OllamaClient: 재시도 $maxAttempts 회 초과 (원본: ${finalException.message})", finalException)
         try {
             if (debugEntry != null) {
@@ -348,24 +351,38 @@ class OllamaClient : LLMClient {
         }
     }
 
+    /** 실제 LLM 요청 결과를 서버 상태 램프에 반영 (추가 네트워크 호출 없음). 사용자 취소는 반영하지 않는다. */
+    private fun reportRequestSuccess() {
+        if (TaskCancellationToken.isCancelled.get()) return
+        try { ServerStatusService.onRequestSuccess() } catch (_: Exception) {}
+    }
+
+    private fun reportRequestFailure(e: Throwable) {
+        if (TaskCancellationToken.isCancelled.get()) return
+        try { ServerStatusService.onRequestFailure(e) } catch (_: Exception) {}
+    }
+
     override fun fetchModels(baseUrl: String, apiKey: String): List<String>? {
-        val cleanUrl = baseUrl.trimEnd('/')
-        if (cleanUrl.isBlank()) return null
-
+        if (baseUrl.trimEnd('/').isBlank()) return null
         return try {
-            val url = "$cleanUrl/api/tags"
-            val response = HttpRequests.request(url).tuner {
-                if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
-                it.connectTimeout = 5000
-                it.readTimeout = 5000
-            }.readString()
-
-            val jsonObject = JsonParser.parseString(response).asJsonObject
-            val modelsArray = jsonObject.getAsJsonArray("models")
-            modelsArray?.mapNotNull { it.asJsonObject.get("name")?.asString }
+            fetchModelsOrThrow(baseUrl, apiKey)
         } catch (e: Exception) {
             logger.warn("OllamaClient: fetchModels failed", e)
             null
         }
+    }
+
+    override fun fetchModelsOrThrow(baseUrl: String, apiKey: String): List<String>? {
+        val cleanUrl = baseUrl.trimEnd('/')
+        val url = "$cleanUrl/api/tags"
+        val response = HttpRequests.request(url).tuner {
+            if (apiKey.isNotBlank()) it.setRequestProperty("Authorization", "Bearer $apiKey")
+            it.connectTimeout = 5000
+            it.readTimeout = 5000
+        }.readString()
+
+        val jsonObject = JsonParser.parseString(response).asJsonObject
+        val modelsArray = jsonObject.getAsJsonArray("models")
+        return modelsArray?.mapNotNull { it.asJsonObject.get("name")?.asString }
     }
 }

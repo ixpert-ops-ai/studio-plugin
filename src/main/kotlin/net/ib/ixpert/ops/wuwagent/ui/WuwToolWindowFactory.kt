@@ -69,6 +69,9 @@ class WuwToolWindowFactory : ToolWindowFactory {
                         val settings = net.ib.ixpert.ops.wuwagent.setting.SettingsState.getInstance().state
                         bridge.sendMessage("selected_model", settings.model)
                         logger.info("WuwToolWindow: 초기 모델 정보 전송 완료 (${settings.model})")
+
+                        // 서버 상태: 서버 호출 없이 보관된 최신 값만 전송 (창 열기/포커스로 재확인하지 않음)
+                        net.ib.ixpert.ops.wuwagent.service.ServerStatusService.sendCurrentTo(bridge)
                     }
                 }
             }, browser.cefBrowser)
