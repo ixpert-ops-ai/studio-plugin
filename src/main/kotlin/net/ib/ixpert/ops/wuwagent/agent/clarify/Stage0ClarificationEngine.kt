@@ -786,23 +786,29 @@ class Stage0ClarificationEngine(
         fun isEmpty(): Boolean = found.isEmpty() && notFound.isEmpty()
     }
 
-    private val fileNameWithExtension = Regex("""^[A-Za-z0-9_.-]+\.(java|kt|xml|jsp|js|sql|html|css|json)$""", RegexOption.IGNORE_CASE)
-    private val classLikeName = Regex("""^[A-Z][A-Za-z0-9_]*$""")
+    /** 파일명 형태 1: 확장자가 있는 토큰(.java, .kt, .xml, .properties 등). */
+    private val fileTokenWithExtension = Regex("""(?<![A-Za-z0-9_])[A-Za-z0-9_.-]+\.(java|kt|xml|properties|yml|yaml|jsp|js|sql|html|css|json)(?![A-Za-z0-9_])""", RegexOption.IGNORE_CASE)
 
-    /** 파일명으로 읽을 수 있는 식별자만 쓴다(확장자가 있는 파일명, 또는 대문자가 둘 이상인 UpperCamelCase 클래스명). 메서드명 등은 제외. */
-    private fun looksLikeFileName(token: String): Boolean =
-        fileNameWithExtension.matches(token) ||
-            (classLikeName.matches(token) && token.length >= 3 && token.count { it.isUpperCase() } >= 2 && token.any { it.isLowerCase() })
+    /** 파일명 형태 2: 대문자로 시작하는 식별자 중 그래프 노드의 클래스명과 정확히 일치하는 것(일치 여부는 아래 함수에서 본다). */
+    private val classNameToken = Regex("""(?<![A-Za-z0-9_])[A-Z][A-Za-z0-9_]*(?![A-Za-z0-9_])""")
+
+    /** "SurveyServiceImpl만 수정"처럼 "만"이 붙은 이름은 수정할 대상(한정)이라 제외 대상으로 읽지 않는다. */
+    private val exclusiveParticleToken = Regex("""(?<![A-Za-z0-9_])[A-Za-z0-9_.-]+만""")
+
+    /** 절(clause)을 끊는 연결어와 문장 끝. "알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야"에서 뒤 절의 파일명이 제외 대상으로 읽히지 않게 한다. */
+    private val clauseConnective = Regex("(말고|하고|하되|이고|지만|면서|그리고)")
+    private val sentenceBreak = Regex("""(?<=[.!?])\s+|\n""")
 
     /**
-     * 글(증거 구문 또는 발화) 안에 사용자가 직접 적은 파일명(클래스명, 확장자 포함 파일명)을 그래프 전체에서 찾는다.
-     * 같은 파일이 두 표기(Foo.java, Foo)로 적혀도 한 번만 센다. 그래프에 없는 파일명은 notFound로 돌려준다(확장자 표기를 우선 보인다).
+     * 글(증거 구문 또는 발화) 안에 사용자가 직접 적은 파일명을 그래프 전체에서 찾는다(결정론적, LLM 없음).
+     * 파일명 형태는 확장자가 있는 토큰, 그리고 그래프 노드의 클래스명과 정확히 일치하는 이름이다.
+     * 같은 파일이 두 표기(Foo.java, Foo)로 적혀도 한 번만 센다. 그래프에 없는 파일명은 확장자가 있는 것만 notFound로 돌려준다.
      */
     private fun explicitFileMentions(text: String): FileMentions {
         val found = LinkedHashMap<String, ExclusionTarget>()
         val notFound = LinkedHashMap<String, String>()
-        val ids = IdentifierRetentionChecker.extractIdentifiers(listOf(text)).filter { looksLikeFileName(it) }
-        for (id in ids.sortedByDescending { it.contains('.') }) {
+        for (m in fileTokenWithExtension.findAll(text)) {
+            val id = m.value
             val baseName = id.substringBeforeLast(".")
             val file = graph.files.values.find { fileNode ->
                 val fName = fileNode.path.substringAfterLast("/")
@@ -819,7 +825,71 @@ class Stage0ClarificationEngine(
             if (resource != null) { found[resource.path] = ExclusionTarget(resource.path, resource.path.substringAfterLast("/").substringBeforeLast(".")); notFound.remove(baseName.lowercase()); continue }
             notFound.putIfAbsent(baseName.lowercase(), id)
         }
+        for (m in classNameToken.findAll(text)) {
+            val file = graph.files.values.find { it.className == m.value } ?: continue
+            found[file.path] = ExclusionTarget(file.path, file.className)
+            notFound.remove(m.value.lowercase())
+        }
         return FileMentions(found.values.toList(), notFound.values.toList())
+    }
+
+    /**
+     * 발화 원문에서, 제외 표현(제외, 빼, 건드, 말고, 그대로 등)이 같은 절에 있는 파일명만 읽는다(결정론적, LLM 없음).
+     * 번역기 분류(EXCLUDE, ADD_CONSTRAINT 등)와 제약 추출 분류(EXCLUDE_COMPONENT, SCOPE_LIMIT 등)는 조건에 쓰지 않는다.
+     * "만"이 붙은 이름(수정 대상 한정)과 제외 표현이 없는 절의 이름은 읽지 않는다.
+     */
+    private fun explicitExclusionMentions(stmt: String): FileMentions {
+        if (!ExclusionWords.containsExclusionWord(stmt)) return FileMentions(emptyList(), emptyList())
+        val clauses = stmt.replace(clauseConnective, "\$1\u0000").replace(sentenceBreak, "\u0000").split('\u0000')
+        val found = LinkedHashMap<String, ExclusionTarget>()
+        val notFound = LinkedHashMap<String, String>()
+        for (clause in clauses) {
+            if (!ExclusionWords.containsExclusionWord(clause)) continue
+            val m = explicitFileMentions(clause.replace(exclusiveParticleToken, " "))
+            m.found.forEach { found.putIfAbsent(it.path, it) }
+            m.notFound.forEach { notFound.putIfAbsent(it.substringBeforeLast(".").lowercase(), it) }
+        }
+        return FileMentions(found.values.toList(), notFound.values.toList())
+    }
+
+    /**
+     * 글에 적힌 파일명을 제외 목록에 반영하고 화면 안내를 돌려준다(처리한 것이 없으면 null). 확인 질문은 하지 않는다.
+     * - 후보 목록(현재 항목)에 있음: 제외 확정, "다음 파일을 분석 대상에서 제외했습니다"
+     * - 후보에는 없지만 그래프에 있음: 제외 목록(REJECTED 항목)에 넣고 "후보에는 없었지만 제외 목록에 넣었습니다"
+     * - 그래프에 없음: 제외 목록은 그대로 두고 "<이름>을(를) 찾지 못했습니다"
+     * 추출한 파일 전부의 결과가 안내에 나온다.
+     */
+    private fun excludeMentionedFiles(mentions: FileMentions, evidence: String, items: MutableList<RequirementItem>, currentTurn: Int): String? {
+        val inCandidates = mutableListOf<String>()
+        val outOfCandidates = mutableListOf<String>()
+        for (t in mentions.found) {
+            val fileName = t.path.substringAfterLast("/")
+            val idx = items.indexOfFirst { (it.hint as? LinkHint.ExistingRef)?.filePath == t.path }
+            if (idx >= 0) {
+                items[idx] = items[idx].copy(verdict = Verdict.REJECTED, source = HintSource.USER_CONFIRMED, rejectionReason = RejectionReason.FILE_MISMATCH)
+                inCandidates.add(fileName)
+            } else {
+                val hint = LinkHint.ExistingRef(t.path, listOf(t.className))
+                items.add(RequirementItem(
+                    id = RequirementItem.deriveId(hint, "exclude:${t.path}"),
+                    statement = "제외 지정: $fileName",
+                    source = HintSource.USER_CONFIRMED,
+                    hint = hint,
+                    anchorRationale = "사용자가 파일명을 지정한 제외 요청('${evidence}')",
+                    verdict = Verdict.REJECTED,
+                    confidence = ConfidenceBucket.HIGH_CONFIDENCE,
+                    provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
+                    utteredTurn = currentTurn,
+                    rejectionReason = RejectionReason.FILE_MISMATCH
+                ))
+                outOfCandidates.add(fileName)
+            }
+        }
+        val lines = mutableListOf<String>()
+        if (inCandidates.isNotEmpty()) lines.add("다음 파일을 분석 대상에서 제외했습니다: ${inCandidates.distinct().joinToString(", ")}")
+        if (outOfCandidates.isNotEmpty()) lines.add("후보에는 없었지만 제외 목록에 넣었습니다: ${outOfCandidates.distinct().joinToString(", ")}")
+        mentions.notFound.distinct().forEach { lines.add("${it}을(를) 찾지 못했습니다.") }
+        return if (lines.isEmpty()) null else lines.joinToString("\n")
     }
 
     /** question: 화면에 보일 확인 질문/안내(제외 요청 하나당 1회), note: 파일명을 직접 적어 바로 제외한 경우의 안내. */
@@ -837,13 +907,10 @@ class Stage0ClarificationEngine(
         constraints: List<IntentConstraint>,
         items: MutableList<RequirementItem>,
         currentTurn: Int,
-        history: List<DialogueHistoryItem>,
-        explicitOnly: Boolean = false   // true면 파일명이 적힌 요청만 처리한다(번역기가 이미 EXCLUDE로 처리한 발화)
+        history: List<DialogueHistoryItem>
     ): UiExclusionOutcome {
         val questions = mutableListOf<String>()
-        val directNames = mutableListOf<String>()          // 후보 목록에 있던 파일(제외 확정)
-        val outOfCandidateNames = mutableListOf<String>()  // 후보에는 없었지만 그래프에 있어 제외 목록에 넣은 파일
-        val notFoundNames = mutableListOf<String>()        // 그래프에도 없는 파일명
+        val explicitNotes = mutableListOf<String>()
         val excludeConstraints = constraints
             .filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT && !it.evidence.isNullOrBlank() }
             .distinctBy { it.evidence }
@@ -854,36 +921,9 @@ class Stage0ClarificationEngine(
             // 파일명이 명시된 제외 요청은 확인 질문 없이 처리한다(번역기 분류와 상관없다).
             val mentions = explicitFileMentions(evidence)
             if (!mentions.isEmpty()) {
-                for (t in mentions.found) {
-                    val fileName = t.path.substringAfterLast("/")
-                    val idx = items.indexOfFirst { (it.hint as? LinkHint.ExistingRef)?.filePath == t.path }
-                    if (idx >= 0) {
-                        // 후보 목록(현재 항목)에 있음
-                        items[idx] = items[idx].copy(verdict = Verdict.REJECTED, source = HintSource.USER_CONFIRMED, rejectionReason = RejectionReason.FILE_MISMATCH)
-                        directNames.add(fileName)
-                    } else {
-                        // 후보에는 없지만 그래프에 있음: 제외 목록(REJECTED 항목)에 넣는다
-                        val hint = LinkHint.ExistingRef(t.path, listOf(t.className))
-                        items.add(RequirementItem(
-                            id = RequirementItem.deriveId(hint, "exclude:${t.path}"),
-                            statement = "제외 지정: $fileName",
-                            source = HintSource.USER_CONFIRMED,
-                            hint = hint,
-                            anchorRationale = "사용자가 파일명을 지정한 제외 요청('${evidence}')",
-                            verdict = Verdict.REJECTED,
-                            confidence = ConfidenceBucket.HIGH_CONFIDENCE,
-                            provenanceSignals = setOf(ProvenanceSignal.USER_UTTERANCE),
-                            utteredTurn = currentTurn,
-                            rejectionReason = RejectionReason.FILE_MISMATCH
-                        ))
-                        outOfCandidateNames.add(fileName)
-                    }
-                }
-                // 그래프에도 없는 파일명: 제외 목록은 그대로 두고 찾지 못했다고 알린다
-                notFoundNames.addAll(mentions.notFound)
+                excludeMentionedFiles(mentions, evidence, items, currentTurn)?.let { explicitNotes.add(it) }
                 continue
             }
-            if (explicitOnly) continue
 
             var resolution = resolveExclusionCandidates(evidence)
             if (resolution.candidates.isEmpty()) {
@@ -917,11 +957,7 @@ class Stage0ClarificationEngine(
             }
             questions.add(message)
         }
-        val noteLines = mutableListOf<String>()
-        if (directNames.isNotEmpty()) noteLines.add("다음 파일을 분석 대상에서 제외했습니다: ${directNames.distinct().joinToString(", ")}")
-        if (outOfCandidateNames.isNotEmpty()) noteLines.add("후보에는 없었지만 제외 목록에 넣었습니다: ${outOfCandidateNames.distinct().joinToString(", ")}")
-        notFoundNames.distinct().forEach { noteLines.add("${it}을(를) 찾지 못했습니다.") }
-        val note = if (noteLines.isEmpty()) null else noteLines.joinToString("\n")
+        val note = if (explicitNotes.isEmpty()) null else explicitNotes.joinToString("\n")
         return UiExclusionOutcome(if (questions.isEmpty()) null else questions.joinToString("\n"), note)
     }
 
@@ -1212,30 +1248,28 @@ class Stage0ClarificationEngine(
             }
         }
 
-        // "X는 건드리지 마" 계열: 번역기가 EXCLUDE로 내지 않은 제외 요청은 제약 추출 -> 후보 탐색 -> 제안/안내로 이어 간다.
-        // 제외 단어가 있는 발화에서만 제약 추출(LLM 1회)을 추가로 한다.
+        // "X는 건드리지 마" 계열.
         var exclusionQuestion: String? = null
         var exclusionNote: String? = null
-        // 번역기가 EXCLUDE를 냈어도, 번역기가 처리한 파일 말고 다른 파일명이 발화에 더 적혀 있으면 이어서 처리한다
-        // (파일명 추출은 결정론적이고, 어느 이름이 제외 대상인지는 제약 추출의 증거 구문으로 가른다).
-        val translatorExcluded = translated.kind == UserActionKind.EXCLUDE
-        val needExtraction = when {
-            answer.handled || translated.kind == UserActionKind.COMPLETE || llmClient == null -> false
-            !ExclusionWords.containsExclusionWord(trimmed) -> false
-            translatorExcluded -> explicitFileMentions(trimmed).let { m -> m.notFound.isNotEmpty() || m.found.any { it.path != translated.targetFilePath } }
-            else -> true
-        }
-        if (needExtraction) {
+        val canHandleExclusion = !answer.handled && translated.kind != UserActionKind.COMPLETE
+        // (1) 발화 원문에서 제외 표현과 같은 절에 파일명이 적혀 있으면, 번역기 분류와 제약 추출 분류에 상관없이 결정적으로 처리한다(LLM 호출 없음, 확인 질문 없음).
+        val mentions = if (canHandleExclusion) explicitExclusionMentions(trimmed) else FileMentions(emptyList(), emptyList())
+        if (!mentions.isEmpty()) {
+            val working = updatedItems.toMutableList()
+            exclusionNote = excludeMentionedFiles(mentions, trimmed, working, state.userStatements.size + 2)
+            updatedItems = working
+        } else if (canHandleExclusion && translated.kind != UserActionKind.EXCLUDE && llmClient != null && ExclusionWords.containsExclusionWord(trimmed)) {
+            // (2) 파일명이 없으면 안 A 흐름: 제약 추출(LLM 1회) -> 후보 탐색 -> 제안/안내. 번역기가 EXCLUDE로 처리한 발화는 이미 끝났다.
             val constraints = extractConstraints(listOf(trimmed))
             val working = updatedItems.toMutableList()
-            val outcome = proposeExclusionsForUtterance(trimmed, constraints, working, state.userStatements.size + 2, state.dialogueHistory, explicitOnly = translatorExcluded)
+            val outcome = proposeExclusionsForUtterance(trimmed, constraints, working, state.userStatements.size + 2, state.dialogueHistory)
             updatedItems = working
             exclusionQuestion = outcome.question
             exclusionNote = outcome.note
         }
         // 안내문에는 확인 질문도 함께 남긴다(같은 제외 요청으로 다시 묻지 않는지 대화 기록으로 판단한다).
-        // 파일명을 처리한 안내(exclusionNote)가 있으면 번역기가 같은 대상에 한 안내(EXCLUDE, 후보에 없음)는 쓰지 않는다. 같은 말을 두 번 하거나 어긋나는 말을 하지 않기 위해서다.
-        val dropTranslatorMessage = exclusionNote != null && (translatorExcluded || (translated.kind == UserActionKind.UNKNOWN && translated.isNotInCandidates))
+        // 엔진이 파일명 처리 안내(exclusionNote)를 만들었으면 번역기 안내는 쓰지 않는다. 번역기(모델)가 같은 파일에 대해 사실과 다른 말을 하거나 같은 말이 두 번 나오지 않게 하기 위해서다.
+        val dropTranslatorMessage = exclusionNote != null
         val echoMsg = listOfNotNull(if (dropTranslatorMessage) null else translated.clarificationMessage, exclusionNote, exclusionQuestion)
             .joinToString("\n").ifBlank { null }
 

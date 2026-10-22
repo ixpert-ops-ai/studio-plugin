@@ -315,7 +315,8 @@ class Stage0UtteranceProcessTest {
         assertEquals("후보군 외 지목 시 items 개수가 변하지 않아야 함 (No-Op)", initialItemsCount, turn1.state.items.size)
         assertEquals("후보군 외 지목 시 기존 items의 verdict가 전혀 손상되지 않아야 함", initialItemsSnapshot, turn1.state.items)
         assertNotNull(turn1.echoBackMessage)
-        assertTrue(turn1.echoBackMessage!!.contains("존재하지 않습니다"))
+        // B-53: 발화에 파일명(test_mapper.xml)이 있으면 엔진이 그래프 전체에서 찾아 사실대로 안내한다(번역기 안내 대신). 그래프에 없으므로 "찾지 못했습니다".
+        assertTrue(turn1.echoBackMessage!!, turn1.echoBackMessage!!.contains("test_mapper.xml을(를) 찾지 못했습니다"))
 
         // 2. 단순 모호 발화 (UNKNOWN)
         val llmResponse2 = """
@@ -432,7 +433,8 @@ class Stage0UtteranceProcessTest {
         val rejectedItem = turn1.state.items.find { it.id == targetId }
         assertNotNull(rejectedItem)
         assertEquals(Verdict.REJECTED, rejectedItem?.verdict)
-        assertTrue(turn1.echoBackMessage!!.contains(marker1))
+        // B-53: 발화에 파일명(order_write.jsp)이 있으면 엔진 안내가 번역기 안내(marker1)를 대신한다.
+        assertTrue(turn1.echoBackMessage!!, turn1.echoBackMessage!!.contains("제외했습니다: order_write.jsp"))
 
         // (나) 닫힌 선택 강제: "결제 모듈 빼줘" (목록 외 대상) -> No-Op 0건 훼손
         val turn2 = engine.processUtterance(turn1.state, "결제 모듈 빼줘")

@@ -256,7 +256,8 @@ class ExclusionProposalFlowTest {
         assertEquals("다음 파일을 분석 대상에서 제외했습니다: AlimtalkTemplateBatchJob.java, AlimtalkTemplateBatchRunner.java", echo)
         assertFalse("모델이 만든 '제외할 수 없습니다' 문구는 쓰지 않는다", echo.contains("제외할 수 없습니다"))
         assertFalse("확인 질문을 하지 않는다", (t1.openQuestion ?: "").contains("제외할까요?"))
-        assertEquals("제약 추출은 1회만 더 한다", base + 1, llm.constraintCalls)
+        // B-53: 파일명은 발화 원문에서 결정적으로 읽으므로 제약 추출을 더 부르지 않는다(B-52의 g1은 base + 1을 기대했다)
+        assertEquals("제약 추출을 더 부르지 않는다", base, llm.constraintCalls)
         assertEquals(listOf(jobPath, runnerPath).sorted(), e.buildClarifyIntent(t1.state).excludedFiles.sorted())
     }
 
@@ -379,5 +380,80 @@ class ExclusionProposalFlowTest {
         listOf("네트워크 쪽은 어때요", "목록 조회하는 쪽이에요.", "SMS 발송도 고려해 줘", "").forEach { assertEquals(it, ExclusionAnswer.OTHER, ExclusionWords.judgeAnswer(it)) }
         // 긴 문장(새 제외 요청)은 답으로 읽지 않는다. 읽으면 "건드리지 말고"가 부정 답으로 오인된다.
         assertEquals(ExclusionAnswer.OTHER, ExclusionWords.judgeAnswer(alimtalkStatement))
+    }
+
+    // ===== B-53: 파일명 처리는 발화 원문의 결정적 규칙(제외 표현이 같은 절에 있을 때만)이고 모델 분류에 의존하지 않는다 =====
+
+    private val twoNames = "AlimtalkTemplateBatchJob.java, AlimtalkTemplateBatchRunner.java는 제외해 주세요"
+    private val twoNamesNote = "다음 파일을 분석 대상에서 제외했습니다: AlimtalkTemplateBatchJob.java, AlimtalkTemplateBatchRunner.java"
+
+    private fun scopeLimit(evidence: String) = constraints(evidence, "SCOPE_LIMIT")
+
+    // H1 제약 추출이 이 문장을 SCOPE_LIMIT으로 분류해도(실측 SR-05X) 두 파일이 모두 제외되고, 번역기 안내 대신 엔진 안내만 나온다. 제약 추출은 더 부르지 않는다.
+    @Test
+    fun h1_scopeLimitClassificationStillExcludesBothFiles() {
+        val translator = """{"action": "ADD_CONSTRAINT", "constraintKind": "SCOPE_LIMIT", "constraintValue": "두 파일 수정 제외", "message": "제외하도록 제약 조건을 등록했습니다."}"""
+        val llm = Fake(translator, scopeLimit(twoNames))
+        val e = engine(llm)
+        val t0 = e.initSession("설문 발송 채널 확장")
+        val base = llm.constraintCalls
+        val t1 = e.processUtterance(t0.state, twoNames)
+        assertEquals(listOf(jobPath, runnerPath).sorted(), e.exclusionView(t1.state).excludedFiles.sorted())
+        // 두 파일은 init 후보 항목에 없을 수 있다. 그래도 둘 다 제외 목록에 있고 안내에 두 파일이 모두 나온다.
+        val echo = t1.echoBackMessage!!
+        assertTrue(echo, echo.contains("AlimtalkTemplateBatchJob.java") && echo.contains("AlimtalkTemplateBatchRunner.java"))
+        assertFalse("번역기 안내는 쓰지 않는다", echo.contains("제약 조건으로 기록했습니다") || echo.contains("제외하도록"))
+        assertEquals("제약 추출을 더 부르지 않는다", base, llm.constraintCalls)
+        assertFalse((t1.openQuestion ?: "").contains("제외할까요?"))
+        assertEquals(listOf(jobPath, runnerPath).sorted(), e.buildClarifyIntent(t1.state).excludedFiles.sorted())
+    }
+
+    // H2 제약 추출 응답이 비었거나 실패해도(빈 배열, 빈 응답, [Error]) 두 파일이 모두 제외된다.
+    @Test
+    fun h2_emptyOrFailedConstraintExtractionStillExcludesBothFiles() {
+        for (bad in listOf("[]", "", "[Error] OpenAI 서버 통신 실패: HTTP 524")) {
+            val e = engine(Fake(addConstraint, bad))
+            val t1 = e.processUtterance(e.initSession("설문 발송 채널 확장").state, twoNames)
+            assertEquals(bad, listOf(jobPath, runnerPath).sorted(), e.exclusionView(t1.state).excludedFiles.sorted())
+        }
+    }
+
+    // H3 제외 표현이 없으면, 또는 제외 표현이 다른 절에 있으면 파일명을 제외하지 않는다("만 수정", 앞 절의 제외 표현).
+    @Test
+    fun h3_noExclusionWordOrDifferentClauseMeansNoExclusion() {
+        val llm = Fake(addConstraint, constraints(alimtalkEvidence))
+        val e = engine(llm)
+        val t0 = e.initSession("설문 발송 채널 확장")
+        val base = llm.constraintCalls
+        val only = e.processUtterance(t0.state, "SurveyServiceImpl만 수정해 주세요")
+        assertEquals(emptyList<String>(), e.exclusionView(only.state).excludedFiles)
+        assertEquals("제외 표현이 없으면 제약 추출도 하지 않는다", base, llm.constraintCalls)
+        // D5 문장: 제외 표현("건드리지 말고")은 앞 절에 있고 SurveyServiceImpl은 "만 수정" 뒤 절에 있다 -> 파일명 처리 없음, 안 A 제안 흐름
+        val d5 = e.processUtterance(t0.state, alimtalkStatement)
+        assertEquals(emptyList<String>(), e.exclusionView(d5.state).excludedFiles)
+        assertEquals(listOf(jobPath, runnerPath).sorted(), proposals(d5.state))
+        // 앞 절에 수정 대상, 뒤 절에 제외 대상(파일명 없음)
+        val e2 = engine(Fake(addConstraint, constraints("알림톡 배치는 제외해 주세요")))
+        val t2 = e2.processUtterance(e2.initSession("설문 발송 채널 확장").state, "SurveyServiceImpl.java를 수정하고 알림톡 배치는 제외해 주세요")
+        assertEquals("앞 절의 SurveyServiceImpl.java는 제외하지 않는다", emptyList<String>(), e2.exclusionView(t2.state).excludedFiles)
+    }
+
+    // H4 번역기 message에 "존재하지 않아 제외할 수 없습니다"가 있어도 화면 안내에는 엔진 안내만 나온다(후보에 있는 파일과 없는 파일을 함께 적은 경우).
+    @Test
+    fun h4_translatorMessageIsNotShownWhenTheEngineReportsTheFiles() {
+        val sr = "AlimtalkTemplateBatchJob 수정"
+        val probe = engine(Fake(addConstraint, constraints(alimtalkEvidence), initConstraintsJson = "[]"))
+        val jobItem = probe.initSession(sr).state.items.first { (it.hint as? LinkHint.ExistingRef)?.filePath == jobPath }
+        val statement = "AlimtalkTemplateBatchJob.java, AdminMgmt1Biz.java는 제외해 주세요"
+        val translator = """{"action": "EXCLUDE", "targetId": "${jobItem.id}", "message": "AdminMgmt1Biz.java는 현재 후보 목록에 존재하지 않아 제외할 수 없습니다."}"""
+        val e = engine(Fake(translator, scopeLimit(statement), initConstraintsJson = "[]"))
+        val t0 = e.initSession(sr)
+        assertFalse("전제: AdminMgmt1Biz는 후보 항목에 없다", itemPaths(t0.state).contains(adminPath))
+        val t1 = e.processUtterance(t0.state, statement)
+        assertEquals(listOf(jobPath, adminPath).sorted(), e.exclusionView(t1.state).excludedFiles.sorted())
+        assertEquals(
+            "다음 파일을 분석 대상에서 제외했습니다: AlimtalkTemplateBatchJob.java\n후보에는 없었지만 제외 목록에 넣었습니다: AdminMgmt1Biz.java",
+            t1.echoBackMessage
+        )
     }
 }
