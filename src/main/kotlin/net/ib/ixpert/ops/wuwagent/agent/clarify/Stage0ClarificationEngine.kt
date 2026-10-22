@@ -782,8 +782,8 @@ class Stage0ClarificationEngine(
     private data class ExclusionTarget(val path: String, val className: String)
 
     /** 글에 직접 적힌 파일명 중 그래프에 있는 것(found)과 없는 것(notFound, 화면에 보일 표기). */
-    private data class FileMentions(val found: List<ExclusionTarget>, val notFound: List<String>) {
-        fun isEmpty(): Boolean = found.isEmpty() && notFound.isEmpty()
+    private data class FileMentions(val found: List<ExclusionTarget>, val notFound: List<String>, val ambiguous: List<String> = emptyList()) {
+        fun isEmpty(): Boolean = found.isEmpty() && notFound.isEmpty() && ambiguous.isEmpty()
     }
 
     /** 파일명 형태 1: 확장자가 있는 토큰(.java, .kt, .xml, .properties 등). */
@@ -792,11 +792,17 @@ class Stage0ClarificationEngine(
     /** 파일명 형태 2: 대문자로 시작하는 식별자 중 그래프 노드의 클래스명과 정확히 일치하는 것(일치 여부는 아래 함수에서 본다). */
     private val classNameToken = Regex("""(?<![A-Za-z0-9_])[A-Z][A-Za-z0-9_]*(?![A-Za-z0-9_])""")
 
-    /** "SurveyServiceImpl만 수정"처럼 "만"이 붙은 이름은 수정할 대상(한정)이라 제외 대상으로 읽지 않는다. */
+    /** "SurveyServiceImpl만 수정"처럼 "만"이 붙은 이름은 같은 절에 수정 동사가 있을 때 수정할 대상(한정)이라 제외 대상으로 읽지 않는다. 수정 동사가 없으면("AdminService만 빼 주세요") 제외 대상이다. */
     private val exclusiveParticleToken = Regex("""(?<![A-Za-z0-9_])[A-Za-z0-9_.-]+만""")
 
-    /** 절(clause)을 끊는 연결어와 문장 끝. "알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야"에서 뒤 절의 파일명이 제외 대상으로 읽히지 않게 한다. */
-    private val clauseConnective = Regex("(말고|하고|하되|이고|지만|면서|그리고)")
+    /** 수정 동사. "수정하지"와 "변경하지"는 제외 표현이므로 수정 동사로 세지 않는다. */
+    private val modifyVerb = Regex("""(수정|변경)(?!하지)|고쳐|고치(?!지)|추가|개발""")
+
+    /** 부정형: "빼지 말고 같이 봐 주세요"는 제외 요청이 아니다. 이 표현이 있는 절은 제외 처리하지 않는다. */
+    private val negatedExclusion = Regex("""빼지\s*말|제외하지\s*말|빼지\s*마|제외하지\s*마""")
+
+    /** 절(clause)을 끊는 연결어와 문장 끝(연결어는 앞 절에 남긴다). "알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정할 거야"에서 뒤 절의 파일명이 제외 대상으로 읽히지 않게 한다. */
+    private val clauseConnective = Regex("(말고|놔두고|두고|빼고|제외하고|하고|하되|이고|지만|면서|그리고)")
     private val sentenceBreak = Regex("""(?<=[.!?])\s+|\n""")
 
     /**
@@ -836,20 +842,29 @@ class Stage0ClarificationEngine(
     /**
      * 발화 원문에서, 제외 표현(제외, 빼, 건드, 말고, 그대로 등)이 같은 절에 있는 파일명만 읽는다(결정론적, LLM 없음).
      * 번역기 분류(EXCLUDE, ADD_CONSTRAINT 등)와 제약 추출 분류(EXCLUDE_COMPONENT, SCOPE_LIMIT 등)는 조건에 쓰지 않는다.
-     * "만"이 붙은 이름(수정 대상 한정)과 제외 표현이 없는 절의 이름은 읽지 않는다.
+     * 제외 표현이 없는 절의 이름, 부정형("빼지 말고") 절의 이름은 읽지 않고, 수정 동사가 있는 절의 "만"이 붙은 이름(수정 대상 한정)도 읽지 않는다.
+     * 한 절에 제외 표현과 수정 동사가 함께 있고 이름이 2개 이상이면 어느 쪽인지 알 수 없으므로 제외하지 않고 ambiguous로 돌려준다.
      */
     private fun explicitExclusionMentions(stmt: String): FileMentions {
         if (!ExclusionWords.containsExclusionWord(stmt)) return FileMentions(emptyList(), emptyList())
         val clauses = stmt.replace(clauseConnective, "\$1\u0000").replace(sentenceBreak, "\u0000").split('\u0000')
         val found = LinkedHashMap<String, ExclusionTarget>()
         val notFound = LinkedHashMap<String, String>()
+        val ambiguous = LinkedHashMap<String, String>()
         for (clause in clauses) {
             if (!ExclusionWords.containsExclusionWord(clause)) continue
-            val m = explicitFileMentions(clause.replace(exclusiveParticleToken, " "))
+            if (negatedExclusion.containsMatchIn(clause)) continue
+            val hasModifyVerb = modifyVerb.containsMatchIn(clause)
+            val m = explicitFileMentions(if (hasModifyVerb) clause.replace(exclusiveParticleToken, " ") else clause)
+            if (hasModifyVerb && m.found.size + m.notFound.size >= 2) {
+                m.found.forEach { ambiguous.putIfAbsent(it.path, it.path.substringAfterLast("/")) }
+                m.notFound.forEach { ambiguous.putIfAbsent("nf:" + it.lowercase(), it) }
+                continue
+            }
             m.found.forEach { found.putIfAbsent(it.path, it) }
             m.notFound.forEach { notFound.putIfAbsent(it.substringBeforeLast(".").lowercase(), it) }
         }
-        return FileMentions(found.values.toList(), notFound.values.toList())
+        return FileMentions(found.values.toList(), notFound.values.toList(), ambiguous.values.toList())
     }
 
     /**
@@ -889,6 +904,7 @@ class Stage0ClarificationEngine(
         if (inCandidates.isNotEmpty()) lines.add("다음 파일을 분석 대상에서 제외했습니다: ${inCandidates.distinct().joinToString(", ")}")
         if (outOfCandidates.isNotEmpty()) lines.add("후보에는 없었지만 제외 목록에 넣었습니다: ${outOfCandidates.distinct().joinToString(", ")}")
         mentions.notFound.distinct().forEach { lines.add("${it}을(를) 찾지 못했습니다.") }
+        if (mentions.ambiguous.isNotEmpty()) lines.add("${mentions.ambiguous.distinct().joinToString(", ")}은(는) 제외 요청인지 분명하지 않아 제외하지 않았습니다.")
         return if (lines.isEmpty()) null else lines.joinToString("\n")
     }
 
