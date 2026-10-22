@@ -12,13 +12,26 @@ import java.io.IOException
 
 @Suppress("UnstableApiUsage")
 class OpenAIClient(
-    // 테스트에서 가짜 서버로 보내기 위한 설정 주입 지점. null이면 저장된 설정(SettingsState)을 쓴다.
+    // 짧은 비스트림 호출(max_tokens <= SHORT_CALL_MAX_TOKENS)의 읽기 타임아웃(초)과 재시도 전 대기(ms). 테스트에서 줄여 쓴다.
+    private val shortReadTimeoutSec: Int = NON_STREAM_READ_TIMEOUT_SEC,
+    private val retryWaitMs: Long = NON_STREAM_RETRY_WAIT_MS,
+    // 테스트에서 가짜 서버로 보내기 위한 설정 주입 지점. null이면 저장된 설정(SettingsState)을 쓴다. 후행 람다로 넘길 수 있게 마지막에 둔다.
     private val settingsOverride: (() -> net.ib.ixpert.ops.wuwagent.setting.SettingsState.State)? = null
 ) : LLMClient {
     private val logger = Logger.getInstance(OpenAIClient::class.java)
     private val gson = Gson()
 
     companion object {
+        /**
+         * 비스트림 호출은 첫 바이트 없이 약 125초가 지나면 중간 계층이 524로 끊는다(B-56). 정상 비스트림 929건 중 90초를 넘은 것은 정체로 보이는 1건뿐이라
+         * 짧은 호출(max_tokens <= SHORT_CALL_MAX_TOKENS)의 읽기 타임아웃을 90초로 두고, 524/502/503/504 또는 타임아웃이면 1회만 다시 호출한다.
+         * max_tokens가 큰 호출(문서 생성 등)은 오래 걸릴 수 있어 설정의 타임아웃을 그대로 쓰고 상태 코드 오류에만 재시도한다.
+         */
+        const val NON_STREAM_READ_TIMEOUT_SEC = 90
+        const val NON_STREAM_RETRY_WAIT_MS = 1000L
+        const val SHORT_CALL_MAX_TOKENS = 1000
+        val RETRYABLE_STATUS = setOf(502, 503, 504, 524)
+
         /** 도구 호출 스트림이 중간에 끊겨(인자 JSON 해석 불가) 다시 호출한 횟수와, 다시 호출해도 끊겨 실패로 남은 횟수. 평가 보고서가 읽는다. */
         val streamRetryCount = java.util.concurrent.atomic.AtomicInteger()
         val streamRetryFailedCount = java.util.concurrent.atomic.AtomicInteger()
@@ -94,6 +107,8 @@ class OpenAIClient(
         )
         val jsonPayload = gson.toJson(requestBody)
         val isStreaming = onChunk != null
+        val shortCall = !isStreaming && (maxTokens ?: 4096) <= SHORT_CALL_MAX_TOKENS
+        val readTimeoutMs = if (shortCall) minOf(settings.timeoutSeconds * 1000, shortReadTimeoutSec * 1000) else settings.timeoutSeconds * 1000
 
         logger.info("OpenAI API Call (Stream=$isStreaming): url=$serverUrl, model=${settings.model}")
 
@@ -105,15 +120,15 @@ class OpenAIClient(
         } else null
 
         return try {
-            val result = HttpRequests.post(serverUrl, "application/json")
+            val result = postWithRetry(isStreaming, retryOnTimeout = shortCall) {
+            HttpRequests.post(serverUrl, "application/json")
                 .tuner { connection ->
                     val effectiveKey = settings.effectiveApiKey()
                     if (effectiveKey.isNotBlank()) {
                         connection.setRequestProperty("Authorization", "Bearer $effectiveKey")
                     }
-                    val timeoutMs = settings.timeoutSeconds * 1000
                     connection.connectTimeout = 30_000
-                    connection.readTimeout = timeoutMs
+                    connection.readTimeout = readTimeoutMs
                 }
                 .connect { request ->
                     request.write(jsonPayload)
@@ -204,6 +219,7 @@ class OpenAIClient(
                         }
                     }
                 }
+            }
             try {
                 if (debugEntry != null) {
                     debugEntry.durationMs = System.currentTimeMillis() - startMs
@@ -245,6 +261,34 @@ class OpenAIClient(
             OllamaChatResponse(null, null, OllamaMessage("assistant", errorMsg), true)
         }
     }
+
+    /**
+     * 비스트림 호출만 1회 다시 호출한다(스트림은 건드리지 않는다). 상태 코드 502/503/504/524이거나, 짧은 호출의 읽기 타임아웃일 때다.
+     * 첫 실패는 warn으로 남기고, 다시 호출해서도 실패하면 예외를 그대로 던져 호출부가 지금처럼 error로 처리한다. 취소 중이면 다시 호출하지 않는다.
+     */
+    private fun <T> postWithRetry(isStreaming: Boolean, retryOnTimeout: Boolean, block: () -> T): T {
+        try {
+            return block()
+        } catch (e: IOException) {
+            if (isStreaming || TaskCancellationToken.isCancelled.get() || !isRetryable(e, retryOnTimeout)) throw e
+            logger.warn("OpenAI 비스트림 호출 실패(${e.message}), ${retryWaitMs}ms 뒤 1회 다시 호출합니다.")
+            try {
+                Thread.sleep(retryWaitMs)
+            } catch (ie: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw e
+            }
+            return block()
+        }
+    }
+
+    /** HttpURLConnection은 4xx/5xx를 "Server returned HTTP response code: 524 for URL ..." IOException으로 던지므로 메시지에서 상태 코드를 읽는다(실측 524 메시지와 같은 형식). */
+    private fun statusOf(e: IOException): Int? =
+        (e as? HttpRequests.HttpStatusException)?.statusCode
+            ?: Regex("""HTTP response code: (\d{3})""").find(e.message.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
+
+    private fun isRetryable(e: IOException, retryOnTimeout: Boolean): Boolean =
+        statusOf(e) in RETRYABLE_STATUS || (retryOnTimeout && e is java.net.SocketTimeoutException)
 
     /**
      * 스트림 절단(도구 인자 JSON 해석 불가)일 때만 1회 다시 호출한다. 타임아웃·연결 오류 등 예외는 그대로 던지고 다시 호출하지 않는다.
