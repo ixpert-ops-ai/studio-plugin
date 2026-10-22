@@ -141,6 +141,7 @@ class WebviewActionRouter(private val project: Project) {
 
                             // 신규 /clarify 세션 시작 시 이전 세션 오염 방지를 위해 previousContract 격리 (null)
                             val previousContract: net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract? = null
+                            net.ib.ixpert.ops.wuwagent.agent.AnalysisSessionMemory.reset()
 
                             val scanner = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0GraphScanner(projectGraph)
                             val llmClient = try {

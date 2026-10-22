@@ -15,6 +15,9 @@ import net.ib.ixpert.ops.wuwagent.model.OllamaMessage
 import net.ib.ixpert.ops.wuwagent.model.ToolCall
 import net.ib.ixpert.ops.wuwagent.model.ToolCallFunction
 import net.ib.ixpert.ops.wuwagent.model.ToolDefinition
+import net.ib.ixpert.ops.wuwagent.agent.TargetFileSpec
+import net.ib.ixpert.ops.wuwagent.agent.TargetFileValidator
+import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AdaptiveFileDiscovery
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ArchitectureLayer
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.GraphStatistics
@@ -40,6 +43,7 @@ class RemovedCandidatesRestoreTest {
     private class StubLlm(private val stage3: (List<String>) -> String) : LLMClient {
         var calls = 0
         val stage3Candidates = mutableListOf<List<String>>()
+        val stage3UserContents = mutableListOf<String>()
 
         override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): OllamaChatResponse {
             calls++
@@ -54,6 +58,7 @@ class RemovedCandidatesRestoreTest {
             val user = messages.mapNotNull { it.content }.joinToString("\n")
             val paths = Regex("""(?m)^- \[(\d+)] (\S+)""").findAll(user).map { it.groupValues[2] }.toList()
             stage3Candidates.add(paths)
+            stage3UserContents.add(user)
             val call = ToolCall("1", "function", ToolCallFunction("submit_verification", stage3(paths)))
             return ChatCompletionResponse("x", listOf(ChatChoice(0, ChatMessage("assistant", null, toolCalls = listOf(call)), "tool_calls")))
         }
@@ -216,5 +221,68 @@ class RemovedCandidatesRestoreTest {
         assertEquals(listOf("a.java", "b.java"), outcome.ignored)
         assertEquals(1, RequirementAnalysisPipeline.lastResult!!.targetFiles.size)
         assertEquals(null, RequirementAnalysisResult("s", emptyList(), "", "r").removedCandidates)
+    }
+
+    // R8 같은 요구사항 문자열로 restore한 뒤 새 /clarify 세션을 시작하면(라우터가 reset을 부른다) pinned가 비어 있고, 다음 분석에서 되살린 파일은 Stage 3가 다시 판정한다.
+    @Test
+    fun r8_newClarifySessionWithTheSameRequirementClearsPinned() {
+        analyze(StubLlm(::mixedStage3))
+        val explicit = RequirementAnalysisPipeline.lastResult!!.removedCandidates!!.first { it.source == RemovedSource.STAGE3_EXPLICIT }.path
+        RequirementAnalysisPipeline.restore(listOf(explicit))
+        assertEquals(setOf(explicit), AnalysisSessionMemory.pinnedPaths())
+        // /clarify 분기는 새 세션을 시작할 때(saveSession 전에) reset을 부른다
+        val router = File("src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/WebviewActionRouter.kt").readText()
+        val clarifyBranch = router.substringAfter("\"/clarify\" -> {").substringBefore("\"/analyze\" -> {")
+        assertTrue("/clarify 분기에 reset 호출이 있어야 한다", clarifyBranch.contains("AnalysisSessionMemory.reset()"))
+        assertTrue("reset은 saveSession보다 먼저다", clarifyBranch.indexOf("AnalysisSessionMemory.reset()") < clarifyBranch.indexOf("saveSession("))
+        AnalysisSessionMemory.reset()   // 라우터가 하는 일
+        assertEquals(emptySet<String>(), AnalysisSessionMemory.pinnedPaths())
+        val llm = StubLlm(::removeAllButFirst)
+        val next = analyze(llm)   // 같은 요구사항 문자열
+        assertTrue("pinned가 없으므로 되살렸던 파일도 Stage 3 후보로 다시 간다", llm.stage3Candidates.single().contains(explicit))
+        assertTrue(next.targetFiles.none { it.path == explicit })
+    }
+
+    // R9 pinned와 사용자 제외가 없을 때 A는 기존 동작을 바꾸지 않는다: Stage 3 검증기가 받는 후보 목록과 요구사항 문장이 Stage 1-2 결과(correctedFiles)·요구사항과 같고,
+    // 최종 목록·noticeLines·마크다운이 removedCandidates와 무관하다. 기대값은 파이프라인 줄을 쓰지 않고 같은 공개 함수(Stage 1 탐색, correctPaths, sortByDependency)로 따로 만든다.
+    @Test
+    fun r9_stage3InputAndOutputsAreUnchangedWhenNothingIsPinnedOrExcluded() {
+        val llm = StubLlm(::mixedStage3)
+        val chunks = StringBuilder()
+        val result = kotlinx.coroutines.runBlocking {
+            RequirementAnalysisPipeline(llm).analyze(primaryReq = req, secondaryReq = "", projectGraph = graph(), clarifyIntent = intent()) { chunks.append(it) }
+        }
+        // 기대 correctedFiles: 파이프라인 :154-234와 같은 공개 함수 호출(제외 없음)
+        val g = graph()
+        val discovery = AdaptiveFileDiscovery.filter(primaryReq = req, secondaryReq = "", graph = g, client = StubLlm(::mixedStage3), project = null, projectBasePath = null, enhancedRequirements = emptyList()) { }
+        val specs = mutableListOf<TargetFileSpec>()
+        discovery.relevantFiles.forEachIndexed { i, f -> specs.add(TargetFileSpec(i + 1, f.path, "MODIFY", "Score: ${f.score}, Via: ${f.discoveryReason}")) }
+        discovery.suggestedNewFiles.forEach { f ->
+            specs.add(TargetFileSpec(specs.size + 1, f.suggestedPath, "CREATE", "- suggestedFileType: ${f.suggestedFileType}\n- reason: ${f.reason}\n- referencePattern: ${f.referencePattern}"))
+        }
+        val expectedCorrected = TargetFileValidator.correctPaths(specs, g)
+        val cands = expectedCorrected.map { it.path }
+        assertTrue("후보가 3개 이상이어야 한다: $cands", cands.size >= 3)
+
+        // (1) 검증기 입력: 후보 목록(번호와 순서)과 요구사항 문장
+        assertEquals(cands, llm.stage3Candidates.single())
+        val user = llm.stage3UserContents.single()
+        val seg = user.substringAfter("## 요구사항\n").substringBefore("\n\n## 후보 파일 목록")
+        assertEquals(req, seg)
+
+        // (2) 최종 목록: 후보에서 모의 검증기가 뺀 둘(번호 2, 3)을 제외하고 sortByDependency한 것
+        val keptSpecs = expectedCorrected.filterIndexed { i, _ -> i != 1 && i != 2 }.map { it.copy(description = "수정이 필요한 구체적인 사유") }
+        assertEquals(TargetFileValidator.sortByDependency(keptSpecs, g), result.targetFiles)
+
+        // (3) noticeLines와 마크다운: 제외 안내 줄과 파일 표가 기존 형식 그대로이고, 새 필드의 어휘가 나오지 않는다
+        val md = chunks.toString()
+        val names = listOf(cands[1], cands[2]).joinToString(", ") { it.substringAfterLast('/') }
+        assertTrue(md, md.contains("- Stage 3에서 제외된 후보 2개: $names (사유: 제공하지 않음)"))
+        result.targetFiles.forEach { assertTrue(md, md.contains("| ${it.order} | ${it.path} | 수정 | ${it.description} |")) }
+        listOf("removedCandidates", "STAGE3_", "USER_EXCLUDED", "되살").forEach { assertFalse("마크다운에 \"$it\"가 나오면 안 된다", md.contains(it)) }
+        assertTrue(md.contains("### 요구사항 분석 요약"))
+
+        // 새 필드는 부가 정보일 뿐이고 같은 분석에서 목록은 (카드 후보 - 최종 유지)이다
+        assertEquals(setOf(cands[1], cands[2]), result.removedCandidates!!.map { it.path }.toSet())
     }
 }
