@@ -328,7 +328,8 @@ class Stage0ClarificationEngine(
 
         // B-12: 사용자 초기 발화 식별자 3분기 분해
         // SR 원문의 제약 추출은 resolveUserUtteredIdentifiers가 안에서 하던 호출과 같다(호출 수 불변). 제외 제안에도 같은 결과를 쓴다.
-        val initConstraints = if (originalRequirement.isBlank()) null else extractConstraints(listOf(originalRequirement))
+        val initExtraction = if (originalRequirement.isBlank()) null else extractConstraintsChecked(listOf(originalRequirement))
+        val initConstraints = initExtraction?.constraints
         val userResolution = resolveUserUtteredIdentifiers(originalRequirement, initConstraints, currentTurn = 1)
         val userConfirmedItems = userResolution.confirmedItems.filter { it.verdict == Verdict.CONFIRMED }
         val userPendingItems = userResolution.confirmedItems.filter { it.verdict == Verdict.PENDING } + 
@@ -378,7 +379,7 @@ class Stage0ClarificationEngine(
         }
 
         // SR 원문의 제외 요청에 대한 안내는 대화 기록에 남긴다(같은 요청으로 다시 묻지 않는지 판단하는 근거이기도 하다).
-        val initEcho = listOfNotNull(srOutcome?.note, srOutcome?.question).joinToString("\n").ifBlank { null }
+        val initEcho = listOfNotNull(srOutcome?.note, srOutcome?.question, if (initExtraction?.failed == true) constraintFailureNote else null).joinToString("\n").ifBlank { null }
 
         val state = Stage0State(
             originalRequirement = originalRequirement,
@@ -434,7 +435,9 @@ class Stage0ClarificationEngine(
             applyPendingExclusionAnswer(updatedItems, stmt, lenient = false).echo?.let { echoMsg = it }
 
             // 2-1. 발화로부터 EXCLUDE_COMPONENT 제약 추출 및 배제 후보 탐색
-            val currentConstraints = extractConstraints(listOf(stmt))
+            val currentExtraction = extractConstraintsChecked(listOf(stmt))
+            val currentConstraints = currentExtraction.constraints
+            if (currentExtraction.failed) echoMsg = listOfNotNull(echoMsg, constraintFailureNote).joinToString("\n")
             proposeExclusionsLegacy(currentConstraints, updatedItems, currentTurn)?.let { exclusionQuestion = it }
 
             val utteredTokens = scanner.extractTokens(stmt, emptySet())
@@ -1276,12 +1279,13 @@ class Stage0ClarificationEngine(
             updatedItems = working
         } else if (canHandleExclusion && translated.kind != UserActionKind.EXCLUDE && llmClient != null && ExclusionWords.containsExclusionWord(trimmed)) {
             // (2) 파일명이 없으면 안 A 흐름: 제약 추출(LLM 1회) -> 후보 탐색 -> 제안/안내. 번역기가 EXCLUDE로 처리한 발화는 이미 끝났다.
-            val constraints = extractConstraints(listOf(trimmed))
+            val extraction = extractConstraintsChecked(listOf(trimmed))
             val working = updatedItems.toMutableList()
-            val outcome = proposeExclusionsForUtterance(trimmed, constraints, working, state.userStatements.size + 2, state.dialogueHistory)
+            val outcome = proposeExclusionsForUtterance(trimmed, extraction.constraints, working, state.userStatements.size + 2, state.dialogueHistory)
             updatedItems = working
             exclusionQuestion = outcome.question
-            exclusionNote = outcome.note
+            // 제약 추출이 실패했으면 번역기 안내(제외를 등록했다는 말 등)는 아래 dropTranslatorMessage로 쓰지 않고 사실만 알린다.
+            exclusionNote = listOfNotNull(outcome.note, if (extraction.failed) constraintFailureNote else null).joinToString("\n").ifBlank { null }
         }
         // 안내문에는 확인 질문도 함께 남긴다(같은 제외 요청으로 다시 묻지 않는지 대화 기록으로 판단한다).
         // 엔진이 파일명 처리 안내(exclusionNote)를 만들었으면 번역기 안내는 쓰지 않는다. 번역기(모델)가 같은 파일에 대해 사실과 다른 말을 하거나 같은 말이 두 번 나오지 않게 하기 위해서다.
@@ -1480,8 +1484,16 @@ class Stage0ClarificationEngine(
         }
     }
 
-    private fun extractConstraints(userStatements: List<String>): List<IntentConstraint> {
-        if (userStatements.isEmpty()) return emptyList()
+    /** 제약 추출 결과. failed=true는 LLM 호출이 실패(응답 없음, [Error], 예외, 해석 불가)해 기본 제약으로 바뀐 경우이고, 모델이 빈 목록을 준 경우는 실패가 아니다. */
+    private class ConstraintExtraction(val constraints: List<IntentConstraint>, val failed: Boolean)
+
+    /** 제약 추출이 최종 실패해 기본 제약으로 바뀌었을 때 화면 안내에 붙이는 한 줄(사실만 알린다: 제외나 한정이 처리되었다고 말하지 않는다). */
+    private val constraintFailureNote = "요청하신 조건을 해석하지 못했습니다. 제외하거나 한정할 파일이 있다면 파일명으로 다시 말씀해 주세요."
+
+    private fun extractConstraints(userStatements: List<String>): List<IntentConstraint> = extractConstraintsChecked(userStatements).constraints
+
+    private fun extractConstraintsChecked(userStatements: List<String>): ConstraintExtraction {
+        if (userStatements.isEmpty()) return ConstraintExtraction(emptyList(), false)
 
         val defaultConstraints = userStatements.map { stmt ->
             IntentConstraint(
@@ -1492,7 +1504,7 @@ class Stage0ClarificationEngine(
             )
         }
 
-        val client = llmClient ?: return defaultConstraints
+        val client = llmClient ?: return ConstraintExtraction(defaultConstraints, false)
 
         return try {
             val systemPrompt = """
@@ -1532,7 +1544,7 @@ class Stage0ClarificationEngine(
             )
             val content = response?.message?.content?.trim()
             if (content.isNullOrBlank() || content.startsWith("[Error]")) {
-                return defaultConstraints
+                return ConstraintExtraction(defaultConstraints, true)
             }
 
             // JSON 파싱 시도 (코드 블록 방어)
@@ -1547,12 +1559,12 @@ class Stage0ClarificationEngine(
             val listType = object : com.google.gson.reflect.TypeToken<List<Map<String, String>>>() {}.type
             val parsedList: List<Map<String, String>>? = com.google.gson.Gson().fromJson(cleanJson, listType)
             if (parsedList == null || parsedList.isEmpty()) {
-                return defaultConstraints
+                return ConstraintExtraction(defaultConstraints, false)
             }
 
             val combinedUserText = userStatements.joinToString(" ")
 
-            parsedList.mapIndexed { index, map ->
+            val extracted = parsedList.mapIndexed { index, map ->
                 val rawKindStr = map["kind"]?.trim()?.uppercase()
                 var kind = try {
                     ConstraintKind.valueOf(rawKindStr ?: "OTHER")
@@ -1583,8 +1595,9 @@ class Stage0ClarificationEngine(
                     rawKind = kind
                 )
             }
+            ConstraintExtraction(extracted, false)
         } catch (e: Exception) {
-            defaultConstraints
+            ConstraintExtraction(defaultConstraints, true)
         }
     }
 }
