@@ -967,20 +967,24 @@
 - **남은 한계**: 부정형 문장("A는 빼지 말고 같이 봐 주세요")은 파일명 제외는 하지 않지만, 제외 단어가 있으므로 파일명이 없는 경우의 안 A 흐름(제약 추출 후 제안 질문)은 그대로 탈 수 있다. 수정 동사 목록과 연결어는 고정 목록이다.
 - **B-53 정정**: B-53에서 "기대가 바뀐 기존 테스트"는 3개다(`ExclusionProposalFlowTest.g1_…`, `Stage0UtteranceProcessTest.testInvariantE_NotInCandidatesAndUnknownNoOpInvariance`, `Stage0UtteranceProcessTest.testPhase33_ThreeLiveUtteranceTypesAndContractNonPersistenceDiskGrep`). 세션 중 "2개"로 말한 것은 틀렸다.
 - **B-51 정정**: 안 C 근거였던 "후보 294개와 실제 후보 9개의 교집합이 하나로 좁혀진다"는 틀렸다. SR-12의 교집합은 6개(APCCSAppVerMngtBIZ, APCADUpdtVerMngtBIZ, APCCSAppVerMngtSVCImpl, APCCTArsCtfBIZ, APCPYSpacdStlmBIZ, APCCTMphCtfBIZ)이고 required인 APCCSAppVerMngtBIZ를 3회 모두 포함한다. S3의 제외 후보에는 required인 KmcisController가 있다. D5는 AlimtalkTemplateBatchRunner 하나, SR-05는 0개다. 파일명 없는 제외 요청의 자동 사전 해제는 required를 해제할 수 있다.
-- **안 1의 A 커밋(Kotlin 데이터 + 되살리기 경로 + 평가 측정) 결정 사항 5개(사용자 지정, 구현 전)**:
-  1. 결과에 선택 필드 `removedCandidates`를 둔다. 항목은 path, source(STAGE3_EXPLICIT=모델 removedFiles에 있음 / STAGE3_IMPLICIT=후보였는데 유지·removed 어디에도 없음 / USER_EXCLUDED=사전 필터에서 빠짐), stageRank(Stage 1-2 순위), reason(모델 사유가 있으면, 없으면 null)이다. 목록은 (카드 후보 − 최종 유지) + 사용자 제외 파일이고, 정렬은 USER_EXCLUDED를 먼저 두고 나머지는 stageRank 순이다.
-  2. `restore(paths)`는 LLM을 부르지 않는다. 최종 목록과 lastResult 캐시에 추가하고 세션 메모리 pinnedFiles에 기록한다. USER_EXCLUDED를 되살리면 그 세션의 메모리상 제외 목록에서만 뺀다(저장 형식과 디스크는 바꾸지 않는다). removedCandidates에 없는 경로는 무시하고 그 사실을 반환값에 담는다. WebviewActionRouter에 `/restore` 라우트를 추가한다(호출하는 화면은 B에서 만든다).
-  3. 같은 세션의 다음 분석에서 pinnedFiles는 사전 필터와 Stage 3 판정을 건너뛰고 최종 목록에 항상 들어간다(Stage 1-2가 찾지 못했더라도). 새 세션은 비어 있게 시작한다.
-  4. 기존 noticeLines, 마크다운 출력, 저장 형식은 바꾸지 않는다. 옛 결과에 필드가 없어도 동작해야 한다.
-  5. 평가: 기준선 3회 덤프로 오프라인 재생(LLM 없음)을 하고, 평가 보고서에 목록 크기·빠진 required의 목록 포함 여부와 순위·USER_EXCLUDED 수 열을 더한다. 평가 정책은 "목록에 있는 required를 전부 되살린다"이고, 되살린 뒤 /implement 입력의 required 수(복원 후 Recall)와 되살릴 때 LLM 호출 수를 기록한다. 실측은 기본 16개 1회와 `-Deval.only=SR-05X` 1회다.
-- **합격 기준(모두 충족해야 한다)**:
-  - 오프라인 재생에서 기준선 3회의 Stage 3 제거 required 17건이 목록에 17/17 있다.
-  - 실측에서 Stage 3가 뺀 required가 전부 목록에 있다.
-  - SR-05X에서 AdminService, AdminOrganizationResponse가 USER_EXCLUDED로 보인다(2/2).
-  - 되살릴 때 LLM 호출이 0이고, 복원 후 /implement 입력에 되살린 파일이 전부 포함된다.
-  - 복원 전 Recall과 제외 대상 노출이 기준선 3회의 최소~최대 범위 안이다.
-  - 상위 5위 비율은 합격 기준이 아니라 기록만 한다.
-  - 기준선 참고: required가 Stage 3에서 제거된 시나리오×회차 12/47(26%), 제거된 약 437개 중 required 17개(약 4%).
+- **안 1 결정 사항 5개(사용자 지정 원문)**:
+  1. 명시된 파일명을 카드에서 미리 해제하는 기능은 만들지 않는다. 그런 파일은 사전 필터(:227-231)에서 이미 빠져 카드에 도달하지 않는다. 대신 사용자 요청으로 제외된 파일을 접힌 목록에 "제외 요청" 배지와 함께 보여 주고 되살릴 수 있게 한다. 규칙이 잘못 제외했을 때의 안전장치이기도 하다.
+  2. 되살리기는 LLM을 부르지 않는다. 고른 파일을 최종 목록과 lastResult 캐시(/implement 입력)에 바로 추가한다. 되살린 파일은 pinnedFiles로 같은 세션의 다음 분석에서만 유지하고 디스크에 쓰지 않는다.
+  3. 접힌 목록은 removedFiles가 아니라 "카드 후보 − 최종 유지"로 만들어 암묵적 탈락도 포함한다. 정렬은 Stage 1-2 순위이고, required가 몇 번째에 있는지 기록한다.
+  4. 파일명 없는 제외 요청에 대한 배너는 다음 단계로 미룬다. 자동 해제는 하지 않는다.
+  5. 커밋은 A(Kotlin 데이터와 평가 측정, 화면 없음)와 B(WebView)로 나눈다.
+- **합격 기준표(사용자 지정 원문)**:
+
+  | 기준 | 현재 | 합격선 |
+  |---|---|---|
+  | Stage 3에서 빠진 required가 접힌 목록에 있는 비율 | 0/17 (목록 없음) | 17/17 |
+  | 그중 상위 5위 안의 비율 | 없음 | 첫 측정값을 기준선으로 기록 |
+  | 사용자 요청 제외 파일이 배지와 함께 보이는 비율 | 0 | 100% |
+  | 되살린 파일이 /implement 입력에 포함 | 기능 없음 | 3/3 |
+  | 같은 세션의 다음 분석에서 되살린 파일 유지 | 기능 없음 | 3/3 |
+  | 되살릴 때 LLM 호출 수 | 해당 없음 | 0 |
+  | 되살리기 클릭 수 | 불가 | 3 이하 (펼침, 체크, 확정). B에서 측정 |
+  | 기존 동작 불변 | - | pinned·USER_EXCLUDED가 비어 있을 때 Stage 3 입력 불변 (B-55 재판정에서 변경) |
 
 ### [B-55] 빠진 후보 목록(removedCandidates)과 되살리기(restore)의 Kotlin 데이터·경로와 측정 (2026-10-22)
 - **상태: 합격 기준 5개 중 4개 충족, 1개(복원 전 Recall·제외 대상 노출의 기준선 범위)는 문자 그대로는 미충족이라 push하지 않았다.** 로컬 커밋: 6cf0ad7(B-54 정정 docs), da4ddfd(src와 테스트).
