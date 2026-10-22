@@ -16,12 +16,57 @@ data class TargetFileSpec(
     val description: String
 )
 
+/** 최종 목록에 없는 후보가 빠진 이유. */
+enum class RemovedSource {
+    STAGE3_EXPLICIT,  // Stage 3 모델이 removedFiles에 넣음
+    STAGE3_IMPLICIT,  // 모델의 removedFiles에 없는데 최종 목록에서 빠짐(REQUIRED 사유가 짧아 코드가 제거, 카드에서 해제한 파일 포함)
+    USER_EXCLUDED     // 사용자 제외 요청으로 사전 필터에서 빠짐(후보에 없었던 제외 파일 포함)
+}
+
+/**
+ * 되살릴 수 있는 후보. stageRank는 카드 후보(correctedFiles)에서의 1부터의 순위이고,
+ * USER_EXCLUDED는 사전 필터 전 목록의 순위이며 그 목록에 없었으면 null이다.
+ */
+data class RemovedCandidate(
+    val path: String,
+    val source: RemovedSource,
+    val stageRank: Int?,
+    val reason: String? = null
+)
+
+/** restored: 되살린 경로, ignored: removedCandidates에 없어 무시한 경로, result: 갱신된 lastResult(없으면 null). */
+data class RestoreOutcome(val restored: List<String>, val ignored: List<String>, val result: RequirementAnalysisResult?)
+
+/**
+ * 같은 세션의 분석들이 공유하는 메모리 전용 상태. 디스크의 계약/의도 파일(ClarificationContractStore, ClarifyIntentStore)과 분리되어 있고
+ * 프로세스를 넘어 남지 않는다. 요구사항이 바뀌면(requirementKey 불일치) 새 세션으로 보고 비운다.
+ * pinned: 되살린 파일(경로 -> 스펙). 다음 분석에서 사전 필터와 Stage 3 판정을 건너뛰고 최종 목록에 들어간다.
+ * removedSpecs: 마지막 분석에서 빠진 후보의 스펙(되살리기용).
+ */
+object AnalysisSessionMemory {
+    private var requirementKey: String? = null
+    private val pinned = LinkedHashMap<String, TargetFileSpec>()
+    private val removedSpecs = LinkedHashMap<String, TargetFileSpec>()
+
+    @Synchronized fun begin(key: String) {
+        if (requirementKey != key) { pinned.clear(); removedSpecs.clear(); requirementKey = key }
+    }
+    @Synchronized fun reset() { requirementKey = null; pinned.clear(); removedSpecs.clear() }
+    @Synchronized fun pinnedPaths(): Set<String> = pinned.keys.toSet()
+    @Synchronized fun pinnedSpecs(): List<TargetFileSpec> = pinned.values.toList()
+    @Synchronized fun setRemovedSpecs(specs: Map<String, TargetFileSpec>) { removedSpecs.clear(); removedSpecs.putAll(specs) }
+    @Synchronized fun removedSpec(path: String): TargetFileSpec? = removedSpecs[path]
+    @Synchronized fun pin(spec: TargetFileSpec) { pinned[spec.path] = spec }
+}
+
 data class RequirementAnalysisResult(
     val summary: String,
     val targetFiles: List<TargetFileSpec>,
     val warnings: String,
     val rawResponse: String,
-    val suggestedNewFiles: List<net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.NewFileProposal> = emptyList()
+    val suggestedNewFiles: List<net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.NewFileProposal> = emptyList(),
+    // 선택 필드: 최종 목록에서 빠진 후보(USER_EXCLUDED 먼저, 나머지는 stageRank 순). 옛 결과(필드 없음, null)는 빈 목록으로 본다.
+    val removedCandidates: List<RemovedCandidate>? = null
 )
 
 class RequirementAnalysisPipeline(private val project: Project?, private val client: LLMClient) {
@@ -29,6 +74,35 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
 
     companion object {
         var lastResult: RequirementAnalysisResult? = null
+
+        /**
+         * 빠진 후보를 되살린다(LLM 호출 없음). 마지막 결과(lastResult, /implement 입력)에 추가하고 세션 메모리 pinned에 기록한다.
+         * USER_EXCLUDED를 되살려도 디스크의 계약/의도 파일과 clarifyIntent는 바꾸지 않는다(다음 분석의 사전 필터만 pinned를 건너뛴다).
+         * removedCandidates에 없는 경로는 무시하고 ignored에 담는다.
+         */
+        fun restore(paths: List<String>): RestoreOutcome {
+            val last = lastResult
+            val byPath = last?.removedCandidates.orEmpty().associateBy { it.path }
+            val restored = mutableListOf<String>()
+            val ignored = mutableListOf<String>()
+            paths.distinct().forEach { if (it in byPath) restored.add(it) else ignored.add(it) }
+            if (last == null || restored.isEmpty()) return RestoreOutcome(emptyList(), ignored, last)
+            val existing = last.targetFiles.map { it.path }.toSet()
+            val added = mutableListOf<TargetFileSpec>()
+            restored.forEach { p ->
+                val base = AnalysisSessionMemory.removedSpec(p)
+                    ?: TargetFileSpec(0, p, "MODIFY", "사용자가 되살린 파일")
+                val spec = base.copy(order = last.targetFiles.size + added.size + 1)
+                AnalysisSessionMemory.pin(spec)
+                if (p !in existing) added.add(spec)
+            }
+            val updated = last.copy(
+                targetFiles = last.targetFiles + added,
+                removedCandidates = last.removedCandidates.orEmpty().filter { it.path !in restored }
+            )
+            lastResult = updated
+            return RestoreOutcome(restored, ignored, updated)
+        }
     }
 
     private val logger = Logger.getInstance(RequirementAnalysisPipeline::class.java)
@@ -224,8 +298,13 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         val intentExcludedPaths = clarifyIntent?.excludedFiles?.toSet() ?: emptySet()
         val allExcludedPaths = stage0RejectedPaths + previousRejectedPaths + intentExcludedPaths
 
-        val eligibleTargetFiles = if (allExcludedPaths.isNotEmpty()) {
-            targetFiles.filter { it.path !in allExcludedPaths }
+        // 같은 세션에서 사용자가 되살린 파일(pinned)은 사전 필터와 Stage 3 판정을 건너뛰고 최종 목록에 들어간다(메모리 전용).
+        AnalysisSessionMemory.begin(primaryReq)
+        val pinnedPaths = AnalysisSessionMemory.pinnedPaths()
+        val activeExcludedPaths = allExcludedPaths - pinnedPaths
+
+        val eligibleTargetFiles = if (activeExcludedPaths.isNotEmpty()) {
+            targetFiles.filter { it.path !in activeExcludedPaths }
         } else {
             targetFiles
         }
@@ -245,18 +324,20 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         println("==========================")
 
         // [Stage 3 User Confirmation Hook]
+        // pinned 파일은 카드와 Stage 3에 보내지 않고 검증 뒤에 최종 목록에 더한다.
+        val stage3Candidates = if (pinnedPaths.isEmpty()) correctedFiles else correctedFiles.filter { it.path !in pinnedPaths }
         val confirmationBridge = JcefStage3ConfirmationBridge(project)
-        val selectedPaths = confirmationBridge.requestConfirmation(correctedFiles)
+        val selectedPaths = confirmationBridge.requestConfirmation(stage3Candidates)
 
         val (validatedTargetFiles, verificationOutput) = try {
             val userSelection: List<TargetFileSpec>? = if (!selectedPaths.isNullOrEmpty()) {
                 val pathSet = selectedPaths.toSet()
-                correctedFiles.filter { it.path in pathSet }
+                stage3Candidates.filter { it.path in pathSet }
             } else {
                 null
             }
 
-            val filesToVerify = userSelection ?: correctedFiles
+            val filesToVerify = userSelection ?: stage3Candidates
             val verifier = FileRelevanceVerifier(client, projectGraph, mdRoot)
             
             // 앵커 형제(anchorSiblingRefs)는 Stage 1 위상 시드 확장 풀에 섞지 않고 (노이즈 원천 차단),
@@ -291,7 +372,11 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                 verificationOutput.files
             }
 
-            Pair(TargetFileValidator.sortByDependency(verifiedFiles, projectGraph), verificationOutput)
+            val withPinned = if (pinnedPaths.isEmpty()) verifiedFiles else {
+                val have = verifiedFiles.map { it.path }.toSet()
+                verifiedFiles + AnalysisSessionMemory.pinnedSpecs().filter { it.path !in have }
+            }
+            Pair(TargetFileValidator.sortByDependency(withPinned, projectGraph), verificationOutput)
         } finally {
             confirmationBridge.hideConfirmation()
         }
@@ -411,12 +496,35 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
         val verifiedNewPaths = validatedTargetFiles.filter { it.type == "CREATE" || it.type == "신규" }.map { it.path }
         val verifiedSuggestedNewFiles = discoveryResult.suggestedNewFiles.filter { it.suggestedPath in verifiedNewPaths }
 
+        // 되살릴 수 있는 후보 = (카드 후보 - 최종 유지) + 사용자 제외 파일. USER_EXCLUDED를 먼저, 나머지는 카드 순위 순.
+        val keptPaths = validatedTargetFiles.map { it.path }.toSet()
+        val explicitRemoved = verificationOutput.removed.toSet()
+        val cardRank = correctedFiles.withIndex().associate { it.value.path to it.index + 1 }
+        val preFilterRank = targetFiles.withIndex().associate { it.value.path to it.index + 1 }
+        val stage3Removed = correctedFiles.filter { it.path !in keptPaths && it.path !in pinnedPaths }
+        val userExcluded = activeExcludedPaths.filter { it !in keptPaths }
+            .sortedWith(compareBy({ preFilterRank[it] ?: Int.MAX_VALUE }, { it }))
+        val removedCandidates = userExcluded.map { RemovedCandidate(it, RemovedSource.USER_EXCLUDED, preFilterRank[it]) } +
+            stage3Removed.map {
+                RemovedCandidate(
+                    it.path,
+                    if (it.path in explicitRemoved && verificationOutput.removedReasons[it.path] != FileRelevanceVerifier.WEAK_REASON) RemovedSource.STAGE3_EXPLICIT else RemovedSource.STAGE3_IMPLICIT,
+                    cardRank[it.path],
+                    verificationOutput.removedReasons[it.path]
+                )
+            }
+        AnalysisSessionMemory.setRemovedSpecs(
+            stage3Removed.associateBy { it.path } +
+                userExcluded.associateWith { p -> targetFiles.firstOrNull { it.path == p } ?: TargetFileSpec(0, p, "MODIFY", "사용자 제외 요청에서 되살린 파일") }
+        )
+
         val result = RequirementAnalysisResult(
             summary = finalReasoning,
             targetFiles = validatedTargetFiles,
             warnings = discoveryResult.metadata.reasoning,
             rawResponse = "그래프 탐색 결과 처리 완료",
-            suggestedNewFiles = verifiedSuggestedNewFiles
+            suggestedNewFiles = verifiedSuggestedNewFiles,
+            removedCandidates = removedCandidates
         )
 
         // --- ClarificationContract 생산 및 디스크 저장 (Analyze 산출물 계약 단독 생산) ---

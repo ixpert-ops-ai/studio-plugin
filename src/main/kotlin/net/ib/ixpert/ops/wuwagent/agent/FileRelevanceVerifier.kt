@@ -52,7 +52,8 @@ class FileRelevanceVerifier(
         val reasoning: String,
         val removed: List<String> = emptyList(),   // Stage 3에서 제거된 후보 경로(사유는 받지 않는다)
         val unjudged: List<String> = emptyList(),  // 제거·유지 어느 쪽에도 없어 유지된 후보 경로(판정 누락)
-        val candidatePaths: List<String> = emptyList()  // 이번 호출의 번호표(1번부터의 후보 경로 순서)
+        val candidatePaths: List<String> = emptyList(),  // 이번 호출의 번호표(1번부터의 후보 경로 순서)
+        val removedReasons: Map<String, String> = emptyMap()  // 제거 사유(모델이 준 것만. 출력 축소 형식은 근거 미제시 제거에만 있다)
     ) {
         /** 화면에 보일 요약: 모델이 인용한 후보 번호를 파일명으로 바꾼다(판정·저장 값은 그대로). */
         fun displayReasoning(): CitationResult = substituteCandidateNumbers(reasoning, candidatePaths)
@@ -75,6 +76,8 @@ class FileRelevanceVerifier(
         /** REQUIRED 사유가 이보다 짧으면 근거 미제시로 보고 제거한다(V2의 40자 이내 사유를 고려해 10자에서 낮춤). */
         const val MIN_REASON_LENGTH = 5
         const val NOTICE_NAME_LIMIT = 10
+        /** REQUIRED로 적었지만 사유가 짧아 코드가 제거한 후보의 사유(모델이 removedFiles에 넣은 것이 아니므로 암묵적 탈락으로 본다). */
+        const val WEAK_REASON = "판정 근거 미제시로 제외"
         const val CITATION_NAME_LIMIT = 3
 
         // 앞에 파일 이름이 붙을 수 있는 괄호 인용. 괄호 안은 정수와 쉼표·공백만 허용한다.
@@ -224,6 +227,7 @@ class FileRelevanceVerifier(
         
         val verifiedTopFiles = mutableListOf<TargetFileSpec>()
         val removedPaths = mutableListOf<String>()
+        val removedReasons = LinkedHashMap<String, String>()
         val unjudgedPaths = mutableListOf<String>()
         var compactHandled = false
         val toolCall = response?.toolCalls?.firstOrNull { it.function.name == "submit_verification" }
@@ -244,7 +248,7 @@ class FileRelevanceVerifier(
             val compact = parseCompact(argsStr)
             if (compact != null) {
                 finalReasoning = compact.reasoning ?: ""
-                applyCompact(compact, topFiles, verifiedTopFiles, removedPaths, unjudgedPaths)
+                applyCompact(compact, topFiles, verifiedTopFiles, removedPaths, unjudgedPaths, removedReasons)
                 compactHandled = true
             }
         }
@@ -264,7 +268,7 @@ class FileRelevanceVerifier(
                 val verdicts = rawVerdicts.map { verdict ->
                     val reasonLen = verdict.reason?.trim()?.length ?: 0
                     if (verdict.verdict == "REQUIRED" && reasonLen < MIN_REASON_LENGTH) {
-                        verdict.copy(verdict = "UNNECESSARY", reason = "판정 근거 미제시로 제외")
+                        verdict.copy(verdict = "UNNECESSARY", reason = WEAK_REASON)
                     } else {
                         verdict
                     }
@@ -287,9 +291,10 @@ class FileRelevanceVerifier(
                         verifiedTopFiles.add(spec.copy(description = reason))
                     } else {
                         removedPaths.add(spec.path)
+                        verdictObj?.reason?.takeIf { it.isNotBlank() }?.let { removedReasons[spec.path] = it }
                     }
                 }
-                
+
                 // [FIX] topFiles에 없었으나 LLM이 새로 추가한 파일(예: Completeness Guard 피드백으로 인한 누락 파일) 처리
                 verdicts.forEach { verdictObj ->
                     if (verdictObj.verdict == "REQUIRED" && verdictObj.filePath != null) {
@@ -337,7 +342,8 @@ class FileRelevanceVerifier(
             reasoning = finalReasoning,
             removed = removedPaths.filter { it !in keptPaths },
             unjudged = unjudgedPaths,
-            candidatePaths = topFiles.map { it.path }
+            candidatePaths = topFiles.map { it.path },
+            removedReasons = removedReasons.filterKeys { it !in keptPaths }
         )
     }
 
@@ -367,7 +373,8 @@ class FileRelevanceVerifier(
         topFiles: List<TargetFileSpec>,
         kept: MutableList<TargetFileSpec>,
         removed: MutableList<String>,
-        unjudged: MutableList<String>
+        unjudged: MutableList<String>,
+        removedReasons: MutableMap<String, String> = mutableMapOf()
     ) {
         val n = topFiles.size
         val required = LinkedHashMap<Int, String?>()
@@ -384,7 +391,7 @@ class FileRelevanceVerifier(
             when {
                 required.containsKey(num) -> {
                     val reason = required[num]?.trim() ?: ""
-                    if (reason.length < MIN_REASON_LENGTH) removed.add(spec.path)
+                    if (reason.length < MIN_REASON_LENGTH) { removed.add(spec.path); removedReasons[spec.path] = WEAK_REASON }
                     else kept.add(spec.copy(description = reason))
                 }
                 num in removedSet -> removed.add(spec.path)

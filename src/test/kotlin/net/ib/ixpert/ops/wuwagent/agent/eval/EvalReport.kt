@@ -125,6 +125,26 @@ object EvalReport {
         typeTable("SR 유형(srType)", srTypes, { it.scenario.srType }, summaries, sb)
     }
 
+    /** 되살리기 측정(안 1의 A): 목록 크기, 빠진 required의 목록 포함·순위, USER_EXCLUDED 수, 복원 때 LLM 호출, 복원 전후 Recall. */
+    private fun restoreSection(summaries: List<ScenarioSummary>, sb: StringBuilder) {
+        val rows = summaries.flatMap { s -> s.runs.filter { it.ok }.map { s to it } }
+        sb.appendLine("## 빠진 후보 목록과 되살리기 (안 1의 A)")
+        sb.appendLine()
+        if (rows.isEmpty()) { sb.appendLine("(성공한 실행 없음)"); sb.appendLine(); return }
+        sb.appendLine("평가 정책: 최종 목록에서 빠진 required 중 목록에 있는 것을 전부 되살린다. 복원 전 Recall은 위 표의 값이고, 복원 후 Recall은 /implement 입력(lastResult)의 required 적중이다.")
+        sb.appendLine()
+        sb.appendLine("| 시나리오 | run | 목록 크기 | USER_EXCLUDED | 빠진 required 중 목록에 있음(순위, source) | 목록에 없음 | 되살림 | 복원 LLM 호출 | Recall@30 복원 전 -> 후 | /implement 입력에 되살린 파일 모두 포함 |")
+        sb.appendLine("|---|---|---|---|---|---|---|---|---|---|")
+        for ((s, r) in rows) {
+            sb.appendLine("| ${s.scenario.id} | ${r.run} | ${if (r.removedListSize < 0) "(필드 없음)" else r.removedListSize.toString()} | ${r.removedUserExcluded.size} ${r.removedUserExcluded.map { cell(it.substringAfterLast('/')) }} | ${if (r.removedRequiredInList.isEmpty()) "-" else r.removedRequiredInList.joinToString("; ") { cell(it) }} | ${if (r.removedRequiredNotInList.isEmpty()) "-" else r.removedRequiredNotInList.joinToString("; ") { cell(it) }} | ${r.restoredPaths.size} | ${r.restoreLlmCalls} | ${r.gtHit30}/${r.gtTotal} -> ${if (r.recallAfterRestore < 0) "-" else r.recallAfterRestore.toString()}/${r.gtTotal} | ${r.restoredInImplementInput ?: "-"} |")
+        }
+        val missing = rows.sumOf { (_, r) -> r.removedRequiredInList.size + r.removedRequiredNotInList.size }
+        val inList = rows.sumOf { (_, r) -> r.removedRequiredInList.size }
+        sb.appendLine()
+        sb.appendLine("- 빠진 required ${missing}건 중 목록에 있는 것 ${inList}건(그중 Stage 3 제거 ${rows.sumOf { (_, r) -> r.gtStage3Removed.size }}건), 복원 때 LLM 호출 합 ${rows.sumOf { (_, r) -> r.restoreLlmCalls }}회, 복원 전 -> 후 required 적중 합 ${rows.sumOf { (_, r) -> r.gtHit30 }} -> ${rows.sumOf { (_, r) -> if (r.recallAfterRestore < 0) r.gtHit30 else r.recallAfterRestore }}")
+        sb.appendLine()
+    }
+
     private fun callRow(c: ProxyCall, origin: Long): String {
         val total = c.totalMs
         val decodeMs = if (c.stream && total != null && c.ttfbMs != null) total - c.ttfbMs!! else total
@@ -279,6 +299,7 @@ object EvalReport {
             sb.appendLine()
         }
         typeSections(summaries, sb)
+        restoreSection(summaries, sb)
         lastAnalyzeCallTable(summaries, calls, sb)
         sb.appendLine("## 시나리오별 상세")
         sb.appendLine()

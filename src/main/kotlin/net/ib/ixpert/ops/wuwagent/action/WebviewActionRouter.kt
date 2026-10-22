@@ -389,6 +389,29 @@ class WebviewActionRouter(private val project: Project) {
                     net.ib.ixpert.ops.wuwagent.agent.JcefStage3ConfirmationBridge.cancelConfirmation(projectId)
                 }
 
+                // ── 빠진 후보 되살리기 (LLM 호출 없음, lastResult와 세션 메모리만 갱신) ────────
+                "/restore" -> {
+                    logger.info("Router: /restore 분기")
+                    val messageId = "restore_${System.currentTimeMillis()}"
+                    val gson = com.google.gson.Gson()
+                    // 본문: {"paths": ["..."]} 또는 ["..."]
+                    val paths: List<String> = try {
+                        val el = com.google.gson.JsonParser.parseString(textBody.trim())
+                        val arr = if (el.isJsonArray) el.asJsonArray else el.asJsonObject.getAsJsonArray("paths")
+                        arr.map { it.asString }
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                    val outcome = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline.restore(paths)
+                    val reply = mapOf(
+                        "restored" to outcome.restored,
+                        "ignored" to outcome.ignored,
+                        "targetFiles" to (outcome.result?.targetFiles ?: emptyList()),
+                        "removedCandidates" to (outcome.result?.removedCandidates ?: emptyList())
+                    )
+                    bridge.sendMessage("analyze_restore", gson.toJson(reply), messageId)
+                }
+
                 // ── 자동 코드 작성 스텁 (Phase 2b) ────────
                 "/implement" -> {
                     logger.info("Router: /implement 분기")

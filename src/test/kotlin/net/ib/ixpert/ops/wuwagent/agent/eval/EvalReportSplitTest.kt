@@ -52,4 +52,21 @@ class EvalReportSplitTest {
         assertTrue(text, text.contains("기대 질문(참고, 자동 판정 안 함): 무엇을 제한할까요?"))
         assertTrue(text, text.contains("SPRING_MVC_MYBATIS / 기존 기능 수정"))
     }
+
+    // 되살리기 측정 열: 목록 크기, USER_EXCLUDED, 빠진 required의 목록 포함, 복원 LLM 호출, 복원 전후 Recall
+    @Test
+    fun reportShowsTheRemovedListAndRestoreMeasurement() {
+        val base = run("X1", listOf("/A.java"), listOf("/B.java"), emptyList(), emptyList())
+        val r = base.copy(
+            removedListSize = 5, removedUserExcluded = listOf("src/Admin.java"),
+            removedRequiredInList = listOf("/B.java (순위 3, STAGE3_EXPLICIT)"), removedRequiredNotInList = emptyList(),
+            restoredPaths = listOf("src/B.java"), restoreLlmCalls = 0, recallAfterRestore = 2, restoredInImplementInput = true
+        )
+        val dir = Files.createTempDirectory("evalreport2").toFile()
+        val (md, _) = EvalReport.write(dir, ServerCheck("s", "m", 200, emptyList(), true, ""), listOf(ScenarioSummary(scenario("X1", "SPRING_MVC_MYBATIS", null), listOf(r))), 1, 300, "m", 1000, emptyList())
+        val text = md.readText(Charsets.UTF_8)
+        assertTrue(text, text.contains("## 빠진 후보 목록과 되살리기 (안 1의 A)"))
+        assertTrue(text, text.contains("| X1 | 1 | 5 | 1 [Admin.java] | /B.java (순위 3, STAGE3_EXPLICIT) | - | 1 | 0 | 1/2 -> 2/2 | true |"))
+        assertTrue(text, text.contains("복원 때 LLM 호출 합 0회"))
+    }
 }

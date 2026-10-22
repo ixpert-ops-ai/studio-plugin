@@ -233,6 +233,9 @@ class LiveEvalTest {
             proxy.phase = "analyze"
             // 화면에 보이는 분석 결과 원문(UI는 onChunk로 받아 그대로 표시한다. RequirementAnalysisResult.summary는 판정 근거 요약일 뿐이다)
             val shown = StringBuilder()
+            // 새 세션: 이전 실행의 되살린 파일과 마지막 결과를 비운다
+            net.ib.ixpert.ops.wuwagent.agent.AnalysisSessionMemory.reset()
+            RequirementAnalysisPipeline.lastResult = null
             val analysis: RequirementAnalysisResult = try {
                 kotlinx.coroutines.runBlocking {
                     RequirementAnalysisPipeline(metered).analyze(
@@ -264,6 +267,18 @@ class LiveEvalTest {
                     isReference = references.any { g -> matchesGt(sc, g, t.path) })
             }
             val fp30 = eligible.count { t -> gtAll.none { g -> matchesGt(sc, g, t.path) } }
+            // 되살리기 측정: 복원 전 지표는 위 analysis로 이미 계산했다. 평가 정책은 "목록에 있는 required를 전부 되살린다".
+            val removedList = analysis.removedCandidates
+            val missingRequired = required.filter { it !in hit30 }
+            val inList = missingRequired.mapNotNull { g -> removedList?.firstOrNull { matchesGt(sc, g, it.path) }?.let { g to it } }
+            val notInList = missingRequired.filter { g -> removedList?.none { matchesGt(sc, g, it.path) } ?: true }
+            val toRestore = inList.map { it.second.path }.distinct()
+            val callsBeforeRestore = metered.records.size
+            val outcome = if (toRestore.isEmpty()) null else RequirementAnalysisPipeline.restore(toRestore)
+            val restoreCalls = metered.records.size - callsBeforeRestore
+            val implementInput = RequirementAnalysisPipeline.lastResult?.targetFiles.orEmpty().filter { sc.onlyType == null || it.type == sc.onlyType }
+            val recallAfter = required.count { g -> implementInput.any { matchesGt(sc, g, it.path) } }
+            val restoredInInput = outcome?.let { o -> o.restored.all { p -> RequirementAnalysisPipeline.lastResult?.targetFiles.orEmpty().any { it.path == p } } }
             // required GT 네 갈래: 후보는 모든 Stage 3 호출의 후보 줄 합집합, 최종 목록은 analysis.targetFiles(hit30과 같은 판정)
             val split = GtSplit.classify(required, hit30, metered.stage3UserContents.isNotEmpty(), GtSplit.candidatePaths(metered.stage3UserContents.toList()), excluded) { g, p -> matchesGt(sc, g, p) }
             // 제외 대상 노출: 사용자 지시로 나타나면 안 되는 파일이 최종 목록(필터 전 전체)에 나타난 수
@@ -309,7 +324,13 @@ class LiveEvalTest {
                 mustNotAppearTotal = mustNot.size, mustNotAppearInTargets = mustNotInTargets,
                 gtKept = split.kept, gtStage3Removed = split.stage3Removed, gtOutsideExcluded = split.outsideExcluded,
                 gtOutsideLost = split.outsideLost, gtUnobserved = split.unobserved,
-                gtTotalCertain = required.count { !it.isUncertain() }, gtHit30Certain = hit30.count { !it.isUncertain() }
+                gtTotalCertain = required.count { !it.isUncertain() }, gtHit30Certain = hit30.count { !it.isUncertain() },
+                removedListSize = removedList?.size ?: -1,
+                removedUserExcluded = removedList.orEmpty().filter { it.source == net.ib.ixpert.ops.wuwagent.agent.RemovedSource.USER_EXCLUDED }.map { it.path },
+                removedRequiredInList = inList.map { (g, c) -> "${g.label()} (순위 ${c.stageRank ?: "-"}, ${c.source})" },
+                removedRequiredNotInList = notInList.map { it.label() },
+                restoredPaths = outcome?.restored.orEmpty(), restoreLlmCalls = restoreCalls,
+                recallAfterRestore = recallAfter, restoredInImplementInput = restoredInInput
             )
         } catch (e: Throwable) {
             return partial("clarify 단계 예외: " + e.javaClass.simpleName + ": " + (e.message ?: "").take(200))

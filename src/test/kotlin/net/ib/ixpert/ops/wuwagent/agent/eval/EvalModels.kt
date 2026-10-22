@@ -129,7 +129,16 @@ data class RunResult(
     val gtOutsideLost: List<String> = emptyList(),
     val gtUnobserved: List<String> = emptyList(),         // Stage 3 호출이 관찰되지 않아 제거/후보 밖을 가를 수 없는 항목
     val gtTotalCertain: Int = 0,                          // uncertain 제외 Recall 분모
-    val gtHit30Certain: Int = 0
+    val gtHit30Certain: Int = 0,
+    // 되살리기 측정(안 1의 A). removedListSize -1 = 결과에 목록 필드 없음
+    val removedListSize: Int = -1,
+    val removedUserExcluded: List<String> = emptyList(),        // 목록의 USER_EXCLUDED 경로
+    val removedRequiredInList: List<String> = emptyList(),      // 최종 목록에서 빠진 required 중 목록에 있는 것("이름 (순위 r, source)")
+    val removedRequiredNotInList: List<String> = emptyList(),   // 빠졌는데 목록에도 없는 required
+    val restoredPaths: List<String> = emptyList(),              // 평가 정책("목록에 있는 required를 전부 되살린다")으로 되살린 경로
+    val restoreLlmCalls: Int = 0,                               // 되살릴 때 LLM 호출 수(기대 0)
+    val recallAfterRestore: Int = -1,                           // 복원 후 /implement 입력(lastResult)의 required 적중 수
+    val restoredInImplementInput: Boolean? = null               // 되살린 파일이 모두 lastResult에 들어갔는가(되살린 것이 없으면 null)
 )
 
 data class ScenarioSummary(
