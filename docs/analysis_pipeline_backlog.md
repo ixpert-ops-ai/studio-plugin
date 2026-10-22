@@ -910,3 +910,28 @@
   - 번역기가 EXCLUDE를 낼 때 모델이 쓴 `message`를 쓰지 않고 고정 문구로 바꾸기(현재 `Stage0UtteranceProcessTest`가 모델 message를 확인하고 있어 그 테스트도 함께 바꿔야 한다).
   - 제약 추출이 SCOPE_LIMIT/EXCLUDE_COMPONENT로 갈리는 응답을 모두 담는 테스트 추가.
 - **B-51 마무리**: B-51의 "SR-05X는 (나) 이후 판정" 항목은 이 문서의 판정으로 닫는다. SR-05X는 required 유지 3/3, 제외 대상 노출 0/2 x3으로 기준은 충족하지만 AdminService 제외와 안내의 정정은 되지 않았다.
+
+### [B-53] 파일명을 발화 원문에서 결정적으로 읽어 제외하는 보완과 SR-05X 합격 (2026-10-22)
+- **B-52 기준의 결함**: B-52의 합격 기준(제외 대상 노출 0/2, 엔진 질문 수, required 유지)은 수정 전에도 충족되는 값이라(Admin 파일은 원래 결과에 나오지 않는다) 수정의 효과를 가려내지 못했다. 실제로 B-52 측정에서는 기준을 모두 충족했지만 AdminService가 3회 모두 제외되지 않았고 사실과 다른 안내가 남았다.
+- **새 합격 기준(모두 충족)**: 3회 모두 excludedFiles에 AdminService와 AdminOrganizationResponse가 둘 다 있음 / 3회 모두 화면 안내에 두 파일의 제외 사실이 나오고 "존재하지 않아" 같은 사실과 다른 문장이 없음 / clarify 호출 수 회차당 8 이하 / 엔진 질문 1 이하 / 제외 대상 노출 0/2, required 유지 3회 중 2회 이상.
+- **1번 위치(읽기, 5d9e018 기준)**:
+  - a. 1d52f97이 더한 제약 추출 호출은 `Stage0ClarificationEngine.kt:1229`(`extractConstraints(listOf(trimmed))`)이고, 호출 조건은 `:1222` `needExtraction`이다(번역기가 EXCLUDE일 때는 다른 파일명이 더 적힌 경우). 결과는 `proposeExclusionsForUtterance`(`:835`)가 EXCLUDE_COMPONENT인 증거 구문만 골라 쓴다(`:847`). 번역기가 EXCLUDE를 낸 경우의 이 호출은 파일명 처리에만 쓰였다.
+  - b. 호출 순서: `needExtraction`(`:1222`) -> 제약 추출(`:1229`) -> `proposeExclusionsForUtterance`(`:1231`)의 파일명 분기(`:855-886`) -> 안내 조합(`:920-924`) -> 번역기 안내 억제(`:1238`) -> 화면 안내(`:1239`). 파일명 처리가 제약 추출의 분류 결과를 앞단에서 받는 구조라, 분류가 SCOPE_LIMIT이면 처음부터 건너뛰어졌다.
+- **변경(8627fe5, `Stage0ClarificationEngine.kt`만, 번역기 코드와 프롬프트는 수정 없음)**:
+  - 파일명은 발화 원문에서 결정적으로 읽는다(`explicitExclusionMentions`, `explicitFileMentions`). 파일명 형태는 확장자가 있는 토큰(.java, .kt, .xml, .properties, .yml, .yaml, .jsp, .js, .sql, .html, .css, .json)과 그래프 노드의 클래스명과 정확히 일치하는 이름이다. 그래프에 없는 이름은 확장자가 있는 것만 "찾지 못했습니다"로 알린다.
+  - 처리 조건은 같은 절(문장 끝, 말고/하고/하되/이고/지만/면서/그리고에서 끊음)에 제외 표현이 있을 때뿐이다. "SurveyServiceImpl만"처럼 "만"이 붙은 이름은 수정 대상 한정이라 읽지 않는다. 번역기 분류와 제약 추출 분류는 조건에 쓰지 않는다.
+  - 파일명을 처리한 경우 제약 추출 호출은 하지 않는다(제거). 같은 호출은 파일명이 없는 제외 발화의 안 A 흐름(후보 탐색, 제안, 안내)에서 계속 쓰이므로 그 경로에는 남겼다. 결과와 안내 문구는 1d52f97 규칙 그대로다(후보에 있음 / 후보 외 그래프에 있음 + "후보에는 없었지만" / 그래프에 없음 "찾지 못했습니다"). 엔진 안내가 만들어지면 번역기 안내는 쓰지 않고 안내에 추출한 파일 전부의 결과가 나온다. 확인 질문과 저장 형식 변경은 없다.
+  - SR 원문(initSession)의 제외 요청은 기존대로 제약 추출 증거 구문 기반이다(이번 범위 밖).
+- **테스트와 검증**: 새 테스트 `h1_scopeLimitClassificationStillExcludesBothFiles`, `h2_emptyOrFailedConstraintExtractionStillExcludesBothFiles`, `h3_noExclusionWordOrDifferentClauseMeansNoExclusion`(제외 표현 없음, D5 문장, 앞 절의 수정 대상), `h4_translatorMessageIsNotShownWhenTheEngineReportsTheFiles`. 전체 494/42/17(490에서 +4), clarify 201/1/3, 실패 메시지 diff 0, 하네스 EXACT_MATCH 5종·MATCH_EXCLUDING 2종 일치, selftest 24/24.
+  - 기대가 바뀐 기존 테스트: `ExclusionProposalFlowTest.g1_…`(제약 추출을 더 부르지 않으므로 호출 수 기대 base + 1 -> base. 이유: 파일명 처리가 제약 추출에 의존하지 않는다), `Stage0UtteranceProcessTest.testInvariantE_NotInCandidatesAndUnknownNoOpInvariance`(안내 "존재하지 않습니다" -> "test_mapper.xml을(를) 찾지 못했습니다". 이유: 발화에 파일명이 있으면 엔진이 직접 그래프에서 찾아 안내하고 번역기 안내는 쓰지 않는다. 항목 불변 단언은 그대로), `Stage0UtteranceProcessTest.testPhase33_ThreeLiveUtteranceTypesAndContractNonPersistenceDiskGrep`(모델 안내문 marker1 -> "제외했습니다: order_write.jsp". 이유 같음. 제외 결과 단언은 그대로). g2~g4, f11을 포함한 나머지는 변경 없이 통과.
+- **측정(`live_eval_20261022_140119`, SR-05X 3회, 사내 Qwen, 사전 예측 `pred_excl_c.md`)**:
+
+  | 회차 | 총(초) | clarify(초/호출) | excludedFiles | 제외 대상 노출 | required 유지 | 엔진 질문 |
+  |---|---|---|---|---|---|---|
+  | 1 | 184 | 144 / 8 | AdminOrganizationResponse, AdminService | 0/2 | 2/2 | 1 |
+  | 2 | 180 | 144 / 8 | AdminOrganizationResponse, AdminService | 0/2 | 2/2 | 1 |
+  | 3 | 178 | 119 / 8 | AdminOrganizationResponse, AdminService | 0/2 | 2/2 | 1 |
+
+  화면 안내(발화 2, 3회 모두 같음): "다음 파일을 분석 대상에서 제외했습니다: AdminOrganizationResponse.java" 줄과 "후보에는 없었지만 제외 목록에 넣었습니다: AdminService.java" 줄. 번역기 안내와 "존재하지 않아" 문장은 나오지 않았다. 서버 오류와 분석 실패는 0건. 최종 목록은 3회 모두 OrganizationService, OrganizationRepository.
+- **판정**: 새 합격 기준 모두 충족(둘 다 제외 3/3, 안내 사실 3/3, clarify 호출 8 이하 3/3, 엔진 질문 1 이하 3/3, 노출 0/2 3/3, required 유지 3/3). 예측과 모두 일치했다. SR-05X는 합격이다.
+- **남은 한계**: 파일명 규칙은 확장자가 있는 이름과 그래프의 클래스명 정확 일치만 읽는다(한글 이름, 패키지 경로만 적은 경우는 안 읽음). 절 나누기는 연결어(말고, 하고 등) 기준이라 "A는 빼고, B도 제외해 주세요"처럼 쉼표로만 이어진 두 이름은 같은 절로 본다. SR 원문의 제외 요청은 아직 제약 추출 분류에 의존한다.
