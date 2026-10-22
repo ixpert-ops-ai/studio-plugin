@@ -981,3 +981,52 @@
   - 복원 전 Recall과 제외 대상 노출이 기준선 3회의 최소~최대 범위 안이다.
   - 상위 5위 비율은 합격 기준이 아니라 기록만 한다.
   - 기준선 참고: required가 Stage 3에서 제거된 시나리오×회차 12/47(26%), 제거된 약 437개 중 required 17개(약 4%).
+
+### [B-55] 빠진 후보 목록(removedCandidates)과 되살리기(restore)의 Kotlin 데이터·경로와 측정 (2026-10-22)
+- **상태: 합격 기준 5개 중 4개 충족, 1개(복원 전 Recall·제외 대상 노출의 기준선 범위)는 문자 그대로는 미충족이라 push하지 않았다.** 로컬 커밋: 6cf0ad7(B-54 정정 docs), da4ddfd(src와 테스트).
+- **2번 위치(읽기, 변경 전 코드 기준)**:
+  - a. 카드 후보, 최종 유지, 순위: `RequirementAnalysisPipeline.kt`의 `targetFiles`(Stage 1 순서, `:166-219`)와 사전 필터 `:227-231`, `correctedFiles`(`:234`, 카드 후보와 Stage 3 입력, 순서가 카드 번호), 검증 결과 `verificationOutput`(`:283`), 최종 유지 `validatedTargetFiles`(`:294`), 결과 생성(`:414`). 이 다섯 값이 `:297`~`:414` 사이에서 함께 보인다. 변경 후 계산 위치는 같은 구간(`removedCandidates`, 현재 `:507` 부근).
+  - b. 사전 필터에서 빠진 사용자 제외 파일: `allExcludedPaths`(`:225`)가 필터(`:227-231`)와 계약 생산(`:447-453`, 디스크 저장 `:473`)에서만 쓰였고 결과로는 나가지 않았다. 후보에 없던 제외 파일은 `targetFiles`에도 없으므로 결과에 실으려면 `allExcludedPaths` 자체를 써야 한다(실제로 그렇게 했다).
+  - c. lastResult: 갱신은 `RequirementAnalysisPipeline.kt:480`(`lastResult = result`, 동반 객체 `:31`), 읽는 곳은 `WebviewActionRouter.kt:397`(`/implement`, `cachedResult.targetFiles`와 `summary`를 `ImplementService`에 전달).
+  - d. pinnedFiles 위치: 디스크에 쓰는 객체는 `ClarificationContractStore.saveContract`(`:473`)와 `ClarifyIntentStore.saveIntent`(라우터 `/analyze-confirm`)이고 둘 다 pinned를 참조하지 않는다. 그래서 같은 파일의 별도 `object AnalysisSessionMemory`(메모리 전용)에 두었다. 세션 경계는 `begin(primaryReq)`의 요구사항 키 불일치로 비우고 `reset()`을 제공한다.
+- **변경(da4ddfd, 허용 파일: `RequirementAnalysisPipeline.kt`, `FileRelevanceVerifier.kt`, `WebviewActionRouter.kt`(라우트 추가만), 평가 test)**:
+  - 결과에 선택 필드 `removedCandidates: List<RemovedCandidate>?`(path, source, stageRank, reason). source는 STAGE3_EXPLICIT(모델 removedFiles)와 STAGE3_IMPLICIT(removedFiles에 없는데 최종 목록에서 빠짐: REQUIRED 사유가 짧아 코드가 제거한 경우, 카드에서 해제한 경우), USER_EXCLUDED. 목록은 (카드 후보 - 최종 유지) + 사용자 제외 파일(후보에 없던 것 포함)이고 USER_EXCLUDED가 먼저, 나머지는 카드 순위 순이다. USER_EXCLUDED의 순위는 사전 필터 전 목록의 순위(없으면 null).
+  - `RequirementAnalysisPipeline.restore(paths)`: LLM 호출 없음, lastResult에 추가(순번 이어서 부여)하고 `AnalysisSessionMemory`에 pin, 목록에 없는 경로는 `ignored`로 반환. 디스크와 clarifyIntent는 건드리지 않는다. `/restore` 라우트는 `{"paths": [...]}` 또는 배열을 받아 `analyze_restore` 메시지로 결과를 보낸다(화면은 B).
+  - 같은 세션의 다음 분석: pinned는 사전 필터(`activeExcludedPaths`)와 Stage 3 입력에서 빠지고 검증 뒤 최종 목록에 더한다. pinned가 비어 있으면 기존 경로와 동일하다.
+  - `FileRelevanceVerifier.VerificationOutput.removedReasons`와 `WEAK_REASON`(모델이 준 제거 사유, 근거 미제시 제거). noticeLines, 마크다운, 저장 형식은 변경 없음.
+  - 평가: 실행마다 세션 메모리 초기화, "목록에 있는 required를 전부 되살린다" 정책, 보고서에 "빠진 후보 목록과 되살리기" 절(목록 크기, USER_EXCLUDED, 빠진 required의 목록 포함·순위·source, 복원 LLM 호출, 복원 전후 Recall, /implement 입력 포함).
+- **테스트**: `RemovedCandidatesRestoreTest` r1~r7(암묵적 탈락 STAGE3_IMPLICIT, USER_EXCLUDED 맨 앞, restore 후 lastResult 포함과 LLM 호출 0, 같은 세션 다음 분석에서 유지, USER_EXCLUDED 복원 후 사전 필터 통과와 디스크 불변, 새 세션 pinned 비어 있음, 필드 없는 옛 결과), `EvalReportSplitTest.reportShowsTheRemovedListAndRestoreMeasurement`. 전체 505/42/17(497에서 +8), clarify 211/1/3(204에서 +7), 실패 메시지 diff 0, 하네스 EXACT_MATCH 5종·MATCH_EXCLUDING 2종 일치, selftest 24/24, 기존 h·g·i·f11 통과.
+- **4-a 오프라인 재생(기준선 3회 덤프, LLM 없음, `replay_a.js`)**: 제거된 required 17건이 모두 목록에 있다(**17/17**). 목록 크기는 중앙값 8, 최대 24(시나리오×회차 47건). 상위 5위 이내 11/17(기록만). source는 17건 모두 STAGE3_EXPLICIT.
+
+  | 회차 | 시나리오 | 제거된 required | 카드 순위/후보 수 |
+  |---|---|---|---|
+  | 110533 | SR-07 | PrFaqMapper.xml | 13/30 |
+  | 110533 | D1 | AlimtalkTmplDto.java | 6/27 |
+  | 110533 | D2 | APCMMTrcdIsSVC / APCMMTrcdIsSVCImpl / APCMMTrcdIsBIZ | 7/18, 3/18, 2/18 |
+  | 110533 | D3 | ACMBTBAPC024DEM | 2/9 |
+  | 155718 | SR-07 | prFaqInfo.xml | 5/30 |
+  | 155718 | D1 | AlimtalkTmplDto.java | 6/27 |
+  | 155718 | D2 | APCMMTrcdIsBIZ | 2/16 |
+  | 155718 | S3 | KmcisService.java / CallbackInfoDto.java | 3/11, 1/11 |
+  | 165435 | SR-07 | PrFaqMapper.xml | 13/30 |
+  | 165435 | D1 | sql_survey.xml / AlimtalkTmplDto.java | 9/21, 5/21 |
+  | 165435 | D2 | APCMMTrcdIsBIZ | 2/16 |
+  | 165435 | S3 | KmcisService.java / CallbackInfoDto.java | 3/11, 1/11 |
+- **정정(2026-10-22 설계 보고와 B-54 이전 판본의 수치)**: "제거 required 17건 중 6건이 removedFiles에 없다"와 "화면에 이름이 보이는 것 11/17"은 틀렸다. 덤프를 이름으로 맞출 때 GT 이름(확장자 없음)과 경로 파일명이 달라 6건을 놓친 집계 오류다. 올바른 값은 17건 모두 모델의 removedFiles에 있었고(IMPLICIT 0), 결과 요약의 "Stage 3에서 제외된 후보 N개" 줄(앞 10개 이름)에도 17/17이 이름으로 나온다. 따라서 이번 변경이 새로 주는 것은 "이름이 보이는가"가 아니라 "되살릴 수 있는가"(0/17 -> 17/17)이다. 목록을 removedFiles가 아니라 "후보 - 유지"로 만드는 이유는 REQUIRED 사유가 짧아 코드가 제거하는 경우(WEAK_REASON)와 카드 해제를 같이 담기 위해서다.
+- **4-c 실측(사전 예측 `pred_restore_a.md`, 사내 Qwen, `live_eval_20261022_160038`(기본 16개 1회), `live_eval_20261022_160437`(SR-05X 1회))**:
+  - 기본 16개: 성공 15, **SR-08 실패(clarify 단계 서버 HTTP 524, 분석 미실행)**. 실패는 처음 3개가 아니므로 중단 조건에는 해당하지 않는다(기준선 1회차의 SR-08 실패와 같은 종류).
+  - Stage 3가 뺀 required 3건(D1 AlimtalkTmplDto 순위 6, D2 APCMMTrcdIsBIZ 순위 2, SR-07 PrFaqMapper.xml 순위 13)이 모두 목록에 있다. 되살림 3건, **복원 LLM 호출 0**, /implement 입력(lastResult)에 되살린 파일 모두 포함 3/3, required 적중 합 37 -> 40.
+  - 목록에 없는 빠진 required(후보 밖): D1 5건(survey 화면 파일과 AlimtalkChnlDto), D2 3건, S2 AdminController, S3 KmcisController, SR-01 ips_common.js. 모두 Stage 1~2에서 후보로 오르지 못한 것이다.
+  - USER_EXCLUDED는 기본 16개에서 모두 0이다(제외가 확정된 시나리오가 없었다: excludedFiles 비어 있음. D5, S3, SR-01, SR-05, SR-07, SR-11, SR-12는 "제외 요청이 확정되지 않았습니다" 상태).
+  - SR-05X: excludedFiles와 목록의 USER_EXCLUDED에 AdminService, AdminOrganizationResponse **2/2**, 제외 대상 노출 0/2, required 2/2 유지, 엔진 질문 1, clarify 호출 8, 목록 크기 3(USER_EXCLUDED 2 + Stage 3 제거 1), 복원 대상 없음.
+- **합격 판정**:
+
+  | 기준 | 결과 |
+  |---|---|
+  | 4-a 17/17 | 충족 |
+  | 4-c에서 Stage 3가 뺀 required 전부 목록에 있음 | 충족 3/3 |
+  | SR-05X USER_EXCLUDED 2/2 | 충족 |
+  | 되살릴 때 LLM 호출 0, /implement 입력에 되살린 파일 전부 포함 | 충족 |
+  | 복원 전 Recall과 제외 대상 노출이 기준선 3회 최소~최대 범위 안 | **미충족(문자 그대로)**: (1) SR-08은 clarify 단계 서버 524로 분석이 실행되지 않아 Recall을 측정하지 못했다. (2) SR-12 제외 대상 노출이 0/1로 기준선 범위 1~1 밖이다. 기준선 3회는 APCADUpdtVerMngtBIZ가 최종 목록에 나왔지만 이번에는 Stage 3 모델이 removedFiles에 넣어(후보 번호 4) 빠졌고 그 파일은 목록(USER_EXCLUDED 아님, STAGE3_EXPLICIT)에 있다. 방향은 개선이고 pinned가 비어 있어 이번 변경이 선택에 영향을 주지 않은 경로이므로 모델 변동으로 보지만, 지정한 기준은 범위 안이라서 충족으로 세지 않는다. 나머지 14개 시나리오의 Recall과 D5·SR-05 노출은 모두 범위 안이다. |
+- **예측과 다른 점**: (1) 예측 5(복원 전 Recall이 범위 안인 시나리오 13개 이상 70%)는 맞았지만(15개 중 15개가 범위 안), 16개 모두 범위 안이라는 35% 시나리오는 SR-08의 서버 오류로 깨졌다. (2) 예측 6(노출이 기준선과 같음 85%)은 SR-12에서 어긋났다(Stage 3 변동). (3) 예측 7의 "USER_EXCLUDED는 제외가 확정된 시나리오 5곳 이상"은 틀렸다: 실제로는 확정된 곳이 SR-05X뿐이었다(D5, S3, SR-05, SR-12 등은 안 A에서 미확정으로 남는 것이 현재 동작이다). (4) 예측 2(3~9건)는 3건(실측 1회차)으로 하한에 걸렸다. (5) 4-a의 source 17건이 모두 EXPLICIT인 것은 예측하지 않았다(정정 참조).
+- **남은 일(범위 밖, 손대지 않음)**: WebView의 접힌 "제외된 후보 N개" 컴포넌트와 복원 버튼(B), 카드의 사전 해제·배너. 세션 경계는 요구사항 문자열 키와 `reset()`뿐이라, 같은 요구사항 문자열로 새 `/clarify` 세션을 시작하면 pinned가 남는다. `/clarify` 시작 분기에 `AnalysisSessionMemory.reset()` 호출을 한 줄 넣어야 하며 이는 라우터의 "라우트 추가만" 범위 밖이라 하지 않았다.
