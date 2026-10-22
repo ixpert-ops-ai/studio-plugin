@@ -850,7 +850,7 @@
   - SR-05X: 번역기가 두 번째 발화를 EXCLUDE로 분류해 파일 하나(AdminOrganizationResponse)만 제외하고 "AdminService.java는 현재 후보 목록에 존재하지 않아 제외할 수 없습니다"라고 안내했다. 이 발화가 EXCLUDE이면 제외 흐름을 건너뛰기 때문에 파일명을 직접 적은 AdminService는 처리되지 않았고, 안내문도 그래프에 있는 파일에 대해 사실과 다르다(후보 목록에 없을 뿐).
   - 평가 대본은 제외 질문에 이름이나 "네"로 답하지 않으면 대체 답변("잘 모르겠어요…")이 쓰인다. 이 답은 답으로 읽히지 않아(OTHER) 번역기를 거친다.
   - SR-12(후보 294개)와 S3(후보 12개)는 파일명을 알려 주지 않으면 노출이 그대로다. 클래스명을 모르는 사용자는 이 흐름으로 해결되지 않는다.
-- **다음 단계 기록**: 안 C(Stage 3 후보 확인 카드에서 제외 요청에 해당하는 후보를 사전 해제 표시)는 후보 294개를 실제 후보 9개와 교집합해 하나로 좁히므로, 대상 클래스명을 모르는 사용자(SR-12 유형)에 맞다. 웹뷰 변경이 필요해 이번 범위에서 제외했다. 안 A의 보완으로는 번역기가 EXCLUDE를 내도 증거 구문에 다른 파일명이 있으면 제외 흐름을 이어 가는 것을 후보로 둔다.
+- **다음 단계 기록**: 안 C(Stage 3 후보 확인 카드에서 제외 요청에 해당하는 후보를 사전 해제 표시)는 후보 294개를 실제 후보 9개와 교집합해 하나로 좁히므로, 대상 클래스명을 모르는 사용자(SR-12 유형)에 맞다 **[정정(B-54): 교집합은 하나가 아니라 6개이고 required인 APCCSAppVerMngtBIZ를 3회 모두 포함한다. 파일명 없는 제외 요청의 자동 사전 해제는 required를 해제할 수 있어 하지 않는다]**. 웹뷰 변경이 필요해 이번 범위에서 제외했다. 안 A의 보완으로는 번역기가 EXCLUDE를 내도 증거 구문에 다른 파일명이 있으면 제외 흐름을 이어 가는 것을 후보로 둔다.
 
 - **추가(2026-10-21): SR-05의 OrganizationRepository 제거는 Stage 3 변동으로 판정, 합격 처리하고 push함.**
   - **입력 비교(읽기)**: 기준선 3회(110533, 155718, 165435)와 안 A 실행(175239)의 SR-05, SR-05X Stage 3 입력을 덤프에서 비교했다.
@@ -935,3 +935,54 @@
   화면 안내(발화 2, 3회 모두 같음): "다음 파일을 분석 대상에서 제외했습니다: AdminOrganizationResponse.java" 줄과 "후보에는 없었지만 제외 목록에 넣었습니다: AdminService.java" 줄. 번역기 안내와 "존재하지 않아" 문장은 나오지 않았다. 서버 오류와 분석 실패는 0건. 최종 목록은 3회 모두 OrganizationService, OrganizationRepository.
 - **판정**: 새 합격 기준 모두 충족(둘 다 제외 3/3, 안내 사실 3/3, clarify 호출 8 이하 3/3, 엔진 질문 1 이하 3/3, 노출 0/2 3/3, required 유지 3/3). 예측과 모두 일치했다. SR-05X는 합격이다.
 - **남은 한계**: 파일명 규칙은 확장자가 있는 이름과 그래프의 클래스명 정확 일치만 읽는다(한글 이름, 패키지 경로만 적은 경우는 안 읽음). 절 나누기는 연결어(말고, 하고 등) 기준이라 "A는 빼고, B도 제외해 주세요"처럼 쉼표로만 이어진 두 이름은 같은 절로 본다. SR 원문의 제외 요청은 아직 제약 추출 분류에 의존한다.
+
+### [B-54] 파일명 제외 규칙의 과잉 제외, 부정형 오인, 과소 제외 보완과 안 1 결정 (2026-10-22)
+- **배경**: B-53 규칙을 기존 시나리오 문장 38개(기본 16 + holdout 4의 SR와 발화)와 합성 문장 6개로 읽기 전용 점검했다(`regress_rule.js`, LLM 없음). 실제 시나리오에서 파일명을 쓴 문장은 **0개**였다(제외 표현이 있는 8문장도 파일명이 없다). 그래서 "과잉 제외 0건"은 규칙을 검증한 값이 아니라 규칙이 작동할 기회가 없었다는 관찰이다. 합성 문장에서 과잉 제외 1건(#1), 과소 제외 1건(#3)이 나왔다.
+- **변경(`Stage0ClarificationEngine.kt`만, cf53fe2)**:
+  - a. `clauseConnective`에 `빼고|두고|놔두고|제외하고`를 추가했다. 연결어는 앞 절에 남긴다(원인: "A는 빼고, B는 수정"이 한 절이라 B도 제외됨).
+  - b. "X만"은 같은 절에 수정 동사(수정|변경|고쳐|고치|추가|개발, 단 "수정하지"와 "변경하지"는 제외 표현이라 세지 않음)가 있을 때만 건너뛴다. 없으면 제외 대상이다("AdminService만 빼 주세요").
+  - c. 같은 절에 `빼지 말|제외하지 말|빼지 마|제외하지 마`가 있으면 그 절은 제외하지 않는다.
+  - d. 한 절에 제외 표현과 수정 동사가 있고 이름이 2개 이상이면 자동 제외하지 않고 "<이름들>은(는) 제외 요청인지 분명하지 않아 제외하지 않았습니다." 한 줄만 안내한다. 확인 질문과 안 A 흐름은 타지 않는다.
+- **1-e 결과(새 테스트 `ExclusionFileNameRuleTest.i1_…`, 기대값 변경 없음, 13/13 일치)**:
+
+  | 문장 | 제외된 파일 |
+  |---|---|
+  | AdminService는 빼고, OrganizationService는 수정해 주세요 | AdminService |
+  | AdminService는 빼고 OrganizationService는 수정해 주세요 | AdminService |
+  | AdminService, OrganizationService는 수정하고 AdminController는 빼 주세요 | AdminController |
+  | AdminService만 빼 주세요 | AdminService |
+  | AdminService.java 말고 나머지는 다 봐 주세요 | AdminService |
+  | OrganizationRepository는 그대로 두고 OrganizationService만 수정 | OrganizationRepository |
+  | AdminService 건드리지 마세요. OrganizationService는 수정 | AdminService |
+  | AdminService랑 AdminController는 빼 주세요 | AdminService, AdminController |
+  | AdminService는 빼지 말고 같이 봐 주세요 | 없음 |
+  | AdminService는 수정하고 AdminController는 그대로 두세요 | AdminController |
+  | 알림톡 배치는 건드리지 말고 SurveyServiceImpl만 수정 | 없음 |
+  | OrganizationService만 수정하고 나머지는 그대로 | 없음 |
+  | SR-05X 발화 2 원문 | AdminService, AdminOrganizationResponse |
+
+  테스트 그래프는 member_market의 클래스명을 본뜬 작은 그래프다(외부 그래프 파일에 의존하지 않는다). 추가 테스트 `i2_ambiguousClauseIsNotExcludedAndGetsOneNoticeLine`(판단 불가 안내), `i3_singleNameWithModifyVerbIsStillExcluded`(이름 하나면 판단 불가가 아님).
+- **1-f**: 갱신한 `regress_rule.js`로 실제 문장 38개를 다시 돌렸다. 결과는 이전과 같다(전부 "추출된 파일명 없음", 과잉 제외 0). 합성 6문장은 #1 AdminService만, #3 AdminService로 바뀌고 나머지는 그대로다.
+- **검증**: 전체 497/42/17(494에서 +3: i1~i3), clarify 204/1/3(201에서 +3), 실패 메시지 diff 0, 하네스 EXACT_MATCH 5종·MATCH_EXCLUDING 2종 일치, selftest 24/24, 기존 h1~h4·g1~g4·f11 통과.
+- **남은 한계**: 부정형 문장("A는 빼지 말고 같이 봐 주세요")은 파일명 제외는 하지 않지만, 제외 단어가 있으므로 파일명이 없는 경우의 안 A 흐름(제약 추출 후 제안 질문)은 그대로 탈 수 있다. 수정 동사 목록과 연결어는 고정 목록이다.
+- **B-53 정정**: B-53에서 "기대가 바뀐 기존 테스트"는 3개다(`ExclusionProposalFlowTest.g1_…`, `Stage0UtteranceProcessTest.testInvariantE_NotInCandidatesAndUnknownNoOpInvariance`, `Stage0UtteranceProcessTest.testPhase33_ThreeLiveUtteranceTypesAndContractNonPersistenceDiskGrep`). 세션 중 "2개"로 말한 것은 틀렸다.
+- **B-51 정정**: 안 C 근거였던 "후보 294개와 실제 후보 9개의 교집합이 하나로 좁혀진다"는 틀렸다. SR-12의 교집합은 6개(APCCSAppVerMngtBIZ, APCADUpdtVerMngtBIZ, APCCSAppVerMngtSVCImpl, APCCTArsCtfBIZ, APCPYSpacdStlmBIZ, APCCTMphCtfBIZ)이고 required인 APCCSAppVerMngtBIZ를 3회 모두 포함한다. S3의 제외 후보에는 required인 KmcisController가 있다. D5는 AlimtalkTemplateBatchRunner 하나, SR-05는 0개다. 파일명 없는 제외 요청의 자동 사전 해제는 required를 해제할 수 있다.
+- **안 1(카드 사전 해제 + 접힌 "제외된 후보 N개" 목록과 복원) 결정 사항 5개(구현 전, 읽기 전용 설계 결과)**:
+  1. 카드 사전 해제는 발화에 파일명이 명시되어 제외가 확정된 파일만 한다("제외 요청" 배지).
+  2. 파일명 없는 제외 요청(S3 "로그인 쪽 컨트롤러", SR-12 "관리 화면")은 자동 해제하지 않는다. 후보가 10개 이하일 때만 "제외 요청과 겹치는 후보" 배너를 띄우고 체크 상태는 그대로 둔다.
+  3. 제거 후보 목록은 모델의 `removedFiles`가 아니라 "카드 후보 − 최종 유지"로 만든다(기준선 required 제거 17건 중 6건이 `removedFiles`에 없었다).
+  4. 복원한 파일은 같은 세션의 메모리상 `pinnedFiles`에 두어 다음 분석에서 Stage 3 제거 대상에서 뺀다. 디스크에 쓰지 않는다(`previousContract = null` 원칙 유지).
+  5. eval은 카드 브리지에 "복원할 파일명" 정책을 주입해 사용자 행동을 흉내 내고, 복원 후 재분석을 한 번 측정한다(`project == null`이면 카드가 꺼지는 현재 경로는 그대로).
+- **합격 기준표(변경 전 기준선 / 합격선)**:
+
+  | 기준 | 기준선(기준선 3회, 시나리오×회차 47건) | 합격선 |
+  |---|---|---|
+  | Stage 3 제거 required 중 UI에서 복원 가능한 비율 | 0/17 | 17/17 |
+  | 제거 required 중 화면에 이름이 보이는 비율 | 11/17(요약 줄 상위 10개, 이름만) | 17/17 |
+  | 복원 파일이 다음 분석에서 유지되는 비율 | 해당 기능 없음 | 3/3 |
+  | 명시 파일명 제외 파일의 카드 사전 해제 | 0 | 100% |
+  | S3·SR-12 required(KmcisController, APCCSAppVerMngtBIZ) 사전 해제 건수 | 0 | 0 유지 |
+  | 복원에 필요한 추가 클릭 | 복원 불가 | 4 이하 |
+  | 접힌 목록 크기 | 평균 9.3, 최대 24 | 기본 접힘, 11개 이상은 스크롤 |
+  | 재분석 추가 시간 | 해당 없음 | 첫 분석의 50% 이하 |
+  - 기준선 참고: required가 Stage 3에서 제거된 시나리오×회차 12/47(26%), 제거된 약 437개 중 required 17개(약 4%).
