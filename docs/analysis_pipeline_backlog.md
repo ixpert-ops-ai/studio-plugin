@@ -1034,3 +1034,32 @@
   | 복원 전 Recall과 제외 대상 노출이 기준선 3회 최소~최대 범위 안 | **미충족(문자 그대로)**: (1) SR-08은 clarify 단계 서버 524로 분석이 실행되지 않아 Recall을 측정하지 못했다. (2) SR-12 제외 대상 노출이 0/1로 기준선 범위 1~1 밖이다. 기준선 3회는 APCADUpdtVerMngtBIZ가 최종 목록에 나왔지만 이번에는 Stage 3 모델이 removedFiles에 넣어(후보 번호 4) 빠졌고 그 파일은 목록(USER_EXCLUDED 아님, STAGE3_EXPLICIT)에 있다. 방향은 개선이고 pinned가 비어 있어 이번 변경이 선택에 영향을 주지 않은 경로이므로 모델 변동으로 보지만, 지정한 기준은 범위 안이라서 충족으로 세지 않는다. 나머지 14개 시나리오의 Recall과 D5·SR-05 노출은 모두 범위 안이다. |
 - **예측과 다른 점**: (1) 예측 5(복원 전 Recall이 범위 안인 시나리오 13개 이상 70%)는 맞았지만(15개 중 15개가 범위 안), 16개 모두 범위 안이라는 35% 시나리오는 SR-08의 서버 오류로 깨졌다. (2) 예측 6(노출이 기준선과 같음 85%)은 SR-12에서 어긋났다(Stage 3 변동). (3) 예측 7의 "USER_EXCLUDED는 제외가 확정된 시나리오 5곳 이상"은 틀렸다: 실제로는 확정된 곳이 SR-05X뿐이었다(D5, S3, SR-05, SR-12 등은 안 A에서 미확정으로 남는 것이 현재 동작이다). (4) 예측 2(3~9건)는 3건(실측 1회차)으로 하한에 걸렸다. (5) 4-a의 source 17건이 모두 EXPLICIT인 것은 예측하지 않았다(정정 참조).
 - **남은 일(범위 밖, 손대지 않음)**: WebView의 접힌 "제외된 후보 N개" 컴포넌트와 복원 버튼(B), 카드의 사전 해제·배너. 세션 경계는 요구사항 문자열 키와 `reset()`뿐이라, 같은 요구사항 문자열로 새 `/clarify` 세션을 시작하면 pinned가 남는다. `/clarify` 시작 분기에 `AnalysisSessionMemory.reset()` 호출을 한 줄 넣어야 하며 이는 라우터의 "라우트 추가만" 범위 밖이라 하지 않았다.
+
+#### [B-55 보충] 판정 기준 변경, 기존 동작 불변 확인, /clarify 리셋 (2026-10-23)
+- **기준 변경 이유**: "복원 전 Recall·제외 대상 노출이 기준선 3회의 최소~최대 범위 안"은 1회 측정으로는 모델 변동을 가려내지 못한다. 이번 A가 선택에 영향을 주지 않았다는 근거는 범위 비교가 아니라 코드 경로의 불변 확인(아래 3-a 표와 테스트 r9)으로 대신한다. 이에 따라 합격 기준표의 마지막 행을 "pinned·USER_EXCLUDED가 비어 있을 때 Stage 3 입력 불변"으로 바꿨다(B-54 원문대로).
+- **실측 결과 그대로**(`live_eval_20261022_160038`, `160437`): SR-12의 제외 대상 노출은 0/1이다(기준선 1~1). 이번 실행에서 Stage 3 모델이 APCADUpdtVerMngtBIZ(후보 번호 4)를 removedFiles에 넣었고, 그 파일은 STAGE3_EXPLICIT로 목록에 있다. SR-08은 clarify 단계에서 서버 HTTP 524로 분석이 실행되지 않았다. **SR-08은 서버 오류로 판정 제외**한다(Recall을 측정하지 못했으므로 범위 비교 대상이 아니다). 나머지 14개 시나리오의 Recall과 D5·SR-05 노출은 기준선 범위 안이었다.
+- **정정 재확인**: 제거된 required 17건은 모두 모델 removedFiles에 있었고 결과 요약의 "Stage 3에서 제외된 후보 N개" 줄(앞 10개 이름)에도 17/17이 나온다(IMPLICIT 0). 앞서 적은 "6건이 removedFiles에 없다"와 "화면에 이름이 보이는 것 11/17"은 이름 맞춤 오류였다.
+- **/clarify 리셋(src 커밋)**: `WebviewActionRouter.kt`의 `/clarify` 분기에서 새 세션을 시작할 때(`saveSession` 전, previousContract 격리 바로 아래) `AnalysisSessionMemory.reset()`을 한 줄 호출한다. 같은 요구사항 문자열로 restore한 뒤 새 `/clarify`를 시작해도 pinned가 남지 않는다. 테스트 `r8_newClarifySessionWithTheSameRequirementClearsPinned`(라우터 소스에서 호출 위치 확인 + 리셋 뒤 같은 요구사항 분석에서 되살렸던 파일이 Stage 3 후보로 다시 감).
+- **기존 동작 불변 확인(3-a, `git diff b7dbaa4 da4ddfd -- src/main`, 줄 번호는 da4ddfd 기준)**: pinned가 비어 있으면(그리고 사용자 제외가 없으면) 아래 줄은 모두 no-op이다. 사용자 제외가 있어도 사전 필터 집합이 기존과 같아서 Stage 3 입력은 같다.
+
+  | 줄 | 영향 대상 | no-op? | 근거 |
+  |---|---|---|---|
+  | `RequirementAnalysisPipeline.kt:299` `allExcludedPaths` | 사전 필터 입력 | 예 | 변경 없는 줄 |
+  | `:302` `AnalysisSessionMemory.begin(primaryReq)` | 상태만 | 예 | 키 기록과 pinned 정리뿐, 출력에 쓰이지 않음 |
+  | `:303-304` `pinnedPaths`, `activeExcludedPaths = allExcludedPaths - pinnedPaths` | 사전 필터 입력 | 예 | pinned가 비면 `allExcludedPaths`와 같은 집합 |
+  | `:306-311` `eligibleTargetFiles` | 사전 필터 결과 | 예 | 같은 집합으로 같은 조건(isNotEmpty)과 같은 필터 |
+  | `:313` `correctedFiles` | 카드 후보와 Stage 3 후보 | 예 | 입력이 같고 줄은 변경 없음 |
+  | `:328` `stage3Candidates` | Stage 3 후보 목록 | 예 | pinned가 비면 `correctedFiles` 그 객체 |
+  | `:330` `requestConfirmation(stage3Candidates)` | 카드 입력 | 예 | 같은 목록(기존은 `correctedFiles`) |
+  | `:335` `stage3Candidates.filter { it.path in pathSet }` | 사용자 선택 | 예 | 같은 목록에서 같은 필터 |
+  | `:340` `filesToVerify = userSelection ?: stage3Candidates` | 검증기 후보 입력 | 예 | 같은 목록 |
+  | `:364` `verifier.verify(fullRequirement, filesToVerify)` | 검증기 요구사항 문장·후보·프롬프트 | 예 | `fullRequirement` 조립 줄(:344-363)과 `FileRelevanceVerifier`의 프롬프트·도구 정의는 변경 없음 |
+  | `:375-379` `withPinned`, `sortByDependency(withPinned, ...)` | 최종 목록 계산 | 예 | pinned가 비면 `verifiedFiles` 그대로 |
+  | `:449` `noticeLines(...)`와 `:427-` 마크다운 | noticeLines, 마크다운 출력 | 예 | 변경 없는 줄이고, `removedCandidates` 계산(`:500-520`)은 마크다운 생성 뒤에 있으며 출력에 쓰이지 않음 |
+  | `:500-520`, `:521-527` 결과 필드 | 결과 객체 | 예(출력 불변) | 새 필드 `removedCandidates`만 추가. 목록·요약·경고·신규 제안 값은 같음 |
+  | `:46-60`, `:69`, `:76-105`(`AnalysisSessionMemory`, 필드, `restore`) | 새 코드 | 예 | `/restore`와 테스트만 호출 |
+  | `FileRelevanceVerifier.kt:56`, `:80`, `:230`, `:251`, `:271`, `:294`, `:346`, `:377`, `:394` | 검증 결과 | 예 | `removedReasons`는 추가 필드이고 `removed`·`files`·`unjudged`·`candidatePaths`·`noticeLines` 값은 같음. `:271`의 `WEAK_REASON`은 이전 리터럴과 같은 문자열. `:297`은 공백만 바뀜 |
+  | `WebviewActionRouter.kt:392-415` `/restore` 분기(추가 23줄, 삭제 0줄) | 새 라우트 | 예 | 기존 분기에 닿지 않음 |
+
+  "아니오"는 없다.
+- **3-b 테스트 `r9_stage3InputAndOutputsAreUnchangedWhenNothingIsPinnedOrExcluded`**: 모의 검증기가 받은 후보 목록(번호·순서)이 파이프라인 줄을 거치지 않고 같은 공개 함수(Stage 1 탐색, `correctPaths`)로 만든 기대 correctedFiles와 같고, 요구사항 구간이 요구사항 문장과 같다. 최종 목록은 `sortByDependency`로 따로 만든 기대 목록과 같고, 마크다운에 제외 안내 줄과 파일 표가 기존 형식으로 나오며 새 필드 어휘(`removedCandidates`, `STAGE3_`, `USER_EXCLUDED`, `되살`)가 없다. 마크다운 전체 문자열의 동일성은 검사하지 않았다(안내 줄·표 행·헤더와 어휘 부재로 확인).
