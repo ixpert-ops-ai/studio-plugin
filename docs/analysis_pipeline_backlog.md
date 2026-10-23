@@ -1144,7 +1144,7 @@
 - **다음 과제(범위 밖, 손대지 않음)**: (1) 후보 줄 상한(B-56 안 C): 작업 요약 33.7K 토큰, 발화 번역 53.4K 토큰의 프롬프트가 후보 약 630개를 상한 없이 담고 있다. 서버의 `max_model_len`에 가깝다는 점은 사용자 지적이며 이 저장소에서는 값을 확인하지 못했으므로 서버 설정 확인이 필요하다. 출력에 영향이 있어 품질 측정이 필요하다. (2) `buildClarifyIntent`의 최종 제약 추출 실패는 화면에 알릴 통로가 없다(`ClarifyIntent` 변경 필요). (3) 정렬 변경 없음(R0 유지), WebView(B) 미착수.
 
 ### [B-58] 접힌 "제외된 후보 N개" 목록과 되살리기 화면(안 1의 B) (2026-10-23)
-- **상태: 구현·자동 검증 통과, push함. IDE 확인 대기(아래 체크리스트).** 커밋: 887cc87(src와 웹뷰 산출물), 이 docs 커밋.
+- **상태: 구현·자동 검증 통과, push함. 브라우저 확인 완료 / 실제 IDE 종단 확인 1회 대기(아래 체크리스트와 B-58 보충).** 커밋: 887cc87(src와 웹뷰 산출물), 이 docs 커밋.
 - **1번 위치(읽기)**:
   - a. 분석 결과 경로: `WebviewActionRouter.kt:1534` `executeAnalyzePipeline` → `:1565` `pipeline.analyze(...) { chunk -> invokeLater { bridge.sendMessageChunk } }`로 마크다운이 스트리밍되고, 끝난 뒤 `invokeLater` 블록이 `extraText`를 보내고 `:1606` `bridge.sendMessage("chat", "", messageId)`(스트리밍 종료 신호)를 보낸다. 별도 메시지는 이 종료 신호 바로 뒤(`:1608`)에 보낸다.
   - b. 웹뷰의 메시지 종류별 처리는 `App.tsx`의 `window` message 핸들러에서 `data.subType`별 분기다(예: `analyze_clarify_summary`는 같은 id의 카드만 갱신, 변경 후 `:1122` `analyze_removed`, `:1131` `analyze_restore`). 렌더는 `MessageItem`(`:550`)이다. `Stage3ConfirmationForm.tsx`의 체크박스는 네이티브 input이 아니라 `useState<Set<string>>`과 행 전체 `onClick={() => handleTogglePath(path)}`, 아이콘 `CheckSquare`/`Square`(lucide)다. 새 패널도 같은 방식을 썼다.
@@ -1158,6 +1158,29 @@
     - 다 비면 패널은 숨기고 안내 문구만 남긴다(지시한 "패널을 숨긴다"에 더해, 되살렸다는 확인이 사라지지 않게 한 선택). `analyze_removed` 메시지가 없는 예전 결과에는 패널이 없다.
   - **클릭 수: 파일 1개를 되살리는 데 3회**(펼침, 체크, "선택한 파일 되살리기").
 - **테스트와 검증**: 새 Kotlin 테스트 `RemovedCandidatesMessagesTest` m1~m5(직렬화·순서·생략 필드, 빈 목록과 null이면 메시지 없음, 필드 없는 옛 결과 호환, 되살리기 응답, 라우터가 종료 신호 뒤에 보내고 requestId로 응답하는지 소스 확인). 웹뷰 로직 테스트 12개(제목, 배지, reason, 파일명, 스크롤 기준, 체크와 버튼 활성 조건, 요청 내용과 목록 순서, 되살린 뒤 N 감소와 안내, 무시된 경로 안내, 다 비었을 때, 본문 해석)가 모두 통과했다. 웹뷰 빌드(`tsc -b && vite build`)가 성공했고 산출물에 새 문구가 들어갔다. 전체 522/42/17(517에서 +5), clarify 217/1/3(변경 없음), 실패 메시지 diff 0, 하네스 EXACT_MATCH 5종·MATCH_EXCLUDING 2종 일치, selftest 24/24, 기존 r·h·g·i·f11과 재시도(n1~n6)·실패 안내(f1~f4) 테스트 통과.
-- **IDE 확인 대기 체크리스트**(React 렌더와 JCEF가 필요해 자동화하지 못한 항목): (1) 분석 결과 아래에 패널이 **접힌 채** 나온다. (2) 펼치면 체크박스·파일명·reason이 보이고 USER_EXCLUDED에만 "제외 요청" 배지가 있다. (3) 순서가 백엔드 순서(USER_EXCLUDED 먼저, 그다음 카드 순위)와 같다. (4) 11개 이상이면 목록 영역에 스크롤이 생긴다. (5) 체크 전에는 버튼이 꺼져 있고 체크하면 켜진다. (6) 누르면 N이 줄고 안내가 나오며 `/implement`가 되살린 파일을 포함한다. (7) 한 번 되살린 파일을 새 분석(같은 요구사항)에서 유지한다. (8) 목록을 모두 되살리면 패널이 사라지고 안내만 남는다. (9) 이 변경 이전의 채팅 기록(필드 없음)에는 패널이 없다. (10) 클릭 3회로 1개를 되살릴 수 있다.
+- **IDE 확인 체크리스트**(처음에는 IDE 확인 대기 항목이었고, 화면 동작은 아래 B-58 보충의 브라우저 확인으로 확인했다. 실제 IDE 종단 확인은 1회 대기): (1) 분석 결과 아래에 패널이 **접힌 채** 나온다. (2) 펼치면 체크박스·파일명·reason이 보이고 USER_EXCLUDED에만 "제외 요청" 배지가 있다. (3) 순서가 백엔드 순서(USER_EXCLUDED 먼저, 그다음 카드 순위)와 같다. (4) 11개 이상이면 목록 영역에 스크롤이 생긴다. (5) 체크 전에는 버튼이 꺼져 있고 체크하면 켜진다. (6) 누르면 N이 줄고 안내가 나오며 `/implement`가 되살린 파일을 포함한다. (7) 한 번 되살린 파일을 새 분석(같은 요구사항)에서 유지한다. (8) 목록을 모두 되살리면 패널이 사라지고 안내만 남는다. (9) 이 변경 이전의 채팅 기록(필드 없음)에는 패널이 없다. (10) 클릭 3회로 1개를 되살릴 수 있다.
 - **r8**: 이번에 라우터를 고칠 수 있었지만 `/clarify` 분기는 IntelliJ `Project`와 브리지가 있어야 호출되어 단위 테스트로 호출할 수 없다. 리셋을 별도 함수로 빼도 "라우터가 그 함수를 부르는가"는 여전히 소스 확인이라, r8은 그대로 둔다(소스에서 호출 위치 확인 + 리셋 뒤 동작).
 - **다음 과제**: (1) 재시도의 실측 검증: 524가 재현될 때까지 측정마다 재시도 건수(같은 단계·같은 요청 크기의 연속 호출)를 기록한다. (2) `max_model_len` 65,536 대비 번역 프롬프트 약 53.7K 토큰(약 82%): 후보 상한(B-56 안 C)을 정할 때 실제 토크나이저로 다시 잰다. (3) `buildClarifyIntent`의 최종 제약 추출 실패가 화면에 표시되지 않는다. (4) 부정형 발화가 안 A 흐름을 타는 문제(B-54 남은 한계). (5) 파일명 없는 제외 요청에 띄우는 배너(B-54 결정 4). (6) 웹뷰 컴포넌트 테스트 도구가 없어 접힘 기본값과 클릭 흐름은 IDE 확인에 의존한다(렌더 테스트 도구 도입은 의존성 추가라 별도 결정).
+
+#### [B-58 보충] 브라우저 자동화로 화면 동작 확인 (2026-10-23)
+- **0번 grep(`/restore` 응답에서 `targetFiles`를 뺀 것의 소비처)**: `analyze_restore`를 읽는 곳은 웹뷰 `App.tsx:1131`뿐이고 `restored`, `ignored`, `removedCandidates`만 쓴다(`removedCandidatesLogic.ts`의 `RestoreReply` 타입에도 `targetFiles`가 없다). 응답을 만드는 `WebviewActionRouter.kt:407`·`:1631`과 테스트 `RemovedCandidatesMessagesTest.kt`는 읽지 않는다. 평가 코드 `LiveEvalTest.kt:281`과 `RemovedCandidatesRestoreTest.kt`의 `targetFiles`는 응답이 아니라 `RequirementAnalysisPipeline.lastResult`와 분석 결과 객체의 필드를 읽는 것이다. 다른 라우트에도 `/restore` 응답의 `targetFiles` 소비처는 없다.
+- **1번 위치**: 웹뷰가 Kotlin에서 메시지를 받는 곳은 `App.tsx:1057` `handleMessage`(`window`의 `message` 이벤트, `:1059`에서 `data.type === 'ai_message'`만 처리, `:1509` 등록)이고, Kotlin이 보내는 쪽은 `JcefBridge.kt:39-55` `sendMessage`(`window.postMessage` 실행)와 `:60` `sendMessageChunk`다. 웹뷰가 Kotlin으로 보내는 함수는 `window.sendToIde(JSON 문자열)`이고 `JcefMessageHandler.kt:40-46` `getInjectScript`가 주입하며 `:14-32`가 받아 `router.handleCommand`로 넘긴다. 도구: Chrome(`C:/Program Files/Google/Chrome/Application/chrome.exe`), Edge도 설치됨, Node v22.21.1.
+- **확인 방법**: `build/ui-check/run.mjs`(커밋하지 않음, Node 내장 `http`와 `WebSocket`만 사용, 의존성 추가 없음). `src/main/resources/webview`의 **빌드 산출물**을 로컬 정적 서버로 띄우고, headless Chrome(`--remote-debugging-port`)에 CDP로 붙어 `Page.addScriptToEvaluateOnNewDocument`로 **모의 브리지**를 페이지 로드 전에 주입했다(운영 코드와 산출물은 바꾸지 않음). 모의 브리지는 `window.sendToIde` 요청을 기록하고 `/restore`에는 백엔드와 같은 형식(`restored`, `ignored`, `removedCandidates`)으로 `analyze_restore`를 같은 `requestId`로 응답한다. 결과 메시지는 Kotlin이 보내는 순서(`analyze_start` → `task_chunk` → `chat` → `analyze_removed`)로 `window.postMessage`했고, 클릭은 CDP `Input.dispatchMouseEvent`(실제 마우스 이벤트)다. **백엔드(Kotlin)와의 연결은 검증하지 않았다**(모의 브리지). 목록 14개는 A 측정(`live_eval_20261022_160038`)의 D2 덤프로 만들었고 D2에는 사용자 제외가 없어 카드 순위가 앞선 2개를 USER_EXCLUDED로 지정해 맨 앞에 두었다(백엔드 정렬 규칙대로, 한 항목에만 reason을 넣음). 스크린샷은 `build/ui-check/*.png`(00~08)에 있다.
+- **2-d 결과(10/10 됨)**:
+
+| # | 항목 | 결과 | 근거 |
+|---|---|---|---|
+| 1 | "제외된 후보 14개"가 접힌 상태로 표시 | 됨 | {"has":true,"expanded":"false","list":false,"text":"제외된 후보 14개"} |
+| 2 | 체크박스·파일명이 받은 순서대로, USER_EXCLUDED 2개가 맨 앞에서 "제외 요청" 배지 | 됨 | 항목 14개, 순서 일치=true, 배지=[true,true,false,false,false,false,false,false,false,false,false,false,false,false], 앞 3개 이름=APCMMTrcdIsBIZ.java,APCTRTrcdIsBIZ.java,APCTRTrcdExstBIZ.java |
+| 3 | 10개를 넘어 목록 영역이 스크롤됨(scrollHeight > clientHeight) | 됨 | {"sh":402,"ch":240,"ov":"auto"} |
+| 4 | 체크 전 버튼 비활성, 1개 체크하면 활성 | 됨 | 체크 전 disabled=true, 체크 후 disabled=false, 아이콘 class=lucide lucide-check-square  |
+| 5 | /restore 요청에 경로 1개와 결과 메시지 id | 됨 | {"command":"/restore","text":"{\"paths\":[\"src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADSspyDlngHistMngtBIZ.java\"]}","requestId":"analyze_UI1"} |
+| 6 | "1개를 되살렸습니다. 구현 대상에 포함됩니다." 안내와 제목 13개 | 됨 | 제목=제외된 후보 13개, 항목 13개, 되살린 항목 목록에 남음=false |
+| 7 | 펼침·체크·확정 3번의 클릭으로 끝남 | 됨 | 접힌 상태에서 되살림까지 dispatch한 클릭 3회 |
+| 8 | "<파일명>은(는) 되살릴 수 없었습니다" 안내 | 됨 | ["LLM 호출 없이 구현 대상에 바로 추가됩니다.","1개를 되살렸습니다. 구현 대상에 포함됩니다.","Old.java은(는) 되살릴 수 없었습니다"] |
+| 9 | 모두 되살리면 패널이 사라지고 안내 줄만 남음 | 됨 | 패널 있음=false, 안내="12개를 되살렸습니다. 구현 대상에 포함됩니다." (마지막 되살림 12개) |
+| 10 | analyze_removed가 없는 예전 결과에는 패널이 없음 | 됨 | {"msg":true,"text":"요구사항 분석 요약\n분석 결과 본문(자동 확인용)\nCopy\nSave .md","panel":0} |
+
+- **참고(관찰, 고치지 않음)**: 목록 영역의 스크롤바가 브라우저 기본 스타일(밝은 막대)이라 어두운 테마와 어울리지 않는다(`02-expanded.png`). 기능에는 영향이 없다.
+- **웹뷰 로직 테스트의 위치**: `webview/test/removedCandidatesLogic.test.ts`는 **Gradle에 연결되어 있지 않고** `node --experimental-strip-types --test webview/test/removedCandidatesLogic.test.ts`로 직접 실행해야 하며 **Node 22.6 이상**이 필요하다(Gradle이 내려받는 Node 20.11.1에서는 이 플래그가 없다). 이 브라우저 확인 스크립트도 Gradle에 연결하지 않았다.
+- **상태**: 브라우저 확인 완료 / 실제 IDE 종단 확인 1회 대기(실제 분석 → `analyze_removed` 수신 → 되살리기 → `/implement` 입력 반영을 JCEF에서 한 번 확인). 종단 확인 때 볼 항목은 위 체크리스트의 (6), (7), (9)이다(백엔드 연동이 필요한 항목).
