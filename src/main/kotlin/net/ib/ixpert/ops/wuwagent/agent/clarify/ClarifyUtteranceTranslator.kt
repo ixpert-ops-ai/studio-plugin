@@ -6,6 +6,38 @@ import net.ib.ixpert.ops.wuwagent.agent.clarify.model.*
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
 
 /**
+ * 프롬프트에 표시할 후보 목록의 상한(B-61). 번역·요약 프롬프트의 후보 목록 부분에만 쓰고, 엔진 내부의 후보 집합(targetId 해석, EXCLUDE 검증,
+ * 제외 후보 탐색, 파일명 직접 제외)은 전체 집합 그대로다. 후보가 LIMIT 이하이면 선택 결과가 입력과 같다(프롬프트가 바이트 단위로 같다).
+ * 선택 = 기존 순서의 앞 LIMIT개 + 항상 포함 항목(확정·거부 판정이 난 항목, 사용자 발화·확정·제외 제안 출처 항목, 발화 식별자가 있는 항목,
+ * 현재 발화와 SR 원문에 파일명(확장자 뗀 이름)이 정확히 나온 항목). 순서는 기존 순서를 유지한다.
+ */
+internal object CandidateCap {
+    const val LIMIT = 120
+
+    class Selection(val shown: List<RequirementItem>, val omitted: Int)
+
+    private val identifierToken = Regex("[A-Za-z0-9_]+")
+
+    fun select(items: List<RequirementItem>, mentionTexts: List<String>): Selection {
+        if (items.size <= LIMIT) return Selection(items, 0)
+        val mentioned = mentionTexts.flatMap { t -> identifierToken.findAll(t).map { it.value }.toList() }.toSet()
+        fun always(item: RequirementItem): Boolean {
+            if (item.verdict != Verdict.PENDING) return true
+            if (item.source != HintSource.SYSTEM_UNCONFIRMED) return true
+            if (item.utteredIdentifier != null) return true
+            val path = (item.hint as? LinkHint.ExistingRef)?.filePath ?: return false
+            val base = path.substringAfterLast('/').substringBeforeLast('.')
+            return base.isNotEmpty() && base in mentioned
+        }
+        val shown = items.filterIndexed { i, item -> i < LIMIT || always(item) }
+        return Selection(shown, items.size - shown.size)
+    }
+
+    /** 생략된 항목이 있을 때만 목록 끝에 붙이는 한 줄(데이터 줄이다). */
+    fun omittedLine(omitted: Int): String = "외 ${omitted}개 생략"
+}
+
+/**
  * 사용자 자유 발화 번역 액션 종류
  */
 enum class UserActionKind {
@@ -43,7 +75,9 @@ object ClarifyUtteranceTranslator {
     fun translate(
         utterance: String,
         currentItems: List<RequirementItem>,
-        llmClient: LLMClient?
+        llmClient: LLMClient?,
+        // 후보 상한(CandidateCap)에서 이름이 나온 항목을 항상 포함하기 위한 SR 원문(없으면 발화만 본다)
+        requirementText: String = ""
     ): TranslatedAction {
         val trimmed = utterance.trim()
         if (trimmed.isBlank()) {
@@ -72,7 +106,7 @@ object ClarifyUtteranceTranslator {
         }
 
         return try {
-            val candidatesContext = buildCandidatesContext(currentItems)
+            val candidatesContext = buildCandidatesContext(currentItems, listOf(trimmed, requirementText))
 
             val systemPrompt = """
                 당신은 소프트웨어 요구사항 구체화 대화의 발화 번역 전문가입니다.
@@ -145,15 +179,17 @@ object ClarifyUtteranceTranslator {
         return completionKeywords.any { normalized.contains(it) }
     }
 
-    private fun buildCandidatesContext(items: List<RequirementItem>): String {
+    private fun buildCandidatesContext(items: List<RequirementItem>, mentionTexts: List<String>): String {
         if (items.isEmpty()) return "(현재 후보 항목 없음)"
-        return items.joinToString("\n") { item ->
+        val selection = CandidateCap.select(items, mentionTexts)
+        val lines = selection.shown.joinToString("\n") { item ->
             val path = when (val h = item.hint) {
                 is LinkHint.ExistingRef -> h.filePath
                 is LinkHint.NewCreation -> item.statement
             }
             "- ID: ${item.id} | 파일: $path | 설명: ${item.statement}"
         }
+        return if (selection.omitted > 0) lines + "\n" + CandidateCap.omittedLine(selection.omitted) else lines
     }
 
     private fun parseAndValidateResponse(

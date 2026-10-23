@@ -1029,11 +1029,14 @@ class Stage0ClarificationEngine(
             """.trimIndent()
 
             val activeItems = items.filter { it.verdict != Verdict.REJECTED }
-            val candidateDescriptions = activeItems.joinToString("\n") { item ->
+            // 후보 상한(B-61): 앞 120개와 항상 포함 항목만 프롬프트에 넣는다(120개 이하면 기존과 같다). 엔진 내부의 후보 집합은 그대로다.
+            val selection = CandidateCap.select(activeItems, listOf(originalRequirement) + userStatements)
+            val shownDescriptions = selection.shown.joinToString("\n") { item ->
                 val path = (item.hint as? LinkHint.ExistingRef)?.filePath ?: item.statement
                 val rationale = item.anchorRationale ?: ""
                 "- $path ($rationale)"
             }
+            val candidateDescriptions = if (selection.omitted > 0) shownDescriptions + "\n" + CandidateCap.omittedLine(selection.omitted) else shownDescriptions
 
             val statementsSection = if (userStatements.isNotEmpty()) {
                 "\n\n[사용자 추가 지시 및 제약사항]\n" + userStatements.joinToString("\n") { "- $it" }
@@ -1218,7 +1221,7 @@ class Stage0ClarificationEngine(
         val translated = if (answer.handled) {
             TranslatedAction(kind = UserActionKind.UNKNOWN, rawStatement = trimmed, clarificationMessage = answer.echo)
         } else {
-            ClarifyUtteranceTranslator.translate(trimmed, state.items, llmClient)
+            ClarifyUtteranceTranslator.translate(trimmed, state.items, llmClient, state.originalRequirement)
         }
         val updatedStatements = if (trimmed.isNotBlank()) state.userStatements + trimmed else state.userStatements
 
