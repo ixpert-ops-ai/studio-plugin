@@ -9,6 +9,8 @@ import './index.css';
 import { ScopeSelectionTree } from './ScopeSelectionTree';
 import { L1ClarificationForm } from './L1ClarificationForm';
 import { Stage3ConfirmationForm } from './Stage3ConfirmationForm';
+import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
+import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
 
 // Mermaid 글로벌 초기 설정
 mermaid.initialize({
@@ -52,6 +54,9 @@ interface Message {
     enhancedRequirements: string[];
     questions: Array<{ questionText: string; defaultValue: string }>;
   };
+  // 분석 결과에서 빠진 후보(analyze_removed 메시지). 없는 예전 결과에서는 패널을 표시하지 않는다.
+  removedCandidates?: RemovedCandidate[];
+  restoreNotice?: RestoreNotice;
 }
 
 // ─────────────────────────────────────────────
@@ -785,6 +790,11 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
         )}
 
         {isError && <div className="error-badge" style={{ marginTop: '12px' }}>ERROR</div>}
+
+        {/* 분석 결과에서 빠진 후보(접힌 목록)와 되살리기. 메시지가 있는 결과에만 표시한다 */}
+        {!isError && !msg.isLoading && (msg.removedCandidates || msg.restoreNotice) && (
+          <RemovedCandidatesPanel messageId={msg.id} candidates={msg.removedCandidates ?? []} notice={msg.restoreNotice} />
+        )}
       </div>
 
       {/* 일반 결과 버튼 (Copy / Save / Diff 보기, 초기 인사말 제외) */}
@@ -1108,6 +1118,32 @@ function App() {
       }
 
       const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
+
+      if (data.subType === 'analyze_removed') {
+        // 분석 스트리밍이 끝난 뒤 따로 도착한다: 같은 결과 메시지에 빠진 후보 목록만 붙인다(순서는 받은 그대로).
+        const list = messageId ? parseRemovedPayload(data.content) : null;
+        if (messageId && list) {
+          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, removedCandidates: list, restoreNotice: undefined } : m));
+        }
+        return;
+      }
+
+      if (data.subType === 'analyze_restore') {
+        // /restore 응답: requestId(=결과 메시지 id)로 같은 메시지의 목록을 갱신하고 결과 안내를 붙인다.
+        if (messageId) {
+          try {
+            const reply = JSON.parse(data.content);
+            setMessages(prev => prev.map(m => {
+              if (m.id !== messageId) return m;
+              const next = applyRestoreReply(m.removedCandidates ?? [], reply);
+              return { ...m, removedCandidates: next.candidates, restoreNotice: next.notice };
+            }));
+          } catch (e) {
+            console.error('Failed to parse analyze_restore JSON', e);
+          }
+        }
+        return;
+      }
 
       if (data.subType === 'analyze_clarify_summary') {
         // 작업 요약은 턴 응답과 따로 도착한다: 같은 카드의 taskSummary만 채운다.

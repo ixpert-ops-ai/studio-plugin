@@ -393,8 +393,8 @@ class WebviewActionRouter(private val project: Project) {
                 // ── 빠진 후보 되살리기 (LLM 호출 없음, lastResult와 세션 메모리만 갱신) ────────
                 "/restore" -> {
                     logger.info("Router: /restore 분기")
-                    val messageId = "restore_${System.currentTimeMillis()}"
-                    val gson = com.google.gson.Gson()
+                    // 웹뷰가 requestId(결과 메시지 id)를 주면 같은 id로 응답해 그 결과 메시지의 목록을 갱신하게 한다.
+                    val messageId = payload["requestId"]?.takeIf { it.isNotBlank() } ?: "restore_${System.currentTimeMillis()}"
                     // 본문: {"paths": ["..."]} 또는 ["..."]
                     val paths: List<String> = try {
                         val el = com.google.gson.JsonParser.parseString(textBody.trim())
@@ -404,13 +404,7 @@ class WebviewActionRouter(private val project: Project) {
                         emptyList()
                     }
                     val outcome = net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline.restore(paths)
-                    val reply = mapOf(
-                        "restored" to outcome.restored,
-                        "ignored" to outcome.ignored,
-                        "targetFiles" to (outcome.result?.targetFiles ?: emptyList()),
-                        "removedCandidates" to (outcome.result?.removedCandidates ?: emptyList())
-                    )
-                    bridge.sendMessage("analyze_restore", gson.toJson(reply), messageId)
+                    bridge.sendMessage("analyze_restore", RemovedCandidatesMessages.restoreReplyPayload(outcome), messageId)
                 }
 
                 // ── 자동 코드 작성 스텁 (Phase 2b) ────────
@@ -1610,6 +1604,8 @@ class WebviewActionRouter(private val project: Project) {
                         bridge.sendMessageChunk(messageId, extraText)
                     }
                     bridge.sendMessage("chat", "", messageId) // 스트리밍 종료 신호
+                    // 스트리밍이 끝난 뒤 빠진 후보 목록을 별도 메시지로 보낸다(마크다운 출력은 바꾸지 않는다). 목록이 비었거나 없으면 보내지 않는다.
+                    RemovedCandidatesMessages.analyzeRemovedPayload(result.removedCandidates)?.let { bridge.sendMessage("analyze_removed", it, messageId) }
                 }
             } catch (e: Exception) {
                 logger.error("RequirementAnalysisPipeline Error", e)
@@ -1619,4 +1615,25 @@ class WebviewActionRouter(private val project: Project) {
             }
         }
     }
+}
+
+/**
+ * 웹뷰로 보내는 "빠진 후보" 메시지 본문. 순서는 백엔드가 만든 그대로(USER_EXCLUDED 먼저, 나머지는 카드 순위 순)이고 화면에서 다시 정렬하지 않는다.
+ */
+object RemovedCandidatesMessages {
+    private val gson = com.google.gson.Gson()
+
+    /** analyze_removed 본문: {"candidates":[{"path","source","stageRank"(없으면 생략),"reason"(없으면 생략)}]}. 목록이 없거나 비면 null(메시지를 보내지 않는다, 옛 결과 호환). */
+    fun analyzeRemovedPayload(candidates: List<net.ib.ixpert.ops.wuwagent.agent.RemovedCandidate>?): String? =
+        if (candidates.isNullOrEmpty()) null else gson.toJson(mapOf("candidates" to candidates))
+
+    /** analyze_restore 본문: 되살린 경로, 무시한 경로, 남은 후보 목록(되살린 뒤의 최종 상태). */
+    fun restoreReplyPayload(outcome: net.ib.ixpert.ops.wuwagent.agent.RestoreOutcome): String =
+        gson.toJson(
+            mapOf(
+                "restored" to outcome.restored,
+                "ignored" to outcome.ignored,
+                "removedCandidates" to (outcome.result?.removedCandidates ?: emptyList())
+            )
+        )
 }
