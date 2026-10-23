@@ -261,7 +261,8 @@ class WebviewActionRouter(private val project: Project) {
                     session.engine.summaryScheduler.invalidate()
 
                     // Stage 1 전이용 ClarifyIntent 생성 및 저장 (ClarificationContract는 Analyze에서 생산)
-                    val clarifyIntent = session.engine.buildClarifyIntent(turnResult.state)
+                    val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
+                    val clarifyIntent = intentBuild.intent
                     net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
                     
                     val projectBase = java.io.File(project.basePath ?: "")
@@ -273,7 +274,7 @@ class WebviewActionRouter(private val project: Project) {
                     }
 
                     // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행 (executeAnalyzePipeline 내부의 AnalyzeInputResolver.resolve 위임)
-                    executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent)
+                    executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent, intentBuild.constraintNotice)
                 }
 
                 // ── 요구사항 대화형 발화 처리 (Stage 0: /clarify-utterance) ────────
@@ -318,7 +319,8 @@ class WebviewActionRouter(private val project: Project) {
                             session.engine.summaryScheduler.invalidate()
 
                             // COMPLETE 상태 전이: ClarifyIntent 생성 및 저장
-                            val clarifyIntent = session.engine.buildClarifyIntent(turnResult.state)
+                            val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
+                            val clarifyIntent = intentBuild.intent
                             net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
 
                             val projectBase = java.io.File(project.basePath ?: "")
@@ -330,7 +332,7 @@ class WebviewActionRouter(private val project: Project) {
                             }
 
                             // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행 (executeAnalyzePipeline 내부의 AnalyzeInputResolver.resolve 위임)
-                            executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent)
+                            executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent, intentBuild.constraintNotice)
                         } catch (e: Exception) {
                             logger.error("Clarify utterance error", e)
                             ApplicationManager.getApplication().invokeLater {
@@ -1536,9 +1538,12 @@ class WebviewActionRouter(private val project: Project) {
         bridge: JcefBridge,
         rawInput: String,
         messageId: String,
-        inMemoryClarifyIntent: net.ib.ixpert.ops.wuwagent.agent.clarify.model.ClarifyIntent?
+        inMemoryClarifyIntent: net.ib.ixpert.ops.wuwagent.agent.clarify.model.ClarifyIntent?,
+        // 최종 제약 추출 실패 안내(이 세션에서 아직 알리지 않았을 때만 있다). 분석 결과 맨 앞에 한 줄로 보인다.
+        constraintNotice: String? = null
     ) {
         bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프 영향도 분석을 시작합니다...", messageId)
+        constraintNotice?.let { bridge.sendMessageChunk(messageId, it + "\n\n") }
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {

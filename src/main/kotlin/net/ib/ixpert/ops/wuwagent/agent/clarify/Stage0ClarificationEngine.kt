@@ -379,7 +379,7 @@ class Stage0ClarificationEngine(
         }
 
         // SR 원문의 제외 요청에 대한 안내는 대화 기록에 남긴다(같은 요청으로 다시 묻지 않는지 판단하는 근거이기도 하다).
-        val initEcho = listOfNotNull(srOutcome?.note, srOutcome?.question, if (initExtraction?.failed == true) constraintFailureNote else null).joinToString("\n").ifBlank { null }
+        val initEcho = listOfNotNull(srOutcome?.note, srOutcome?.question, if (initExtraction?.failed == true) constraintFailureLine() else null).joinToString("\n").ifBlank { null }
 
         val state = Stage0State(
             originalRequirement = originalRequirement,
@@ -437,7 +437,7 @@ class Stage0ClarificationEngine(
             // 2-1. 발화로부터 EXCLUDE_COMPONENT 제약 추출 및 배제 후보 탐색
             val currentExtraction = extractConstraintsChecked(listOf(stmt))
             val currentConstraints = currentExtraction.constraints
-            if (currentExtraction.failed) echoMsg = listOfNotNull(echoMsg, constraintFailureNote).joinToString("\n")
+            if (currentExtraction.failed) echoMsg = listOfNotNull(echoMsg, constraintFailureLine()).joinToString("\n")
             proposeExclusionsLegacy(currentConstraints, updatedItems, currentTurn)?.let { exclusionQuestion = it }
 
             val utteredTokens = scanner.extractTokens(stmt, emptySet())
@@ -1285,7 +1285,7 @@ class Stage0ClarificationEngine(
             updatedItems = working
             exclusionQuestion = outcome.question
             // 제약 추출이 실패했으면 번역기 안내(제외를 등록했다는 말 등)는 아래 dropTranslatorMessage로 쓰지 않고 사실만 알린다.
-            exclusionNote = listOfNotNull(outcome.note, if (extraction.failed) constraintFailureNote else null).joinToString("\n").ifBlank { null }
+            exclusionNote = listOfNotNull(outcome.note, if (extraction.failed) constraintFailureLine() else null).joinToString("\n").ifBlank { null }
         }
         // 안내문에는 확인 질문도 함께 남긴다(같은 제외 요청으로 다시 묻지 않는지 대화 기록으로 판단한다).
         // 엔진이 파일명 처리 안내(exclusionNote)를 만들었으면 번역기 안내는 쓰지 않는다. 번역기(모델)가 같은 파일에 대해 사실과 다른 말을 하거나 같은 말이 두 번 나오지 않게 하기 위해서다.
@@ -1328,10 +1328,16 @@ class Stage0ClarificationEngine(
      * - 대화 중 REJECTED된 파일 목록을 excludedFiles(1급 결정)로 추출하여 analyze에 원천 배제 인계.
      * - LLM 실패 시 originalRequirement 및 ConstraintKind.OTHER + rawStatement로 완전 격리 폴백 보장.
      */
-    fun buildClarifyIntent(state: Stage0State): ClarifyIntent {
+    fun buildClarifyIntent(state: Stage0State): ClarifyIntent = buildClarifyIntentChecked(state).intent
+
+    /** ClarifyIntent와, 최종 제약 추출이 실패했는데 이 세션에서 아직 알리지 않았다면 화면에 보일 안내 한 줄(ClarifyIntent와 저장 형식은 바꾸지 않는다). */
+    data class ClarifyIntentBuild(val intent: ClarifyIntent, val constraintNotice: String?)
+
+    fun buildClarifyIntentChecked(state: Stage0State): ClarifyIntentBuild {
         val graphHash = ClarificationContractStore.calculateGraphHash(graph)
         val anchorTokens = state.seedSet.map { it.value }.distinct()
-        val constraints = extractConstraints(state.userStatements)
+        val extraction = extractConstraintsChecked(state.userStatements)
+        val constraints = extraction.constraints
         val rawRefined = refineRequirement(state.originalRequirement, state.userStatements, constraints)
         val retentionResult = IdentifierRetentionChecker.checkRetention(
             refinedRequirement = rawRefined,
@@ -1405,7 +1411,7 @@ class Stage0ClarificationEngine(
                 )
             }
 
-        return ClarifyIntent(
+        val intent = ClarifyIntent(
             originalRequirement = state.originalRequirement,
             refinedRequirement = refinedRequirement,
             userStatements = state.userStatements,
@@ -1425,6 +1431,8 @@ class Stage0ClarificationEngine(
             unconfirmedExclusions = unconfirmedExclusions,
             contractVersion = ClarifyIntent.CURRENT_INTENT_VERSION
         )
+        val notice = if (extraction.failed && !constraintFailureNoticeShown) constraintFailureLine() else null
+        return ClarifyIntentBuild(intent, notice)
     }
 
     /** 화면 payload용: 확정된 제외 파일과, 제안 상태로 대기 중인 제외 후보(확정 전). 판정에는 쓰지 않는다. */
@@ -1489,6 +1497,12 @@ class Stage0ClarificationEngine(
 
     /** 제약 추출이 최종 실패해 기본 제약으로 바뀌었을 때 화면 안내에 붙이는 한 줄(사실만 알린다: 제외나 한정이 처리되었다고 말하지 않는다). */
     private val constraintFailureNote = "요청하신 조건을 해석하지 못했습니다. 제외하거나 한정할 파일이 있다면 파일명으로 다시 말씀해 주세요."
+
+    /** 이 세션에서 제약 추출 실패 안내를 이미 화면 안내에 붙였는지. 최종 추출(buildClarifyIntentChecked)의 안내가 같은 말을 되풀이하지 않게 한다. */
+    @Volatile private var constraintFailureNoticeShown = false
+
+    /** 화면 안내에 실패 안내를 붙이는 곳에서 부른다(붙였다고 기록하고 같은 줄을 돌려준다). */
+    private fun constraintFailureLine(): String { constraintFailureNoticeShown = true; return constraintFailureNote }
 
     private fun extractConstraints(userStatements: List<String>): List<IntentConstraint> = extractConstraintsChecked(userStatements).constraints
 
