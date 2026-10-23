@@ -1184,3 +1184,18 @@
 - **참고(관찰, 고치지 않음)**: 목록 영역의 스크롤바가 브라우저 기본 스타일(밝은 막대)이라 어두운 테마와 어울리지 않는다(`02-expanded.png`). 기능에는 영향이 없다.
 - **웹뷰 로직 테스트의 위치**: `webview/test/removedCandidatesLogic.test.ts`는 **Gradle에 연결되어 있지 않고** `node --experimental-strip-types --test webview/test/removedCandidatesLogic.test.ts`로 직접 실행해야 하며 **Node 22.6 이상**이 필요하다(Gradle이 내려받는 Node 20.11.1에서는 이 플래그가 없다). 이 브라우저 확인 스크립트도 Gradle에 연결하지 않았다.
 - **상태**: 브라우저 확인 완료 / 실제 IDE 종단 확인 1회 대기(실제 분석 → `analyze_removed` 수신 → 되살리기 → `/implement` 입력 반영을 JCEF에서 한 번 확인). 종단 확인 때 볼 항목은 위 체크리스트의 (6), (7), (9)이다(백엔드 연동이 필요한 항목).
+
+### [B-59] 최종 제약 추출 실패 안내 (buildClarifyIntent) (2026-10-23)
+- **상태: 합격, push함.** 커밋: 0aa7bf5(src와 테스트), 이 docs 커밋.
+- **1번 위치(읽기)**:
+  - a. `buildClarifyIntent`는 `Stage0ClarificationEngine.kt`의 정의(변경 전 `:1331`)이고 호출처는 라우터 두 곳이다: `WebviewActionRouter.kt:264`(`/clarify-confirm`, UI는 도달하지 않는 구 경로)와 `:321`(`/clarify-utterance`에서 완료 상태 전이). 테스트가 부르는 곳은 별도다. 최종 추출은 이 함수 안의 `extractConstraints(state.userStatements)`(변경 전 `:1335`)이고, 발화가 없으면(LLM 호출 없음) 실패하지 않으며, 호출이 응답 없음·`[Error]`·예외·해석 불가로 끝나면 실패다(`extractConstraintsChecked`, B-57).
+  - b. 실패하면 발화마다 `ConstraintKind.OTHER`(evidence 없음) 기본 제약으로 대체된다. 이 제약은 `ClarifyIntent.constraints`에 들어가고, **분석(Stage 1~3)은 `constraints`를 읽지 않는다**(`src/main`에서 `ConstraintKind`를 쓰는 곳은 저장소·번역기·엔진뿐). 영향은 정제문 생성 프롬프트에 제약 정보가 빠지는 것과, 발화에서 온 제외 요청이 `unconfirmedExclusions`(미확정 제외 안내)에 기록되지 않는 것이다. `excludedFiles`는 대화 중 확정된 거부 항목에서 오므로 실패와 무관하게 그대로다.
+  - c. `buildClarifyIntent`의 결과는 곧바로 `executeAnalyzePipeline`으로 넘어가 분석 스트리밍 마크다운(결과 메시지)으로 이어진다. `ClarifyIntent`를 바꾸지 않고 안내를 실을 수 있는 통로는 **반환 래퍼**(엔진 `buildClarifyIntentChecked`)와 **라우터 응답**(`executeAnalyzePipeline`에 안내 인자를 더해 분석 메시지의 첫 청크로 전달)이다. 세션 메모리 대신 엔진 인스턴스(세션마다 새로 만들어짐)의 플래그로 중복을 막았다.
+  - d. `ClarifyIntentStore`는 Gson으로 직렬화/역직렬화하고(`saveIntent` `:60` 이후, `loadIntent`는 `ClarifyIntentJson` DTO로 읽음) 모르는 필드는 무시되고 빠진 선택 필드는 널 안전하게 기본값으로 처리된다. 실패하는 경우는 버전·`originalRequirement`·`refinedRequirement` 누락, 지원하지 않는 버전, 그래프 해시 불일치뿐이다(Fail-Fast). `loadIntent`의 `src/main` 호출처는 없다(ADR-001).
+- **고른 통로: 2-a(ClarifyIntent를 바꾸지 않는 통로).** 이유: 통로가 있어 `ClarifyIntent`에 필드를 더할 필요가 없고, 그러면 저장 형식과 예전 의도 데이터의 읽기 호환(필드 없음 → false 같은 마이그레이션)을 건드리지 않는다. 안내는 화면 전용이라 저장하지 않는다. 그래서 2-b용 "예전 의도 JSON 읽기" 테스트는 만들지 않았다(`ClarifyIntent` 정의 변경 없음).
+- **변경**:
+  - `Stage0ClarificationEngine.kt`: `buildClarifyIntentChecked(state)`가 `ClarifyIntentBuild(intent, constraintNotice)`를 돌려준다. 최종 추출이 실패했고 이 세션에서 앞 단계(`initSession`, `processUtterance`, 구 `processTurn`)가 같은 안내를 아직 붙이지 않았을 때만 B-57 문구를 준다(엔진 인스턴스의 `constraintFailureNoticeShown` 플래그, 안내를 붙이는 세 곳이 `constraintFailureLine()`로 기록). `buildClarifyIntent(state)`는 시그니처와 반환값을 유지한다(`buildClarifyIntentChecked(state).intent`).
+  - `WebviewActionRouter.kt`(안내 전달만): 두 호출처가 `buildClarifyIntentChecked`를 쓰고 `executeAnalyzePipeline(..., constraintNotice)`로 넘기며, 이 함수가 `analyze_start` 직후 안내를 첫 청크로 보낸다(분석 마크다운 앞에 한 줄).
+  - 실패해도 제외·제약이 반영된 것처럼 보이는 문구는 나가지 않는다(`excludedFiles` 변화 없음, `exclusionSummaryLines`에 제외 확정 줄 없음). 확인 질문은 없다.
+- **테스트**: 새 `FinalConstraintFailureNoticeTest` g1~g4(최종 실패 → 안내 1줄·제외 변화 없음·제외 문구 없음, 앞 단계 안내가 있으면 되풀이하지 않음(initSession과 processUtterance 두 경우), 성공 → 안내 없음·기존과 같은 intent, 라우터가 두 호출처에서 안내를 분석 스트림 첫 청크로 넘기는 소스 확인). 전체 526/42/17(522에서 +4), clarify 221/1/3(217에서 +4), 실패 메시지 diff 0, 하네스 EXACT_MATCH 5종·MATCH_EXCLUDING 2종 일치, selftest 24/24, 기존 r·h·g·i·f11과 재시도 n1~n6·실패 안내 f1~f4·m1~m5 통과, 웹뷰 로직 테스트 12개 통과. 기대가 바뀐 기존 테스트는 없다.
+- **한계(기록)**: (1) 안내는 한 세션에 한 번만 나오므로, 앞 단계 안내(초기 요구사항 또는 한 발화)가 있었다면 최종 추출의 실패는 따로 알리지 않는다. (2) 평문 `buildClarifyIntent`를 부르는 곳(테스트)은 실패 시에도 중복 방지 플래그를 세운다(운영 경로는 항상 `Checked`를 쓴다). (3) 이 안내는 분석 결과 메시지의 첫 줄로만 보이고 별도 알림이 아니다. (4) 정제문 생성(`refineRequirement`) 호출의 실패는 여전히 조용히 원문으로 대체된다(이번 범위 밖).
