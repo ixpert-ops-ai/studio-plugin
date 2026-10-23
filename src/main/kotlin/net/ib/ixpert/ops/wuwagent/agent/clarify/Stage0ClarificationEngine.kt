@@ -4,6 +4,11 @@ import net.ib.ixpert.ops.wuwagent.agent.clarify.model.*
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DomainDictionary
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executors
+
+/** 정제문 호출을 최종 제약 추출과 동시에 돌리는 데 쓰는 백그라운드 스레드(데몬). */
+private val refineExecutor = Executors.newCachedThreadPool { r -> Thread(r, "clarify-refine").apply { isDaemon = true } }
 
 /**
  * Stage 0 대화 제어 엔진 및 개방형 질문 트리거.
@@ -1339,9 +1344,20 @@ class Stage0ClarificationEngine(
     fun buildClarifyIntentChecked(state: Stage0State): ClarifyIntentBuild {
         val graphHash = ClarificationContractStore.calculateGraphHash(graph)
         val anchorTokens = state.seedSet.map { it.value }.distinct()
+        // 정제문 호출은 제약 추출의 결과를 쓰지 않으므로(프롬프트가 SR과 발화만 쓴다) 두 호출을 동시에 시작하고 둘 다 끝나면 합친다.
+        // 정제문을 별도 스레드로 보내지 못하거나 그 결과를 받지 못하면 같은 입력으로 이 스레드에서 다시 부른다(결과는 순차 실행과 같다).
+        val refineFuture = try {
+            CompletableFuture.supplyAsync({ refineRequirement(state.originalRequirement, state.userStatements) }, refineExecutor)
+        } catch (e: Exception) {
+            null
+        }
         val extraction = extractConstraintsChecked(state.userStatements)
         val constraints = extraction.constraints
-        val rawRefined = refineRequirement(state.originalRequirement, state.userStatements, constraints)
+        val rawRefined = try {
+            refineFuture?.join()
+        } catch (e: Exception) {
+            null
+        } ?: refineRequirement(state.originalRequirement, state.userStatements)
         val retentionResult = IdentifierRetentionChecker.checkRetention(
             refinedRequirement = rawRefined,
             originalRequirement = state.originalRequirement,
@@ -1454,8 +1470,7 @@ class Stage0ClarificationEngine(
 
     private fun refineRequirement(
         original: String,
-        userStatements: List<String>,
-        constraints: List<IntentConstraint>
+        userStatements: List<String>
     ): String {
         if (userStatements.isEmpty()) return original
         val client = llmClient ?: return original
