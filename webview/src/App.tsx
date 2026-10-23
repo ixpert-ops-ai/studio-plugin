@@ -11,6 +11,7 @@ import { L1ClarificationForm } from './L1ClarificationForm';
 import { Stage3ConfirmationForm } from './Stage3ConfirmationForm';
 import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
+import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
 mermaid.initialize({
@@ -269,8 +270,31 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
   });
 
   const [naturalUtterance, setNaturalUtterance] = useState('');
-  const [isSendingUtterance, setIsSendingUtterance] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  // 대기 표시: 발화 해석 응답이나 분석 시작을 기다리는 동안만 켠다(사실만: 대기 중이라는 것과 경과 초). 백엔드가 이미 보내는 메시지로만 끈다.
+  const [wait, setWait] = useState<WaitState>(IDLE);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const isInterpreting = wait.phase === 'interpreting';
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const d = event.data;
+      if (!d || d.type !== 'ai_message') return;
+      setWait(prev => onBackendMessage(prev, d.subType));
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  useEffect(() => {
+    if (wait.phase === 'idle') return;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setNowMs(now);
+      setWait(prev => expireIfStale(prev, now));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [wait.phase]);
 
   // payload 갱신 시 verdicts 및 rejectionReasons 무조건 덮어쓰기 (SSOT)
   useEffect(() => {
@@ -295,21 +319,27 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
 
   const handleSendUtterance = () => {
     const text = naturalUtterance.trim();
-    if (!text || isSendingUtterance || isSubmitted) return;
+    if (!canSendUtterance(wait, text, isSubmitted)) return;
     if (window.sendToIde) {
-      setIsSendingUtterance(true);
+      const now = Date.now();
+      setNowMs(now);
+      setWait(prev => startWait(prev, 'interpreting', now));
       window.sendToIde(JSON.stringify({
         command: '/clarify-utterance',
         text
       }));
       setNaturalUtterance('');
-      setTimeout(() => setIsSendingUtterance(false), 600);
     }
   };
 
   const handleSendResponse = (isCompletionDeclared: boolean = true) => {
-    if (isSubmitted) return;
+    if (isSubmitted || isInterpreting) return;
     setIsSubmitted(true);
+    {
+      const now = Date.now();
+      setNowMs(now);
+      setWait(prev => startWait(prev, 'confirming', now));
+    }
 
     // SSOT 원칙: REJECTED인 항목 중 사용자가 명시적으로 선택한 사유만 전송 (미선택 항목은 키 부재로 백엔드 기본값 위임)
     const rejectionReasonUpdates: Record<string, 'FILE_MISMATCH' | 'CONCEPT_IRRELEVANT'> = {};
@@ -479,7 +509,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
                       handleSendUtterance();
                     }
                   }}
-                  disabled={isSendingUtterance}
+                  disabled={isInterpreting}
                   style={{
                     flex: 1,
                     padding: '6px 10px',
@@ -493,7 +523,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
                 <button
                   type="button"
                   onClick={handleSendUtterance}
-                  disabled={!naturalUtterance.trim() || isSendingUtterance}
+                  disabled={!naturalUtterance.trim() || isInterpreting}
                   style={{
                     padding: '6px 12px',
                     fontSize: '12px',
@@ -506,9 +536,15 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
                     whiteSpace: 'nowrap'
                   }}
                 >
-                  {isSendingUtterance ? '반영 중...' : '지시 전송 ↵'}
+                  {isInterpreting ? '해석 중...' : '지시 전송 ↵'}
                 </button>
               </div>
+              {isInterpreting && (
+                <div className="clarify-wait" role="status" style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#93c5fd' }}>
+                  <div className="typing-dots"><span></span><span></span><span></span></div>
+                  <span>{INTERPRETING_TEXT}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -518,6 +554,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
               <button
                 type="button"
                 onClick={() => handleSendResponse(true)}
+                disabled={isInterpreting}
                 style={{
                   padding: '6px 14px',
                   fontSize: '12px',
@@ -533,8 +570,14 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
               </button>
             )}
             {isSubmitted && (
-              <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 'bold' }}>
+              <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                 ✓ 확인이 제출되었습니다. 분석을 진행 중입니다...
+                {wait.phase === 'confirming' && (
+                  <span className="clarify-wait" role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 'normal', color: '#94a3b8' }}>
+                    <span className="typing-dots"><span></span><span></span><span></span></span>
+                    <span>{confirmingElapsedText(elapsedSeconds(wait, nowMs))}</span>
+                  </span>
+                )}
               </span>
             )}
           </div>
