@@ -80,6 +80,19 @@ object AnalyzeSessionManager {
         if (!session.isExpired(TTL_MINUTES, now)) session.touch(now)
     }
 
+    /**
+     * 분석 시작에 실패해 지웠던 세션을 되돌린다(같은 객체). 그 사이 새 세션이 만들어졌거나 이미 만료됐으면 되돌리지 않는다(만료된 세션은 되살리지 않는다).
+     * 되돌리면 마지막 활동 시각을 갱신한다. 돌려주는 값: 되돌렸는가.
+     */
+    fun restoreSession(project: Project, session: Stage0Session): Boolean {
+        val basePath = project.basePath ?: return false
+        val now = clock()
+        if (session.isExpired(TTL_MINUTES, now)) return false
+        val restored = sessions.putIfAbsent(basePath, session) == null
+        if (restored) session.touch(now)
+        return restored
+    }
+
     fun removeSession(project: Project) {
         val basePath = project.basePath ?: return
         sessions.remove(basePath)

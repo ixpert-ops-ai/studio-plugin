@@ -50,6 +50,13 @@ export const onClarifyBackendMessage = (state: ClarifyFormState, subType: string
   return NO_CHANGE;
 };
 
+/** 확정 뒤 오류가 와서(세션 만료가 아니다) 같은 정제문으로 "다시 시도"할 수 있는가: 제출 문구를 걷었고 세션이 살아 있다. */
+export const isRetryableConfirmFailure = (outcome: { revertSubmitted: boolean; sessionExpired: boolean }): boolean =>
+  outcome.revertSubmitted && !outcome.sessionExpired;
+
+/** 확정 버튼 문구: 확정 실패 뒤에는 "다시 시도". */
+export const confirmButtonLabel = (confirmFailed: boolean): string => (confirmFailed ? '다시 시도' : '확인 완료 및 분석 시작 →');
+
 /** 다시 시작할 때 /clarify로 보내는 요청: 원 요구사항 그대로(대화 발화는 다시 보내지 않는다). */
 export const restartRequest = (originalRequirement: string): { command: string; text: string } => ({
   command: '/clarify',

@@ -3,6 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  confirmButtonLabel,
+  isRetryableConfirmFailure,
   isSessionExpiredError,
   onClarifyBackendMessage,
   previousStatements,
@@ -63,4 +65,20 @@ test('이전 발화 목록: 서버 기록과 화면에서 보낸 발화를 합�
   ];
   assert.deepEqual(previousStatements(sr, history, ['관리자 화면만 해당이에요', '  이메일은 마스킹해서 ', '']), ['관리자 화면만 해당이에요', '이메일은 마스킹해서']);
   assert.deepEqual(previousStatements(sr, undefined, []), []);
+});
+
+test('확정 뒤 일반 오류는 다시 시도할 수 있고 세션 만료 오류는 다시 시작 안내다', () => {
+  const state = { confirmPending: true, submitted: true };
+  const failed = onClarifyBackendMessage(state, 'error', '분석을 시작하지 못했습니다: 연결 실패');
+  assert.equal(isRetryableConfirmFailure(failed), true);
+  const expired = onClarifyBackendMessage(state, 'error', '분석 세션이 만료되었거나 유효하지 않습니다. /clarify를 다시 실행해 주세요.');
+  assert.equal(isRetryableConfirmFailure(expired), false);
+  // 확정을 보내지 않은 상태의 오류, 분석이 이미 시작된 뒤의 오류는 다시 시도 대상이 아니다
+  assert.equal(isRetryableConfirmFailure(onClarifyBackendMessage({ confirmPending: false, submitted: true }, 'error', '분석 중 오류')), false);
+  assert.equal(isRetryableConfirmFailure(onClarifyBackendMessage({ confirmPending: false, submitted: false }, 'error', 'x')), false);
+});
+
+test('확정 버튼 문구: 실패 뒤에는 다시 시도', () => {
+  assert.equal(confirmButtonLabel(true), '다시 시도');
+  assert.equal(confirmButtonLabel(false), '확인 완료 및 분석 시작 →');
 });

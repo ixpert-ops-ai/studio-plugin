@@ -235,6 +235,73 @@ class ClarifyConfirmHandoffTest {
         }
     }
 
+    // ── B-73 step 2: 분석 시작(continueAfterClarify) 실패 ──
+
+    @Test
+    fun x7_분석_시작이_실패하면_세션을_되돌리고_표지를_풀며_다시_확정하면_분석이_한_번이다() {
+        val id = "handoff-continue-fail-project"
+        JcefRefinedRequirementConfirmationBridge.endHandoff(id)
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val r = Recorder()
+            var ignored = 0
+            var attempt = 0
+            val analyses = Collections.synchronizedList(ArrayList<String>())
+            val done = CountDownLatch(1)
+            fun confirm() {
+                if (JcefRefinedRequirementConfirmationBridge.isHandoffActive(id)) { ignored++; return }
+                ClarifyConfirmHandoff.start(
+                    ClarifyConfirmHandoff.Steps(
+                        invalidateSummary = {},
+                        beginHandoff = { JcefRefinedRequirementConfirmationBridge.beginHandoff(id) },
+                        buildIntent = { "intent" },
+                        removeSession = { r.steps.add("removeSession") },
+                        restoreSession = { r.steps.add("restoreSession") },
+                        continueAfterClarify = { i ->
+                            if (++attempt == 1) throw IllegalStateException("분석 시작 실패")
+                            analyses.add(i); JcefRefinedRequirementConfirmationBridge.endHandoff(id); done.countDown()
+                        },
+                        onFailure = { r.steps.add("onFailure"); r.failures.add(it) },
+                        endHandoff = { r.steps.add("endHandoff"); JcefRefinedRequirementConfirmationBridge.endHandoff(id) }
+                    )
+                ) { task -> pool.execute { task() } }
+            }
+            confirm()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (r.failures.isEmpty() && System.nanoTime() < deadline) Thread.sleep(10)
+            assertEquals("세션을 지운 뒤 실패했으니 세션을 되돌리고, 그 다음에 표지를 풀고, 오류를 알린다",
+                listOf("removeSession", "restoreSession", "endHandoff", "onFailure"), r.steps.toList())
+            assertFalse(JcefRefinedRequirementConfirmationBridge.isHandoffActive(id))
+            confirm() // 같은 정제문으로 다시 확정
+            assertTrue(done.await(5, TimeUnit.SECONDS))
+            assertEquals(listOf("intent"), analyses.toList())
+            assertEquals("무시 로그 없음", 0, ignored)
+        } finally {
+            JcefRefinedRequirementConfirmationBridge.endHandoff(id)
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun x7b_정제문_생성이_실패하면_세션을_지우지_않았으므로_복원도_하지_않는다() {
+        val r = Recorder()
+        ClarifyConfirmHandoff.start(
+            ClarifyConfirmHandoff.Steps(
+                invalidateSummary = {}, beginHandoff = {}, buildIntent = { throw IllegalStateException("x") },
+                removeSession = { r.steps.add("removeSession") }, restoreSession = { r.steps.add("restoreSession") },
+                continueAfterClarify = { r.steps.add("continue") }, onFailure = { r.steps.add("onFailure") }, endHandoff = { r.steps.add("endHandoff") }
+            )
+        ) { task -> task() }
+        assertEquals(listOf("endHandoff", "onFailure"), r.steps.toList())
+    }
+
+    @Test
+    fun x7c_라우터_확정_분기는_분석_시작_실패_때_세션을_되돌린다() {
+        val confirm = router.substringAfter("\"/clarify-confirm\", \"/analyze-confirm\" -> {").substringBefore("// ── 요구사항 대화형 발화 처리")
+        assertTrue(confirm.contains("restoreSession = {"))
+        assertTrue(confirm.contains("AnalyzeSessionManager.restoreSession(project, session)"))
+    }
+
     // ── e5 ──
 
     @Test

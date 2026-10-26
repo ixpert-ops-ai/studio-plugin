@@ -282,6 +282,8 @@ class WebviewActionRouter(private val project: Project) {
                                 intentBuild
                             },
                             removeSession = { net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project) },
+                            // 분석 시작에 실패하면 같은 세션을 되돌려 사용자가 같은 정제문으로 다시 확정할 수 있게 한다
+                            restoreSession = { net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.restoreSession(project, session) },
                             continueAfterClarify = { intentBuild -> continueAfterClarify(project, bridge, intentBuild, messageId) },
                             onFailure = { e ->
                                 logger.error("Clarify confirm error", e)

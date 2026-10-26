@@ -14,7 +14,7 @@ import { buildCancelText, makeNoticeBubble, markExpired } from './refinedConfirm
 import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
 import { makeErrorBubble } from './errorDisplayLogic';
-import { onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
+import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { applyCardStatus, cardPendingAfter, isCardHide, isCardRequest, submittedStatusText } from './cardWaitLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
@@ -289,6 +289,8 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
   const [nowMs, setNowMs] = useState(() => Date.now());
   // 정제문·패키지 선택·탐색 힌트·Stage 3 카드가 응답을 기다리는 중인가(제출 뒤 문구가 "확인을 기다리고 있습니다"가 된다)
   const [cardPending, setCardPending] = useState(false);
+  // 확정 뒤 오류(세션 만료 아님)로 분석을 시작하지 못함: 같은 정제문으로 "다시 시도"할 수 있다(발화는 다시 보내지 않는다)
+  const [confirmFailed, setConfirmFailed] = useState(false);
   const isInterpreting = wait.phase === 'interpreting';
 
   useEffect(() => {
@@ -301,6 +303,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
       const r = onClarifyBackendMessage({ confirmPending: confirmPendingRef.current, submitted: submittedRef.current }, d.subType, d.content);
       if (r.endConfirmPending) confirmPendingRef.current = false;
       if (r.revertSubmitted) setIsSubmitted(false);
+      if (isRetryableConfirmFailure(r)) setConfirmFailed(true);
       if (r.sessionExpired) setSessionExpired(true);
     };
     window.addEventListener('message', onMessage);
@@ -357,6 +360,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
   const handleSendResponse = (isCompletionDeclared: boolean = true) => {
     if (isSubmitted || isInterpreting) return;
     setIsSubmitted(true);
+    setConfirmFailed(false);
     confirmPendingRef.current = true;
     {
       const now = Date.now();
@@ -625,6 +629,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
                 type="button"
                 onClick={() => handleSendResponse(true)}
                 disabled={isInterpreting}
+                data-clarify-retry={confirmFailed ? 'true' : undefined}
                 style={{
                   padding: '6px 14px',
                   fontSize: '12px',
@@ -636,7 +641,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
                   fontWeight: 'bold'
                 }}
               >
-                확인 완료 및 분석 시작 →
+                {confirmButtonLabel(confirmFailed)}
               </button>
             )}
             {isSubmitted && (

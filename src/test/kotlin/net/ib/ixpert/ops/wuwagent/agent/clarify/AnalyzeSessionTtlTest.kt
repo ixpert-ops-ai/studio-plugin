@@ -61,6 +61,41 @@ class AnalyzeSessionTtlTest {
         AnalyzeSessionManager.clock = { System.currentTimeMillis() }
     }
 
+    // B-73: 분석 시작 실패로 지웠던 세션을 되돌린다(만료·새 세션이면 되돌리지 않고, TTL 동작은 그대로)
+    @Test
+    fun r2_분석_시작_실패로_지운_세션은_되돌릴_수_있고_되돌리면_활동_시각이_갱신된다() {
+        val p = project("/ttl/restore")
+        save(p)
+        val s = AnalyzeSessionManager.getSession(p)!!
+        AnalyzeSessionManager.removeSession(p)
+        assertNull(AnalyzeSessionManager.getSession(p))
+        advance(10)
+        assertTrue(AnalyzeSessionManager.restoreSession(p, s))
+        assertNotNull(AnalyzeSessionManager.getSession(p))
+        advance(29) // 되돌린 시각부터 29분이면 아직 유효(복원이 활동 시각을 갱신했다)
+        assertNotNull(AnalyzeSessionManager.getSession(p))
+    }
+
+    @Test
+    fun r3_만료된_세션과_새로_만들어진_세션은_되돌리지_않는다() {
+        val p = project("/ttl/restore2")
+        save(p)
+        val s = AnalyzeSessionManager.getSession(p)!!
+        AnalyzeSessionManager.removeSession(p)
+        advance(31)
+        assertFalse("만료된 세션은 되살리지 않는다", AnalyzeSessionManager.restoreSession(p, s))
+        assertNull(AnalyzeSessionManager.getSession(p))
+        // 그 사이 새 /clarify가 세션을 만들었다면 덮어쓰지 않는다
+        val q = project("/ttl/restore3")
+        save(q)
+        val old = AnalyzeSessionManager.getSession(q)!!
+        AnalyzeSessionManager.removeSession(q)
+        save(q)
+        val fresh = AnalyzeSessionManager.getSession(q)
+        assertFalse(AnalyzeSessionManager.restoreSession(q, old))
+        assertTrue(fresh === AnalyzeSessionManager.getSession(q))
+    }
+
     @Test
     fun ttl는_30분이다() {
         assertEquals(30L, AnalyzeSessionManager.TTL_MINUTES)
