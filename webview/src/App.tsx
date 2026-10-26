@@ -14,6 +14,7 @@ import { buildCancelText, makeNoticeBubble, markExpired } from './refinedConfirm
 import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
 import { makeErrorBubble } from './errorDisplayLogic';
+import { onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
@@ -275,6 +276,13 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
 
   const [naturalUtterance, setNaturalUtterance] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
+  // 세션 만료: 백엔드가 세션을 찾지 못하면(마지막 활동 뒤 30분 경과 등) 확정 버튼 대신 다시 시작 안내를 보인다
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [restarted, setRestarted] = useState(false);
+  const [sentUtterances, setSentUtterances] = useState<string[]>([]);
+  const confirmPendingRef = useRef(false); // 확정을 보냈고 아직 분석 시작·오류·확인 카드를 받지 못함
+  const submittedRef = useRef(false);
+  useEffect(() => { submittedRef.current = isSubmitted; }, [isSubmitted]);
   // 대기 표시: 발화 해석 응답이나 분석 시작을 기다리는 동안만 켠다(사실만: 대기 중이라는 것과 경과 초). 백엔드가 이미 보내는 메시지로만 끈다.
   const [wait, setWait] = useState<WaitState>(IDLE);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -285,6 +293,11 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
       const d = event.data;
       if (!d || d.type !== 'ai_message') return;
       setWait(prev => onBackendMessage(prev, d.subType));
+      // 확정 뒤 오류면 제출 문구를 걷고, 세션 만료 오류면 다시 시작 안내를 보인다
+      const r = onClarifyBackendMessage({ confirmPending: confirmPendingRef.current, submitted: submittedRef.current }, d.subType, d.content);
+      if (r.endConfirmPending) confirmPendingRef.current = false;
+      if (r.revertSubmitted) setIsSubmitted(false);
+      if (r.sessionExpired) setSessionExpired(true);
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
@@ -328,6 +341,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
       const now = Date.now();
       setNowMs(now);
       setWait(prev => startWait(prev, 'interpreting', now));
+      setSentUtterances(prev => [...prev, text]);
       window.sendToIde(JSON.stringify({
         command: '/clarify-utterance',
         text
@@ -339,6 +353,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
   const handleSendResponse = (isCompletionDeclared: boolean = true) => {
     if (isSubmitted || isInterpreting) return;
     setIsSubmitted(true);
+    confirmPendingRef.current = true;
     {
       const now = Date.now();
       setNowMs(now);
@@ -490,7 +505,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
           )}
 
           {/* 2. 단일 통합 자연어 대화 입력란 (/clarify-utterance) */}
-          {!isSubmitted && (
+          {!isSubmitted && !sessionExpired && (
             <div style={{
               marginTop: '14px',
               padding: '10px 12px',
@@ -553,8 +568,55 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
           )}
 
           {/* 3. 단일 분석 시작 버튼 */}
+          {sessionExpired && (
+            <div data-session-expired="true" style={{
+              marginTop: '14px',
+              padding: '10px 12px',
+              background: 'rgba(245, 158, 11, 0.08)',
+              border: '1px solid rgba(245, 158, 11, 0.4)',
+              borderRadius: '6px',
+              fontSize: '12px',
+              color: '#fcd34d',
+              lineHeight: 1.5
+            }}>
+              <div>대화 세션이 끝나서 확인을 이어갈 수 없습니다(마지막 활동 뒤 30분이 지났거나 세션이 이미 닫혔습니다). 같은 요구사항으로 처음부터 다시 시작할 수 있습니다. 지금까지 입력한 발화는 자동으로 다시 보내지 않습니다.</div>
+              {previousStatements(payload.originalRequirement, payload.dialogueHistory, sentUtterances).length > 0 && (
+                <div data-session-expired-statements="true" style={{ marginTop: '6px', color: '#e5e7eb' }}>
+                  이전에 입력한 발화(필요하면 다시 시작한 뒤 직접 입력해 주세요):
+                  <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
+                    {previousStatements(payload.originalRequirement, payload.dialogueHistory, sentUtterances).map((t, i) => <li key={i}>{t}</li>)}
+                  </ul>
+                </div>
+              )}
+              <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  data-clarify-restart="true"
+                  disabled={restarted}
+                  onClick={() => {
+                    if (restarted) return;
+                    setRestarted(true);
+                    window.dispatchEvent(new CustomEvent('wuw:restart-clarify', { detail: { text: payload.originalRequirement } }));
+                  }}
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    background: restarted ? '#374151' : '#f59e0b',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: restarted ? 'default' : 'pointer',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  {restarted ? '다시 시작하는 중...' : '같은 요구사항으로 다시 시작'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-            {!isSubmitted && (
+            {!isSubmitted && !sessionExpired && (
               <button
                 type="button"
                 onClick={() => handleSendResponse(true)}
@@ -1752,6 +1814,22 @@ function App() {
       isNearBottom.current = true;
     }, 50);
   };
+
+  // clarify 카드의 "같은 요구사항으로 다시 시작": 입력창에서 "/clarify 원문"을 보낸 것과 같게 사용자 말풍선을 붙이고 /clarify로 보낸다
+  useEffect(() => {
+    const onRestart = (e: Event) => {
+      const text = (e as CustomEvent).detail?.text;
+      if (typeof text !== 'string' || text.trim() === '' || !window.sendToIde) return;
+      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: `/clarify ${text}` }]);
+      window.sendToIde(JSON.stringify(restartRequest(text)));
+      setTimeout(() => {
+        scrollToBottom();
+        isNearBottom.current = true;
+      }, 50);
+    };
+    window.addEventListener('wuw:restart-clarify', onRestart);
+    return () => window.removeEventListener('wuw:restart-clarify', onRestart);
+  }, []);
 
   // 팝업 아이템 로직 (모델 및 명령어 조합)
   const popupItems = useMemo(() => {

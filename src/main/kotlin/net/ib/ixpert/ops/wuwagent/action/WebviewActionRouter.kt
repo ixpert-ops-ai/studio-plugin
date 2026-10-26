@@ -165,7 +165,7 @@ class WebviewActionRouter(private val project: Project) {
                             )
 
                             // 작업 요약은 턴 응답을 기다리게 하지 않고 따로 만들어 같은 카드에 채운다(턴 번호로 짝을 맞춘다)
-                            val summaryTurn = scheduleTaskSummary(bridge, engine, turnResult.state, messageId)
+                            val summaryTurn = scheduleTaskSummary(bridge, engine, turnResult.state, messageId, project)
                             val payload = mapOf(
                                 "originalRequirement" to initialRequirement,
                                 "summaryTurn" to summaryTurn,
@@ -251,7 +251,7 @@ class WebviewActionRouter(private val project: Project) {
 
                     if (!isCompletionDeclared && !turnResult.isReadyForStage1) {
                         // 다음 턴 대화 진행
-                        val summaryTurn = scheduleTaskSummary(bridge, session.engine, turnResult.state, messageId)
+                        val summaryTurn = scheduleTaskSummary(bridge, session.engine, turnResult.state, messageId, project)
                         val nextPayload = mapOf(
                             "originalRequirement" to session.initialRequirement,
                             "summaryTurn" to summaryTurn,
@@ -308,9 +308,11 @@ class WebviewActionRouter(private val project: Project) {
                             val turnResult = session.engine.processUtterance(session.currentState, utterance)
                             session.currentState = turnResult.state
                             session.lastTurnResult = turnResult
+                            // 발화 처리 완료도 활동이다: 세션 유효 시간은 마지막 활동부터 센다
+                            net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.touch(project)
 
                             if (!turnResult.isReadyForStage1) {
-                                val summaryTurn = scheduleTaskSummary(bridge, session.engine, turnResult.state, messageId)
+                                val summaryTurn = scheduleTaskSummary(bridge, session.engine, turnResult.state, messageId, project)
                                 val nextPayload = mapOf(
                                     "originalRequirement" to session.initialRequirement,
                                     "summaryTurn" to summaryTurn,
@@ -1542,10 +1544,13 @@ class WebviewActionRouter(private val project: Project) {
         bridge: JcefBridge,
         engine: net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine,
         state: net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0State,
-        messageId: String
+        messageId: String,
+        project: Project? = null
     ): Int {
         fun send(payload: Map<String, Any>) {
             val json = com.google.gson.Gson().toJson(payload)
+            // 요약 전송도 활동이다: 세션 유효 시간은 마지막 활동부터 센다
+            project?.let { net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.touch(it) }
             ApplicationManager.getApplication().invokeLater {
                 bridge.sendMessage("analyze_clarify_summary", json, messageId)
             }
