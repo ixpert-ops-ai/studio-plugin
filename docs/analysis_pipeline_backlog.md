@@ -1570,3 +1570,196 @@ D4에서 새 형식이 만드는 질문(5개 상한, 구현 방법·파일은 �
 2. 엔진 질문 10개 중 6개가 파일 범위 질문이고 expectedQuestions 적중은 0/5다. 생성형 질문 규칙은 `브랜드/api/연동` 키워드 템플릿 하나뿐이다.
 3. 정제문은 스크립트 조건을 대부분 반영한다(28/30). 부족한 쪽은 질문이다. 다만 정제문이 뜻을 바꾼 2건(D2 참조→추가, SR-07 선택→금지)이 그대로 분석 입력이 된다.
 4. holdout 4개와 SR-06은 실행 기록이 없어 1-c의 실제 질문 열이 비어 있다. 판정은 SR 원문과 스크립트에 대한 사람 판단이며 GT와 대조하지 않았다.
+
+### [B-66] clarify 분리를 위한 출력 계약 초안과 분리 지도, 정제문 확인 경로, "현재 동작" 그래프 검증 (2026-10-26)
+
+읽기만 했다(코드, 웹뷰, 프롬프트, LLM, /tokenize, 외부 접속 없음). 사전 확인: `git status -s` 비어 있음, HEAD = origin = 53c4ea9. 그래프/소스는 로컬 평가 프로젝트 파일을 읽기만 했고, 이 문서에는 파일명과 메서드명만 적었다(코드 본문 없음).
+
+#### 1-a 정제문 확인 경로
+
+- **정제문을 사용자가 보는 곳: 없음.** 정제문(`refineRequirement` 결과)은 확정 뒤 `buildClarifyIntentChecked`에서 만들어져(`WebviewActionRouter.kt:264`, 후보 :322) 곧바로 `executeAnalyzePipeline`(:277, :335)으로 간다. 화면 메시지에 `refinedRequirement`를 싣는 곳이 라우터와 웹뷰에 없다(`webview/src`에 `refined` 0건, `정제` 0건). 화면에 보이는 것은 작업 요약(`App.tsx:455-470`의 `taskSummary`)인데 이것은 후보 범위 요약 호출(`generateTaskSummary`)의 결과이며 정제문이 아니다. 정제문은 디스크 기록(`ClarifyIntentStore.saveIntent`, 라우터 :270, :328, "기록만")에만 남는다.
+- **사용자가 고치는 곳: 없음.** 확정 버튼(`App.tsx:336-357` `handleSendResponse`)이 보내는 것은 `verdictUpdates`(후보 체크 상태)와 발화뿐이다. 정제문 편집 입력은 없다.
+- **`stage0Contract.enrichedRequirementText`는 clarify→analyze 경로에서 채워지지 않는다.** 채우는 곳은 `transitionToStage1`(`Stage0ClarificationEngine.kt:1152-1215`, 필드 :1202)뿐인데 `src/main`에 호출자가 없다. 라우터의 `pipeline.analyze(...)` 호출(`WebviewActionRouter.kt:1570-1577`)은 `stage0Contract`를 넘기지 않아 기본값 null이다. 그래서 `RequirementAnalysisPipeline.kt:135-136`은 `primaryReq`(=정제문+식별자 줄)로, :345-350은 `input.rawRefined`로 떨어진다. (B-65에서 "미확인"이라 쓴 항목의 확인 결과.)
+- **`refineRequirement` 프롬프트 원문**(`Stage0ClarificationEngine.kt:1471` 부근, 고치지 않음):
+  - 첫 지시: "최초 요구사항과 대화 중 사용자가 제공한 추가 발화/답변을 종합하여, 명확하고 구체화된 단일 요구사항 정제문(1~2문장)을 작성하세요."
+  - 규율 1: "원 요구사항의 핵심 목표와 사용자의 세부 의도/제약사항을 자연스럽게 결합하세요."
+  - 규율 2: "사용자가 언급한 특정 클래스/파일명(…) 및 식별자는 누락 없이 온전히 포함하세요."
+  - 규율 3: 배타적 한정 표현('~만 수정')은 "흐리거나 일반화하지 말고 … '만'을 분명하게 유지하세요."(우선순위 표현 '~위주로'는 왜곡하지 않기)
+  - 규율 4: "불필요한 서론/결론/인사말 없이 오직 정제된 요구사항 본문만 출력하세요."
+  - 의미 변경 유도 가능 지시문: **"명확하고 구체화된", "1~2문장", "자연스럽게 결합"**. 이 세 표현은 문장을 다시 쓰고 합치도록 요구하며, 보존 규칙은 식별자(규율 2)와 '만'(규율 3) 둘뿐이다. SR-07의 "없어도 돼요"(선택)는 어떤 보존 규칙에도 해당하지 않고(단정형으로 쓰도록 압축되기 쉽다), D2의 "참조"는 규율 2가 식별자만 지키고 식별자 사이의 관계 표현은 지키지 않는다. 이것은 지시문과 결과의 대응 관찰이며 인과를 확인한 것은 아니다.
+- **조건 수준으로 갈린 6개 시나리오: 회차별 정제문 조건과 Stage 3 결과**(`live_eval_*.json`의 `rawRefined`, `targets`, `gtHit30/gtTotal`; 파일은 날짜별이고 **코드 버전이 서로 달라 회차 간 비교가 섞인다**). 조건 O/X는 정제문에 해당 조건이 있는가.
+
+| 시나리오 | 회차(날짜_시각#회) | 정제문 조건 | Stage 3 결과(대상 수, GT 적중, 제거된 GT) |
+|---|---|---|---|
+| D3 | 1020_1105#1 / 1020_1557#1 / 1020_1654#1 / 1022_1600#1 | SAPACMM0802S01 참고: X / X / X / O | 4개 4/5(제거 1) / 5개 5/5 / 5개 5/5 / 5개 5/5 |
+| SR-05X | 1020_1752#1 | 대기 숨김 O | 1개 1/2(제거 1) |
+| SR-05X | 1021_1310#1, #2, #3 | 대기 숨김 X, O, O | 2개 2/2 ×3 |
+| SR-05X | 1022_1401#1~#3, 1022_1604#1 | 대기 숨김 O ×4(운영 중 O, X, X, O) | 2개 2/2 ×4 |
+| SR-08 | 1020_1457, 1020_1557, 1020_1654 | 유사 추가: X, O, X | 4개 3/3(오탐 1) / 4개 3/3(오탐 1) / 3개 3/3 |
+| SR-08 | 1023_0908#1~#3 | 유사 추가: X, O, X | 3개 / 4개(오탐 1) / 4개(오탐 1), 모두 3/3 |
+| SR-08 | 1023_1453#1~#3 | 유사 추가: X ×3 | 3개 3/3 ×3 |
+| S3 | 1020_1105 / 1020_1557 / 1020_1654 / 1020_1752 / 1022_1600 | "범위" 문구: X / X / X / O / O | 4개 3/4 / 2개 1/4(제거 2) / 2개 1/4(제거 2) / 3개 2/4(제거 2) / 4개 3/4 |
+| SR-01 | 1020_1105 / 1020_1557 / 1020_1654 / 1022_1600 | "문구만": X / X / X / O | 2개 1/2 / 1개 1/2 / 2개 1/2 / 2개 1/2 (모두 같은 GT 1건 누락) |
+| SR-05 | 1020_1105~1022_1600 8회 | "일반 조직 목록" O ×8, "대기 숨김" O ×8, "운영 중" O ×2(앞 2회)·X ×6 | 대상 2~3개, 2/2 ×7, 1/2 ×1(1020_1752, 제거 1) |
+
+읽는 법: (1) **같은 날(같은 코드) 같은 정제문 조건에서도 Stage 3 결과가 달라진다**(SR-05 1021_1101 #1~#3: 조건 동일, 대상 2/2/3개. SR-08 1023_0908: 조건 X, O, X에서 대상 3, 4, 4개로 X에서도 4개가 나옴). (2) 같은 날 조건이 갈린 묶음(SR-05X 1021_1310의 X, O, O; SR-08 1023_0908)에서 정제문 조건 차이와 Stage 3 결과 차이는 대응하지 않았다. (3) 날짜가 다른 회차의 차이(D3, S3)는 코드 변경(B-48~B-54)과 섞여 정제문 효과로 분리할 수 없다. 결론: 이 자료로는 "정제문의 조건 차이가 Stage 3 결과를 바꾼다"를 확인하지도 부정하지도 못한다(같은 조건에서도 결과가 갈리는 변동이 있음은 확인됨). 정정: B-65에서 SR-05의 "일반 조직 목록"을 "보이는 3개 모두"라고 썼는데 8회 모두에 있었다.
+
+#### 1-b "현재 동작" 그래프 검증 (그래프 JSON + 소스만 읽음)
+
+**SR-05** (graphKey member_market, `member-market/.meta/project-graph.json`, 소스 `member-market-api/src/main/java/com/membermarket/` 기준 상대 경로)
+| 현재 동작(문장) | 근거 |
+|---|---|
+| 사용자용 조직 목록은 `GET /api/organizations`이고 `type` 파라미터가 있으면 유형으로 거르고 없으면 전부 돌려준다. **상태(status) 조건은 없다.** | 그래프 apiEndpoints(`OrganizationController`), `api/organization/OrganizationController.java:18-23`, `api/organization/OrganizationService.java:23-36`(`findByType` 또는 `findAll`) |
+| 조직 상태는 ACTIVE, INACTIVE, PENDING이고 새 조직의 기본값은 ACTIVE다. "운영 중"이라는 값은 없고 스크립트의 "활성"에 대응하는 것은 ACTIVE다. | `domain/organization/OrganizationStatus.java`, `domain/organization/Organization.java:46` |
+| 상태로 거르는 저장소 메서드 `findByStatus`는 선언만 있고 호출하는 곳이 없다. | `domain/organization/OrganizationRepository.java:14`, 저장소 전체 grep 결과 선언 1건 |
+| 관리자 목록은 `GET /api/admin/organizations`이며 마스터는 전부(`findAll(pageable)`), 기관 관리자는 자기 기관 1건이다. 상태 조건 없음(대기 조직도 보인다). | `api/admin/AdminService.java:99-107`, 그래프 apiEndpoints(`AdminController`) |
+| 관리자 화면 두 곳이 같은 관리자 목록 API를 쓴다. | `member-market-web/src/views/admin/AdminOrganizationListView.vue:75`, `AdminAccountListView.vue:193` |
+| 사용자용 목록 `/api/organizations`를 부르는 화면은 웹 소스에서 찾지 못했다. | `member-market-web/src` grep 0건 → **미확인**(호출처) |
+
+질문 예: "현재 사용자용 조직 목록(`GET /api/organizations`)은 대기 중인 조직도 모두 돌려줍니다. 바뀐 뒤에는 활성 상태만 보이게 하고, 관리자 목록(`/api/admin/organizations`, 관리자 화면 두 곳이 사용)은 대기 조직도 계속 보이게 둡니까?" 이 사실은 정제문이 SR에 없던 "일반 조직 목록"을 더한 것이 코드의 두 목록 구분과 맞는다는 근거도 된다(구분은 SR이 아니라 코드에서 나왔다). 조회 단계 **5**(그래프 검색 1, 서비스 노드 조회 1, 소스 읽기 1, 소스 읽기+enum/entity 1, grep 1: `findByStatus`와 웹 호출처). 그래프만으로 얻은 것: 서비스의 `dependsOn`에 `OrganizationType`은 있고 `OrganizationStatus`는 없어 "상태 미사용"이 간접적으로 보이나 확정은 소스 읽기가 필요했다.
+
+**SR-12** (graphKey apc, `graph/project-graph-a/project-graph.json`; **소스 폴더 `C:/scrad/workspace/apc-pjt`가 비어 있어 소스는 못 읽음**, 그래프의 한글 주석만 사용)
+| 현재 동작(문장) | 근거 |
+|---|---|
+| 서비스 쪽 최신 앱버전 판단은 사용자 앱정보(모바일OS구분코드, 앱스토어구분코드, 모바일앱버전명)로 "최신앱버전 정보"를 조회한다. 즉 OS와 스토어를 이미 입력으로 받는다. | 그래프 노드 `APCCSAppVerMngtBIZ`(메서드 `selAppVerUpdtInf`, 한글 주석 "사용자 앱정보로 최신앱버전 정보조회", "모바일OS구분코드", "앱스토어구분코드", "모바일앱버전명") |
+| 최신 버전 조회는 `ACAOTBAPC003DEM.selNewSappVer`, 중간 버전은 `selMidlSappVer`다. 주석상 중간 버전 쿼리는 최신 쿼리와 비슷하되 노출 여부(`SPACD_DLSTM_USE_YN='Y'`)를 조건으로 쓴다고 되어 있어, 최신 쿼리는 이 조건을 쓰지 않는 것으로 읽힌다(확정 아님). | `ACAOTBAPC003DEM` 메서드 목록, `APCCSAppVerMngtBIZ` 한글 주석 → **SQL 본문 미확인** |
+| 최종앱버전이 중간앱버전보다 크고 중간앱버전의 업데이트 유형이 강제(3)나 강제_결제구동 제외(4)이면 최신앱버전의 업데이트 유형과 메시지를 중간앱버전 내용으로 바꾼다. | `APCCSAppVerMngtBIZ` 한글 주석 |
+| 관리 화면 쪽에도 "최신 앱버전 조회", "최신중간 앱버전 조회"가 있다(`selLtSappVer`, `selLtMidlSappVer`). 서비스 쪽과 같은 쿼리를 쓰는지는 모른다. | `APCADUpdtVerMngtBIZ` 메서드와 한글 주석, 화면 `webapps/js/ad/appVerMngt/UAPCAD0301M0.js` → 쿼리 공유 **미확인** |
+| "버전 번호가 가장 큰 것을 최신으로 본다"는 현재 규칙인지 | **미확인**(정렬 조건은 SQL 안) |
+
+질문 예: "현재 앱 업데이트 안내는 사용자 앱의 OS·스토어·버전으로 최신 버전을 조회하고, 중간 버전이 강제 유형이면 그 내용으로 덮어씁니다(`APCCSAppVerMngtBIZ.selAppVerUpdtInf`). 바뀐 뒤에도 중간 버전 덮어쓰기는 유지합니까?" 조회 단계 **4**(그래프 검색 1, 노드 조회 3: BIZ, DEM, 관리 BIZ) + 소스 읽기 시도 2회 실패.
+
+**D4** (graphKey ism, `graph/project-graph-i/project-graph.json`; **소스 폴더 `ism-pjt/ism-api-bo`가 비어 있어 소스 못 읽음**)
+| 현재 동작(문장) | 근거 |
+|---|---|
+| 케어회원 목록, 개수, 상세 조회와 저장, 수정 API가 이미 있다: `GET /me/careMember/getCareMemberMgmtList`, `getCareMemberMgmtListCount`, `getCareMemberInfo`, `PUT saveCareMember`, `updateCareMember`. | 그래프 apiEndpoints(`CareMemberMgmtController`) |
+| 목록 조회 쿼리는 `ECMBTBISM006Mapper.xml`의 `getCareMemberMgmtList`이고 테이블 `ECBCTBISM001`, `ECBCTBISM002`, `ECMBTBISM001`, `ECMBTBISM007`, `ECMBTBISM006`를 조인하며 조건절은 `getCareMemberMgmtListWhere`를 포함한다. | 그래프 resourceNode(MYBATIS_MAPPER) `sql_id`, `table_name`, `include_ref` → **조건 내용 미확인** |
+| 요청/응답은 유의고객 등록·해제 정보(등록일자, 해제일자, 사유, 고객명 등)를 다룬다. | `CareMemberMgmtRequest/Response`의 한글 주석 |
+| "관리 화면"에 해당하는 화면 파일은 그래프에 없다(이 그래프는 API 모듈이다). | resourceNodes 중 화면 0건 → **미확인** |
+
+질문 예: "케어회원 목록·상세 조회 API(`/me/careMember/getCareMemberMgmtList`)가 이미 있습니다. 새로 만들 것은 화면입니까, 아니면 기존 API의 조회 조건이나 항목을 바꾸는 것입니까?" 조회 단계 **3**(그래프 검색 1, 컨트롤러 노드 조회 1, 매퍼 노드 조회 1) + 소스 읽기 시도 1회 실패.
+
+도구 설계 근거: 세 건 모두 **노드 검색 → 노드 상세(메서드, 한글 주석, 엔드포인트) → 리소스 노드(SQL id, 테이블)** 순서가 쓰였고, 소스 본문이 필요한 것은 SR-05 하나뿐이었다(SR-12, D4는 소스가 없어 SQL 본문이 "미확인"으로 남았다). 소스가 없는 환경에서도 그래프의 `sql_id`, 테이블, 한글 주석까지는 얻을 수 있고 그 밖은 "미확인"이 된다.
+
+#### 1-c 분리 지도
+
+`Stage0ClarificationEngine.kt`(1,636줄). 줄 수는 선언 시작 줄 간 간격이며 주석과 중첩 함수를 포함한 근사값이다. 분류: 구(구체화), 파(파일 범위 조작), 공(공용).
+
+| 함수(시작 줄, 줄 수) | 분류 | 호출하는 것 → |
+|---|---|---|
+| 클래스 머리와 데이터 클래스 (17-67, ~50) | 공 | - |
+| `buildTaskSummary` :28 (6), `generateTaskSummary` :1019 (61) | 구 | 번역/요약 프롬프트(후보 목록 사용) |
+| `checkOpenQuestionTrigger` :1126 (26) | 구(그래프 사실 사용 :1137) | - |
+| `refineRequirement` :1471 (43) | 구 | LLM |
+| `extractConstraintsChecked` :1527 (~110), `ConstraintExtraction`, `constraintFailureLine` | 구 | LLM |
+| `buildClarifyIntent` :1339 (3), `buildClarifyIntentChecked` :1344 (114) | 공(정제문+제약은 구, excludedFiles·미확정 제외는 파) | `refineRequirement` :1350/:1360, `extractConstraintsChecked` :1354, `resolveExclusionCandidates` :1380, `unconfirmedFromPendingProposals` :1392 |
+| `initSession` :267 (144) | 공 | 추출 :336, `resolveUserUtteredIdentifiers` :338, `scanner.rescanUnverified` :345, `proposeExclusionsForUtterance` :358, `checkOpenQuestionTrigger` :361, 요약 :396 |
+| `processTurn` :411 (144, 구형 턴) | 공 | `applyPendingExclusionAnswer` :440, 추출 :443, `proposeExclusionsLegacy` :446, `resolveUserUtteredIdentifiers` :452, `rescanUnverified` :509, `mergeCandidates` :512, 질문 :516, 요약 :540 |
+| `processUtterance` :1216 (123) | 공 | `applyPendingExclusionAnswer` :1222, `rescanUnverified` :1263, `mergeCandidates` :1264, `explicitExclusionMentions` :1283, `excludeMentionedFiles` :1286, 추출 :1290, `proposeExclusionsForUtterance` :1292, 질문 :1320, 요약 :1321 |
+| `resolveUserUtteredIdentifiers` :68 (199) | 파 | 그래프 파일 찾기 :105, :140, 신규 생성 질문 :192 |
+| `resolveExclusionCandidates` :568 (86, `findFilesForWord` :593 포함) | 파 | 그래프 :595 |
+| `applyPendingExclusionAnswer` :663 (73) | 파 | `ExclusionWords.judgeAnswer` :668 |
+| `buildProposedExclusionItem` :736 (19), `upsertProposedExclusion` :755 (13) | 파 | - |
+| `proposeExclusionsLegacy` :768 (22) | 파 | `resolveExclusionCandidates` :772 |
+| `explicitFileMentions` :821 (35), `explicitExclusionMentions` :856 (29), `excludeMentionedFiles` :885 (35) | 파 | `ExclusionWords.containsExclusionWord` :857, :863 |
+| `proposeExclusionsForUtterance` :929 (60) | 파 | `explicitFileMentions` :946, `excludeMentionedFiles` :948, `resolveExclusionCandidates` :952/:955 |
+| `unconfirmedFromPendingProposals` :989 (20) | 파 | - |
+| `findExclusionCandidates` :1009 (10) | 파(`src/main` 호출자 없음) | `resolveExclusionCandidates` :1010 |
+| `mergeCandidates` :1080 (46) | 파 | - |
+| `transitionToStage1` :1152 (64) | 파(`src/main` 호출자 없음) | - |
+| `exclusionView` :1460 (11) | 파 | - |
+
+줄 수 합계(근사): 구 ~265, 파 ~790, 공 ~575(나머지는 import와 주석). 구체화 함수는 파일 범위 함수를 직접 부르지 않는다(공용 함수 세 개와 `buildClarifyIntentChecked`가 둘을 이어 준다). 엔진 밖 호출자는 `WebviewActionRouter.kt`의 `initSession` :153, `processTurn` :237, `processUtterance` :294, `exclusionView` :173-174/:252-253/:308-309뿐이다.
+
+**clarify 밖으로 옮길 것과 받을 곳**(결정성 표시: ●=모델 판단 밖에 남음, ○=모델 판단 포함)
+| 옮길 것 | 지금 위치 | 받을 곳 | 결정성 |
+|---|---|---|---|
+| 스캐너 후보(토큰 추출, 재스캔, 후보 병합) | `Stage0ClarificationEngine.kt:271/:448/:1258`(`extractTokens`), :345/:509/:1263(`rescanUnverified`), :1080-1125(`mergeCandidates`), `Stage0GraphScanner.kt` 전체 | Stage 1 앞: `RequirementAnalysisPipeline.kt:221-231`(사전 제외)와 :228(`AdaptiveFileDiscovery.filter`) 사이. 시드 선정(`AgenticSeedSelector`)이 이미 자체 탐색을 하므로 계약에는 후보 목록을 싣지 않는다 | ● 규칙 기반 |
+| 제외 후보 탐색 | `resolveExclusionCandidates` :568-653, `proposeExclusionsForUtterance` :929-988, `proposeExclusionsLegacy` :768, `applyPendingExclusionAnswer` :663, `buildProposedExclusionItem` :736, `upsertProposedExclusion` :755, `findExclusionCandidates` :1009(미사용) | `RequirementAnalysisPipeline.kt:295-298`(제외 경로 집합) 앞의 입력 준비 단계, 카드는 `WebviewActionRouter.kt:173-174/:252-253/:308-309`가 쓰는 `exclusionView` 대응물 | ● 키워드와 그래프 이름 매칭(번역기가 EXCLUDE로 분류한 발화만 ○) |
+| 파일명 직접 제외 규칙(B-53, B-54) | `explicitFileMentions` :821, `explicitExclusionMentions` :856, `excludeMentionedFiles` :885, `ExclusionWords.kt:17-36`(`containsExclusionWord` :20, `judgeAnswer` :36), 호출 :946-948, :1283-1292 | 같은 사전 제외 단계(`RequirementAnalysisPipeline.kt:295-298`). 입력은 계약의 "범위 밖" 원문 문장 | ● 정규식과 이름 매칭. 단 :1288의 분기는 번역기 분류(○)와 `ExclusionWords` 검사(●)가 섞여 있어 분리 시 둘을 나눠야 함 |
+| `excludedFiles` | 만드는 곳 `buildClarifyIntentChecked` :1344-1457, `exclusionView` :1460 | 읽는 곳은 이미 분석 쪽: `AnalyzeInputResolver.kt`(`isExcludedIdentifier`), `RequirementAnalysisPipeline.kt:298`, :558-561. 계약 필드 "파일명 직접 제외"로 유지 | ● |
+| 미확정 제외 안내 | 만드는 곳 :1392(`unconfirmedExclusions`), `unconfirmedFromPendingProposals` :989; 보이는 곳 `RequirementAnalysisPipeline.kt:430`(`exclusionSummaryLines`) | "범위 밖" 필드 표시로 대체(B-65 1-e). 파일 반영은 사전 제외 단계 | ○ 제약 추출 결과를 쓰는 부분, ● 이름 매칭 부분 |
+
+모델 판단 밖에 남는 결정적 규칙: B-53/B-54 파일명 제외(위 표), `ExclusionWords` 정규식과 응답 판정(`judgeAnswer` :36), 세션 리셋(`AnalyzeSessionManager.kt:41/:52`, 라우터가 확정 시 `removeSession` 호출, 새 세션은 `previousContract = null`, ADR-001), 저장(`ClarifyIntentStore.saveIntent` :60, "기록만", `findIntentFile`/`loadIntentByKey` 호출자 0), 후보 상한(`CandidateCap`, `ClarifyUtteranceTranslator.kt:14`). 모델 판단: 번역기 분류, 제약 추출, 정제문, 요약, (새로 생길) 질문과 현재 동작 서술.
+
+**하네스와 기존 테스트가 clarify 내부에 의존하는 곳**
+- `LiveEvalTest.kt`: `Stage0GraphScanner(graph, minSpecificityScore = 1.0, proposalBudget = 10)` :130, `Stage0ClarificationEngine(scanner, graph, metered, deferTaskSummary = …)` :131, `summaryScheduler` :134-137/:192-193, `initSession` :140, `processUtterance` :151, `exclusionView` :160-161, `processTurn`(확정 시뮬레이션 `isCompletionDeclared = true`) :197, `buildClarifyIntent` :201, `AnalyzeInputResolver.resolve` :220, 결과 필드 `rawRefined`, `engineQuestions`, `UtteranceLog`(echo/openQuestion/rejected 수/seed 수). 즉 엔진 생성자 인자, 턴 결과 필드(`openQuestion`, `echoBackMessage`, `isReadyForStage1`, `state.items`, `state.seedSet`), 요약 스케줄러에 의존한다.
+- `Stage0EngineRoutedBaselineHarnessTest.kt`: `Stage0ClarificationEngine(scanner, graph, llmClient = null | mockLlm)` :256/:311/:368/:419, `initSession` :259, `processTurn` :314, `buildClarifyIntent` :260/:320/:372, `AnalyzeInputResolver.resolve` :262/:322/:374. 이 테스트의 콘솔 출력이 베이스라인 비교 도구(저장소 밖 `$TEMP/bl/a55_accept.out` 계열)의 **EXACT_MATCH 5종**(survey_admin LlmOff, APC Transit Card LlmOff, ISM Core LlmOff, Ablation-a, Ablation-b)과 **MATCH_EXCLUDING 2종**(survey_admin LlmOn, APC DEM Isolated LlmOn, 접두 `RefinedReq:` 한 줄 제외)의 입력이다. LLM을 쓰지 않는 5종은 분석 입력 줄이 한 글자도 바뀌면 안 되므로 `AnalyzeInputResolver`/`buildClarifyIntent`의 출력 형식이 계약이 된다. LLM을 쓰는 2종은 정제문 줄만 제외하고 비교한다(정제문이 모델 산출물이기 때문).
+- `clarify` 테스트 패키지가 엔진/스캐너를 직접 생성하는 파일 22개: `AnalyzeSessionManagerTest`, `CandidateCapTest`, `ClarificationContractStoreTest`, `ConstraintExtractionFailureNoticeTest`, `ExcludeComponentDialogueTest`, `ExcludedIdentifierSubtractionTest`, `ExclusionDisplayTest`, `ExclusionFileNameRuleTest`, `ExclusionProposalFlowTest`, `FinalConstraintFailureNoticeTest`, `ParallelRefineTest`, `Stage0B12ReAskLiveLlmObservationTest`, `Stage0EngineRoutedBaselineHarnessTest`, `Stage0GraphScannerTest`, `Stage0RouterAndContractTest`, `Stage0SurveyAdminLiveLlmVerificationTest`, `Stage0SurveyAdminSnapshotTest`, `Stage0ThreeScenarioLiveLlmObservationTest`, `Stage0ThreeScenarioObservationTest`, `Stage0UserIdentifierDisambiguationTest`, `Stage0UtteranceProcessTest`, `TaskSummaryDeferTest` + `agent/integration/ClarifyToAnalyzeIntegrationBaselineTest.kt`(:208-209) + `agent/eval/LiveEvalTest.kt`. 분리하면 이 중 파일 범위/제외 관련(`Exclusion*`, `ExcludeComponentDialogueTest`, `ExcludedIdentifierSubtractionTest`, `Stage0UserIdentifierDisambiguationTest`, `Stage0GraphScannerTest`)은 새 단계 쪽으로 옮겨야 하고, 구체화 쪽(`ParallelRefineTest`, `*FailureNotice*`, `CandidateCapTest`, `TaskSummaryDeferTest`)은 그대로 남는다.
+
+#### 1-d 에이전트 루프 전제
+
+도구 호출(tool calling)을 쓰는 곳:
+| 곳 | 위치 | 요청 형식 | 실패·잘못된 호출 처리 |
+|---|---|---|---|
+| 시드 선정(다중 턴) | `AgenticSeedSelector.kt:22-` (`maxTurns = 10` :71, 호출 :83-91), 도구 정의 `DEFINITIONS` :414-(`search_graph_nodes` :418, `inspect_node_detail` :439, `expand_connected_nodes` :456, `confirm_final_seeds` :482) | `chatWithTools(maxTokens = 2048, tools, toolChoice = "auto", temperature = 0.0)` | 호출 예외 → 루프 종료(:91-94) → 가드 2 누적 상위 3개 채택(:310-327) → `fallbackSelection` 키워드 매칭(:329-333, :371). 도구 호출 없이 끝나면 종료(:112-116). 알 수 없는 도구 이름은 오류 JSON 반환(:211-213). 중복 검색어는 경고 반환(가드 1). 인자 JSON은 `gson.fromJson` 직접 해석(:~133)이라 해석 실패 예외가 루프 밖으로 번질 수 있음(B-34에서 D4 절단 때 확인된 위치) |
+| Stage 3 검증 | `FileRelevanceVerifier.kt:220-221` (`submit_verification` 강제 선택 `toolChoice = {type: function, function.name}`) | 단일 호출, 도구 강제 | 예외 :223, :322, :362, 유효한 도구 호출이 없으면 "keeping all files as fallback"(:330) |
+| 신규 파일 탐지 | `NewFileDetector.kt:146-147` (`propose_n…` 강제) | 단일 호출, 도구 강제 | 예외 :165 |
+| 시드 선정(1회형) | `LlmSeedSelector.kt:246-247` (`submit_se…` 강제) | 단일 호출 | 예외 :261/:278, `fallbackSelection` :282/:285, JSON 배열 폴백 :272 |
+| 후보 선택(다중 턴) | `LlmCandidateSelector.kt:99-100`(`search_files`, `get_file_summary`, `get_dependencies`, 마지막 턴은 도구 없음) | 도구 `auto` | `fallbackToStage1` :106/:116/:152/:174/:198, 예외 :178 → `fallbackToLegacyPrompting` :187/:201 |
+| 클라이언트 | `OpenAIClient.kt:297-315`(`chatWithTools`), 요청 본문 :340-355(`tools`, `tool_choice`, 스트림), `OllamaClient.kt:253-321` | - | 스트림 절단(도구 인자 JSON 해석 불가) 감지 시 1회 재시도, 재시도도 절단이면 실패 계수 증가(:305-313) |
+
+기존 덤프 1,760개(`build/eval-reports/dumps*`)에서 센 도구 호출: 시드 선정 655회 중 인자 해석 성공 654, 해석 불가 1(D4 스트림 절단, `finish_reason` 없음, 인자 728자 — B-34의 현상). Stage 3 검증 143/143, 신규 파일 탐지 57/57 성공. 시드 선정 턴의 구성: 한 턴에 도구 호출이 여러 개(병렬)인 턴 436, 단일 inspect 55, 단일 search 12, expand 8, 최종 확정(`confirm_final_seeds`) 143. 덤프에는 도구 이름과 잘못된 이름 호출 여부가 남지 않아 "알 수 없는 도구" 횟수는 **미확인**. 스트림 덤프에는 완료 토큰이 기록되지 않아 시간으로만 비교했다(시드 선정 턴 시간 중앙: 병렬 호출 턴 16.5초, inspect 14.9초, search 9.0초, expand 19.3초, 확정 52.6초).
+
+도구 후보(3개 이하, 1-b에서 실제로 쓴 조회 기준):
+1. `search_graph_nodes(query)` — 기존(`AgenticSeedSelector.kt:418`, 구현 :514). 세 건 모두 첫 단계.
+2. `inspect_node_detail(node)` — 기존(:439, 구현 :650). 메서드, 한글 주석, 엔드포인트, `dependsOn/dependedBy`. 리소스 노드(`sql_id`, 테이블, `include_ref`)까지 돌려주도록 확장이 필요한지는 현재 출력에 포함되는지 **미확인**(1-b에서는 JSON을 직접 읽어 얻음).
+3. `read_method_source(path, method)` — 신규. SR-05에서만 필요했고(서비스 본문), 소스가 없는 환경(SR-12, D4)에서는 "미확인"을 돌려주도록 해야 한다.
+
+질문 1개당 예상 시간(기존 출력 토큰 ÷ 8 tok/s, `clarify` 덤프 중앙값): 번역 응답 103토큰 ≈ 13초, 정제 36토큰 ≈ 5초, 제약 추출 94토큰 ≈ 12초, 요약 153토큰(최대 265) ≈ 19초(최대 33초). 질문 하나에 선택지 2~5개와 추천 답을 쓰면 요약 호출과 비슷한 150~250토큰으로 가정해 **19~31초**. 조회 턴은 위 시드 선정 턴 시간(중앙 15~19초, 한 턴 안 병렬 호출 포함)을 쓰면 **조회 3단계 ≈ 50초**. 따라서 첫 질문까지 약 70~80초, 조회를 한 번만 하고 질문 5개를 연속으로 만들면 질문당 19~31초가 더해져 5개 합 145~205초(사용자 입력 시간 제외). 이 값은 추정이며 질문 생성 호출은 아직 측정하지 않았다.
+
+#### 1-e 출력 계약 초안 (문서만)
+
+읽는 곳이 없는 필드는 만들지 않는다. `ClarifyIntent.CURRENT_INTENT_VERSION = "1.2"`(`model/ClarifyIntent.kt:42`)를 "1.3"으로 올리는 것을 기준으로 적었다(필드 추가, 기본값 있음).
+
+| 필드 | 생산자 | 읽는 곳 | 저장 | contractVersion |
+|---|---|---|---|---|
+| `currentBehavior` (사실, 근거(노드·메서드·SQL id·파일:라인), 확인/미확인) | 에이전트 루프(도구 조회) | 화면(질문 근거 표시), Stage 1 입력(시드 선정 힌트: 사실에 나온 클래스명 `AgenticSeedSelector.kt:59` 입력), Stage 3 본문(`AnalyzeSections.kt:22-47`) | 세션 메모리 + 기록 저장(`saveIntent` "기록만") | 1.3 추가 |
+| `afterBehavior` (바뀐 뒤 동작 문장 목록, 출처: SR/발화/답) | 사용자 답과 SR에서 모델이 구성하고 사용자가 확인 | Stage 1 입력(`RequirementAnalysisPipeline.kt:135-136`), Stage 3 본문, `/implement`(저장 계약 `enrichedRequirementText = effectiveReq`, :578 경유), 화면 | 저장 | 1.3 추가 |
+| `outOfScope` (범위 밖 문장 목록, 원문 인용) | 모델 추출(SR, 발화) | 사전 제외 단계(파일명 규칙이 읽음, `RequirementAnalysisPipeline.kt:295-298`), Stage 3 본문, 화면(미확정 제외 안내 대체) | 저장 | 1.3 추가 |
+| `openItems` (미정: 질문했으나 답이 없거나 모른다고 한 항목) | 질문 규칙 엔진(질문 5개 상한 뒤 남은 것) | Stage 3 본문(불확실 표시. 지금의 `unresolvedItems` 줄 `AnalyzeSections.kt` 자리), `/implement`(가정으로 명시), 화면 | 저장 | 1.3 추가(`unresolvedItems`와 통합 시 1.3에서 대체) |
+| `qaLog` (질문, 선택지, 추천 답, 사용자 답) | 질문 규칙 엔진, 사용자 | 화면(대화 이력 재표시), 평가 하네스(B-65식 판정). 분석 단계의 reader는 없음 → **화면과 평가 도구만 읽으므로 분석 입력에는 싣지 않는다**. `userStatements`를 대체 | 기록 저장(분석 계약에는 제외) | 1.3 추가 |
+| `excludedFilesByRule` (파일명 직접 제외: 결정적 규칙 결과 + 미확정 제안) | 결정적 규칙(`explicitFileMentions` 등, 모델 아님) | `RequirementAnalysisPipeline.kt:298`, :558-561, 화면 카드 | 저장(기존 `excludedFiles` 유지) | 변경 없음(기존 필드 이름만 유지) |
+
+만들지 않는 필드: 후보 목록(시드 선정이 자체 탐색), `constraints`(읽는 곳이 없었다. `outOfScope`와 `afterBehavior`가 대체), `anchorTokens`(읽는 곳 없음, B-65 1-d 참고).
+
+**정제문 문자열의 생성**: `refinedRequirement`는 호환용 파생 필드로 남기고, LLM 호출 없이 계약에서 결정적으로 렌더링한다: `afterBehavior`를 순서대로 문장으로 잇고, `outOfScope`를 "단, …은 바꾸지 않는다"로 잇고, `openItems`를 "미정: …"으로 잇는다(`AnalyzeInputResolver.kt:58-72`가 읽는 값). 이렇게 하면 모델이 문장을 다시 쓰는 단계가 없어져 D2("참조"→"추가")와 SR-07("없어도 돼요"→"제공하지 않습니다")류 변경이 생길 자리가 없다(문장은 사용자가 확인한 `afterBehavior` 그대로). 대가: 각 문장을 사용자가 보고 고칠 수 있게 하는 화면이 필요하다(지금은 정제문 확인 경로 없음).
+ADR-001과의 관계: 새 필드도 디스크에서 자동으로 읽지 않으면 위반이 아니다(`findIntentFile`, `loadIntentByKey` 호출자 0 유지). `ClarifyIntentStore.kt:29`(`isSupportedVersion`)와 `loadIntent` :88-121이 "1.3"을 받아들이도록 바뀌어야 하며, `/analyze`가 `/clarify` 없이 도는 불변식은 새 필드가 모두 선택(기본값)이면 유지된다.
+
+#### 1-f clarify 평가 기준 고정 (B-65 판정 재현용)
+
+**빈칸 판정**(범주 9개별, 입력은 SR 원문 + 스크립트 발화만, GT와 그래프는 보지 않음)
+| 판정 | 정의 | 예 |
+|---|---|---|
+| 명확 | 구현이나 검증을 바꾸는 결정을 원문에서 하나로 읽을 수 있다 | SR-01 "현재 5회에서 3회로" (기능범위) |
+| 부분 | 결정의 일부만 있거나 둘 이상으로 읽힌다 | SR-07 "게시하지 않은"(예약·임시저장 포함 여부), D2 "최근이력 1건"(최근의 기준) |
+| 없음 | 그 범주의 결정이 원문에 흔적도 없다 | D4 "케어회원 관리 화면 조회"의 권한, 예외 처리 |
+| 판단 불가 | 원문만으로 둘 중 어느 쪽인지 정하기 어렵다. 이 판정은 요약 줄에서 따로 센다 | D3 "SAPACMM0802S01 참고"(기존 서비스 참고인지 신규인지) |
+범주에 해당하는 결정이 애초에 필요 없으면 "해당 없음"(세지 않는다).
+
+**물어야 할 질문 인정 규칙**: (1) 답이 구현이나 검증(테스트 기대값)을 바꾼다. (2) 구현 방법, 파일 선택, 클래스 이름은 묻지 않는다. (3) 한 질문에 결정 하나. (4) 상한 5개, 같은 결정은 한 번. (5) 스크립트가 이미 답한 결정은 "물을 것"에는 세고 "스크립트 답"에도 센다(B-65의 44개 중 18개). (6) 원문에 명시된 제약을 확인하려는 질문은 인정하지 않는다.
+
+**반영 판정**(스크립트 조건을 조건 하나씩 쪼개 정제문과 대조)
+| 판정 | 정의 | 예 |
+|---|---|---|
+| 반영 | 조건이 같은 뜻으로 있다(어순, 어미 차이는 무관) | D5 "SurveyServiceImpl만 수정" |
+| 일부 | 조건의 일부 요소만 있거나, 같은 뜻이지만 범위가 좁아졌다 | SR-05X 정제문에 "대기 중인 조직 숨김"이 없고 "활성만 표시"만 있음 |
+| 누락 | 조건이 정제문에 없다 | D3 정제문1의 "SAPACMM0802S01 참고" |
+| 의미 변경 | 조건의 뜻이 달라졌다(선택→금지, 참조→추가 위치) | SR-07 "없어도 돼요"→"제공하지 않습니다", D2 "참조"→"추가" |
+추가된 조건(정제문에만 있는 것)은 별도로 "추가" 열에 세고 반영률에는 넣지 않는다(S3 "요청된 범위 내에서만", SR-08 "유사한"). B-65에서는 의미 변경 2건을 "일부"로 묶었고, 이 기준에서는 "의미 변경"으로 분리한다(28 반영 / 일부 0 / 누락 0 / 의미 변경 2, SR-05X 정제문2의 대기 숨김은 회차에 따라 "일부"가 추가됨).
+
+**스크립트 개선안(질문을 받기 전에 답을 넣지 않는 대본, 예시만; 기존 스크립트는 고치지 않음)**: 지금 스크립트는 첫 발화에 답을 한꺼번에 넣어 질문 적중을 볼 수 없다(B-65: 스크립트가 44개 질문 중 18개에 미리 답함). 개선안은 "질문 주제 → 답" 표와 모르겠다 기본 답으로 구성하고, 엔진이 그 주제를 물을 때만 답한다.
+| SR | 질문 주제 → 답 | 기본 답(주제가 안 맞을 때) |
+|---|---|---|
+| SR-08 | "비슷한 단어 기준" → "띄어쓰기를 없앤 뒤 대소문자 구분 없이 같으면 같은 단어" / "수정할 때도 검사하나" → "수정할 때도 똑같이" / "걸리면 막나 경고만 하나" → "등록을 막아 주세요" | "잘 모르겠어요. 지금 방식 그대로면 됩니다." |
+| SR-05 | "어떤 상태를 보이게 하나" → "활성 상태만" / "대기 중 조직은" → "숨겨 주세요" / "어느 목록인가" → "사용자가 보는 조직 목록" | 같음 |
+| SR-07 | "게시하지 않은 범위" → "임시저장과 예약 상태 모두" / "숨긴 것을 다시 볼 수단" → "없어도 돼요(필요 없음)" | 같음 |
+이렇게 하면 "정제문 반영" 판정은 질문과 답이 오간 경우에만 생기고, "물어야 할 질문 적중"은 엔진이 주제를 실제로 물었는지로 측정된다.
+
+#### 예상과 다른 점
+1. **정제문을 사용자가 보거나 고치는 경로가 없다**(화면, 라우터, 웹뷰 모두 0). `enrichedRequirementText`는 호출자가 없는 `transitionToStage1`에서만 채워져 clarify→analyze 경로에서는 항상 비어 있다(B-65의 "미확인"을 "채워지지 않음"으로 정정).
+2. 정제문 조건 차이와 Stage 3 결과 차이는 이 자료로 분리되지 않는다. 같은 날, 같은 정제문 조건에서도 대상 수가 갈린다(SR-05 2/2/3개, SR-08 3/4/4개).
+3. 그래프만으로 "현재 동작"을 채우는 데는 한계가 분명했다: 소스 폴더가 비어 있는 두 프로젝트(apc, ism)에서는 SQL 조건과 정렬 규칙이 "미확인"이고, 소스가 있는 SR-05만 상태 조건 없음이라는 핵심 사실이 소스 읽기(`OrganizationService.java:23-36`)로 확정됐다. 그래프의 `dependsOn`(Status 미의존)은 그 사실의 간접 단서였다.
+4. 기존 코드에 이미 "도구를 쓰는 다중 턴 루프"와 "턴 사이 사용자 피드백 브리지"(`AgenticSeedSelector.kt:17`, :234 `clarificationBridge.requestClarification`)가 있다. 새 에이전트 루프를 처음부터 만들 필요는 없다.
+5. `findExclusionCandidates`(:1009)와 `transitionToStage1`(:1152)은 `src/main`에 호출자가 없다(분리 대상에서 삭제 후보).
+6. 시드 선정의 도구 호출 해석 성공률은 654/655이고 실패 1건이 스트림 절단 한 건(B-34 현상)이다. 도구 호출 자체는 안정적이고 시간이 병목이다(확정 턴 중앙 52.6초).
