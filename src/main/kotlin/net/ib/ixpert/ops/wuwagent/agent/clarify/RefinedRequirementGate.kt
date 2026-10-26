@@ -13,6 +13,12 @@ sealed class RefinedConfirmationDecision {
 
     /** "취소": 분석을 시작하지 않는다. */
     object Cancel : RefinedConfirmationDecision()
+
+    /** 새 /clarify나 새 확인 요청이 이 확인을 대신했다. 분석을 시작하지 않고 안내도 보내지 않는다. */
+    object Superseded : RefinedConfirmationDecision()
+
+    /** 대기 시간 안에 응답이 없었다. 정제문을 그대로 쓰고 진행한다(카드는 비활성으로 바꿔 안내한다). */
+    object TimedOut : RefinedConfirmationDecision()
 }
 
 /** 분석을 시작하기 전에 정제문을 사용자에게 확인받는 중개 인터페이스(Stage3ConfirmationBridge와 같은 방식). */
@@ -24,6 +30,9 @@ fun interface RefinedRequirementConfirmationBridge {
 
     /** 확인 카드를 화면에서 내린다. */
     fun hideConfirmation() {}
+
+    /** 응답 없이 시간이 지나 진행하는 경우: 카드를 내리지 않고 비활성으로 바꿔 "응답이 없어 …" 안내를 보인다. */
+    fun expireConfirmation() {}
 }
 
 sealed class RefinedGateResult {
@@ -32,6 +41,9 @@ sealed class RefinedGateResult {
 
     /** 사용자가 취소했다. 분석을 시작하지 않는다. */
     object Cancelled : RefinedGateResult()
+
+    /** 새 /clarify 등이 이 확인을 대신했다. 분석도 안내도 없다. */
+    object Superseded : RefinedGateResult()
 }
 
 object RefinedRequirementGate {
@@ -52,12 +64,17 @@ object RefinedRequirementGate {
             bridge.requestConfirmation(intent.originalRequirement, shown)
         } catch (e: Exception) {
             null
-        } finally {
-            try { bridge.hideConfirmation() } catch (e: Exception) { /* 화면 정리 실패는 진행에 영향 없음 */ }
+        }
+        try {
+            // 시간 초과로 진행하면 카드를 지우지 않고 비활성으로 바꿔 이유를 보인다. 그 밖에는 카드를 내린다.
+            if (decision == RefinedConfirmationDecision.TimedOut) bridge.expireConfirmation() else bridge.hideConfirmation()
+        } catch (e: Exception) {
+            // 화면 정리 실패는 진행에 영향 없음
         }
         return when (decision) {
-            null, RefinedConfirmationDecision.Proceed -> RefinedGateResult.Proceed(intent)
+            null, RefinedConfirmationDecision.Proceed, RefinedConfirmationDecision.TimedOut -> RefinedGateResult.Proceed(intent)
             RefinedConfirmationDecision.Cancel -> RefinedGateResult.Cancelled
+            RefinedConfirmationDecision.Superseded -> RefinedGateResult.Superseded
             is RefinedConfirmationDecision.ProceedEdited -> {
                 val edited = decision.text.trim()
                 if (edited.isEmpty() || edited == shown.trim()) RefinedGateResult.Proceed(intent)
@@ -75,7 +92,8 @@ object RefinedRequirementGate {
         bridge: RefinedRequirementConfirmationBridge?,
         save: (ClarifyIntent) -> Unit,
         analyze: (ClarifyIntent) -> Unit,
-        onCancelled: () -> Unit
+        onCancelled: () -> Unit,
+        onSuperseded: () -> Unit = {}
     ) {
         when (val result = apply(intent, bridge)) {
             is RefinedGateResult.Proceed -> {
@@ -83,12 +101,14 @@ object RefinedRequirementGate {
                 analyze(result.intent)
             }
             RefinedGateResult.Cancelled -> onCancelled()
+            RefinedGateResult.Superseded -> onSuperseded()
         }
     }
 
     /**
      * 고친 문장을 정제문 필드(refinedRequirement, retentionAudit.rawRefinedRequirement)에 넣는다. 저장 형식과 contractVersion은 그대로다.
-     * 식별자 보존 검사는 LLM 없이 결정적이라 고친 문장으로 다시 계산한다(빠진 식별자 줄이 Stage 3 입력에 맞게 갱신된다).
+     * 사용자가 고친 문장은 그 자체가 결정이므로 사용자가 지운 식별자는 Stage 1~3 입력에 다시 붙이지 않는다(`missingBeforeFix`를 비운다.
+     * [AnalyzeInputResolver.resolve]는 이 목록으로만 "빠진 식별자 줄"을 붙인다). 고치지 않은 경우는 이 함수를 거치지 않아 지금과 같다.
      */
     fun withEditedRefined(intent: ClarifyIntent, edited: String): ClarifyIntent {
         val retention = IdentifierRetentionChecker.checkRetention(
@@ -99,8 +119,8 @@ object RefinedRequirementGate {
         val audit = (intent.retentionAudit ?: RetentionAudit(rawRefinedRequirement = edited)).copy(
             rawRefinedRequirement = retention.rawRefinedRequirement,
             expectedIdentifiers = retention.expectedIdentifiers.toList().sorted(),
-            missingBeforeFix = retention.missingIdentifiers,
-            wasRetainedWithoutModification = retention.wasRetainedWithoutModification,
+            missingBeforeFix = emptyList(),
+            wasRetainedWithoutModification = true,
             scopeModifierDropped = retention.scopeModifierDropped
         )
         return intent.copy(refinedRequirement = retention.effectiveRefinedRequirement, retentionAudit = audit)

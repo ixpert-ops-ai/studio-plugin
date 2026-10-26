@@ -10,7 +10,7 @@ import { ScopeSelectionTree } from './ScopeSelectionTree';
 import { L1ClarificationForm } from './L1ClarificationForm';
 import { Stage3ConfirmationForm } from './Stage3ConfirmationForm';
 import { RefinedConfirmationForm } from './RefinedConfirmationForm';
-import { buildCancelText, makeNoticeBubble } from './refinedConfirmLogic';
+import { buildCancelText, makeNoticeBubble, markExpired } from './refinedConfirmLogic';
 import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
 import { makeErrorBubble } from './errorDisplayLogic';
@@ -35,6 +35,7 @@ interface Message {
   id: string;
   role: 'user' | 'ai' | 'tool';
   subType?: string;
+  expired?: boolean;
   content: string;
   stepLabel?: string;
   applyable?: boolean;
@@ -686,6 +687,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
       <RefinedConfirmationForm
         key={msg.id}
         payload={msg.content}
+        expired={msg.expired === true}
         onCancel={(projectId) => {
           if (window.sendToIde) {
             window.sendToIde(JSON.stringify({
@@ -1332,6 +1334,12 @@ function App() {
             isLoading: false
           }];
         });
+        return;
+      }
+
+      // 응답 없이 시간이 지나 원래 문장으로 분석이 진행됨: 카드를 지우지 않고 비활성으로 바꿔 이유를 보인다
+      if (data.subType === 'refinedConfirmation/expired') {
+        setMessages(prev => markExpired(prev));
         return;
       }
 

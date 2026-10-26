@@ -43,6 +43,13 @@ export const evaluateEdit = (shown: string, edited: string): EditState => {
 
 export type ConfirmAction = 'asis' | 'edited';
 
+/** 응답 없이 대기 시간이 지나 백엔드가 원래 문장으로 분석을 진행했을 때 카드에 보이는 안내. */
+export const EXPIRED_TEXT = '응답이 없어 원래 문장으로 분석을 진행했습니다.';
+
+/** 확인 카드 메시지에 만료 표시를 단다(다른 메시지와 이미 만료된 카드는 그대로). 카드는 지우지 않고 비활성으로 남긴다. */
+export const markExpired = <T extends { subType?: string; expired?: boolean }>(messages: T[]): T[] =>
+  messages.map(m => (m.subType === 'refinedConfirmation/request' && !m.expired ? { ...m, expired: true } : m));
+
 /**
  * 백엔드로 보내는 응답 본문. "이대로 분석"은 editedText가 없고, "수정한 내용으로 분석"은 앞뒤 공백을 뗀 고친 문장이 들어간다.
  * 진행할 수 없는 상태(빈 칸, 고치지 않았는데 edited)면 null이라 아무것도 보내지 않는다.

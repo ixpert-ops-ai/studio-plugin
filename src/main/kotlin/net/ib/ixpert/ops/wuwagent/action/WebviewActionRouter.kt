@@ -132,6 +132,9 @@ class WebviewActionRouter(private val project: Project) {
                         return@invokeLater
                     }
 
+                    // 이전 대화가 정제문 확인 카드에서 응답을 기다리고 있으면 정리한다(이전 분석은 시작하지 않는다)
+                    net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.supersedePending(project.locationHash)
+
                     bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프 기반으로 요구사항을 구체화하고 있습니다...", messageId)
 
                     ApplicationManager.getApplication().executeOnPooledThread {
@@ -198,6 +201,11 @@ class WebviewActionRouter(private val project: Project) {
                 // ── 요구사항 구체화 확인 (Stage 0 -> Stage 1) ────────
                 "/clarify-confirm", "/analyze-confirm" -> {
                     logger.info("Router: /clarify-confirm or /analyze-confirm 분기")
+                    // 이미 확인 카드 대기나 분석 시작 중이면 두 번째 확인은 무시한다(세션은 첫 확인에서 이미 닫혔다)
+                    if (net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.isHandoffActive(project.locationHash)) {
+                        logger.info("Router: 정제문 확인이 진행 중이라 두 번째 확인을 무시합니다")
+                        return@invokeLater
+                    }
                     val messageId = "analyze_${System.currentTimeMillis()}"
                     
                     val session = net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.getSession(project)
@@ -262,6 +270,7 @@ class WebviewActionRouter(private val project: Project) {
 
                     // Stage 1 전이용 ClarifyIntent 생성 및 저장 (ClarificationContract는 Analyze에서 생산)
                     val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
+                    net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.beginHandoff(project.locationHash)
                     net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
 
                     // 정제문 확인 카드는 응답을 기다리므로 EDT를 막지 않게 백그라운드에서 이어 간다
@@ -269,6 +278,7 @@ class WebviewActionRouter(private val project: Project) {
                         try {
                             continueAfterClarify(project, bridge, intentBuild, messageId)
                         } catch (e: Exception) {
+                            net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.endHandoff(project.locationHash)
                             logger.error("Clarify confirm error", e)
                             ApplicationManager.getApplication().invokeLater {
                                 bridge.sendMessage("error", "분석을 시작하지 못했습니다: ${e.message}", messageId)
@@ -320,7 +330,8 @@ class WebviewActionRouter(private val project: Project) {
 
                             // COMPLETE 상태 전이: ClarifyIntent 생성 및 저장
                             val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
-                            net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
+                            net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.beginHandoff(project.locationHash)
+                    net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
 
                             continueAfterClarify(project, bridge, intentBuild, messageId)
                         } catch (e: Exception) {
@@ -1550,28 +1561,33 @@ class WebviewActionRouter(private val project: Project) {
         messageId: String
     ) {
         val projectBase = java.io.File(project.basePath ?: "")
-        net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.handoff(
-            intent = intentBuild.intent,
-            bridge = net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge(project),
-            save = { clarifyIntent ->
-                try {
-                    val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
-                    logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
-                } catch (e: Exception) {
-                    logger.warn("Clarify intent save failed (recording only): ${e.message}")
+        try {
+            net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.handoff(
+                intent = intentBuild.intent,
+                bridge = net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge(project),
+                save = { clarifyIntent ->
+                    try {
+                        val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
+                        logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
+                    } catch (e: Exception) {
+                        logger.warn("Clarify intent save failed (recording only): ${e.message}")
+                    }
+                },
+                // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행 (executeAnalyzePipeline 내부의 AnalyzeInputResolver.resolve 위임)
+                analyze = { clarifyIntent ->
+                    executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent, intentBuild.constraintNotice)
+                },
+                // 오류가 아닌 안내 메시지(error 형식을 쓰지 않는다)
+                onCancelled = {
+                    ApplicationManager.getApplication().invokeLater {
+                        bridge.sendMessage("analyze_notice", "분석을 취소했습니다.", "analyze_notice_${System.currentTimeMillis()}")
+                    }
                 }
-            },
-            // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행 (executeAnalyzePipeline 내부의 AnalyzeInputResolver.resolve 위임)
-            analyze = { clarifyIntent ->
-                executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent, intentBuild.constraintNotice)
-            },
-            // 오류가 아닌 안내 메시지(error 형식을 쓰지 않는다)
-            onCancelled = {
-                ApplicationManager.getApplication().invokeLater {
-                    bridge.sendMessage("analyze_notice", "분석을 취소했습니다.", "analyze_notice_${System.currentTimeMillis()}")
-                }
-            }
-        )
+                // onSuperseded: 새 /clarify가 이 확인을 대신했다. 분석도 안내도 없다(기본 동작)
+            )
+        } finally {
+            net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.endHandoff(project.locationHash)
+        }
     }
 
     private fun executeAnalyzePipeline(

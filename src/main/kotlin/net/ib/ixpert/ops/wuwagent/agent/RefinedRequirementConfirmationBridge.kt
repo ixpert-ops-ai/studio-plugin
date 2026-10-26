@@ -8,16 +8,25 @@ import net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementConfirmationBr
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 /** 응답을 기다리는 확인 요청 표. 화면 응답(complete)과 대기(await)를 이어 준다. IDE 없이 테스트할 수 있게 따로 둔다. */
 class RefinedConfirmationRegistry {
     private val pending = ConcurrentHashMap<String, CompletableFuture<RefinedConfirmationDecision?>>()
 
+    /** 같은 키에 이미 기다리는 요청이 있으면 그 요청은 새 요청이 대신한 것으로 끝낸다(분석을 시작하지 않는다). */
     fun register(key: String): CompletableFuture<RefinedConfirmationDecision?> {
         val future = CompletableFuture<RefinedConfirmationDecision?>()
-        pending[key] = future
+        pending.put(key, future)?.complete(RefinedConfirmationDecision.Superseded)
         return future
     }
+
+    /** 기다리는 요청이 있으면 대신 처리됐다고 끝낸다(새 /clarify). 없으면 아무 일도 없다. */
+    fun supersede(key: String) {
+        pending.remove(key)?.complete(RefinedConfirmationDecision.Superseded)
+    }
+
+    fun isPending(key: String): Boolean = pending.containsKey(key)
 
     fun complete(key: String, decision: RefinedConfirmationDecision?) {
         pending.remove(key)?.complete(decision)
@@ -25,12 +34,18 @@ class RefinedConfirmationRegistry {
 
     fun cancel(key: String) = complete(key, RefinedConfirmationDecision.Cancel)
 
-    /** 시간 안에 응답이 없거나 대기가 깨지면 null(결정 없음)이다. */
+    /**
+     * 시간 안에 응답이 없으면 [RefinedConfirmationDecision.TimedOut], 대기가 깨지면 null(결정 없음)이다.
+     * 정리할 때는 이 요청의 항목일 때만 지운다(그 사이 같은 키로 등록된 새 요청을 지우지 않는다).
+     */
     fun await(key: String, future: CompletableFuture<RefinedConfirmationDecision?>, timeoutSeconds: Long): RefinedConfirmationDecision? =
         try {
             future.get(timeoutSeconds, TimeUnit.SECONDS)
+        } catch (e: TimeoutException) {
+            pending.remove(key, future)
+            RefinedConfirmationDecision.TimedOut
         } catch (e: Exception) {
-            pending.remove(key)
+            pending.remove(key, future)
             null
         }
 
@@ -47,6 +62,23 @@ class JcefRefinedRequirementConfirmationBridge(
 
     companion object {
         private val registry = RefinedConfirmationRegistry()
+
+        /** 확인 → 저장 → 분석 시작이 진행 중인 프로젝트. 이 동안 들어온 두 번째 /clarify-confirm은 무시한다. */
+        private val activeHandoffs: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+        fun beginHandoff(projectId: String): Boolean = activeHandoffs.add(projectId)
+
+        fun endHandoff(projectId: String) {
+            activeHandoffs.remove(projectId)
+        }
+
+        fun isHandoffActive(projectId: String): Boolean = activeHandoffs.contains(projectId)
+
+        /** 새 /clarify가 시작되면 기다리는 확인 카드를 정리하고(이전 분석을 시작하지 않는다) 진행 표지를 푼다. */
+        fun supersedePending(projectId: String) {
+            registry.supersede(projectId)
+            activeHandoffs.remove(projectId)
+        }
 
         /** "이대로 분석"(editedText=null) 또는 "수정한 내용으로 분석"(editedText=고친 문장). */
         fun completeConfirmation(projectId: String, editedText: String?) {
@@ -79,6 +111,17 @@ class JcefRefinedRequirementConfirmationBridge(
             }
         }
         return registry.await(projectId, future, timeoutSeconds)
+    }
+
+    override fun expireConfirmation() {
+        if (project == null) return
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(project).sendMessage("refinedConfirmation/expired", "", "system")
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
     }
 
     override fun hideConfirmation() {

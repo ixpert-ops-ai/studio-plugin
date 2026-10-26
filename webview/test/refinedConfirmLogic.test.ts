@@ -6,7 +6,9 @@ import {
   buildCancelText,
   buildSubmitText,
   evaluateEdit,
+  EXPIRED_TEXT,
   makeNoticeBubble,
+  markExpired,
   parsePayload,
 } from '../src/refinedConfirmLogic.ts';
 import { IDLE, onBackendMessage, startWait } from '../src/clarifyWaitLogic.ts';
@@ -63,4 +65,21 @@ test('확인 카드나 취소 안내가 오면 분석 대기 표시가 내려간
   // 확인 카드 숨김은 대기를 건드리지 않는다
   wait = startWait(IDLE, 'confirming', 3000);
   assert.equal(onBackendMessage(wait, 'refinedConfirmation/hide'), wait);
+});
+
+test('만료 표시: 확인 카드에만 달리고 다른 메시지는 그대로이며 카드는 지워지지 않는다', () => {
+  const list = [
+    { id: 'a', subType: 'analyze_clarify' },
+    { id: 'b', subType: 'refinedConfirmation/request' },
+    { id: 'c' },
+  ];
+  const out = markExpired(list);
+  assert.equal(out.length, 3);
+  assert.deepEqual(out[0], list[0]);
+  assert.deepEqual(out[1], { id: 'b', subType: 'refinedConfirmation/request', expired: true });
+  assert.deepEqual(out[2], list[2]);
+  assert.equal(list[1].expired, undefined); // 입력을 바꾸지 않는다
+  assert.equal(EXPIRED_TEXT, '응답이 없어 원래 문장으로 분석을 진행했습니다.');
+  // 이미 만료된 카드는 같은 값으로 남는다
+  assert.deepEqual(markExpired(out)[1], out[1]);
 });

@@ -1,20 +1,21 @@
 import React, { useMemo, useState } from 'react';
 import { FileCheck2, Play, Pencil, X } from 'lucide-react';
-import { buildSubmitText, evaluateEdit, parsePayload } from './refinedConfirmLogic';
+import { EXPIRED_TEXT, buildSubmitText, evaluateEdit, parsePayload } from './refinedConfirmLogic';
 
 interface RefinedConfirmationFormProps {
   payload: string; // JSON string from msg.content
   onCancel: (projectId: string) => void;
   onSubmit: (projectId: string, text: string) => void; // text: 백엔드로 보낼 본문(JSON)
+  expired?: boolean; // 응답 없이 대기 시간이 지나 원래 문장으로 분석이 진행됨: 카드는 비활성이 되고 안내가 보인다
 }
 
 /** 분석 시작 전 확인 카드: 원문 SR과 정제문을 나란히 보이고, 정제문은 고칠 수 있다. */
-export const RefinedConfirmationForm: React.FC<RefinedConfirmationFormProps> = ({ payload, onCancel, onSubmit }) => {
+export const RefinedConfirmationForm: React.FC<RefinedConfirmationFormProps> = ({ payload, onCancel, onSubmit, expired = false }) => {
   const data = useMemo(() => parsePayload(payload), [payload]);
   const shown = data?.refinedRequirement ?? '';
   const [edited, setEdited] = useState<string>(shown);
   const [submittedAction, setSubmittedAction] = useState<'asis' | 'edited' | 'cancel' | null>(null);
-  const isSubmitted = submittedAction !== null;
+  const isSubmitted = submittedAction !== null || expired;
 
   if (!data) {
     return (
@@ -120,6 +121,12 @@ export const RefinedConfirmationForm: React.FC<RefinedConfirmationFormProps> = (
           )}
         </div>
       </div>
+
+      {expired && (
+        <div data-refined-confirm-expired="true" style={{ fontSize: '12px', color: '#fcd34d', marginBottom: '10px' }}>
+          {EXPIRED_TEXT}
+        </div>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
         <button type="button" data-refined-confirm-action="cancel" onClick={cancel} disabled={isSubmitted} style={button(!isSubmitted, false)}>
