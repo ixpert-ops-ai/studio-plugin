@@ -2618,3 +2618,109 @@ IDE의 14:47:19 `/clarify-confirm` 직후 오류는 **세션 유효 시간 초�
 **재테스트 관찰(사용자 보고 중 로그로 확인된 것)**: "수정한 내용으로 분석" 경로 — `분석 시작 직전 SR(75자, clarify 경유)`과 탐색기 `SR:` 줄이 사용자가 고친 75자 그대로이고 식별자 재부착은 없다(IDE 첫 확인). 사용자가 쓴 마스킹 형식("앞 2자리 + 도메인")이 시드 확정 근거(`confirm_final_seeds` rationale)까지 전달됐다. `sql_survey.xml`은 RelevanceScorer 점수 5로 `RESOURCE_REVERSE_LINK` 구제(VETTED BYPASS)로만 남았고, `AddressDaoImpl`·`AddressDao`는 점수 40에서 `Seed Direct Dependency` 구제로 들어왔다가 Stage 3에서 사유 없이 제외됐다.
 
 **개선점 추가**: 24 탐색기 추정→단정 승격 차단(본문 미확인 시 "추정" 표시) / 구조. 25 로그 한글 인코딩 / 즉시(파일은 정상, 콘솔 MS949; 2-h). 26 saveChat 중복 호출(`messages` 변경마다 전송, 디바운스 없음)·제목의 "/clarify" 접두어 / 즉시.
+
+
+### [B-72] 즉시 수정 묶음(초기 실패 안내 분리, [ExtractFail] 로그, 카드 대기 문구, 탐색 힌트 카드 표기), 남은 읽기 조사, 개선점 23 설계 초안 (2026-10-26)
+
+사전 확인: `git status -s` 비어 있음. **HEAD = origin = 0db26b1**(지시문의 901dac8이 아니다: 901dac8 뒤에 B-71 추가 문서 커밋 0db26b1을 push했고 901dac8은 그 조상이다). 샌드박스 IDE는 꺼져 있다(`idea` 프로세스 없음, 실행 중인 java는 2개로 `--add-opens`로 시작하는 JVM과 Kotlin 컴파일러 데몬뿐). 실서버 LLM 호출 없음. 커밋: 1 = `8b9703f`, 이 문서 = 다음 커밋.
+
+#### 1 커밋 1(8b9703f) 즉시 수정
+- **1a 초기 실패 안내 분리**(`Stage0ClarificationEngine.kt`): `initSession`의 안내(`:387`)가 `initConstraintFailureLine()`의 새 문구 "요구사항에서 조건을 자동으로 정리하지 못했습니다. 분석에는 영향이 없으며, 범위나 조건이 있으면 말씀해 주세요."를 쓴다("파일명으로" 없음). 발화 단계(`:445`, `:1297`)와 최종 추출(`:1454`)의 문구 "요청하신 조건을 해석하지 못했습니다. …파일명으로 다시 말씀해 주세요."는 그대로다. 새 안내도 "이미 안내함" 표시(`constraintFailureNoticeShown`)를 세워 최종 추출 안내가 되풀이되지 않는 기존 동작은 같다.
+- **1b `[ExtractFail]` 로그**: `extractFailLogLine(kind, body, error)`가 `[ExtractFail] 종류=<응답 없음|[Error]|예외|파싱 실패> 본문(<전체>자 중 앞 <n>자)=<앞 500자> 예외=…` 한 줄을 `println`(idea.log의 `STDOUT -`)으로 남긴다. 줄바꿈은 `\n` 글자로 바꾼다. 파싱 실패는 기존에는 바깥 `catch`에 섞여 있어 따로 갈랐다. 모델이 빈 목록(`[]`)을 준 경우와 정상 응답은 줄을 남기지 않는다.
+- **1c 카드 대기 문구**(`cardWaitLogic.ts` 새 순수 로직, `App.tsx`): 정제문·패키지 선택·탐색 힌트·Stage 3 카드의 요청 메시지가 오면 진행 중 메시지의 상단 문구(`currentStatus`)와 확인 제출 뒤 문구가 "확인을 기다리고 있습니다"로, 카드가 내려가면(`*/hide`, `refinedConfirmation/expired`) "분석을 진행 중입니다"로 바뀐다. 스트리밍이 시작되어 문구가 없는 메시지는 건드리지 않는다.
+- **1d 탐색 힌트 카드 표기**(`explorerDisplayLogic.ts`, `L1ClarificationForm.tsx`): 카드의 `message`·`explanation`에서 "메타그래프"를 "프로젝트 코드 구조"로 바꿔 보이고, 후보 옆 "(주석 없음)" 칸은 비운다(값이 있는 한글 이름은 그대로). **프롬프트와 탐색기 입력은 바꾸지 않았다.** 이 변경은 화면 출력(L1 카드)에만 있고 `idea.log`의 `STDOUT` 출력과 도구 결과(LLM 입력)에는 손대지 않았다. 남은 "메타그래프" 화면 문구: 라우터 오류 메시지 `WebviewActionRouter.kt:144, :461, :673, :1626`("메타그래프를 찾을 수 없습니다")와 `:1668`(/explain 쪽 교정 안내).
+- **1e `beginHandoff` 뒤 `buildIntent` 실패**: **수정이 필요 없었다.** `ClarifyConfirmHandoff.start`가 실패하면 `endHandoff()`로 표지를 풀고 `onFailure`로 오류 1회를 보내며, `removeSession`은 `buildIntent` 성공 뒤라 **세션은 남는다**. 웹뷰는 확정 뒤 일반 오류(세션 만료 문구가 아닌 것)면 제출 상태를 되돌려 확정 버튼이 다시 보인다(2ad2b99). 다시 확정하면 가드가 통과(표지 해제됨)해 분석이 1회 시작되고 무시 로그는 없다(테스트 x5). **남은 위험**: `buildIntent` 성공 뒤 `continueAfterClarify`가 예외를 내면 세션은 이미 닫혀 있어 다시 확정하면 "세션 만료" 안내와 다시 시작 버튼이 나온다(고치지 않음).
+
+| 기대 | 확인한 테스트 | 결과 |
+|---|---|---|
+| x1 초기 추출 실패 → 새 문구 1줄, 발화 없음, "파일명" 없음 | `ImmediateFixesB72Test.x1`(응답 [Error], 빈 응답, 해석 불가, 호출 예외 4종: 새 문구 정확히 1번, "파일명" 없음, 발화 실패 문구 없음, 대화 이력에 사용자 턴 없음, `userStatements` 빈 목록) | 통과 |
+| x2 발화 추출 실패 → 기존 문구 | `x2`(초기 성공 뒤 발화 실패: 기존 문구 있음, 초기 문구 없음) + `ConstraintExtractionFailureNoticeTest` f1의 발화 부분, `FinalConstraintFailureNoticeTest` g2의 발화 부분 | 통과 |
+| x3 `[ExtractFail]` 종류와 본문 앞 500자 | `x3`([Error], 응답 없음, 700자 파싱 실패(500자만, "700자 중 앞 500자"), 짧은 파싱 실패(전체), 호출 예외(`RuntimeException`), 빈 목록 응답은 줄 없음) | 통과 |
+| x4 카드 대기/응답 뒤 문구 | `cardWaitLogic.test.ts` 5개(카드 4종 요청 → 대기, 응답 5종 → 진행, 다른 메시지 불변, 제출 뒤 문구, 탐색 힌트 표기), ui-check 31(대기 상단 문구와 제출 뒤 문구 "확인을 기다리고 있습니다", hide 뒤 "분석을 진행 중입니다"), 32(탐색 힌트 카드: "메타그래프" 없음, "프로젝트 코드 구조" 있음, "주석 없음" 없음, 한글 이름 유지) | 통과(ui-check는 탐색 힌트 카드로만 실제 화면 확인, 나머지 카드 3종은 단위 테스트) |
+| x5 `buildIntent` 실패 → 오류 1회, 다시 확정하면 분석 1회, 무시 로그 없음 | `ClarifyConfirmHandoffTest.x5`(첫 시도 실패: 오류 1, 세션 안 닫힘, 표지 해제 → 다시 확정: 분석 1, 무시 0, 세션 닫기 1) | 통과 |
+| x6 하네스 diff 0 | 하네스 EXACT_MATCH 5/5, MATCH_EXCLUDING 2/2, 실패 메시지 diff 0 | 통과 |
+
+**기존 테스트 기대가 바뀐 것**(이름과 이유): `ConstraintExtractionFailureNoticeTest.f1_failureWithExclusionWordsShowsTheNoticeAndExcludesNothing`(SR 원문 `initSession` 부분)과 `f2_failureWithoutExclusionWordsStillShowsTheNotice`, `FinalConstraintFailureNoticeTest.g2_noticeIsNotRepeatedWhenAnEarlierStepAlreadyShowedIt`의 `t0`(`initSession`) 검사가 초기 안내의 새 문구를 기대하도록 바꿨다(1a로 `initSession` 문구가 분리됐기 때문). 발화·최종 안내를 검사하는 부분은 그대로다.
+
+#### 2 읽기 조사
+**2-f ~ 2-k**는 B-71 추가 절에 기록했다(freeze 스택, AddressDao, 로그 인코딩, 단계별 소요, saveChat, 탐색기 근거). 이 작업에서는 2-g를 확장하고(아래) 2-l, 2-m을 새로 조사했다.
+
+**2-g (확장) 응답자 이메일의 출처**
+- `SurveyServiceImpl.java:68` `AddressDao addressDao`, `:97` `addressDao.selectAddressList(addressDto)`: `kind`/`admCode`로 시도·시군·동 행정구역 목록을 JSON으로 돌려주는 화면용 조회다. `sql_address.xml:6-14`는 `ISSW_ADDRESS_SIDO/SIGOON/DONG`만 읽는다(연락처 주소록 아님, 이메일 컬럼 없음).
+- 응답자를 가리키는 컬럼: 응답 테이블 `ISSW_SURVEY_R`는 `R_IDX`, `S_CODE`, `MT_PR`(발송 메시지 키)로 쓰이고, 응답 목록·상세 쿼리는 `SR.MT_PR = LA.MT_PR`(`sql_survey.xml:1108, 1231, 1347` 등)로 발송 로그 `ita_talk_log`/`em_mmt_log`에 이어진다. 상세 조회(`:1760-1782`)가 함께 고르는 응답자 관련 컬럼은 `h_code`, `h_code_key`, `h_batch_yn`, `mt_pr`, `privacy_yn`, `ip_agreement_yn`뿐이다. **전화번호·이메일·주소록 키 컬럼은 이 매퍼의 어느 쿼리도 고르지 않는다**(`CALLBACK`은 발신번호, `:109, :173, :218, :368, :551`). `EMAIL`은 관리자 계정 쿼리 4곳(`:670, :841, :857, :889`)뿐이다. `SurveyDto.java`에는 이메일·전화번호 필드가 없다(`privacy_display_yn`만).
+- **결론: (다) 현재 스키마에 없음**(이 저장소의 매퍼와 DTO 기준). 단서: `ita_talk_log`/`em_mmt_log`는 외부(발송 시스템) 테이블이라 컬럼 정의(DDL)가 저장소에 없어, 발송 수신 번호 같은 컬럼이 있는지는 확인할 수 없다(이메일일 가능성은 낮다고 추정만 한다). (가) 기존 데이터에 있음과 (나) 주소록 조인은 근거가 없다.
+
+**2-l Stage 0 후보 목록(`Stage0State.items`)을 쓰는 곳**
+
+| 소비처 | file:line | 쓰는 것 | 화면에서 목록을 빼면 |
+|---|---|---|---|
+| 확인 카드(ClarifyForm) 후보 체크·거부 UI | 페이로드 `WebviewActionRouter.kt:172, :261, :328`, 화면 `App.tsx:255-339`(`payload.items`, verdict, 거부 사유) | 후보 전체, verdict, 거부 사유 | **깨짐**: 후보를 직접 거부하는 입력 경로(REJECTED → 제외 목록, `FILE_MISMATCH`/`CONCEPT_IRRELEVANT` 거부 사유 수집)가 사라진다 |
+| 작업 요약 | `Stage0ClarificationEngine.kt:29, :396, :540, :1019`(`generateTaskSummary(…, state.items, …)`), 예약 `WebviewActionRouter.kt:1562` | 후보 줄과 근거 문구(요약 프롬프트) | 그대로(요약은 엔진 내부 items로 만든다. 요약 문장이 파일 이름을 인용하지 않게 바뀔 뿐) |
+| 발화 번역기 | `Stage0ClarificationEngine.kt:1230` `ClarifyUtteranceTranslator.translate(trimmed, state.items, …)`, 후보 선택 `ClarifyUtteranceTranslator.kt:21-33`(`LIMIT`) | 발화를 후보 파일에 대응 | 그대로(내부 items 사용). 단 사용자가 이름을 몰라 "UserDto 빼줘" 같은 발화를 못 쓰게 된다 |
+| 제외 매칭·제안 | `:923`(UI 경로 제외 제안), `:1221-1265`(발화 처리와 `mergeCandidates`), `exclusionView` `:1460-1470` → 라우터 페이로드 `excludedFiles`/`pendingExclusions` | PROPOSED_EXCLUSION, REJECTED | 그대로(발화 경로). "제외할까요?" 질문은 파일 이름이 질문에 보여야 의미가 있어 화면 표기는 필요 |
+| ClarifyIntent | `:1368`(REJECTED → `excludedFiles`), `:1404`(PENDING 사용자 발화 → `unresolvedItems`), `:1347`·`:1438`(`seedSet` → `anchorTokens`) | 제외 파일, 미확정 항목, 앵커 | 그대로. `anchorTokens`는 `ClarifyIntentStore`/엔진 밖에서 읽는 곳이 없다(Stage 1에 쓰이지 않음) |
+| Stage 1 입력 | `AnalyzeInputResolver.kt:63-75`, `RequirementAnalysisPipeline.kt:298`(`clarifyIntent.excludedFiles` 하드 필터), `:558` | **후보 목록은 넘어가지 않고** `excludedFiles`와 `refinedRequirement`만 | 그대로(후보 목록을 화면에서 빼도 Stage 1 입력은 `excludedFiles`가 비는 만큼만 달라진다) |
+| Stage0Contract | `RequirementAnalysisPipeline.kt:293-296`(`rejectedExistingRefs`) | REJECTED 항목 | 그대로(거부가 없으면 비어 있음) |
+
+정리: 화면에서 목록을 빼면 깨지는 것은 **체크박스 거부 입력 경로 하나**이고(발화 경로는 유지), Stage 1 입력·하네스(카드 없음)는 바뀌지 않는다.
+
+**2-m 초기 제약 추출 실패 빈도**
+- 이 수정 이전에는 실패 로그가 없었다(`[ExtractFail]`은 이번에 새로 생김). 그래서 직접 센 값은 두 곳뿐이다.
+  - 샌드박스 `idea.log` 전체의 `/clarify` 수신: idea.log 4, idea.1.log 8, idea.2.log 13 = **25회**(다른 로그는 0). 실패 여부는 로그에 없어 **분자는 알 수 없다**.
+  - 저장된 채팅(`AppData/Roaming/ixpert/chats`) 중 clarify 카드의 `dialogueHistory`가 있는 8개: B-57 이전 5개는 문구가 생기기 전이라 판단할 수 없고, 그 뒤 3개(14:41 채팅 1개 성공, 15:45~15:46 두 채팅 2개 실패 문구 있음) 중 **2/3**. 모두 같은 날 서로 다른 시각의 표본이라 빈도 추정으로는 약하다.
+- live_eval 덤프(`build/eval-reports/dumps`, 제약 추출 요청 24건; `initSession`과 발화 추출을 구분하지 않음): 응답 24건 중 **1건이 파싱 실패**(D2, 모델이 `evidence`에 따옴표를 이스케이프하지 않은 깨진 JSON, `finishReason=stop`, 159토큰이라 잘림이 아님), 나머지 23건은 정상(그중 6건은 `[]`). 실패율 약 4%(1/24)다. IDE 15:45~15:46 두 번의 실패는 본문이 로그에 없어 종류를 알 수 없었고, 이제 `[ExtractFail]`이 남긴다.
+
+#### 3 개선점 표(B-71 표에서 바뀐 것)
+- **14 카드 대기 상태 문구: 반영**(1c, 8b9703f; IDE 확인 필요).
+- **18 Stage 1 "메타그래프"·"(주석 없음)": 반영(탐색 힌트 카드 표기 한정)**(1d, 8b9703f; 라우터 오류 메시지의 "메타그래프"는 남음).
+- **24 탐색기 추정→단정 승격 차단**(본문 미확인 시 "추정" 표시): 구조(2-k: `inspect_node_detail`은 이름·시그니처만, 프롬프트 변경이 필요해 이번엔 금지).
+- **25 로그 한글 인코딩**: 조사 결과 `idea.log`와 `shadow_logs.jsonl`은 정상 UTF-8이고 JVM은 `file.encoding=UTF-8`, `JNU=MS949`(콘솔)라 **콘솔·화면 해석 문제**. 상태: 조사 완료, 콘솔 `stdout.encoding` 설정은 `build.gradle` 수정 금지로 보류.
+- **26 saveChat 중복·제목 "/clarify" 접두어**: 조사 결과 `messages` 변경마다 전송(디바운스 없음, 분석 1회에 20회), 제목은 첫 사용자 말풍선 앞 20자라 접두어가 들어감. 상태: 즉시(미수정).
+
+#### 4 개선점 23 설계 초안: 판단 지점을 정제문 카드 하나로 (구현하지 않음)
+**현재 판단 지점 5개**(B-71 IDE 재테스트): clarify 대화·확정, 정제문 카드, 패키지 선택, 탐색 힌트, Stage 3 카드(사용자 대기 약 304초).
+
+**없애는 카드와 정보의 이동처**
+
+| 없앨 것 | 지금 하는 일 | 정보 이동처 |
+|---|---|---|
+| clarify 파일 요약(ClarifyForm 후보·체크박스) | 후보 파일을 보여 주고 거부 | 파일 목록은 카드에서 빼거나 접힌 "참고(추정)" 한 줄로. 거부는 발화(번역기)로, 이미 제외된 파일은 "반영한 조건" 줄에 이름으로 기록(2-l: 깨지는 것은 체크박스 거부 경로 하나) |
+| 패키지 선택 카드(>50개) | 범위를 직접 고르게 함 | "범위" 가정 한 줄로 이동: 예 "설문(survey) 패키지에서 찾습니다. 맞습니까?"(추정). 사용자가 고치면 `ClarifyIntent`의 새 필드(soft 힌트)로 전달해 Stage 1 `workingMetaGraph`를 좁히고, 아니면 지금처럼 전체 그래프(하네스와 같음) |
+| 탐색 힌트 카드(L1) | 탐색 중 모호할 때 힌트 요청 | 질문 최대 2개 중 하나(탐색이 모호할 때만). 힌트가 필요 없으면 카드 없이 진행하고 근거는 결과의 접힌 "탐색 근거"로 |
+| Stage 3 카드 | 최종 검증 전 14개 후보 확인 | 결과 화면의 접힌 "제외된 후보와 사유"(이미 있는 `analyze_removed`/되살리기)로. 사유는 현재 V2 형식이 받지 않으므로(2-d) 사유 표시는 별도 프롬프트 변경이 필요하다(이번 범위 밖) |
+
+**정제문 카드의 칸**
+1. **반영한 조건(발화별)**: 발화 원문 → 처리 결과를 한 줄씩. 예 "'이메일은 마스킹해서 내려줘' → 정제문에 반영", "'알림톡 배치는 건드리지 말고' → 파일 2개 제외". 출처는 `ClarifyIntent.userStatements`, `constraints`(evidence), `excludedFiles`로 모두 이미 있다.
+2. **가정**: 정제문 생성 때 모델이 채운 가정 문장. 소스 확인이 없으므로 등급은 항상 **추정**.
+3. **질문 최대 2개**: 소스에서 확인한 사실로 만든다. 구조는 B-69 실험(결정적 그래프 조회 + 소스에서 현재 동작 추출 + 질문 생성 LLM 1회). 예(2-g 결론 (다)): "설문 응답 조회 SQL(`sql_survey.xml:1218` `selectSurveyRAnsList`)에 응답자 이메일 컬럼이 없습니다. 이메일을 어디서 가져올까요? (가) 다른 테이블 (나) 새로 저장 (다) 잘 모르겠음".
+
+**근거 등급 표시**
+- **확인**: 소스 `file:line`을 인용할 수 있는 결정론 조회 결과(컬럼·메서드·테이블의 있음/없음). 배지 "✓ 확인"과 인용 줄을 함께 보인다.
+- **추정**: 이름·구조 유추나 LLM 판단. 배지 "추정", 단정 어미 금지("~로 보입니다. 맞습니까?"). 메서드 본문이나 SQL을 읽지 않은 사실(`inspect_node_detail` 수준의 시그니처 정보)은 항상 추정(2-k, 개선점 24와 같은 규칙).
+
+**Stage 0 파일 목록을 화면에서 뺄 때의 영향**: 2-l 표대로 체크박스 거부 경로만 깨지고 요약·번역기·제외 제안·Intent·Stage 1 입력은 그대로다. 대신 제외하려는 사용자가 이름을 모르는 문제는 "반영한 조건"의 제외 파일 이름과 질문 보기로 메운다.
+
+**평가 방법(기존 하네스(카드 없음)와 비교 가능한 지표, 사전 등록)**
+1. 카드가 기본값(응답 없음)이면 현재 동작과 같아야 한다: 하네스 EXACT_MATCH 5 / MATCH_EXCLUDING 2, 실패 메시지 diff 0을 그대로 유지(성공 기준).
+2. 카드 경로를 오프라인으로 재생한다(모의 사용자 정책 3종: 기본값 수락, 오라클 응답, 수정 입력). 비교 지표: 최종 파일의 required recall과 정밀도, 제외 정확도(required 손실 0 기준).
+3. 판단 지점 수(5 → 1)와 사용자 대기 시간(기준선 304초), 질문 수(≤2).
+4. 질문 품질: "확인" 등급 질문의 사실 정확도는 소스 인용과 대조해 자동 채점, "추정" 등급은 오류율을 따로 센다. 기준선 대비 Stage 0 ∩ 최종 교집합(IDE 응답자 이메일 SR의 0/8)이 개선되는지 본다.
+
+#### 5 검증(커밋 8b9703f 기준)
+
+| 검증 | 결과 |
+|---|---|
+| 전체 테스트(서버 의존 14클래스 제외) | 598개(이전 594 + 새 4), 실패 42, 건너뜀 18. 실패 42건은 기준과 판정 차이 0, 관찰 차이 0 |
+| clarify 패키지 | 282개(38 스위트), 실패 1(기존 1건), 건너뜀 3 |
+| 하네스 | EXACT_MATCH 5/5, MATCH_EXCLUDING 2/2 |
+| 실패 메시지 diff | 0 |
+| selftest | 24/24 |
+| 웹뷰 로직 테스트 | 48/48(새 5개 포함) |
+| ui-check | 32/32(기존 30 + 새 31, 32) |
+| `npm run build` 산출물 | 커밋 1에 `src/main/resources/webview/index.html`, `webview/tsconfig.tsbuildinfo` 포함 |
+
+#### 예상과 다른 점
+1. 1e는 코드 수정이 필요 없었다(이미 표지 해제와 세션 유지). 대신 재확정 시나리오 테스트(x5)를 추가했고, `continueAfterClarify` 실패 때 세션이 이미 닫혀 있는 남은 위험을 적었다.
+2. 지시한 "상단 문구"가 한 곳이 아니라 둘이라 둘 다 바꿨다(진행 중 메시지의 상태 문구, 확인 제출 뒤 문구).
+3. 초기 실패 안내 분리로 기존 테스트 3개의 기대가 바뀌었다(위).
+4. 2-m의 직접 분자가 없다(이전에는 실패 로그가 없었다). 채팅·덤프 표본으로만 보았고 그것도 `initSession`만 가려내지 못했다.
