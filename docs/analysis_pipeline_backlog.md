@@ -2149,3 +2149,126 @@ GT 파일 목록은 보지 않았다. 질문 목록은 B-65의 "물어야 할 �
 | 실패 메시지 diff | 0 |
 | selftest | 24/24 |
 | 새 단위 테스트 `QuestionGenExperimentTest` | 10개 통과(지시문 기대값 6, 결정적 단계 4), 실행 1개는 `-DrunLiveLlmTests` 없이는 건너뜀 |
+
+### [B-69a] runIde 준비(빌드 상태 확인, [RefineGate] 진단 로그, 사용자 실행 안내문)와 이전 IDE 로그 분석 보류 (2026-10-26)
+
+사전 확인: `git status -s` 비어 있음, HEAD = origin = 8715ff1. **`build/ide-logs/analyze_prev_20261026.log`가 없다**(`build/ide-logs` 폴더 자체가 없고, 저장소와 `C:/Workspace`, 다운로드, 바탕화면에서 `analyze_prev*`를 찾지 못했다). 그래서 **2부(4-a~4-i 이전 IDE 로그 분석)는 건너뛰었다.** 다만 아래 1-c에서 샌드박스 `idea.log`에 오늘(2026-10-26) 13:19~13:29의 `/clarify` → `/clarify-utterance` → `/clarify-confirm` 실행 기록이 남아 있는 것을 확인했다. 그 구간을 `build\ide-logs\analyze_prev_20261026.log`로 복사해 주면 2부를 이어서 할 수 있다(이번에는 복사하지 않았다). runIde, IDE 조작, LLM 호출은 하지 않았다.
+
+#### 1-a 빌드 상태
+| 대상 | 생성 시각 | 카드 문구 / 카드 클래스 |
+|---|---|---|
+| `src/main/resources/webview/index.html`, `build/webview/index.html` (3,584,274자) | 2026-10-26 13:08 | 웹뷰 문구 "이대로 분석", "수정한 내용으로 분석", "응답이 없어 원래 문장으로", "분석 시작 전 요구사항 확인", "원래대로 되돌리기"와 메시지 키 `refinedConfirmation/request|expired|submit`, `analyze_notice`가 **원문 그대로 있다**(유니코드 이스케이프 형태는 0건이라 디코딩이 필요 없다). |
+| "분석을 취소했습니다" | - | **웹뷰 번들에는 없다(정상).** 이 문구는 웹뷰가 아니라 Kotlin `WebviewActionRouter.continueAfterClarify`가 `analyze_notice`로 보낸다. 컴파일된 클래스에는 있다(아래 `build/libs` jar 1줄). |
+| `build/libs/iXpert_AI-Assistant-Intelli-1.0-SNAPSHOT.jar` | 2026-10-26 13:08 | 웹뷰 문구 모두 있음, 클래스 `RefinedRequirementGate`, `JcefRefinedRequirementConfirmationBridge`, `continueAfterClarify`, "분석을 취소했습니다", `refinedConfirmation/expired`, `supersedePending`, `isHandoffActive`, `expireConfirmation` 모두 있음(16cb296의 수정 내용 포함). 단 `[RefineGate]` 로그는 아직 없음(이번 커밋 전 빌드). |
+| **샌드박스 플러그인 jar** `build/idea-sandbox/IC-2024.3.5/plugins/iXpert_AI-Assistant-Intelli/lib/…-1.0-SNAPSHOT.jar` | **2026-10-26 09:31** | **카드 문구와 카드 클래스가 전부 없다**(웹뷰 문구 0/6, 메시지 키 0/4, "분석을 취소했습니다", `continueAfterClarify` 0건). |
+| `build/distributions/…zip` | 2026-09-18 | 카드 없음(옛 배포본) |
+
+커밋 시각: 0551784(카드 구현) 2026-10-26 10:04, 16cb296(수정) 13:19. 샌드박스 jar(09:31)는 두 커밋보다 앞서 만들어졌다.
+
+#### 1-b runIde 동작
+- `./gradlew -m runIde`(dry-run, 실행 없이 작업 순서만 출력)로 확인한 실행 순서: `nodeSetup` → `npmSetup` → `installWebviewDependencies` → `buildWebview` → `copyWebviewToResources` → `processResources` → `classes` → `instrumentCode` → `jar` → `instrumentedJar` → `composedJar` → **`prepareSandbox`** → `runIde`. 즉 runIde는 실행 전에 웹뷰 빌드, 리소스 복사, 플러그인 jar 재생성, 샌드박스 플러그인 갱신을 **자동으로 한다**(`build.gradle.kts:57-83`의 `buildWebview`/`copyWebviewToResources`/`processResources` 의존, `prepareSandbox`는 IntelliJ Platform Gradle Plugin 2.11.0 제공). 소스가 바뀌었는데 입력이 같으면 UP-TO-DATE로 건너뛴다.
+- 샌드박스 경로: `build/idea-sandbox/IC-2024.3.5/`(`config`, `plugins`, `system`, `log`, 테스트용 `config-test`/`plugins-test`/`system-test`/`log-test`는 별개). **`gradlew test`는 `plugins-test`만 갱신하고 `plugins`(runIde용)는 갱신하지 않는다**(그래서 이번 세션에서 테스트를 여러 번 돌렸어도 샌드박스 jar는 09:31 그대로다).
+- 샌드박스 IDE 설정 저장 위치: `config/options/WuwAgentSettings.xml`(내용은 `enableLlmDebug`, `frameworkType`, `model`뿐이고 서버 주소는 기본값을 쓴다. API 키 값은 이 파일에 없다). 채팅 기록은 샌드박스가 아니라 `C:\Users\dffrp\AppData\Roaming\ixpert\chats\`에 저장된다(`/saveChat` 로그의 "채팅 저장 성공" 경로).
+- **`gradlew clean`을 하면 `build/` 전체가 지워진다**: 샌드박스 설정(`config`의 모델 설정, 열어 둔 프로젝트 이력), 샌드박스 로그(`log/idea*.log`), `build/nodejs`(자동 다운로드한 Node 20.11.1, 다시 받아야 함), `build/webview`, `build/eval-reports`(이번 실험의 저장소 밖 결과 `qgen_results.json`, `pred_qgen.md`와 평가 보고서), `build/ui-check`, `build/ide-logs`. 저장소에 커밋된 것은 지워지지 않는다.
+
+#### 1-c 이전 실행 판별
+**카드 없는 빌드였다(확정).** 샌드박스 `log/idea.log`의 마지막 "IDE STARTED"는 **2026-10-26 09:31:42**이고(`Loaded custom plugins: iXpert AI Assistant (1.0-SNAPSHOT)`, 플러그인 경로 `build\idea-sandbox\…`), 샌드박스 jar는 같은 시각(09:31)에 만들어졌으며 카드 문구와 클래스가 없다. 이 IDE 세션은 0551784(10:04) 전에 시작해 지금까지 같은 jar로 돌았고, 로그의 13:19:32 `Router: /clarify 분기`, 13:21:16 `/clarify-utterance`, 13:22:26 `/clarify-confirm`은 옛 코드(카드 없음)로 실행된 것이다. `idea.log`에 `refinedConfirmation` 전송 줄도 없다. 따라서 이전 IDE 화면에서 카드를 볼 수 없었던 것은 코드 문제가 아니라 **옛 빌드를 쓰고 있었기 때문**이다. 지금 그 IDE가 떠 있다면 닫고 runIde를 다시 실행해야 새 jar가 샌드박스에 복사된다.
+
+#### 1-d 로그 출력 위치
+기존 `[AgenticGraphExplorer]` 로그는 **`println`(콘솔)**이다: `AgenticSeedSelector.kt:23-27`(시작 배너), `:92`, `:99`, `:107`, `:110` 등. 같은 `println`은 runIde 콘솔(Gradle 창)에 나오고, IDE가 stdout을 `log/idea.log`에 `INFO - STDOUT - …` 줄로도 옮긴다(샌드박스 `idea.log`에서 `STDOUT - saveChat 수신…` 형태로 확인). 반면 `WebviewActionRouter`의 `logger.info`(51곳)는 IntelliJ Logger라 `idea.log`에만 `#…WebviewActionRouter - …` 줄로 남는다. `[RefineGate]`는 1-d와 같은 `println`을 써서 **콘솔 로그 파일(`Tee-Object`)과 `idea.log` 둘 다**에서 찾을 수 있다.
+
+#### 2 진단 로그 커밋 `6a60070`
+`[RefineGate]` 한 줄 로그 14줄만 추가했다(삭제 0줄, 로그가 아닌 추가 줄 0줄). 요청 id `rid`는 SR 원문의 해시(`Integer.toHexString(원문.hashCode())`)이고 라우터, 게이트, 브리지가 모두 같은 값을 만들 수 있어서 쓴다(같은 SR로 연속 실행하면 같은 rid이므로 시각으로 구분한다). 지점: `/clarify` 수신과 대기 카드 정리 호출, `/clarify-confirm` 수신, 두 번째 확인 무시, 정제문 생성 완료(글자 수와 앞 80자, 확정 버튼 경로와 발화 완료 경로 각각), 브리지 판정(`project null=false, 브리지 null=false → 카드 요청`), 게이트의 `브리지 null → 카드 없이 진행`, 카드 요청 전송, 웹뷰 응답 수신(submit 이대로/수정 N자, cancel), 게이트의 응답 결과(이대로/수정 N자/취소/시간 초과/새 /clarify가 대신함/결정 없음), 취소 시 분석 미시작 안내, 새 /clarify로 대기 카드 정리(대기중, 확인진행중), 분석 시작 직전 SR(앞 80자). 동작, 메시지 형식, 화면 문구, 저장 형식은 바뀌지 않았고 로그 문구에 대한 테스트도 추가하지 않았다. 웹뷰는 고치지 않아 빌드 산출물은 커밋하지 않았다.
+
+추가된 로그 줄 전체(`git diff -U0` 결과의 `+` 줄 14개, 들여쓰기 제거):
+```
+println("[RefineGate] /clarify 수신 messageId=$messageId → 대기 중인 정제문 카드 정리를 호출했습니다(이전 분석은 시작하지 않음)")
+println("[RefineGate] /clarify-confirm 두 번째 확인을 무시했습니다(확인 진행 중) project=${project.locationHash}")
+println("[RefineGate] /clarify-confirm 수신 messageId=$messageId")
+println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 정제문 생성 완료(확정 버튼 경로) messageId=$messageId 원문 ${intentBuild.intent.originalRequirement.length}자, 정제문 ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).length}자, 앞80자: ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).take(80).replace("\n", " ")}")
+println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 정제문 생성 완료(발화 완료 경로) messageId=$messageId 원문 ${intentBuild.intent.originalRequirement.length}자, 정제문 ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).length}자, 앞80자: ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).take(80).replace("\n", " ")}")
+println("[RefineGate] 웹뷰 응답 수신: submit ${if (editedText == null) "이대로 분석" else "수정(" + editedText.length + "자)"} projectId=$projectId")
+println("[RefineGate] 웹뷰 응답 수신: cancel projectId=$projectId")
+println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 브리지 판정: project null=false, 브리지 null=false → 카드 요청 messageId=$messageId")
+println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 취소 → 분석을 시작하지 않고 안내(analyze_notice)만 보냅니다")
+println("[RefineGate] rid=${Integer.toHexString((inMemoryClarifyIntent?.originalRequirement ?: rawInput).hashCode())} 분석 시작 직전 SR(${initialRequirement.length}자, ${if (inMemoryClarifyIntent != null) "clarify 경유" else "/analyze 직접"}): ${initialRequirement.take(80).replace("\n", " ")}")
+println("[RefineGate] 새 /clarify로 대기 카드 정리 projectId=$projectId 대기중=${registry.isPending(projectId)} 확인진행중=${activeHandoffs.contains(projectId)}")
+println("[RefineGate] rid=${Integer.toHexString(originalRequirement.hashCode())} 카드 요청 전송 projectId=$projectId 정제문 ${refinedRequirement.length}자")
+if (bridge == null) println("[RefineGate] rid=${Integer.toHexString(intent.originalRequirement.hashCode())} 브리지 null → 카드 없이 진행")
+println("[RefineGate] rid=${Integer.toHexString(intent.originalRequirement.hashCode())} 응답 결과: ${when (decision) { null -> "결정 없음(정제문 그대로 진행)"; RefinedConfirmationDecision.Proceed -> "이대로 분석"; is RefinedConfirmationDecision.ProceedEdited -> "수정(" + decision.text.trim().length + "자)"; RefinedConfirmationDecision.Cancel -> "취소"; RefinedConfirmationDecision.Superseded -> "새 /clarify가 대신함(분석 안 함)"; RefinedConfirmationDecision.TimedOut -> "시간 초과(정제문 그대로 진행)" }}")
+```
+
+검증(커밋 6a60070 기준): 전체 테스트 565개, 실패 42, 건너뜀 18(실패 42건은 기준과 판정 차이 0, 관찰 차이 0), clarify 패키지 249개 중 실패 1(기존 1건), 하네스 EXACT_MATCH 5/5와 MATCH_EXCLUDING 2/2, 실패 메시지 diff 0, selftest 24/24. 컴파일 오류 없음.
+
+#### 3 사용자 실행 안내문(PowerShell)
+**먼저 닫을 것**: 샌드박스 IDE(09:31에 뜬 창)가 아직 떠 있으면 닫는다(`runIde`는 같은 샌드박스를 쓰므로 둘이 겹치면 시작이 막히거나 옛 jar를 계속 쓴다). `.\gradlew.bat clean`은 하지 않는다(샌드박스 설정, 로그, 실험 결과 `build\eval-reports`, Node 다운로드가 모두 지워진다).
+
+```powershell
+cd C:\Workspace\DEV-ASSISTANT\IDE-PLUGIN\intelliJ\ai-assistant-plugin
+
+# 1) 실행 전 확인
+git status -s                 # 비어 있어야 한다
+git log --oneline -3          # 맨 위가 6a60070(진단 로그) 이후 커밋인지 확인
+Get-Item build\idea-sandbox\IC-2024.3.5\plugins\iXpert_AI-Assistant-Intelli\lib\iXpert_AI-Assistant-Intelli-1.0-SNAPSHOT.jar | Select-Object LastWriteTime
+                              # 지금은 2026-10-26 09:31이다(옛 jar). runIde가 끝까지 시작하면 이 시각이 바뀐다.
+
+# 2) runIde 실행과 콘솔 로그 저장 (Gradle 창은 IDE를 닫을 때까지 열려 있다)
+New-Item -ItemType Directory -Force build\ide-logs | Out-Null
+.\gradlew.bat runIde 2>&1 | Tee-Object -FilePath build\ide-logs\runide_20261026.log
+
+# 3) IDE가 뜬 뒤 새 jar인지 확인(다른 PowerShell 창)
+Get-Item build\idea-sandbox\IC-2024.3.5\plugins\iXpert_AI-Assistant-Intelli\lib\iXpert_AI-Assistant-Intelli-1.0-SNAPSHOT.jar | Select-Object LastWriteTime
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path build\idea-sandbox\IC-2024.3.5\plugins\iXpert_AI-Assistant-Intelli\lib\iXpert_AI-Assistant-Intelli-1.0-SNAPSHOT.jar))
+$r = New-Object IO.StreamReader($z.GetEntry('webview/index.html').Open(), [Text.Encoding]::UTF8)
+$t = $r.ReadToEnd(); $r.Close(); $z.Dispose()
+$t.Contains('수정한 내용으로 분석')     # True여야 한다
+
+# 4) 확인을 마친 뒤 [RefineGate] 줄 모으기
+Select-String -Path build\ide-logs\runide_20261026.log -Pattern 'RefineGate' | ForEach-Object { $_.Line }
+Select-String -Path build\idea-sandbox\IC-2024.3.5\log\idea.log -Pattern 'RefineGate' | ForEach-Object { $_.Line }
+```
+로그 위치: 콘솔 로그 `build\ide-logs\runide_20261026.log`(Tee), IDE 로그 `build\idea-sandbox\IC-2024.3.5\log\idea.log`(`INFO - STDOUT - [RefineGate] …`). 웹뷰로 간 메시지는 `idea.log`의 `Bridge → Webview (subType=refinedConfirmation/request …)` 줄로도 보인다. 같은 실행의 줄은 `rid=`(SR 해시)와 시각으로 묶는다.
+
+**확인 항목과 찾을 로그**(A~I는 요청 목록, J~L은 B-68의 IDE 확인 8개와 대조해 빠진 것을 더했다)
+
+| 항목 | 화면에서 볼 것 | 로그에서 찾을 줄 |
+|---|---|---|
+| A 카드 표시, 경과 초 멈춤, IDE 멈춤과 오류 알림 없음 | 확정 뒤 카드가 뜨고 clarify 카드의 "경과 N초"가 멈춘다. 카드가 떠 있는 동안 에디터 입력이 막히지 않고 오류 알림이 없다 | `/clarify-confirm 수신` → `정제문 생성 완료(확정 버튼 경로)` → `브리지 판정 … → 카드 요청` → `카드 요청 전송` → `idea.log`의 `Bridge → Webview (subType=refinedConfirmation/request`. 줄 사이 시각 간격으로 멈춤 여부를 본다 |
+| B 정제문 수정 후 진행 | "수정한 내용으로 분석"을 누르면 분석이 시작된다 | `웹뷰 응답 수신: submit 수정(N자)` → `응답 결과: 수정(N자)` → `분석 시작 직전 SR(…자, clarify 경유): …` — **SR: 줄의 앞 80자가 고친 문장이어야 한다** |
+| C 빈 입력이면 진행 버튼 비활성 | 정제문을 모두 지우면 "이대로 분석"과 "수정한 내용으로 분석"이 모두 비활성이고 경고가 보인다 | 눌러도 `웹뷰 응답 수신` 줄이 **생기지 않아야 한다**(화면 확인) |
+| D 취소 | "분석을 취소했습니다." 일반 안내 말풍선이 뜨고(오류 표시 아님) 분석이 시작되지 않는다 | `웹뷰 응답 수신: cancel` → `응답 결과: 취소` → `취소 → 분석을 시작하지 않고 안내…`. 이 rid의 `분석 시작 직전 SR` 줄은 **없어야 한다** |
+| E 카드 대기 중 새 /clarify | 이전 카드가 사라지고, 5분이 지나도 이전 요구사항의 분석이 시작되지 않는다 | `/clarify 수신 … 대기 중인 정제문 카드 정리를 호출` → `새 /clarify로 대기 카드 정리 … 대기중=true` → `응답 결과: 새 /clarify가 대신함(분석 안 함)`. 이전 rid의 `분석 시작 직전 SR` 줄이 **없어야 한다** |
+| F 진행 버튼 연타 | 분석이 한 번만 시작되고 "세션 만료" 오류 말풍선이 없다 | `분석 시작 직전 SR` 줄이 **1회**, 연타분은 `두 번째 확인을 무시했습니다(확인 진행 중)`. `idea.log`에 `분석 세션이 만료` 오류 전송이 없어야 한다 |
+| G(선택) 5분 대기 | 카드가 남아 비활성이 되고 "응답이 없어 원래 문장으로 분석을 진행했습니다."가 보이며 분석이 시작된다 | `응답 결과: 시간 초과(정제문 그대로 진행)` → `분석 시작 직전 SR`(모델이 만든 원래 정제문) |
+| H 제외된 후보 되살리기 | 결과 아래 "제외된 후보"에서 되살린 파일이 `/implement` 대상에 포함된다 | `[RefineGate]` 줄은 없다. `Router: /restore 분기`, `analyze_restore` 전송, 이어 `Router: /implement 분기`에서 대상 목록에 해당 파일이 있는지 본다 |
+| I 새 /clarify → 제외된 후보 패널 초기화 | 새 `/clarify`를 보내면 이전 결과의 "제외된 후보" 패널이 사라진다(되살리기 상태 초기화) | `/clarify 수신 …` 줄 뒤에 `Router: /clarify 분기`. 패널은 화면으로 확인(`AnalysisSessionMemory.reset`은 로그가 없다) |
+| J(추가, B-68 8번) 채팅 저장·불러오기 | 확인 카드가 떠 있을 때나 만료된 뒤 채팅을 저장하고 다시 불러오면 눌러도 반응 없는 카드가 살아 있지 않아야 한다 | `saveChat 수신`, `채팅 저장 성공`, 불러온 뒤 화면. 이 카드는 Stage 3 카드와 같은 기존 성질일 수 있다 |
+| K(추가, B-68 6번) 지운 식별자 | 문장에서 식별자(예: 클래스 이름)를 지우고 "수정한 내용으로 분석"을 누르면 분석 입력에 그 식별자가 다시 붙지 않는다 | `분석 시작 직전 SR(…자, clarify 경유)` 줄의 글자 수가 고친 문장 길이와 같고(뒤에 식별자 줄이 붙으면 더 길다), 앞 80자가 고친 문장 |
+| L(추가, B-68 7번) 취소 뒤 재시작 | 취소한 뒤 새 `/clarify`가 정상적으로 시작된다 | D의 줄들 뒤에 `/clarify 수신 …` → `정제문 생성 완료` … |
+
+**카드가 안 뜰 때 원인 가르기**
+
+| `[RefineGate]` 로그 | 뜻 |
+|---|---|
+| 줄이 하나도 없음 | **오래된 빌드**(샌드박스 jar가 09:31 그대로)이거나 stdout 수집 문제. 위 3)의 jar 시각과 `수정한 내용으로 분석` 확인이 `False`면 runIde가 새로 빌드하지 않은 것이다 |
+| `정제문 생성 완료`까지만 있고 `브리지 판정`이 없음 | `/clarify-confirm` 뒤 백그라운드 전환에서 예외(`idea.log`의 `Clarify confirm error`) |
+| `브리지 null → 카드 없이 진행` | 게이트가 브리지 없이 호출됨(라우터에서는 일어나지 않는 경로, 테스트나 하네스) |
+| `브리지 판정 … → 카드 요청`은 있는데 `카드 요청 전송`이 없음 | 카드 전송 코드(EDT 큐 `invokeLater`)가 실행되지 않음(EDT가 막힘 또는 모달 대화상자) |
+| `카드 요청 전송`은 있는데 화면에 카드가 없음 | **웹뷰 수신 문제**: `idea.log`의 `Bridge → Webview (subType=refinedConfirmation/request`가 있는지, 웹뷰가 옛 번들(문구 확인 `False`)인지, JCEF 개발자 도구 콘솔 오류를 본다 |
+| `카드 요청 전송` 직후 `응답 결과: 결정 없음` | 전송 중 예외(`JcefBridge` 오류)로 곧바로 진행됨 |
+| 카드를 눌렀는데 `웹뷰 응답 수신`이 없음 | 웹뷰 → IDE 전송 실패(`JcefMessageHandler`의 `JS → IDE` 줄과 JS 오류 확인) |
+| `웹뷰 응답 수신`은 있는데 `응답 결과`가 `새 /clarify가 대신함` 또는 `시간 초과` | 그 사이 새 `/clarify`가 왔거나 300초가 지남 |
+
+#### 4 (2부) 이전 IDE 로그 분석 — 건너뜀
+`analyze_prev_20261026.log`가 없어 4-a~4-i는 하지 않았다. 위 1-c의 샌드박스 `idea.log`에 같은 날 13:19~13:29의 실행이 남아 있으므로 해당 구간을 파일로 저장해 주면 같은 방식으로 분석할 수 있다. 이전 IDE 화면 원문도 받지 못해 이 문서에 기록하지 못했다.
+
+#### 결정(B-69 판단)
+질문 생성은 운영에 넣지 않는다. 다음 후보: 질문 생성을 Stage 1 시드 탐색 뒤로 옮겨 시드 소스를 근거로 쓰는 방안이며, runIde로 확인 카드를 본 뒤 결정한다.
+
+#### 예상과 다른 점
+1. 이전 IDE 로그 파일은 없었지만, 샌드박스 `idea.log`에 오늘 실행 기록이 남아 있었다. 이 IDE 세션이 09:31에 시작해 옛 jar로 계속 돌았다는 것이 "카드가 안 보인 이유"의 확정 근거다.
+2. `gradlew test`는 `plugins-test`만 갱신하고 runIde용 `plugins` 샌드박스는 건드리지 않아, 테스트를 반복해도 샌드박스 jar는 갱신되지 않는다.
+3. "분석을 취소했습니다" 문구는 웹뷰 번들이 아니라 Kotlin 클래스에 있어서, 웹뷰 번들 검사만으로는 이 문구를 찾을 수 없다.
+4. 요청한 "같은 출력 방식"을 기존 `println`으로 맞추면 `idea.log`(STDOUT)와 runIde 콘솔 로그 양쪽에 같은 줄이 남는다.
+5. 로그 줄만 추가하라는 제한 때문에 요청 id를 인자로 넘기지 못하고 SR 원문 해시를 rid로 썼다(같은 SR로 반복 실행하면 같은 rid가 되므로 시각으로 구분해야 한다).
