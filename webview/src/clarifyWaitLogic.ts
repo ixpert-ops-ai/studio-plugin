@@ -8,8 +8,8 @@ export type WaitState = { phase: WaitPhase; startedAt: number | null };
 
 export const IDLE: WaitState = { phase: 'idle', startedAt: null };
 
-/** 백엔드가 이미 보내는 메시지 중 대기를 끝내는 것: 새 대화 카드(해석 응답), 분석 시작, 오류, 취소. 새 subType은 없다. */
-export const END_SUBTYPES = ['analyze_clarify', 'analyze_start', 'error', 'task_cancelled'];
+/** 백엔드가 보내는 메시지 중 대기를 끝내는 것: 새 대화 카드(해석 응답), 분석 시작, 오류, 취소, 정제문 확인 카드(사용자 응답을 기다리는 중이라 분석 대기가 아니다), 취소 안내. */
+export const END_SUBTYPES = ['analyze_clarify', 'analyze_start', 'error', 'task_cancelled', 'refinedConfirmation/request', 'analyze_notice'];
 
 /** 응답이 끝내 오지 않을 때 표시가 영영 남지 않게 하는 안전 상한(운영 타임아웃의 두 배, 기본 300초). 이 값은 경과를 알리는 용도가 아니다. */
 export const MAX_WAIT_MS = 600_000;

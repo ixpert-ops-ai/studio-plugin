@@ -9,6 +9,8 @@ import './index.css';
 import { ScopeSelectionTree } from './ScopeSelectionTree';
 import { L1ClarificationForm } from './L1ClarificationForm';
 import { Stage3ConfirmationForm } from './Stage3ConfirmationForm';
+import { RefinedConfirmationForm } from './RefinedConfirmationForm';
+import { buildCancelText, makeNoticeBubble } from './refinedConfirmLogic';
 import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
 import { makeErrorBubble } from './errorDisplayLogic';
@@ -678,6 +680,32 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
     );
   }
 
+  // 0.85 분석 시작 전 정제문 확인 카드 (원문과 정제문을 나란히 보이고, 정제문을 고쳐 진행하거나 취소)
+  if (msg.subType === 'refinedConfirmation/request') {
+    return (
+      <RefinedConfirmationForm
+        key={msg.id}
+        payload={msg.content}
+        onCancel={(projectId) => {
+          if (window.sendToIde) {
+            window.sendToIde(JSON.stringify({
+              command: 'refinedConfirmation/cancel',
+              text: buildCancelText(projectId)
+            }));
+          }
+        }}
+        onSubmit={(_projectId, text) => {
+          if (window.sendToIde) {
+            window.sendToIde(JSON.stringify({
+              command: 'refinedConfirmation/submit',
+              text
+            }));
+          }
+        }}
+      />
+    );
+  }
+
   // 1. Tool / Status 메시지
   if (msg.role === 'tool') {
     return (
@@ -1289,6 +1317,34 @@ function App() {
 
       if (data.subType === 'stage3Confirmation/hide') {
         setMessages(prev => prev.filter(m => m.subType !== 'stage3Confirmation/request'));
+        return;
+      }
+
+      if (data.subType === 'refinedConfirmation/request') {
+        const uniqueId = `rc_${Date.now()}`;
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.subType !== 'refinedConfirmation/request');
+          return [...filtered, {
+            id: uniqueId,
+            role: 'ai',
+            subType: 'refinedConfirmation/request',
+            content: data.content,
+            isLoading: false
+          }];
+        });
+        return;
+      }
+
+      if (data.subType === 'refinedConfirmation/hide') {
+        setMessages(prev => prev.filter(m => m.subType !== 'refinedConfirmation/request'));
+        return;
+      }
+
+      // 오류가 아닌 안내(예: 분석 취소). messageId와 짝 없이도 안내 말풍선으로 보인다.
+      if (data.subType === 'analyze_notice') {
+        if (typeof data.content === 'string' && data.content.trim() !== '') {
+          setMessages(prev => [...prev, makeNoticeBubble(data.content, Date.now(), Math.random().toString(36).substring(2, 7)) as Message]);
+        }
         return;
       }
 

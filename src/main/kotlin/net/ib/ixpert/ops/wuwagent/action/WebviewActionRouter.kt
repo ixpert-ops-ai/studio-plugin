@@ -262,19 +262,19 @@ class WebviewActionRouter(private val project: Project) {
 
                     // Stage 1 전이용 ClarifyIntent 생성 및 저장 (ClarificationContract는 Analyze에서 생산)
                     val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
-                    val clarifyIntent = intentBuild.intent
                     net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
-                    
-                    val projectBase = java.io.File(project.basePath ?: "")
-                    try {
-                        val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
-                        logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
-                    } catch (e: Exception) {
-                        logger.warn("Clarify intent save failed (recording only): ${e.message}")
-                    }
 
-                    // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행 (executeAnalyzePipeline 내부의 AnalyzeInputResolver.resolve 위임)
-                    executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent, intentBuild.constraintNotice)
+                    // 정제문 확인 카드는 응답을 기다리므로 EDT를 막지 않게 백그라운드에서 이어 간다
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            continueAfterClarify(project, bridge, intentBuild, messageId)
+                        } catch (e: Exception) {
+                            logger.error("Clarify confirm error", e)
+                            ApplicationManager.getApplication().invokeLater {
+                                bridge.sendMessage("error", "분석을 시작하지 못했습니다: ${e.message}", messageId)
+                            }
+                        }
+                    }
                 }
 
                 // ── 요구사항 대화형 발화 처리 (Stage 0: /clarify-utterance) ────────
@@ -320,19 +320,9 @@ class WebviewActionRouter(private val project: Project) {
 
                             // COMPLETE 상태 전이: ClarifyIntent 생성 및 저장
                             val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
-                            val clarifyIntent = intentBuild.intent
                             net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
 
-                            val projectBase = java.io.File(project.basePath ?: "")
-                            try {
-                                val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
-                                logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
-                            } catch (e: Exception) {
-                                logger.warn("Clarify intent save failed (recording only): ${e.message}")
-                            }
-
-                            // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행 (executeAnalyzePipeline 내부의 AnalyzeInputResolver.resolve 위임)
-                            executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent, intentBuild.constraintNotice)
+                            continueAfterClarify(project, bridge, intentBuild, messageId)
                         } catch (e: Exception) {
                             logger.error("Clarify utterance error", e)
                             ApplicationManager.getApplication().invokeLater {
@@ -376,6 +366,21 @@ class WebviewActionRouter(private val project: Project) {
                     val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
                     val projectId = payload["projectId"]?.toString() ?: project.locationHash
                     net.ib.ixpert.ops.wuwagent.agent.JcefL1ClarificationBridge.cancelClarification(projectId)
+                }
+
+                // ── 정제문 확인 카드 응답 (분석 시작 전) ────────
+                "refinedConfirmation/submit" -> {
+                    val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
+                    val projectId = payload["projectId"]?.toString() ?: project.locationHash
+                    // editedText가 있으면 "수정한 내용으로 분석", 없으면 "이대로 분석"
+                    val editedText = payload["editedText"] as? String
+                    net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.completeConfirmation(projectId, editedText)
+                }
+
+                "refinedConfirmation/cancel" -> {
+                    val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
+                    val projectId = payload["projectId"]?.toString() ?: project.locationHash
+                    net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.cancelConfirmation(projectId)
                 }
 
                 // ── Stage 3 User Confirmation Events ────────
@@ -1531,6 +1536,42 @@ class WebviewActionRouter(private val project: Project) {
             state,
             fail = { turn -> send(mapOf("turn" to turn, "failed" to true)) }
         ) { turn, summary -> send(mapOf("turn" to turn, "taskSummary" to summary)) }
+    }
+
+    /**
+     * 정제문이 만들어진 뒤 분석을 시작하기 전의 흐름: 정제문 확인 카드 → 저장 → Stage 1 분석.
+     * 카드 응답이 없거나(대기 시간 초과) 브리지가 없으면 정제문을 그대로 쓰고 이전과 같이 진행한다. 취소하면 분석을 시작하지 않고 안내만 보낸다.
+     * 응답을 기다리므로 EDT가 아닌 스레드에서 불러야 한다.
+     */
+    private fun continueAfterClarify(
+        project: Project,
+        bridge: JcefBridge,
+        intentBuild: net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine.ClarifyIntentBuild,
+        messageId: String
+    ) {
+        val projectBase = java.io.File(project.basePath ?: "")
+        net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.handoff(
+            intent = intentBuild.intent,
+            bridge = net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge(project),
+            save = { clarifyIntent ->
+                try {
+                    val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)
+                    logger.info("Clarify intent saved to: ${savedFile.absolutePath}")
+                } catch (e: Exception) {
+                    logger.warn("Clarify intent save failed (recording only): ${e.message}")
+                }
+            },
+            // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행 (executeAnalyzePipeline 내부의 AnalyzeInputResolver.resolve 위임)
+            analyze = { clarifyIntent ->
+                executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent, intentBuild.constraintNotice)
+            },
+            // 오류가 아닌 안내 메시지(error 형식을 쓰지 않는다)
+            onCancelled = {
+                ApplicationManager.getApplication().invokeLater {
+                    bridge.sendMessage("analyze_notice", "분석을 취소했습니다.", "analyze_notice_${System.currentTimeMillis()}")
+                }
+            }
+        )
     }
 
     private fun executeAnalyzePipeline(
