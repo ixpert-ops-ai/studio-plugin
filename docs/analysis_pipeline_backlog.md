@@ -2573,3 +2573,48 @@ IDE의 14:47:19 `/clarify-confirm` 직후 오류는 **세션 유효 시간 초�
 4. 요약의 "기존 select로 이메일 조회"는 소스에서 확인되지 않는다(`sql_survey.xml`의 EMAIL은 관리자 계정 쿼리뿐).
 5. Stage 1 Turn 1 상위 10건이 최종 3개를 모두 담았지만 Stage 0 후보와는 겹침이 없다.
 6. 확정 후 카드가 4개 연속(정제문, 패키지, 탐색 힌트, Stage 3)이라 사용자 대기만 약 5분이다.
+
+#### [B-71 추가] 2-f ~ 2-k 읽기 조사, 개선점 24~26, 재테스트 관찰 (2026-10-26, 코드 변경 없음)
+
+**2-f 16:13 freeze 덤프** (`threadDumps-freeze-20261026-161326-…-Net.poll-18sec`, 덤프 3개 16:13:26/31/36 모두 같은 스택. `report.txt`의 EDT 점유 10500ms)
+- EDT 스택: `EdtInvocationEvent → …InvocationEvent.dispatch → WebviewActionRouter.handleCommand$lambda$160(WebviewActionRouter.kt:275)` → `Stage0ClarificationEngine.buildClarifyIntentChecked(:1355)` → `extractConstraintsChecked(:1573)` → `OpenAIClient.chat(OpenAIClient.kt:123)` → `postWithRetry(:271)` → `HttpRequests.process` → `OpenAIClient.chat$lambda$4$lambda$3(:193)`(응답 읽기) → `Socket$SocketInputStream.read` → `sun.nio.ch.Net.poll`(소켓 읽기 대기).
+- 어떤 LLM 호출인가: **최종 제약 추출**(`extractConstraintsChecked`, `max_tokens = 500`, 비스트림 호출)이다. 줄번호는 덤프 빌드 기준이며 소스(02ef82a)와 1줄씩 다르다. 로그의 `정제문 생성 완료`가 16:13:39.655로 수신(16:13:21.525)에서 18.1초 뒤이고 덤프 이름의 18sec와 일치한다.
+- 판단 근거: c435a58 이후 같은 조건의 freeze는 **사라질 것으로 판단하지만 실 IDE에서 확인하지 않았다**. 근거 = e1(모의 LLM 3000ms에서 핸들러가 200ms 안에 반환), e2b(라우터 소스에서 확정 분기의 `buildClarifyIntentChecked`가 `buildIntent = {` 람다 안 1곳뿐). EDT에 남는 것은 가드, `getSession`, `processTurn`(확정 버튼은 `userStatement == null`이라 LLM 없음)이다. IDE 재확인 항목으로 남긴다.
+
+**2-g SurveyServiceImpl의 AddressDao**
+- 위치: 필드 `SurveyServiceImpl.java:68`, 사용 `:97` `this.addressDao.selectAddressList(addressDto)`(`procType` 분기 안, `kind`·`admCode`로 시도/시군/동 목록을 JSON 배열에 담는 화면용 조회). `sql_address.xml`은 `ISSW_ADDRESS_SIDO/SIGOON/DONG`(행정구역)만 조회하고 이메일이 없다.
+- 판정(2-d의 3번과 합침): 응답자 이메일은 **주소록 테이블에서 오지 않는다**(Address 계열은 행정구역). `sql_survey.xml`의 설문 결과 조회 쿼리(`selectResultList :5`, `selectSurveyRAnsList :1218`, `selectSurveyRAnsListCN :1334`)에도 EMAIL 컬럼이 없고 EMAIL은 관리자 계정 쿼리(`insertUser`, `updateUser`, 주석 처리된 `selectUser`)뿐이다. 응답자 이메일이 어디에 저장되는지는 이 조사로는 알 수 없다.
+- 결론: **Stage 3의 "Address 계열 무관" 판정은 결과가 맞다**(근거는 제공되지 않아 검증 불가였을 뿐이다). **파일 표의 "응답자 이메일 조회 SQL 수정"은 소스와 모순되지 않는다**(현재 select에 이메일이 없으니 SQL 수정이 필요한 쪽이 자연스럽다). **요약의 "기존 select로 이메일 조회, DAO/MyBatis 변경 없이"는 소스로 뒷받침되지 않는다**(맞지 않을 가능성이 높다).
+
+**2-h GUARD-SHADOW 로그 한글**
+- 경고 원문(`CompletenessGuardIntegration.kt:114`, `idea.log` 16:21:03.079): `[GUARD-SHADOW] 차단 대상이었으나 shadow 모드라 통과시킴: [역할 누락/PERSISTENCE] DB 데이터 조회/저장 필요 → DAO_INTERFACE 가 REQUIRED 집합에 없습니다. 해당 역할 파일을 포함하세요.; [역할 누락/BUSINESS] 비즈니스 가공/변환 로직 필요 → SERVICE_INTERFACE 가 REQUIRED 집합에 없습니다. 해당 역할 파일을 포함하세요.`
+- 원인: **`idea.log` 파일 자체는 정상 UTF-8**이다(UTF-8 검증 통과, 대체 문자 U+FFFD 0건, 위 원문이 그대로 있다). `shadow_logs.jsonl`도 `ShadowLogger.kt:44-48`이 UTF-8로 명시해 쓴다. IDE 시작 로그가 `locale=ko_KR JNU=MS949 file.encoding=UTF-8`(15:33:17)이라, JVM 파일 인코딩은 UTF-8이고 **콘솔·네이티브 인코딩만 MS949**다. 따라서 깨짐은 파일이 아니라 MS949로 해석하는 화면(runIde 콘솔, 또는 UTF-8 파일을 MS949로 여는 뷰어)에서 생긴 것으로 보인다. 사용자가 본 화면은 알 수 없어 그 부분은 판단 불가다. `gradle.properties`는 `-Dfile.encoding=UTF-8`만 주고 `stdout.encoding`은 없다(build.gradle 수정은 금지라 손대지 않았다).
+
+**2-i 오늘 분석 단계별 소요(초, `idea.log`·덤프)**
+| 구간 | 시각 | 초 | LLM 대기? |
+|---|---|---|---|
+| /clarify 수신 → 첫 카드(`analyze_clarify`) | 15:46:51.330 → 15:47:06.923 | 15.6 | 예(초기 제약 추출) |
+| 〃 → 첫 요약(`analyze_clarify_summary`) | → 15:47:22.800 | 31.5 | 예(요약 호출 15.9초 추가) |
+| 발화 수신 → 제약 응답 | 15:49:05.815 → 15:49:18.452 | 12.6 | 예 |
+| 〃 → 발화 뒤 요약 | → 15:49:34.600 | 28.8 | 예 |
+| 확정 → 정제문 카드 요청(**EDT freeze 포함**) | 16:13:21.525 → 16:13:39.761 | 18.2 | 예(최종 제약 추출, 소켓 대기) |
+| 정제문 카드 대기(**사용자**) | 16:13:39.761 → 16:14:48.774 | 69.0 | – |
+| 카드 응답 → 패키지 카드 표시 | → 16:14:48.870 | 0.1 | 아니오 |
+| 패키지 카드 대기(**사용자**) | → 16:16:18.896 | 90.0 | – |
+| 카드 응답 → Stage 1 시작 | → 16:16:18.931 | 0.04 | 아니오 |
+| Stage 1 Turn 1 | 16:16:18.967 → 16:16:32.814(+검색 0.15) | 13.9 | 예 |
+| 탐색 힌트 카드 대기(**사용자**) | 16:16:33.026 → 16:17:41.698 | 68.7 | – |
+| Turn 2 / 3 / 4 / 5 | 16:17:41.700→58.023 / 58.030→18:15.815 / 18:15.823→38.308 / 18:38.314→19:18.692 | 16.3 / 17.8 / 22.5 / **40.4** | 예(스트리밍 도구 호출) |
+| RelevanceScorer 등 후처리 | 16:19:18.705 → 16:19:18.861 | 0.16 | 아니오 |
+| Stage 3 카드 대기(**사용자**) | 16:19:18.883 → 16:20:35.302 | 76.4 | – |
+| Stage 3 검증 | 16:20:35.312 → 16:21:02.954 | 27.6 | 예 |
+| 결과 전송 | → 16:21:03.127 | 0.17 | 아니오 |
+확정 수신부터 결과까지 461.6초 중 사용자 대기 304.1초, 시스템 157.0초(그중 LLM 대기 약 156.6초). **가장 긴 구간(사용자 대기 제외)**: 1) Turn 5 40.4초, 2) Stage 3 검증 27.6초, 3) Turn 4 22.5초 — **셋 다 LLM 대기**다. Turn 5는 응답 청크가 189개(Turn 2~4는 70~98개)로 가장 길게 생성했고 중간에 `httpFileSystem` 경고 로그가 있으나 원인과 무관하다.
+
+**2-j saveChat 호출**: 확정(16:13:21)부터 결과(16:21:03)까지 **20회**(같은 구간 직전 클라이언트 단계까지 합치면 이 채팅은 32회). 호출처: `webview/src/App.tsx:1692-1708`의 `useEffect([messages, chatId])`가 `messages`가 바뀔 때마다(스트리밍 청크, 카드 표시·숨김, 단계 메시지) `/saveChat`을 전송하고, `handleNewChat`(`:1716`)이 한 번 더 보낸다. 라우터는 `executeOnPooledThread`로 파일에 쓴다(`WebviewActionRouter.kt:1436-1442`). 같은 내용 반복 여부: 로그에는 메시지 본문이 잘려 있어 바이트 비교는 못 했지만, 16:14:48.796/.803/.896/.916처럼 **120ms 안에 4회**가 몰린 것이 있어 변경분 없는 연속 저장이 포함된 것으로 보인다(디바운스 없음). 제목은 `firstUser.content.slice(0, 20)`이라 첫 사용자 말풍선이 `/clarify 원문`이어서 **"/clarify " 접두어가 제목에 들어간다**(`"/clarify 기존 설문조사 상세 "`).
+
+**2-k 탐색기 추정 → 단정**: `inspect_node_detail`(`AgenticSeedSelector.kt:650-696`)의 결과는 클래스명·경로·유형, `localName`, 한글 주석, **메서드 이름·반환형·파라미터 목록**, 의존·피의존 클래스 이름, API 엔드포인트뿐이다. **메서드 본문과 SQL은 들어가지 않는다**(`MethodSignature`에도 본문 필드가 없다). Turn 3의 "설문 응답(결과) 조회 메서드로 **보입니다**"는 이름(`getSurveyRAnsList`)으로 한 추정이고, Turn 4의 "상세 조회 메서드이며", Turn 5의 "수행하는 서비스 로직"/"처리됩니다"는 새 근거(본문·SQL) 없이 단정으로 바뀐 것이다(그 사이 호출은 `inspect_node_detail`과 `expand_connected_nodes`로 둘 다 이름만 반환).
+
+**재테스트 관찰(사용자 보고 중 로그로 확인된 것)**: "수정한 내용으로 분석" 경로 — `분석 시작 직전 SR(75자, clarify 경유)`과 탐색기 `SR:` 줄이 사용자가 고친 75자 그대로이고 식별자 재부착은 없다(IDE 첫 확인). 사용자가 쓴 마스킹 형식("앞 2자리 + 도메인")이 시드 확정 근거(`confirm_final_seeds` rationale)까지 전달됐다. `sql_survey.xml`은 RelevanceScorer 점수 5로 `RESOURCE_REVERSE_LINK` 구제(VETTED BYPASS)로만 남았고, `AddressDaoImpl`·`AddressDao`는 점수 40에서 `Seed Direct Dependency` 구제로 들어왔다가 Stage 3에서 사유 없이 제외됐다.
+
+**개선점 추가**: 24 탐색기 추정→단정 승격 차단(본문 미확인 시 "추정" 표시) / 구조. 25 로그 한글 인코딩 / 즉시(파일은 정상, 콘솔 MS949; 2-h). 26 saveChat 중복 호출(`messages` 변경마다 전송, 디바운스 없음)·제목의 "/clarify" 접두어 / 즉시.
