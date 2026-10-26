@@ -15,6 +15,7 @@ import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
 import { makeErrorBubble } from './errorDisplayLogic';
 import { onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
+import { applyCardStatus, cardPendingAfter, isCardHide, isCardRequest, submittedStatusText } from './cardWaitLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
@@ -286,6 +287,8 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
   // 대기 표시: 발화 해석 응답이나 분석 시작을 기다리는 동안만 켠다(사실만: 대기 중이라는 것과 경과 초). 백엔드가 이미 보내는 메시지로만 끈다.
   const [wait, setWait] = useState<WaitState>(IDLE);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // 정제문·패키지 선택·탐색 힌트·Stage 3 카드가 응답을 기다리는 중인가(제출 뒤 문구가 "확인을 기다리고 있습니다"가 된다)
+  const [cardPending, setCardPending] = useState(false);
   const isInterpreting = wait.phase === 'interpreting';
 
   useEffect(() => {
@@ -293,6 +296,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
       const d = event.data;
       if (!d || d.type !== 'ai_message') return;
       setWait(prev => onBackendMessage(prev, d.subType));
+      setCardPending(prev => cardPendingAfter(prev, d.subType));
       // 확정 뒤 오류면 제출 문구를 걷고, 세션 만료 오류면 다시 시작 안내를 보인다
       const r = onClarifyBackendMessage({ confirmPending: confirmPendingRef.current, submitted: submittedRef.current }, d.subType, d.content);
       if (r.endConfirmPending) confirmPendingRef.current = false;
@@ -637,7 +641,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
             )}
             {isSubmitted && (
               <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                ✓ 확인이 제출되었습니다. 분석을 진행 중입니다...
+                {submittedStatusText(cardPending)}
                 {wait.phase === 'confirming' && (
                   <span className="clarify-wait" role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 'normal', color: '#94a3b8' }}>
                     <span className="typing-dots"><span></span><span></span><span></span></span>
@@ -1193,6 +1197,11 @@ function App() {
     const handleMessage = (event: MessageEvent) => {
       const data = event.data;
       if (!data || data.type !== 'ai_message') return;
+
+      // 확인 카드가 뜨면 진행 중 메시지의 상단 문구를 "확인을 기다리고 있습니다"로, 카드 응답 뒤에는 "분석을 진행 중입니다"로 바꾼다
+      if (isCardRequest(data.subType) || isCardHide(data.subType)) {
+        setMessages(prev => applyCardStatus(prev, data.subType));
+      }
 
       if (data.subType === 'selected_model') {
         setSelectedModel(data.content);

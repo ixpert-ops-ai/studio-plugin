@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Compass, Check, SkipForward, Layers, FileCode, Tag } from 'lucide-react';
+import { localNameLabel, toUserWording } from './explorerDisplayLogic';
 
 export interface L1Candidate {
   className?: string;
@@ -120,13 +121,13 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
       {explanation && (
         <div style={{ background: 'rgba(59, 130, 246, 0.1)', padding: '10px 12px', borderRadius: '6px', borderLeft: '3px solid #3b82f6', marginBottom: '14px', fontSize: '12px', color: '#bfdbfe' }}>
           <strong style={{ color: '#93c5fd' }}>🤖 AI 탐색 해석 및 다음 계획:</strong>
-          <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>{explanation}</div>
+          <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>{toUserWording(explanation)}</div>
         </div>
       )}
 
       {/* Message & Query */}
       <div style={{ fontSize: '13px', lineHeight: '1.5', color: '#e2e8f0', marginBottom: '14px' }}>
-        <p style={{ margin: '0 0 6px 0' }}>{message}</p>
+        <p style={{ margin: '0 0 6px 0' }}>{toUserWording(message)}</p>
         <div style={{ background: 'rgba(0, 0, 0, 0.3)', padding: '6px 10px', borderRadius: '4px', borderLeft: '3px solid #60a5fa', fontSize: '12px', color: '#cbd5e1' }}>
           <strong>현재 검색어:</strong> {query}
         </div>
@@ -198,7 +199,7 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
                     {cand.className}
                   </span>
                   <span style={{ color: '#94a3b8', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    ({cand.localName || '주석 없음'})
+                    {localNameLabel(cand.localName)}
                   </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '8px' }}>

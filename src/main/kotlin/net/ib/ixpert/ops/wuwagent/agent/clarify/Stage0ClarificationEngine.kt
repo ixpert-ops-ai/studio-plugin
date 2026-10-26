@@ -384,7 +384,7 @@ class Stage0ClarificationEngine(
         }
 
         // SR 원문의 제외 요청에 대한 안내는 대화 기록에 남긴다(같은 요청으로 다시 묻지 않는지 판단하는 근거이기도 하다).
-        val initEcho = listOfNotNull(srOutcome?.note, srOutcome?.question, if (initExtraction?.failed == true) constraintFailureLine() else null).joinToString("\n").ifBlank { null }
+        val initEcho = listOfNotNull(srOutcome?.note, srOutcome?.question, if (initExtraction?.failed == true) initConstraintFailureLine() else null).joinToString("\n").ifBlank { null }
 
         val state = Stage0State(
             originalRequirement = originalRequirement,
@@ -1517,11 +1517,27 @@ class Stage0ClarificationEngine(
     /** 제약 추출이 최종 실패해 기본 제약으로 바뀌었을 때 화면 안내에 붙이는 한 줄(사실만 알린다: 제외나 한정이 처리되었다고 말하지 않는다). */
     private val constraintFailureNote = "요청하신 조건을 해석하지 못했습니다. 제외하거나 한정할 파일이 있다면 파일명으로 다시 말씀해 주세요."
 
+    /** 첫 화면(initSession)의 초기 제약 추출 실패 안내. 사용자가 아직 아무것도 말하지 않았으므로 발화 실패 안내와 문구를 나눈다(파일명을 요구하지 않는다). */
+    private val initConstraintFailureNote = "요구사항에서 조건을 자동으로 정리하지 못했습니다. 분석에는 영향이 없으며, 범위나 조건이 있으면 말씀해 주세요."
+
     /** 이 세션에서 제약 추출 실패 안내를 이미 화면 안내에 붙였는지. 최종 추출(buildClarifyIntentChecked)의 안내가 같은 말을 되풀이하지 않게 한다. */
     @Volatile private var constraintFailureNoticeShown = false
 
     /** 화면 안내에 실패 안내를 붙이는 곳에서 부른다(붙였다고 기록하고 같은 줄을 돌려준다). */
     private fun constraintFailureLine(): String { constraintFailureNoticeShown = true; return constraintFailureNote }
+
+    /** 첫 화면에 붙이는 초기 실패 안내(붙였다고 기록해 이후 최종 추출 안내가 되풀이되지 않게 한다). */
+    private fun initConstraintFailureLine(): String { constraintFailureNoticeShown = true; return initConstraintFailureNote }
+
+    private val EXTRACT_FAIL_BODY_LIMIT = 500
+
+    /** 제약 추출 실패 로그 한 줄: 종류(응답 없음, [Error], 예외, 파싱 실패)와 응답 본문 앞 500자(짧으면 전체). 줄바꿈은 한 줄로 보이게 \\n으로 적는다. */
+    internal fun extractFailLogLine(kind: String, body: String?, error: Throwable? = null): String {
+        val text = body ?: ""
+        val shown = text.take(EXTRACT_FAIL_BODY_LIMIT).replace("\r", "").replace("\n", "\\n")
+        val err = if (error != null) " 예외=${error.javaClass.simpleName}: ${error.message}" else ""
+        return "[ExtractFail] 종류=$kind 본문(${text.length}자 중 앞 ${minOf(text.length, EXTRACT_FAIL_BODY_LIMIT)}자)=$shown$err"
+    }
 
     private fun extractConstraints(userStatements: List<String>): List<IntentConstraint> = extractConstraintsChecked(userStatements).constraints
 
@@ -1576,7 +1592,12 @@ class Stage0ClarificationEngine(
                 maxTokens = 500
             )
             val content = response?.message?.content?.trim()
-            if (content.isNullOrBlank() || content.startsWith("[Error]")) {
+            if (content.isNullOrBlank()) {
+                println(extractFailLogLine("응답 없음", response?.message?.content))
+                return ConstraintExtraction(defaultConstraints, true)
+            }
+            if (content.startsWith("[Error]")) {
+                println(extractFailLogLine("[Error]", content))
                 return ConstraintExtraction(defaultConstraints, true)
             }
 
@@ -1590,7 +1611,12 @@ class Stage0ClarificationEngine(
             }
 
             val listType = object : com.google.gson.reflect.TypeToken<List<Map<String, String>>>() {}.type
-            val parsedList: List<Map<String, String>>? = com.google.gson.Gson().fromJson(cleanJson, listType)
+            val parsedList: List<Map<String, String>>? = try {
+                com.google.gson.Gson().fromJson(cleanJson, listType)
+            } catch (e: Exception) {
+                println(extractFailLogLine("파싱 실패", content, e))
+                return ConstraintExtraction(defaultConstraints, true)
+            }
             if (parsedList == null || parsedList.isEmpty()) {
                 return ConstraintExtraction(defaultConstraints, false)
             }
@@ -1630,6 +1656,7 @@ class Stage0ClarificationEngine(
             }
             ConstraintExtraction(extracted, false)
         } catch (e: Exception) {
+            println(extractFailLogLine("예외", null, e))
             ConstraintExtraction(defaultConstraints, true)
         }
     }

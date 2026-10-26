@@ -189,6 +189,52 @@ class ClarifyConfirmHandoffTest {
         assertEquals(1, Regex("""isHandoffActive\(project\.locationHash\)""").findAll(confirm).count())
     }
 
+    // ── x5 (B-72) ──
+
+    @Test
+    fun x5_정제문_생성_실패_뒤_다시_확정하면_분석은_한_번이고_무시_로그는_없다() {
+        val id = "handoff-retry-project"
+        JcefRefinedRequirementConfirmationBridge.endHandoff(id)
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val r = Recorder()
+            var ignored = 0
+            var sessionRemoved = 0
+            var attempt = 0
+            val analyses = Collections.synchronizedList(ArrayList<String>())
+            val done = CountDownLatch(2)
+            fun confirm() {
+                if (JcefRefinedRequirementConfirmationBridge.isHandoffActive(id)) { ignored++; return }
+                ClarifyConfirmHandoff.start(
+                    ClarifyConfirmHandoff.Steps(
+                        invalidateSummary = {},
+                        beginHandoff = { JcefRefinedRequirementConfirmationBridge.beginHandoff(id) },
+                        buildIntent = { if (++attempt == 1) throw IllegalStateException("첫 시도 실패") else "intent" },
+                        removeSession = { sessionRemoved++ },
+                        continueAfterClarify = { i -> analyses.add(i); JcefRefinedRequirementConfirmationBridge.endHandoff(id); done.countDown() },
+                        onFailure = { r.failures.add(it); done.countDown() },
+                        endHandoff = { JcefRefinedRequirementConfirmationBridge.endHandoff(id) }
+                    )
+                ) { task -> pool.execute { task() } }
+            }
+            confirm()
+            // 첫 시도가 실패해 오류가 한 번 나가고 표지가 풀릴 때까지 기다린다
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (r.failures.isEmpty() && System.nanoTime() < deadline) Thread.sleep(10)
+            assertEquals("오류 1회", 1, r.failures.size)
+            assertEquals("실패한 시도는 세션을 닫지 않는다", 0, sessionRemoved)
+            assertFalse("표지가 풀려 있어야 한다", JcefRefinedRequirementConfirmationBridge.isHandoffActive(id))
+            confirm() // 사용자가 다시 확정
+            assertTrue(done.await(5, TimeUnit.SECONDS))
+            assertEquals("분석은 한 번", listOf("intent"), analyses.toList())
+            assertEquals("무시 로그 없음", 0, ignored)
+            assertEquals(1, sessionRemoved)
+        } finally {
+            JcefRefinedRequirementConfirmationBridge.endHandoff(id)
+            pool.shutdownNow()
+        }
+    }
+
     // ── e5 ──
 
     @Test

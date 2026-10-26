@@ -24,6 +24,8 @@ import java.io.File
  */
 class FinalConstraintFailureNoticeTest {
 
+    // B-72: 첫 화면(initSession)의 초기 실패 안내는 발화 실패 안내와 문구를 나눴다
+    private val initNote = "요구사항에서 조건을 자동으로 정리하지 못했습니다. 분석에는 영향이 없으며, 범위나 조건이 있으면 말씀해 주세요."
     private val note = "요청하신 조건을 해석하지 못했습니다. 제외하거나 한정할 파일이 있다면 파일명으로 다시 말씀해 주세요."
 
     /** 제약 추출 응답을 도중에 바꿀 수 있는 가짜 LLM: init과 발화 단계는 성공시키고 최종 추출만 실패시키는 상황을 만든다. */
@@ -87,7 +89,7 @@ class FinalConstraintFailureNoticeTest {
         val llm = Fake(); llm.constraints = failing
         val e = engine(llm)
         val t0 = e.initSession("설문 발송 채널 확장")
-        assertTrue(t0.echoBackMessage ?: "", t0.echoBackMessage?.contains(note) == true)
+        assertTrue(t0.echoBackMessage ?: "", t0.echoBackMessage?.contains(initNote) == true)
         val t1 = e.processUtterance(t0.state, "SurveyServiceImpl도 같이 봐 주세요")
         assertNull("최종 추출이 같은 말을 되풀이하지 않는다", e.buildClarifyIntentChecked(t1.state).constraintNotice)
         // processUtterance 단계에서 안내한 경우(제외 표현이 있는 발화)도 마찬가지

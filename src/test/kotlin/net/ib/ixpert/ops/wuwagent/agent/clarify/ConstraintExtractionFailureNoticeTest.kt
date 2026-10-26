@@ -26,6 +26,8 @@ import org.junit.Test
 class ConstraintExtractionFailureNoticeTest {
 
     private val note = "요청하신 조건을 해석하지 못했습니다. 제외하거나 한정할 파일이 있다면 파일명으로 다시 말씀해 주세요."
+    // B-72: 첫 화면(initSession)의 초기 실패 안내는 발화 실패 안내와 문구를 나눴다
+    private val initNote = "요구사항에서 조건을 자동으로 정리하지 못했습니다. 분석에는 영향이 없으며, 범위나 조건이 있으면 말씀해 주세요."
 
     /** 제약 추출 응답: 문자열이면 그 내용, null이면 예외를 던진다. */
     private class Fake(private val constraints: String?, private val translatorJson: String) : LLMClient {
@@ -92,7 +94,7 @@ class ConstraintExtractionFailureNoticeTest {
             val init = srEngine.initSession("설문 발송 채널 확장. 알림톡 배치는 건드리지 마세요.")
             val echo = init.echoBackMessage
             assertNotNull(label, echo)
-            assertTrue("$label: $echo", echo!!.contains(note))
+            assertTrue("$label: $echo", echo!!.contains(initNote))
             assertFalse("$label: $echo", echo.contains("제외했습니다") || echo.contains("제외 목록에 넣었습니다"))
             assertEquals(label, emptyList<String>(), srEngine.exclusionView(init.state).excludedFiles)
 
@@ -114,7 +116,7 @@ class ConstraintExtractionFailureNoticeTest {
     fun f2_failureWithoutExclusionWordsStillShowsTheNotice() {
         for ((response, label) in failures) {
             val init = engine(Fake(response, addConstraint)).initSession("설문 발송 채널 확장")
-            assertTrue("$label: ${init.echoBackMessage}", init.echoBackMessage?.contains(note) == true)
+            assertTrue("$label: ${init.echoBackMessage}", init.echoBackMessage?.contains(initNote) == true)
         }
     }
 
