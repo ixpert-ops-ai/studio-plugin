@@ -2272,3 +2272,112 @@ Select-String -Path build\idea-sandbox\IC-2024.3.5\log\idea.log -Pattern 'Refine
 3. "분석을 취소했습니다" 문구는 웹뷰 번들이 아니라 Kotlin 클래스에 있어서, 웹뷰 번들 검사만으로는 이 문구를 찾을 수 없다.
 4. 요청한 "같은 출력 방식"을 기존 `println`으로 맞추면 `idea.log`(STDOUT)와 runIde 콘솔 로그 양쪽에 같은 줄이 남는다.
 5. 로그 줄만 추가하라는 제한 때문에 요청 id를 인자로 넘기지 못하고 SR 원문 해시를 rid로 썼다(같은 SR로 반복 실행하면 같은 rid가 되므로 시각으로 구분해야 한다).
+
+### [B-70] clarify 세션 만료 수정(마지막 활동 기준 30분, 다시 시작 버튼), 확인 제출 전 문구 정리, 후보 선정 원인 조사 (2026-10-26)
+
+사전 확인: `git status -s` 비어 있음, HEAD = origin = b1f2e5f. 실서버 LLM 호출 없음(테스트는 모의만, 후보 재현은 LLM 없이 스캐너만 실행). 커밋: 1 = `2ad2b99`, 2 = `ed087bb`.
+
+#### 0 세션 만료 원인(요약)
+IDE의 14:47:19 `/clarify-confirm` 직후 오류는 **세션 유효 시간 초과**였다. `AnalyzeSessionManager`의 유효 시간은 5분 고정이었고 **생성 시각(`createdAtMs`)부터** 셌으며 발화나 확정으로 갱신하지 않았다(`getSession`이 만료면 세션을 지우고 null → 라우터 `:216`/`:302`가 같은 고정 오류 문구를 보냄). 세션 생성 14:41:50.3, 확정 수신 14:47:19.895로 329.6초(TTL 초과 29.6초)였고 오류는 수신 줄과 같은 밀리초에 나갔다(요약 응답 14:44:58 기준으로는 141.9초라 활동 기준 TTL이었다면 만료되지 않았을 시간). 이중 확인, 경합, 구 빌드는 로그로 배제했다. 웹뷰는 확정을 누르는 즉시 "✓ 확인이 제출되었습니다"를 띄우고(`App.tsx:341`) 오류가 와도 되돌리지 않아 모순된 화면이 남았다.
+
+#### 1 커밋 1(2ad2b99): 세션 유효 시간과 다시 시작
+- **TTL**: 기준을 마지막 활동 시각으로 바꾸고 30분으로 했다(`AnalyzeSessionManager.kt`: `TTL_MINUTES = 30`, `Stage0Session.lastActivityMs`, `isExpired(ttlMinutes, nowMs)`). 활동 = `getSession` 성공, 발화 처리 완료(`WebviewActionRouter.kt`의 `/clarify-utterance`에서 `touch`), 작업 요약 전송(`scheduleTaskSummary`에서 `touch`). 이미 만료된 세션은 `touch`로 되살리지 않는다. 시각은 주입 가능한 `AnalyzeSessionManager.clock`이다(테스트에서 실제로 기다리지 않음).
+- **웹뷰**(`clarifySessionLogic.ts` 순수 로직, `App.tsx`의 `ClarifyForm`): 확정을 보낸 뒤 오류를 받으면 `isSubmitted`를 되돌려 "확인이 제출되었습니다" 문구를 걷는다. 세션 만료 오류(고정 문구 일치)면 확정 버튼과 발화 입력을 숨기고 "같은 요구사항으로 다시 시작" 버튼 1개와 안내(이전 발화 목록 표시, 자동 재전송 없음)를 보인다. 버튼은 `wuw:restart-clarify` 이벤트로 `App`이 사용자 말풍선 "/clarify 원문"을 붙이고 `{command: '/clarify', text: 원 요구사항}`을 보낸다. 분석이 이미 시작된 뒤의 오류는 건드리지 않는다.
+- **기대값과 검증**(테스트는 이 기대에 맞췄다. **기존 테스트의 기대는 바뀐 것이 없다**: `AnalyzeSessionManagerTest`의 `testSessionExpiration`은 `isExpired(5)`를 명시해 그대로 통과한다):
+
+| 기대 | 확인한 테스트 | 결과 |
+|---|---|---|
+| s1 생성 4분 뒤 발화 → 그 4분 뒤(생성 기준 8분) 확정 성공 | `AnalyzeSessionTtlTest` s1, s1b(생성 6분) | 통과 |
+| s2 마지막 활동 후 29분 확정 성공, 31분이면 null | s2, s2c(경계: 30분 정확히 성공, 1ms 지나면 null) | 통과 |
+| s3 만료된 세션은 발화로 되살아나지 않음 | s3(만료 뒤 요약 `touch`와 발화 조회 모두 null), `touch는_살아_있는_세션…`, r1(라우터 소스에 `touch` 2곳) | 통과 |
+| s4 웹뷰: 확정 후 만료 오류 → 제출 문구 없음, 다시 시작 버튼 1개, 누르면 `/clarify`에 원문과 같은 문자열 | `clarifySessionLogic.test.ts` 8개, ui-check 27(문구 없음, 버튼 1개, 확정 버튼 없음), 28(이전 발화 목록 1개, 재전송 0), 29(`/clarify`에 원문 1회, 사용자 말풍선, 재클릭 무시) | 통과 |
+| s5 정상 확정 흐름의 화면·메시지 순서 불변 | 기존 ui-check 1~26 그대로 통과 + 30(정상 확정: 제출 문구 유지, 분석 시작 도착, 다시 시작 버튼 없음) | 통과 |
+
+#### 2 커밋 2(ed087bb): 확인 제출 전 문구
+- **지시 2번 교체**(`Stage0ClarificationEngine.generateTaskSummary`의 시스템 프롬프트): "2. 근거 문구에 없는 역할·기능을 만들지 말 것. 근거가 이름/토큰 일치뿐인 파일은 '이름이 비슷해 포함됨(확인 필요)'으로만 쓸 것. 사용자 제약(범위·대상 화면)과 맞지 않는 파일을 '핵심 변경 대상'이라 부르지 말 것." 1번과 3번은 그대로다.
+- **근거 문구 변환**(`agent/clarify/RationaleWording.kt` 새 파일, 호출 위치 `Stage0ClarificationEngine.kt`의 `generateTaskSummary` 후보 줄 `val rationale = RationaleWording.toUserWording(item.anchorRationale ?: "")`): `구조 식별자(...) 공유` → `같은 화면 변수(...) 사용`, `View-Script 페어` → `같은 화면의 스크립트`, `CALLS 연결` → `호출 관계`, `요구사항 토큰(...)과 일치` → `이름이 요구사항 단어(...)와 비슷함`(앞의 "클래스명/엔드포인트가 "는 함께 제거). 등록되지 않은 문구는 원문 유지. 저장된 `anchorRationale`과 후보 선정 규칙은 바뀌지 않는다.
+- **진행 문구**(`WebviewActionRouter.kt`의 `analyze_start` 두 곳): "프로젝트 메타그래프 기반으로 요구사항을 구체화하고 있습니다..." → "프로젝트 코드 구조를 바탕으로 요구사항을 구체화하고 있습니다...", "프로젝트 메타그래프 영향도 분석을 시작합니다..." → "프로젝트 코드 구조를 바탕으로 영향받는 파일 분석을 시작합니다...".
+- **입력칸 예시**(`App.tsx`): `예: "관리자 화면만 해당이에요", "이메일은 마스킹해서", "분석 시작해줘"`.
+- **기대값과 검증**: `RationaleWordingTest` 11개 통과(변환 4종과 한 문장 복합 변환, 등록되지 않은 문구 원문 유지 5개 사례, 모의 클라이언트로 캡처한 요약 프롬프트의 system과 user에 '구조 식별자'·'View-Script'·'CALLS' 없음, 지시 2번 문장과 1·3번 유지, 진행 문구에 "메타그래프" 없음, 입력칸 예시). **하네스 영향 없음**: 하네스가 비교하는 줄(EXACT_MATCH 5, MATCH_EXCLUDING 2)에는 요약 문장이 없고 `CandidateCapTest`(요약 줄 형식), `TaskSummaryDeferTest`도 그대로 통과했다. 실측은 하지 않았다(사용자 IDE 재테스트로 확인).
+- **남은 것**: 번역기 프롬프트(`ClarifyUtteranceTranslator`의 후보 컨텍스트)는 이번에 바꾸지 않아 근거 문구 원문이 그대로 들어간다. 등록되지 않은 내부 문구(`INJECTS 연결`, `IMPLEMENTS 연결`, `공유 타입 브릿지(...)를 통한 형제 클러스터 위상 회수`, `...에 바인딩된 MyBatis 매퍼`, `...의 URL(...)을 처리하는 Controller`)는 그대로 요약 프롬프트에 들어간다.
+
+#### 3 읽기 조사 결과
+**3-a SR "기존 설문조사 상세 조회 기능에 응답자 이메일 정보도 같이 내려주도록 백엔드를 수정해주세요"의 스캐너 토큰**(survey_admin 그래프, LLM 없이 `Stage0GraphScanner` 실행)
+- `KeywordDecomposer.decompose`의 영문 토큰(사전 번역): `detail, info, view, search, list, information, data, update, edit, modify`. 한글 원형 `contentTokens`: `기존, 설문조사, 상세, 조회, 기능에, 응답자, 이메일, 정보도, 같이, 내려주도록, 백엔드를, 수정해주세요`.
+- **빈도 필터는 Stage 0 스캐너에 없다**(`Stage0GraphScanner.kt`, `KeywordDecomposer.kt` 전체에 빈도 기준 없음). 토큰을 걸러내는 장치는 세 가지다: (1) 사전 번역 상위 3개 컷(`DomainDictionary.kt:41` `take(3)`): `상세`→detail, info, view(show, single, item 탈락), `조회`→search, list, view(read, select, get, find, lookup 탈락), `정보도`→info, information, data, `수정해주세요`→update, edit, modify(change, alter, patch 탈락). (2) 영문 일반어 불용어(`Stage0GraphScanner.kt:204-210` `genericTokenStopwords`)에 걸려 detail, info, view, search, list, data, update가 후보 매칭용 영문 토큰(`queryDomainTokens`, `:212`)에서 빠지고 **`information, edit, modify` 세 개만 남는다**. (3) 후보 수 상한 `proposalBudget = 8`(`:19`, 운영 라우터는 기본값으로 생성)과 `minSpecificityScore = 1.0`(`:18`).
+- **survey·설문 토큰**: `설문조사`는 내장 사전에 번역이 없어(`translate("설문조사") = []`, 외부 `dictionary.json`은 `DomainDictionary.load`에서 꺼져 있음) 한글 개념 토큰으로만 남는다. 영문 `survey` 토큰이 만들어지지 않아 클래스명 경로(엣지 0-B)에서 설문 계열 클래스와 맞지 않고 한글 자연어명/주석 경로(엣지 0)에서만 쓰인다. 탈락이 아니라 번역 부재다.
+- **재현**: 스캐너만으로 IDE의 후보 8개가 **8/8 재현되고 순서도 같다**(`engine.initSession`을 LLM 없이 돌려도 8/8). 후보와 근거: survey_list.jsp(구조 식별자 search_s_code, detail_s_idx), survey.list.js(View-Script 페어), IpsController(survey_result.jsp의 URL을 처리), **UserDto(요구사항 토큰 edit, modify와 일치)**, sql_user.xml(UserDao에 바인딩된 매퍼), survey_result.jsp(구조 식별자 search_word), survey.result.js(View-Script 페어), UserServiceImpl(CallbackInfoDto의 CALLS 연결).
+
+**3-b 문구 생성과 번역 사전 위치**
+- `요구사항 토큰(...)과 일치`: `Stage0GraphScanner.kt:251`(단독), `:253`(`+ 요구사항 토큰(...) 일치`). 매칭 규칙은 `:241` `matchCount >= 2 || (matchCount >= 1 && (isExactClassMatch || queryDomainTokens.size == 1))`, 점수 `:245`.
+- 수정→edit/modify: `DomainDictionary.kt:119` `"수정" to setOf("update", "edit", "modify", "change", "alter", "patch")`(변경은 `:127`), 번역 함수 `translate`(`:24-43`)가 `koreanNoun.contains(key)`로 "수정해주세요"에 "수정"을 맞추고 빈도 동률이면 삽입 순서 상위 3개(update, edit, modify)를 돌려준다. 호출은 `KeywordDecomposer.kt:29`(번역), `:35`(영문 토큰 추가).
+- **판단(원인)**: 한글 동사 하나("수정")가 영문 동의어 둘(edit, modify)로 풀려 **둘이 각각 "도메인 토큰 일치"로 세어져 정밀도 규칙 `matchCount >= 2`를 동시에 채운다**. 메서드 이름 토큰에 edit와 modify가 있는 `UserDto`가 후보에 오르고 `UserServiceImpl`, `sql_user.xml`로 번진다(후보 3개의 노이즈).
+
+**3-c 동작어를 일치 토큰에서 뺐을 때의 오프라인 비교**(스캐너만, SR만 사용, 운영 기본값 `proposalBudget = 8`. 제외한 토큰 = edit, modify, update, add, change와 한글 수정, 변경, 추가, 삭제. 후보 수는 스캐너가 돌려준 전체(접힌 저신뢰 묶음 포함)이고 required는 그래프 안에 있는 정답 파일. 스크립트 발화는 쓰지 않았다)
+
+| 시나리오 | 그래프 | required(그래프 내) | 기준 후보 | 기준 required 적중 | 제외 후보 | 제외 required 적중 | 빠진 required | 동작어로만 들어온 후보 | 사라진 후보 수 | 새 후보 수 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| D1 | survey_admin | 8 | 16 | 7 | 16 | 7 | 0 | 0 | 0 | 0 |
+| D2 | apc | 5 | 8 | 2 | 8 | 2 | 0 | 0 | 0 | 0 |
+| D3 | apc | 5 | 8 | 1 | 8 | 1 | 0 | 0 | 0 | 0 |
+| D4 | ism | 4 | 558 | 0 | 558 | 0 | 0 | 0 | 0 | 0 |
+| D5 | survey_admin | 1 | 16 | 1 | 16 | 1 | 0 | 0 | 0 | 0 |
+| S1 | member_market | 3 | 16 | 3 | 16 | 3 | 0 | 0 | 0 | 0 |
+| S2 | member_market | 4 | 24 | 2 | 24 | 2 | 0 | 0 | 0 | 0 |
+| S3 | survey_admin | 4 | 16 | 1 | 16 | 1 | 0 | 0 | 0 | 0 |
+| SR-01 | survey_admin | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| SR-02 | survey_admin | 4 | 16 | 1 | 16 | 1 | 0 | 0 | 0 | 0 |
+| SR-04 | member_market | 1 | 18 | 1 | 18 | 1 | 0 | 0 | 0 | 0 |
+| SR-05 | member_market | 2 | 13 | 0 | 13 | 0 | 0 | 0 | 0 | 0 |
+| SR-07 | ism | 2 | 26 | 0 | 26 | 0 | 0 | 0 | 0 | 0 |
+| SR-08 | ism | 3 | 623 | 0 | 623 | 0 | 0 | 0 | 0 | 0 |
+| SR-11 | apc | 4 | 8 | 0 | 8 | 0 | 0 | 0 | 0 | 0 |
+| SR-12 | apc | 2 | 14 | 1 | 14 | 1 | 0 | 0 | 0 | 0 |
+| SR-03 | survey_admin | 1 | 16 | 0 | 16 | 0 | 0 | 0 | 0 | 0 |
+| SR-06 | member_market | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| SR-09 | ism | 3 | 264 | 1 | 212 | 1 | 0 | 0 | 54 | 2 |
+| SR-10 | apc | 1 | 8 | 0 | 8 | 0 | 0 | 0 | 0 | 0 |
+| SR-05X | member_market | 2 | 13 | 0 | 13 | 0 | 0 | 0 | 0 | 0 |
+
+요약: **21개 시나리오 모두 required 파일이 빠지는 경우가 0건**이다(적중 수가 같다). 동작어 토큰만으로 들어온 후보도 이 21개에는 없다. 후보 구성이 바뀐 곳은 SR-09 한 곳(후보 264 → 212, 사라진 54개와 새로 생긴 2개, required 적중은 1건 그대로)이다. IDE SR(위 3-a)은 이 세트에 GT가 없어 따로 봤다: 동작어를 빼면 노이즈 4개(UserDto, sql_user.xml, UserServiceImpl)와 함께 **정당한 후보였던 `IpsController`도 사라지고**(예산 8개 경쟁 결과) 후보가 16개로 늘며 DateUtil, sql_address.xml, sql_survey.xml, AlimtalkTemplate* 계열 형제 클러스터가 올라온다. 따라서 동작어 제거는 이 평가 세트에서는 recall을 해치지 않지만 노이즈를 다른 노이즈로 바꾸는 효과이고 단독 해결책으로 보기 어렵다(구현하지 않았다). 한계: 스크립트 발화 이후의 재탐색과 기본 후보 수 8을 넘는 접힌 묶음의 쓰임은 반영하지 않았다.
+
+**3-d `buildClarifyIntentChecked`(`WebviewActionRouter.kt:275`)는 EDT에서 돈다**
+- `handleCommand` 전체가 `ApplicationManager.getApplication().invokeLater { … }`(`WebviewActionRouter.kt:62-63`) 안이라 `/clarify-confirm` 분기(`:203`)의 `processTurn`(`:248`)과 `buildClarifyIntentChecked`(`:275`)가 AWT 이벤트 스레드에서 실행된다(JCEF 쿼리 콜백 `JcefMessageHandler.kt:28`이 `router.handleCommand`를 부르고 라우터가 EDT로 넘긴다). `idea.log` 형식은 스레드 이름을 찍지 않아 스레드명은 없고, **스택이 증거**다: 13:22:26,575 `SEVERE - HttpRequests - Assertion failed: Network must not be accessed in EDT or inside read action …`의 스택이 `IdeEventQueue` → `InvocationEvent.dispatch` → `WebviewActionRouter.handleCommand$lambda`(당시 `:264`) → `Stage0ClarificationEngine.buildClarifyIntentChecked`(`:1354`) → `extractConstraintsChecked`(`:1572`) → `OpenAIClient.chat`(`:123`) → `HttpRequests.process`. 이 단언은 `idea.log`에 이번 세션 1회, `idea.1.log`에 12줄(약 6회) 남아 있고, 호출 자체는 그대로 진행되어 IDE 오류 알림이 뜰 수 있다. 같은 위치에서 정제문 호출은 별도 스레드(`refineExecutor`)에서 돈다.
+- **IDE 응답 정지 시간 추정**: 확정 수신 13:22:26,564 → `analyze_start` 13:22:31,306 = **4.7초**(이 실행은 구 빌드이며 호출이 빨랐다). 구조상 EDT가 막히는 시간은 최종 제약 추출과 정제문 생성(병렬) 중 긴 쪽이다. B-62 측정의 최종 제약 추출은 호출 중앙 15.9초, 최대 58.8초(SR-08 구간 28초)이므로 **보통 10~30초, 길면 1분 가까이 IDE가 멈출 수 있다**고 추정한다(이번 실행 4.7초는 짧은 대화의 경우). `/clarify-utterance`, `/clarify` 초기화 등은 `executeOnPooledThread`라 해당하지 않는다. 수정하지 않았다.
+
+#### 4 검증(커밋 ed087bb 기준)
+| 검증 | 결과 |
+|---|---|
+| 전체 테스트(서버 의존 14클래스 제외) | 585개, 실패 42, 건너뜀 18. 실패 42건은 기준과 판정 차이 0, 관찰 차이 0 |
+| clarify 패키지 | 269개(36 스위트), 실패 1(기존 1건), 건너뜀 3 |
+| 하네스 | EXACT_MATCH 5/5, MATCH_EXCLUDING 2/2 |
+| 실패 메시지 diff | 0 |
+| selftest | 24/24 |
+| 웹뷰 로직 테스트 | 43/43(새 `clarifySessionLogic` 8개 포함) |
+| ui-check | 30/30(기존 26 + 새 27~30) |
+| `npm run build` 산출물 | 커밋 1, 2에 `src/main/resources/webview/index.html`과 `tsconfig.tsbuildinfo` 포함 |
+임시 조사용 테스트(`ScratchScannerProbeTest`)는 커밋하지 않고 지웠다.
+
+#### 5 확인 제출 전 개선점 11개
+(사용자가 정한 11개 목록은 이 세션에서 받지 못했다. 개선점 1·2는 지시문의 "질문 템플릿(개선점 1·2)"에서, 나머지는 이번 작업의 항목과 관찰에서 정리했다. 번호 대응이 다르면 알려 주면 맞춘다.)
+
+| # | 개선점 | 상태 |
+|---|---|---|
+| 1 | 근거 없이 나가는 고정 질문(`브랜드/api/연동` 키워드 템플릿) 정리 | 보류(질문 템플릿, 구현 금지) |
+| 2 | 질문 형식(보기, 추천 답, 한 번에 하나, 추정은 "~로 보입니다. 맞습니까?") | 보류(질문 템플릿, 구현 금지) |
+| 3 | 세션 유효 시간을 마지막 활동 기준 30분으로 | 이번 반영(2ad2b99) |
+| 4 | 확정 오류 때 "확인이 제출되었습니다" 문구가 남는 문제 | 이번 반영(2ad2b99) |
+| 5 | 세션 만료 시 "같은 요구사항으로 다시 시작" 버튼과 이전 발화 안내 | 이번 반영(2ad2b99) |
+| 6 | 작업 요약이 근거에 없는 역할을 지어내는 문제(지시 2번 교체) | 이번 반영(ed087bb) |
+| 7 | 요약 근거 문구의 내부 용어(구조 식별자, View-Script, CALLS, 토큰 일치) | 이번 반영(ed087bb). 번역기 프롬프트와 미등록 문구(INJECTS 등)는 보류 |
+| 8 | 진행 문구의 "메타그래프" | 이번 반영(ed087bb) |
+| 9 | 입력칸 예시 문구 | 이번 반영(ed087bb) |
+| 10 | 후보 선정: 한 동사의 동의어가 각각 일치 토큰으로 세어져 노이즈 후보(UserDto 등)가 생김 | 조사 중(원인 확인, 동작어 제거 효과 오프라인 비교 완료, 규칙 수정은 보류) |
+| 11 | `buildClarifyIntentChecked`가 EDT에서 돌아 IDE가 멈춤 | 조사 중(원인과 정지 시간 추정 확인, 수정은 보류) |
+
+#### 예상과 다른 점
+1. 스캐너에는 "빈도 필터"가 없었다. 토큰을 줄이는 것은 번역 상위 3개 컷, 영문 일반어 불용어, 후보 수 상한 8이다.
+2. 노이즈 후보의 직접 원인은 단어 하나가 동의어 둘로 풀려 "2개 일치" 규칙을 채우는 것이다.
+3. 동작어를 빼도 21개 평가 시나리오에서는 required 손실이 없었지만 IDE SR에서는 정당했던 `IpsController`가 함께 사라진다.
+4. 3-d의 EDT 문제는 단순 추정이 아니라 `idea.log`에 IntelliJ의 SEVERE 단언 스택으로 남아 있었다(이전 세션에도 여러 번).
+5. 이번 TTL 수정은 만료 시각만 바꾼 것이 아니라 확정이 실패해도 화면이 "제출됨"으로 굳는 문제까지 같이 있었다.
