@@ -519,7 +519,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
               <div style={{ display: 'flex', gap: '8px' }}>
                 <input
                   type="text"
-                  placeholder='예: "주소 매퍼 빼줘", "Bizgo API 써", "분석 시작해줘"'
+                  placeholder='예: "관리자 화면만 해당이에요", "이메일은 마스킹해서", "분석 시작해줘"'
                   value={naturalUtterance}
                   onChange={e => setNaturalUtterance(e.target.value)}
                   onKeyDown={e => {

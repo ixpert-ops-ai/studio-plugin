@@ -1029,7 +1029,7 @@ class Stage0ClarificationEngine(
 
                 [엄격한 규율]
                 1. 주어진 후보 파일 목록을 절대로 재판단, 평가, 추가, 또는 삭제하지 마십시오.
-                2. 탐색된 후보들이 왜 관련되어 있으며 어떤 역할을 하는지 사용자에게 친절하게 요약/설명하는 용도로만 작성하십시오.
+                2. 근거 문구에 없는 역할·기능을 만들지 말 것. 근거가 이름/토큰 일치뿐인 파일은 '이름이 비슷해 포함됨(확인 필요)'으로만 쓸 것. 사용자 제약(범위·대상 화면)과 맞지 않는 파일을 '핵심 변경 대상'이라 부르지 말 것.
                 3. 불필요한 인사말(예: 안녕하세요 등) 없이 요약 본문만 작성하십시오.
             """.trimIndent()
 
@@ -1038,7 +1038,8 @@ class Stage0ClarificationEngine(
             val selection = CandidateCap.select(activeItems, listOf(originalRequirement) + userStatements)
             val shownDescriptions = selection.shown.joinToString("\n") { item ->
                 val path = (item.hint as? LinkHint.ExistingRef)?.filePath ?: item.statement
-                val rationale = item.anchorRationale ?: ""
+                // 스캐너의 내부 표현(구조 식별자, View-Script, CALLS 등)은 사용자 문구로 바꿔서 프롬프트에 넣는다(저장된 근거는 그대로)
+                val rationale = RationaleWording.toUserWording(item.anchorRationale ?: "")
                 "- $path ($rationale)"
             }
             val candidateDescriptions = if (selection.omitted > 0) shownDescriptions + "\n" + CandidateCap.omittedLine(selection.omitted) else shownDescriptions

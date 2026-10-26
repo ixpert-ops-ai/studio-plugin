@@ -136,7 +136,7 @@ class WebviewActionRouter(private val project: Project) {
                     net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.supersedePending(project.locationHash)
                     println("[RefineGate] /clarify 수신 messageId=$messageId → 대기 중인 정제문 카드 정리를 호출했습니다(이전 분석은 시작하지 않음)")
 
-                    bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프 기반으로 요구사항을 구체화하고 있습니다...", messageId)
+                    bridge.sendMessage("analyze_start", "🔍 프로젝트 코드 구조를 바탕으로 요구사항을 구체화하고 있습니다...", messageId)
 
                     ApplicationManager.getApplication().executeOnPooledThread {
                         try {
@@ -1613,7 +1613,7 @@ class WebviewActionRouter(private val project: Project) {
         // 최종 제약 추출 실패 안내(이 세션에서 아직 알리지 않았을 때만 있다). 분석 결과 맨 앞에 한 줄로 보인다.
         constraintNotice: String? = null
     ) {
-        bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프 영향도 분석을 시작합니다...", messageId)
+        bridge.sendMessage("analyze_start", "🔍 프로젝트 코드 구조를 바탕으로 영향받는 파일 분석을 시작합니다...", messageId)
         constraintNotice?.let { bridge.sendMessageChunk(messageId, it + "\n\n") }
 
         ApplicationManager.getApplication().executeOnPooledThread {
