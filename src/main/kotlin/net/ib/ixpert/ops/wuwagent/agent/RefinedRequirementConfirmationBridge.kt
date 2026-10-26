@@ -76,6 +76,7 @@ class JcefRefinedRequirementConfirmationBridge(
 
         /** 새 /clarify가 시작되면 기다리는 확인 카드를 정리하고(이전 분석을 시작하지 않는다) 진행 표지를 푼다. */
         fun supersedePending(projectId: String) {
+            println("[RefineGate] 새 /clarify로 대기 카드 정리 projectId=$projectId 대기중=${registry.isPending(projectId)} 확인진행중=${activeHandoffs.contains(projectId)}")
             registry.supersede(projectId)
             activeHandoffs.remove(projectId)
         }
@@ -105,6 +106,7 @@ class JcefRefinedRequirementConfirmationBridge(
                     "refinedRequirement" to refinedRequirement,
                     "message" to "분석을 시작하기 전에 정제된 요구사항을 확인해 주세요. 그대로 진행하거나 고쳐서 진행할 수 있습니다."
                 )
+                println("[RefineGate] rid=${Integer.toHexString(originalRequirement.hashCode())} 카드 요청 전송 projectId=$projectId 정제문 ${refinedRequirement.length}자")
                 bridge.sendMessage("refinedConfirmation/request", Gson().toJson(payload), "system")
             } catch (e: Exception) {
                 registry.complete(projectId, null)

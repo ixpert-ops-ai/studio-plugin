@@ -58,6 +58,7 @@ object RefinedRequirementGate {
      * 고친 문장이 비어 있거나 보여 준 문장과 같으면 고치지 않은 것으로 본다.
      */
     fun apply(intent: ClarifyIntent, bridge: RefinedRequirementConfirmationBridge?): RefinedGateResult {
+        if (bridge == null) println("[RefineGate] rid=${Integer.toHexString(intent.originalRequirement.hashCode())} 브리지 null → 카드 없이 진행")
         if (bridge == null) return RefinedGateResult.Proceed(intent)
         val shown = shownRefined(intent)
         val decision = try {
@@ -65,6 +66,7 @@ object RefinedRequirementGate {
         } catch (e: Exception) {
             null
         }
+        println("[RefineGate] rid=${Integer.toHexString(intent.originalRequirement.hashCode())} 응답 결과: ${when (decision) { null -> "결정 없음(정제문 그대로 진행)"; RefinedConfirmationDecision.Proceed -> "이대로 분석"; is RefinedConfirmationDecision.ProceedEdited -> "수정(" + decision.text.trim().length + "자)"; RefinedConfirmationDecision.Cancel -> "취소"; RefinedConfirmationDecision.Superseded -> "새 /clarify가 대신함(분석 안 함)"; RefinedConfirmationDecision.TimedOut -> "시간 초과(정제문 그대로 진행)" }}")
         try {
             // 시간 초과로 진행하면 카드를 지우지 않고 비활성으로 바꿔 이유를 보인다. 그 밖에는 카드를 내린다.
             if (decision == RefinedConfirmationDecision.TimedOut) bridge.expireConfirmation() else bridge.hideConfirmation()

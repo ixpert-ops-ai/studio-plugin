@@ -134,6 +134,7 @@ class WebviewActionRouter(private val project: Project) {
 
                     // 이전 대화가 정제문 확인 카드에서 응답을 기다리고 있으면 정리한다(이전 분석은 시작하지 않는다)
                     net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.supersedePending(project.locationHash)
+                    println("[RefineGate] /clarify 수신 messageId=$messageId → 대기 중인 정제문 카드 정리를 호출했습니다(이전 분석은 시작하지 않음)")
 
                     bridge.sendMessage("analyze_start", "🔍 프로젝트 메타그래프 기반으로 요구사항을 구체화하고 있습니다...", messageId)
 
@@ -204,9 +205,11 @@ class WebviewActionRouter(private val project: Project) {
                     // 이미 확인 카드 대기나 분석 시작 중이면 두 번째 확인은 무시한다(세션은 첫 확인에서 이미 닫혔다)
                     if (net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.isHandoffActive(project.locationHash)) {
                         logger.info("Router: 정제문 확인이 진행 중이라 두 번째 확인을 무시합니다")
+                        println("[RefineGate] /clarify-confirm 두 번째 확인을 무시했습니다(확인 진행 중) project=${project.locationHash}")
                         return@invokeLater
                     }
                     val messageId = "analyze_${System.currentTimeMillis()}"
+                    println("[RefineGate] /clarify-confirm 수신 messageId=$messageId")
                     
                     val session = net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.getSession(project)
                     if (session == null) {
@@ -270,6 +273,7 @@ class WebviewActionRouter(private val project: Project) {
 
                     // Stage 1 전이용 ClarifyIntent 생성 및 저장 (ClarificationContract는 Analyze에서 생산)
                     val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
+                    println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 정제문 생성 완료(확정 버튼 경로) messageId=$messageId 원문 ${intentBuild.intent.originalRequirement.length}자, 정제문 ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).length}자, 앞80자: ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).take(80).replace("\n", " ")}")
                     net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.beginHandoff(project.locationHash)
                     net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
 
@@ -330,6 +334,7 @@ class WebviewActionRouter(private val project: Project) {
 
                             // COMPLETE 상태 전이: ClarifyIntent 생성 및 저장
                             val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
+                            println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 정제문 생성 완료(발화 완료 경로) messageId=$messageId 원문 ${intentBuild.intent.originalRequirement.length}자, 정제문 ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).length}자, 앞80자: ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).take(80).replace("\n", " ")}")
                             net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.beginHandoff(project.locationHash)
                     net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
 
@@ -385,12 +390,14 @@ class WebviewActionRouter(private val project: Project) {
                     val projectId = payload["projectId"]?.toString() ?: project.locationHash
                     // editedText가 있으면 "수정한 내용으로 분석", 없으면 "이대로 분석"
                     val editedText = payload["editedText"] as? String
+                    println("[RefineGate] 웹뷰 응답 수신: submit ${if (editedText == null) "이대로 분석" else "수정(" + editedText.length + "자)"} projectId=$projectId")
                     net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.completeConfirmation(projectId, editedText)
                 }
 
                 "refinedConfirmation/cancel" -> {
                     val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
                     val projectId = payload["projectId"]?.toString() ?: project.locationHash
+                    println("[RefineGate] 웹뷰 응답 수신: cancel projectId=$projectId")
                     net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.cancelConfirmation(projectId)
                 }
 
@@ -1561,6 +1568,7 @@ class WebviewActionRouter(private val project: Project) {
         messageId: String
     ) {
         val projectBase = java.io.File(project.basePath ?: "")
+        println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 브리지 판정: project null=false, 브리지 null=false → 카드 요청 messageId=$messageId")
         try {
             net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.handoff(
                 intent = intentBuild.intent,
@@ -1579,6 +1587,7 @@ class WebviewActionRouter(private val project: Project) {
                 },
                 // 오류가 아닌 안내 메시지(error 형식을 쓰지 않는다)
                 onCancelled = {
+                    println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 취소 → 분석을 시작하지 않고 안내(analyze_notice)만 보냅니다")
                     ApplicationManager.getApplication().invokeLater {
                         bridge.sendMessage("analyze_notice", "분석을 취소했습니다.", "analyze_notice_${System.currentTimeMillis()}")
                     }
@@ -1616,6 +1625,7 @@ class WebviewActionRouter(private val project: Project) {
                 )
                 val clarifyIntent = resolvedInput.effectiveIntent
                 val initialRequirement = resolvedInput.effectiveRequirement
+                println("[RefineGate] rid=${Integer.toHexString((inMemoryClarifyIntent?.originalRequirement ?: rawInput).hashCode())} 분석 시작 직전 SR(${initialRequirement.length}자, ${if (inMemoryClarifyIntent != null) "clarify 경유" else "/analyze 직접"}): ${initialRequirement.take(80).replace("\n", " ")}")
 
                 // 2. 단독 실행 시 stale contract 무차별 유입 방지 (previousContract = null 격리)
                 val previousContract: net.ib.ixpert.ops.wuwagent.agent.clarify.model.Stage0TransitionContract? = null
