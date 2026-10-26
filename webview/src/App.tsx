@@ -11,6 +11,7 @@ import { L1ClarificationForm } from './L1ClarificationForm';
 import { Stage3ConfirmationForm } from './Stage3ConfirmationForm';
 import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
+import { makeErrorBubble } from './errorDisplayLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
@@ -1489,7 +1490,10 @@ function App() {
           // matching messageId가 없어도 새 말풍선 생성 금지 → 빈 말풍선 방지
           const isStartSubType = data.subType.endsWith('_start');
           if (!isStartSubType) {
-            // matching 메시지가 없는데 완료/에러 신호가 오면 무시
+            // matching 메시지가 없는데 완료 신호가 오면 무시. 오류(error)는 버리지 않고 오류 말풍선으로 보인다(내용이 있는 말풍선이라 빈 말풍선이 아니다).
+            if (data.subType === 'error') {
+              return [...prev, makeErrorBubble(data.content, Date.now(), Math.random().toString(36).substring(2, 7))];
+            }
             return prev;
           }
 
@@ -1542,6 +1546,9 @@ function App() {
           newMessages.push(newMsg);
           return newMessages;
         });
+      } else if (data.subType === 'error') {
+        // messageId가 없는 오류도 버리지 않고 오류 말풍선으로 보인다.
+        setMessages(prev => [...prev, makeErrorBubble(data.content, Date.now(), Math.random().toString(36).substring(2, 7))]);
       }
     };
 
