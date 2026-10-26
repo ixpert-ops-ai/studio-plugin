@@ -269,26 +269,30 @@ class WebviewActionRouter(private val project: Project) {
                         }
                         return@invokeLater
                     }
-                    session.engine.summaryScheduler.invalidate()
-
-                    // Stage 1 전이용 ClarifyIntent 생성 및 저장 (ClarificationContract는 Analyze에서 생산)
-                    val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
-                    println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 정제문 생성 완료(확정 버튼 경로) messageId=$messageId 원문 ${intentBuild.intent.originalRequirement.length}자, 정제문 ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).length}자, 앞80자: ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).take(80).replace("\n", " ")}")
-                    net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.beginHandoff(project.locationHash)
-                    net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
-
-                    // 정제문 확인 카드는 응답을 기다리므로 EDT를 막지 않게 백그라운드에서 이어 간다
-                    ApplicationManager.getApplication().executeOnPooledThread {
-                        try {
-                            continueAfterClarify(project, bridge, intentBuild, messageId)
-                        } catch (e: Exception) {
-                            net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.endHandoff(project.locationHash)
-                            logger.error("Clarify confirm error", e)
-                            ApplicationManager.getApplication().invokeLater {
-                                bridge.sendMessage("error", "분석을 시작하지 못했습니다: ${e.message}", messageId)
-                            }
-                        }
-                    }
+                    // 정제문 생성(LLM 호출, 수 초~1분)과 이어지는 확인 카드는 EDT를 막지 않게 백그라운드에서 한다(EDT에서 네트워크를 쓰면 IDE가 멈춘다).
+                    // 확인 진행 표지는 백그라운드로 넘기기 전에 세워, 정제문을 만드는 동안 들어온 두 번째 확인도 무시되게 한다.
+                    net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyConfirmHandoff.start(
+                        net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyConfirmHandoff.Steps(
+                            invalidateSummary = { session.engine.summaryScheduler.invalidate() },
+                            beginHandoff = { net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.beginHandoff(project.locationHash) },
+                            // Stage 1 전이용 ClarifyIntent 생성 및 저장 (ClarificationContract는 Analyze에서 생산)
+                            buildIntent = {
+                                val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
+                                println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 정제문 생성 완료(확정 버튼 경로) messageId=$messageId 원문 ${intentBuild.intent.originalRequirement.length}자, 정제문 ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).length}자, 앞80자: ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).take(80).replace("\n", " ")}")
+                                intentBuild
+                            },
+                            removeSession = { net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project) },
+                            continueAfterClarify = { intentBuild -> continueAfterClarify(project, bridge, intentBuild, messageId) },
+                            onFailure = { e ->
+                                logger.error("Clarify confirm error", e)
+                                ApplicationManager.getApplication().invokeLater {
+                                    bridge.sendMessage("error", "분석을 시작하지 못했습니다: ${e.message}", messageId)
+                                }
+                            },
+                            endHandoff = { net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.endHandoff(project.locationHash) }
+                        ),
+                        runInBackground = { task -> ApplicationManager.getApplication().executeOnPooledThread { task() } }
+                    )
                 }
 
                 // ── 요구사항 대화형 발화 처리 (Stage 0: /clarify-utterance) ────────
