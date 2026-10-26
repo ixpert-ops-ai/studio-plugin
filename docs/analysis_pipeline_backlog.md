@@ -2381,3 +2381,195 @@ IDE의 14:47:19 `/clarify-confirm` 직후 오류는 **세션 유효 시간 초�
 3. 동작어를 빼도 21개 평가 시나리오에서는 required 손실이 없었지만 IDE SR에서는 정당했던 `IpsController`가 함께 사라진다.
 4. 3-d의 EDT 문제는 단순 추정이 아니라 `idea.log`에 IntelliJ의 SEVERE 단언 스택으로 남아 있었다(이전 세션에도 여러 번).
 5. 이번 TTL 수정은 만료 시각만 바꾼 것이 아니라 확정이 실패해도 화면이 "제출됨"으로 굳는 문제까지 같이 있었다.
+
+
+### [B-71] 확정 경로 EDT 해제, IDE 재테스트(02ef82a) 결함 원인 조사, 후보 선정 규칙 오프라인 비교, 개선점 표 정정 (2026-10-26)
+
+사전 확인: `git status -s` 비어 있음, HEAD = origin = 02ef82a. 실서버 LLM 호출 없음(후보 비교는 스캐너만, R4는 이미 남은 idea.log 덤프 재사용). 커밋: 1 = `c435a58`, 이 문서 = 2번째 커밋. 임시 조사 코드(스캐너 복사본 `ScratchScanner`, `ScratchRuleCompareTest`)는 커밋하지 않고 지웠다.
+
+#### 1 커밋 1(c435a58): `/clarify-confirm`의 정제문 생성을 EDT에서 뺐다
+**B-67 정리 정정**: B-67에서 "정제문 생성은 백그라운드"라고 정리한 것은 틀렸다. `handleCommand` 전체가 `invokeLater`(EDT)이고 `/clarify-confirm` 분기의 `buildClarifyIntentChecked`(최종 제약 추출 + 정제문 생성 LLM 호출)가 EDT에 남아 있었다. 이번에 `ClarifyConfirmHandoff`(새 파일)로 옮겼다. 가드(`isHandoffActive`), `getSession`, `processTurn`은 EDT에 남고, 확인 진행 표지(`beginHandoff`)는 백그라운드로 넘기기 **전에** 세운다.
+
+| 기대 | 확인한 테스트(`ClarifyConfirmHandoffTest` 외) | 결과 |
+|---|---|---|
+| e1 모의 LLM 3000ms에서 EDT 200ms 안에 반환 | e1 | 통과 |
+| e2 순서 | e2(실행 순서), e2b(라우터 소스 순서) | 통과. **기대와 다른 점**: 사전 등록 순서는 `buildIntent → beginHandoff`였으나 e4(정제문 생성 중 두 번째 확인 무시)를 지키려면 표지가 먼저여야 해서 `invalidate → beginHandoff → (반환) → buildIntent → removeSession → continueAfterClarify`로 했다 |
+| e3 실패 시 같은 형식의 화면 오류 | e3, e3b(실행기 거절), e3c(소스: `error`/"분석을 시작하지 못했습니다: …") | 통과. **이전 동작과 다른 점**: 이전에는 EDT에서 정제문 생성이 예외를 내면 채팅 오류 없이 IDE 예외만 남았다. 이제 기존 `error` 형식 메시지가 나간다 |
+| e4 두 번째 확인 무시(로그 1줄, 분석 1회) | e4, e4b | 통과 |
+| e5 세션 TTL(s1~s3) 불변 | e5 + `AnalyzeSessionTtlTest` 9/9 | 통과 |
+기존 테스트의 기대는 바뀐 것이 없다(`RefinedRequirementGateTest` 19/19, `FinalConstraintFailureNoticeTest` 4/4).
+
+#### 2-a handleCommand EDT 동기 네트워크·대량 I/O 호출 전수
+`handleCommand` 전 분기를 훑고(`WebviewActionRouter.kt:62-63`이 `invokeLater`) 비동기 래핑이 없는 LLM·HTTP·파일 호출만 골랐다. 스캔 결과의 가양성(에이전트는 `Task.Backgroundable`/`executeOnPooledThread` 안)은 뺐다.
+
+| 분기 | file:line | 호출 | max_tokens | 시간 근거 | idea.log `Network must not be accessed in EDT` |
+|---|---|---|---|---|---|
+| `/clarify-confirm` (수정 전) | `WebviewActionRouter.kt:275`(수정 전 번호) → `Stage0ClarificationEngine.buildClarifyIntentChecked` → `extractConstraintsChecked`(`:1576`, 500), `refineRequirement`(`:1501`, 300) | OpenAIClient 동기 2회(병렬) | 500, 300 | **16:13:21.525 수신 → 16:13:39.655 정제문 생성 완료 = 18.1초 EDT 정지**(오늘 재테스트). 13:22:26 → 13:22:31 = 4.7초(짧은 대화) | 현재 `idea.log` 2건(13:22:26, 16:13:21). **이 수정 대상(해결됨)** |
+| `/clarify-confirm` | `:248` `processTurn` | LLM은 `userStatement != null`일 때만(확정 버튼은 null) | 해당 시 500 | 호출 없음 | 해당 없음 |
+| `/task`(편집기 없음 `:839`, 편집기 있음 `:1020`) | `IntentAnalyzer.analyze` → `IntentAnalyzer.kt:57` `client.chat(systemPrompt, userInput)` | 키워드 매핑이 실패하면 LLM 의도 분류(동기) | 지정 안 함 → 기본 4096(`OpenAIClient.kt:106`; 짧은 호출 임계 1000 초과라 타임아웃도 설정값) | 09-09 08:43:14.988 → 08:43:16.526 = 1.5초, 09-02 16:45:34.774 → 16:45:36.260 = 1.5초, 16:45:36.280 → 16:45:37.347 = 1.1초 | `idea.3.log` 1건(09-09, 스택 `:925`), `idea.8.log` 1건(09-02, 스택 `:897`)(당시 줄번호). 소스 주석 `:1017`의 "LLM 호출 없이 즉시 반환"은 사실이 아님. **고치지 않음** |
+| `/saveMarkdown` | `:1308` 이하 `file.writeText` | 파일 저장 대화상자 뒤 소용량 쓰기 | 해당 없음 | 측정 없음(소용량) | 0 |
+| `/loadLastChat`, `/loadChat`, `/listChats`, `/deleteChat`, `/saveChat` | `:1436-1495` | `executeOnPooledThread` 안 | 해당 없음 | 수신→라우터 진입이 4.5초(14:34:12.4→16.9), 1.6초(15:33:26.5→28.1)로 늦은 것은 IDE 시작 직후 EDT 대기, 파일 로드는 0.2초(18KB, 6KB) | 0 |
+| `/explain`, `/chat`, `/find`, `/task` 에이전트, `/doc`, `/ragdoc`, ImpactAgent | `BaseAgent.execute` 등 | `Task.Backgroundable` | 각 에이전트 | EDT 아님 | 0 |
+| `/clarify`, `/clarify-utterance`, `/analyze`, `/implement`, `/fetchModels`, `/testConnection` | 각 분기 | `executeOnPooledThread` | 각 호출 | EDT 아님 | 0 |
+전체 샌드박스 로그(`idea.log`~`idea.8.log`)의 단언 발생: **`buildClarifyIntent*`/`extractConstraints*`/`refineRequirement` 경로 10건**(`idea.log` 2, `idea.1.log` 6, `idea.2.log` 2; 모두 `/clarify-confirm`의 정제문 생성, 줄번호는 빌드마다 다름: `:368`은 25d9305·c584460에서 `buildClarifyIntent` 줄로 확인, 나머지는 같은 호출 지점이나 줄번호만 검증하지 못함), **`IntentAnalyzer.analyze` 2건**(`/task`). 호출 한 번이 SEVERE 줄과 Throwable 줄 2줄로 찍혀 줄 수는 그 두 배다.
+
+#### 2-b 사용자 발화 없이 첫 화면에 "요청하신 조건을 해석하지 못했습니다…"와 요약 전송 2회
+- **판정: 2ad2b99 회귀는 배제. 문구가 나온 원인은 판단 불가(LLM 출력 문제로 보임).**
+- (1) 문구 `Stage0ClarificationEngine.kt:1518`(`constraintFailureNote`), 첫 화면에는 `initSession`의 `:387`(`constraintFailureLine()`)이 대화 첫 턴으로 넣는다. 조건 = 초기 제약 추출 실패(응답이 비었거나 `[Error]`, 예외, JSON 파싱 실패). 사용자 발화가 필요 없다.
+- (2) `idea.log`: /clarify 15:45:59, 15:46:51(새 채팅) 둘 다 뒤에 `/clarify-utterance`가 오지 않았다. 발화는 15:49:05에 하나(`{"command":"/clarify-utterance","text":"설문 상세 화면용이고, 이메일은 마스킹해서 내려줘를 보내 주세요."}`)가 두 번째 /clarify 뒤 2분 14초에 왔다. 저장된 채팅 JSON 두 첫 카드의 대화 이력이 모두 그 문구로 시작한다(초기 추출 실패 2회).
+- (3) 웹뷰가 `/clarify-utterance`를 보내는 곳은 `handleSendUtterance`(버튼·Enter)뿐이다. 2ad2b99는 오류 수신 상태, 세션 만료 UI, 다시 시작 버튼(`wuw:restart-clarify`, 클릭에서만 `/clarify` 전송)을 더했을 뿐 자동 전송이 없고 일반 `handleSend` `/clarify` 경로는 그대로다. 라우터 변경은 `touch` 호출과 `scheduleTaskSummary`의 `project` 인자뿐이다.
+- (4) 14:41(구 빌드): /clarify → analyze_clarify → 요약 1회, 발화 → 요약 1회. 현재 빌드: /clarify당 요약 1회(15:46:30, 15:47:22), 발화 뒤 1회(15:49:34). "두 번"은 /clarify 요청이 두 번이었기 때문이고 요청당 횟수는 두 빌드가 같다. 14:41 첫 카드에는 문구가 없었고(추출 성공) 15:45/15:46에는 있었는데 LLM 응답 본문이 로그에 없어 실패 이유는 알 수 없다.
+
+#### 2-c 패키지 선택 카드
+- **임계값**: `RequirementAnalysisPipeline.kt:139-140` `val threshold = 50`, `projectGraph.totalFileCount > threshold`이면 카드(`ScopeSelectionBridge.requestScopeSelection`, `:159`). survey_admin은 132개(재테스트 로그 "132개 파일")라 항상 뜬다. 트리 구성값 `ScopeConfig`(`ScopeSelector.kt:19-25`): `minFilesPerNode=2, maxDepth=15, maxSelections=15, maxFiles=500, warningThreshold=300`. 카드 응답 대기 5분(`ScopeSelectionBridge.kt:28`). 선택이 없거나 취소(null)면 `hardLimit = 10000`(`:197`) 이하는 안내 한 줄만 보이고 전체 그래프로 진행, 초과면 예외.
+- **평가 하네스**: `project == null`이면 브리지를 부르지 않는다(`:146-157`). `E2E_TARGET_GT == "OrdrInqrListResponse"`일 때만 주문 도메인 패키지(`/or/`)를 모의 선택하고 그 외는 `null` → 전체 그래프. 즉 하네스는 카드를 보지 않고 전체 그래프로 돈다. (Stage 0 하네스는 엔진만 쓰므로 해당 없음)
+- **Stage 1 범위 영향**: 선택하면 `ScopeSelector.buildSubMetaGraph`가 만든 `SubMetaGraph`가 `workingMetaGraph`(`:140`)가 되어 이후 탐색기에 `graph = workingMetaGraph`(`:231`)로만 전달된다. 즉 선택 밖 파일은 탐색기에 보이지 않는다. 하위 그래프가 비면 전체로 되돌린다(`:164-166`). 선택 패키지가 참조하는 외부 파일은 최대 50개를 자동 포함(`:178-186`, 유틸 제외). 오늘 재테스트는 카드를 취소(16:14:48.870 표시 → 16:16:18.896 취소, 90초)해 전체 132개로 진행했다.
+- **Stage 0 후보 패키지 사전 체크 가능 위치**: Stage 0 후보는 이미 `domainPackage`를 갖는다(`Stage0ClarificationEngine.kt:128`, `:289`; `BrotherAnalogyScanner.extractDomainPackage` `:178`). `RequirementAnalysisPipeline.kt:143-159`에서 카드를 띄울 때 `clarifyIntent`(파라미터)의 후보 파일 디렉터리를 `buildDirectoryTree` 결과에 미리 체크하는 방식이 가능하다. 다만 지금 `ClarifyIntent`에는 후보 파일 경로 목록이 없다(`anchorTokens`, `excludedFiles` 등만). 구현하지 않았다.
+
+#### 2-d 결과 화면
+1. **"(사유: 제공하지 않음)"**: `FileRelevanceVerifier.kt:69` `noticeLines()`의 고정 문자열. 출력 축소 형식(V2)은 제거 후보 번호만 받고 사유를 받지 않는다(`CompactResponse.removedFiles: List<Int>`). 요약(`reasoning`)이 무관 판정 사유를 문장으로 담고 있으나 후보와 연결된 구조 데이터는 없다. 연결 가능한 데이터는 `removedReasons: Map<String,String>`(`:60` 부근, "모델이 준 것만")인데 V2에서는 근거 미제시 제거에만 채워진다.
+2. **요약과 파일 표의 출처**: **같은 LLM 응답**이다. Stage 3 호출은 `16:20:35.312 → 16:21:02.954` 한 번(`toolCalls=1, finishReason=stop`)뿐이고, 요약은 `reasoning`, 표의 수정 사유는 같은 응답의 `requiredFiles[].reason`(`FileRelevanceVerifier.kt:291`, `:395`)이다. 한 응답 안의 모순이다.
+3. **sql_survey.xml과 응답자 이메일**: `EMAIL`은 `sql_survey.xml`에서 4줄(`:670`, `:841`, `:857`, `:889`)뿐이고 모두 관리자 계정 테이블 `ISSW_ADMIN_USER`(`insertUser` `:830-857`, `updateUser` `:866-889`, 그리고 주석 처리된 `selectUser` `:654-712`)이다. 설문 결과 조회 `selectSurveyRAnsList`(`:1218`, `resultType="HashMap"`)와 `selectSurveyRAnsListCN`(`:1334`), `selectResultList`(`:5`)에는 이메일 컬럼이 없다. 요약의 "기존 select로 이메일을 조회"는 **근거가 없다**. `sql_address.xml`은 시도·시군·동 주소 테이블(`ISSW_ADDRESS_SIDO` 등, `:6-14`)로 이메일도 없고 연락처 주소록이 아니다. (이름 때문에 후보에 올랐을 뿐이다.)
+4. **Stage 3에서 제외된 시드 `SurveyDaoImpl`이 메타데이터에 시드로 남는 위치**: `RequirementAnalysisPipeline.kt:460`과 `:482`가 `discoveryResult.metadata.seedClasses`(Stage 1 결과, Stage 3 이후에도 불변)를 그대로 출력한다.
+5. **"총 30개 대상 중 3개"의 30**: `RequirementAnalysisPipeline.kt:483-484` `discoveryResult.metadata.totalCandidates + suggestedNewFiles.size`, `totalCandidates`는 `AdaptiveFileDiscovery.kt:61` `expandedFiles.size`(확장·평가 대상 수)다. 화면의 진행 문구 "30개 평가 대상"과 같은 값이며 최종 후보 14개와 다른 수다.
+
+#### 2-e `/restore` 호출
+`WebviewActionRouter.kt:425` `/restore` 분기가 있으나 오늘 재테스트 로그에 `/restore` 수신은 **없다**(14:34, 15:33의 `/loadLastChat`만 있음, LLM 호출 없음, 파일 로드 0.2초).
+
+#### 3 후보 선정 규칙 오프라인 비교(스캐너 복사본, LLM 없음, 규칙 변경 아님)
+규칙 정의(비교용 복사본): **R0** 현재(`:241`). **R1** 같은 한글 원어(`translate`가 돌려준 영문 동의어들)를 일치 **1개**로 센다. **R2** R1 + 한글 `설문*`을 영문 `survey` 토큰으로도 인정. **R3** R1 + 한글 원어가 후보 파일의 한글 주석·자연어명에 있으면 그 원어를 일치 1개로 인정(클래스 이름 토큰 매칭 보강). **R4** Stage 1 탐색기 Turn 1 검색어 기준 상위 결과(LLM이 필요해 기존 idea.log 덤프 재사용, 덤프가 있는 IDE SR 2건만). 운영 기본값 `proposalBudget = 8`. R0는 B-70 표와 후보 수가 같다(D1 16, D4 558, SR-08 623, SR-09 264 등), IDE SR-B는 IDE의 8개와 같다.
+
+| 시나리오 | 그래프 | required | R0 적중/후보 | R1 적중/후보 | R2 적중/후보 | R3 적중/후보 | R0 대비 잃은 required (R1, R2, R3 공통) |
+|---|---|---|---|---|---|---|---|
+| D1 | survey_admin | 8 | 7/16 | 7/16 | **8**/16 | 7/16 | 0 |
+| D2 | apc | 5 | 2/8 | 2/8 | 2/8 | 2/8 | 0 |
+| D3 | apc | 5 | 1/8 | 1/8 | 1/8 | 1/8 | 0 |
+| D4 | ism | 4 | 0/558 | 0/**8** | 0/8 | 0/8 | 0 |
+| D5 | survey_admin | 1 | 1/16 | 1/16 | 1/16 | 1/16 | 0 |
+| S1 | member_market | 3 | 3/16 | **1**/32 | 1/32 | 1/22 | **ChatService.java, ChatRoomResponse.java** |
+| S2 | member_market | 4 | 2/24 | **3**/26 | 3/26 | 2/19 | 0 |
+| S3 | survey_admin | 4 | 1/16 | 1/**8** | 1/8 | 1/8 | **KmcisServiceImpl.java**(다른 1건으로 대체) |
+| SR-01 | survey_admin | 2 | 0/0 | 0/0 | 0/0 | 0/0 | 0 |
+| SR-02 | survey_admin | 4 | 1/16 | 1/16 | 1/16 | 1/16 | 0 |
+| SR-04 | member_market | 1 | 1/18 | 1/18 | 1/18 | 1/18 | 0 |
+| SR-05 | member_market | 2 | 0/13 | 0/13 | 0/13 | 0/13 | 0 |
+| SR-07 | ism | 2 | 0/26 | 0/26 | 0/26 | 0/26 | 0 |
+| SR-08 | ism | 3 | 0/623 | 0/22 | 0/22 | 0/177 | 0 |
+| SR-11 | apc | 4 | 0/8 | 0/8 | 0/8 | 0/8 | 0 |
+| SR-12 | apc | 2 | 1/14 | 1/14 | 1/14 | 1/14 | 0 |
+| SR-03 | survey_admin | 1 | 0/16 | 0/16 | 0/16 | 0/16 | 0 |
+| SR-06 | member_market | 2 | 0/0 | 0/0 | 0/0 | 0/0 | 0 |
+| SR-09 | ism | 3 | 1/264 | 1/264 | 1/264 | 1/258 | 0 |
+| SR-10 | apc | 1 | 0/8 | 0/8 | 0/8 | 0/8 | 0 |
+| SR-05X | member_market | 2 | 0/13 | 0/13 | 0/13 | 0/13 | 0 |
+| **합계** | | | **21 / 후보 1681** | 20 / 540 | 21 / 540 | 19 / 672 | R1·R2·R3 모두 **required 3건 이탈**(S1 2건, S3 1건)이고 얻은 것은 S2 +1(R1·R2), D1 +1(R2) |
+
+요약: **셋 모두 required 손실 0이라는 기준을 충족하지 못한다**(S1의 ChatService·ChatRoomResponse, S3의 KmcisServiceImpl이 빠진다). 후보 수는 ism 그래프에서 크게 줄지만(D4 558 → 8, SR-08 623 → 22) 그 일부는 정당한 후보의 손실과 같은 이유(일치 개수가 줄어 규칙 `matchCount >= 2`를 못 채움)이다. R2의 D1 +1은 `survey` 토큰 추가의 효과다. 규칙 수정은 하지 않았다.
+
+**IDE SR 두 건 후보 전체**(survey_admin, 번호는 스캐너 출력 순서). 15번 뒤의 16번째 줄은 파일이 아닌 안내 문구("기존 형제 클러스터…")다.
+
+| 규칙 | SR | 후보 수 | SurveyServiceImpl | SurveyDao | sql_survey.xml | IpsController 유지 | UserDto 제거 |
+|---|---|---|---|---|---|---|---|
+| R0 | A 설문 기간 연장 | 16 | 없음 | 없음 | 없음 | 유지 | 아니오(포함) |
+| R1 | A | 7 | **있음** | 없음 | 없음 | 유지 | 예 |
+| R2 | A | 7 | 있음 | 없음 | 없음 | 유지 | 예 |
+| R3 | A | 16 | 없음 | 없음 | 없음 | 제거됨 | 아니오 |
+| R4 | A(덤프, 정제 SR, 검색어 "Survey Period Valid") | 10 | 있음 | **있음** | **있음** | 없음 | 예(없음) |
+| R0 | B 응답자 이메일 | 8 | 없음 | 없음 | 없음 | 유지 | 아니오 |
+| R1 | B | 8 | **있음** | 없음 | **있음** | 유지 | 예 |
+| R2 | B | 8 | 없음(예산 경쟁에서 `SurveyPartExportCli`가 대신 들어옴) | 없음 | 있음 | 유지 | 예 |
+| R3 | B | 8 | 있음 | 없음 | 있음 | 유지 | 예 |
+| R4 | B(덤프, 정제 SR, 검색어 "survey response email") | 10 | 있음 | 있음 | 있음 | 없음 | 예(없음) |
+
+- R0 A(16): UserServiceImpl, UserDto, sql_user.xml(mssql), KmcisServiceImpl, CallbackInfoDto, sql_user.xml(mysql), IpsController, ReviewDto, AlimtalkTemplateBatchRunner/Repository/Job, IbCenterApiServiceImpl/IbCenterApiService, AlimtalkChnlDto, AlimtalkTmplDto, 안내 문구. R1·R2 A(7): IbCenterApiServiceImpl, ReviewDto, UserServiceImpl, SurveyDto, KmcisServiceImpl, SurveyServiceImpl, IpsController. R3 A는 R0와 거의 같은 16개(UserServiceImpl, ReviewDto, sql_user.xml, IbCenterApiServiceImpl(2회 중복), SurveyDto, KmcisServiceImpl, UserDto, Alimtalk* 등).
+- R0 B(8): survey_list.jsp, survey.list.js, IpsController, UserDto, sql_user.xml, survey_result.jsp, survey.result.js, UserServiceImpl. R1·R3 B(8): survey_list.jsp, survey.list.js, IpsController, sql_address.xml, survey_result.jsp, survey.result.js, SurveyServiceImpl, sql_survey.xml. R2 B(8): R1·R3의 SurveyServiceImpl 자리에 SurveyPartExportCli.
+- R4 B(10): SurveyDao, SurveyDaoImpl, SurveyServiceImpl, sql_survey.xml, survey.preview.js, SurveyPartExportCli/Job/Runner, SurveyDto, SurveyQImgDto. 두 번째 검색어 "설문 응답자 이메일"은 7건(ClosingLinkDto, SurveyPartExportRunner, SurveyDaoImpl, ReviewDto, SurveyDto, SurveyQImgDto, SurveyServiceImpl).
+- R4의 한계: 덤프가 있는 2건뿐이고, 덤프의 SR은 정제 SR(75자)이며 LLM이 검색어를 만든 결과라 같은 SR이라도 재현을 보장하지 않는다. 21개 시나리오에는 덤프가 없어 R4 required 손실은 **측정하지 못했다**.
+
+**IDE 응답자 이메일 SR의 단계별 교집합**(2026-10-26 16:13~16:21 `idea.log`; Stage 0 후보는 B-70에서 IDE 8개와 스캐너 8/8 일치 확인)
+
+| 집합 | 파일 |
+|---|---|
+| Stage 0 후보 8 | survey_list.jsp, survey.list.js, IpsController, UserDto, sql_user.xml(mssql), survey_result.jsp, survey.result.js, UserServiceImpl |
+| Stage 1 Turn 1 상위 10 | SurveyDao, SurveyDaoImpl, SurveyServiceImpl, sql_survey.xml, survey.preview.js, SurveyPartExportCli, SurveyPartExportJob, SurveyPartExportRunner, SurveyDto, SurveyQImgDto |
+| Stage 3 카드 14 | SurveyServiceImpl, SurveyDto, SurveyDaoImpl, SurveyService, AddressDaoImpl, SurveyDao, AddressDao, sql_survey.xml, sql_address.xml, SurveyQImgDto, UserServiceImpl, ReviewDto, ClosingLinkDto, SearchHistRDto |
+| 최종 3 | sql_survey.xml, SurveyDto, SurveyServiceImpl |
+
+- Stage 0 ∩ Turn 1 = **0건**, Stage 0 ∩ 카드 14 = 1건(UserServiceImpl, 이름 유사로 포함된 노이즈), Stage 0 ∩ 최종 3 = **0건(0/8)**. 네 집합의 공통 파일은 없다.
+- Turn 1 상위 10 ∩ 카드 14 = 6건(SurveyDao, SurveyDaoImpl, SurveyServiceImpl, sql_survey.xml, SurveyDto, SurveyQImgDto). **Turn 1 상위 10 ∩ 최종 3 = 3건(최종 3개가 모두 Turn 1 상위 10 안)**.
+- 참고(규칙 비교): R1·R3의 Stage 0 후보는 최종 3 중 SurveyServiceImpl, sql_survey.xml 2건을 포함한다.
+
+**사전 번역이 없는 한글 명사**(23개 SR = 평가 21개 + IDE 2건, 그래프 한글 주석·자연어명에서 부분 문자열로 찾음). 형태소 분석이 없어 `contentTokens`에는 조사 붙은 어절과 용언도 섞여 있어 아래는 사람이 도메인 명사만 고른 목록이다. 부분 문자열 검색이라 짧은 단어(이전, 현재 등)는 넓게 걸린다. 출처: 이 조사의 스캐너 비교 출력(`TEMP` 보관).
+- 번역 없음 + 그래프 주석·자연어명에 **있음**: 설문(survey_admin), 발송(survey_admin, apc, ism), 메시지(전 그래프), 재발급(apc), 참여(survey_admin, apc, ism), 판매(ism, member_market), 예약(survey_admin, ism, member_market), 조직(ism), 학교(member_market), 회사(survey_admin, ism), 배너·공지·팝업·노출(apc, ism), 건수·비율(survey_admin/apc/ism), 이미지(전 그래프), 종료·시작·일시(apc, ism), 기간·검증·당일(survey_admin 등), 이메일(apc, ism, member_market), 브랜드(apc, ism), 안내(survey_admin, apc, ism).
+- 번역 없음 + 주석에서 **못 찾음**: **설문조사**, 브랜드메시지, 발급업체, 응답자, 금칙어, 익일, 내보내기, 스토어(별), 자정까지(자정). ("비밀번호"는 apc·ism 주석에 있어 위 목록에 해당.)
+- 위 두 목록에서 이번 IDE SR에 직접 걸리는 것: `설문조사`(번역 없음, 주석에도 없음 → survey 클래스로 연결할 길이 한글 경로에서도 막힘), `설문`(주석에는 있음, 번역 없음), `응답자`(번역·주석 모두 없음), `이메일`(번역 없음, survey_admin 주석에는 없고 다른 그래프에만 있음).
+
+#### 4 개선점 표(확인 제출 전 1~11은 원래 번호를 유지, 12~23 추가)
+상태 열의 "IDE 확인"은 2026-10-26 02ef82a 재테스트에서 화면 또는 로그로 확인했음을 뜻한다.
+
+| # | 개선점 | 상태 |
+|---|---|---|
+| 1 | 개인정보 질문 템플릿(근거 없이 나가는 고정 질문) | 보류(질문 템플릿, 구현 금지) |
+| 2 | 가정 한 줄 | 보류 |
+| 3 | 지어낸 설명 차단(요약 지시 2번) | 반영(ed087bb), IDE 확인 |
+| 4 | 내부 용어(구조 식별자·View-Script·CALLS·토큰 일치) | 반영(ed087bb), IDE 확인. 남은 것: 번역기 프롬프트, 미등록 문구(INJECTS 등), **Stage 1 탐색기의 "메타그래프"** |
+| 5 | 입력칸 예시 | 반영(ed087bb), IDE 확인 |
+| 6 | 동작어 이중 계산(한 원어 → 동의어 둘이 각각 일치) | 비교 중(R1: required 3건 이탈로 기준 미충족, 후보 수 1681 → 540) |
+| 7 | 설문 계층 누락(사전 번역 없음) | 비교 중(R2: D1 +1이나 required 3건 이탈, 설문조사는 주석에도 없음) |
+| 8 | 범위 표현 반영 | 구조 |
+| 9 | SCOPE → Stage 1 | 구조 |
+| 10 | 화면 재구성 | 구조 |
+| 11 | 진행 문구 | 카드 대기 중에도 "분석 진행 중" 문구가 남음(사용자 보고, 로그로는 화면 문구를 확인할 수 없음) |
+| 12 | 요약의 무관·확인필요 후보 접기 | 구조 |
+| 13 | 정제문 카드에 반영 조건·가정 칸 | 구조 |
+| 14 | 카드 대기 상태 문구 | 즉시 |
+| 15 | 패키지 선택 임계값·사전 체크·버튼명 | 조사(2-c: 임계값 50, 사전 체크 위치 후보 `:143-159`, `ClarifyIntent`에 후보 경로 없음) |
+| 16 | 탐색 힌트 카드 비차단 | 구조 |
+| 17 | Stage 0 후보를 Stage 1 방식으로 또는 미표시 | 비교 중(R4: 덤프 2건, Stage 0 ∩ Turn 1 = 0, Turn 1 상위 10이 최종 3을 모두 포함) |
+| 18 | Stage 1 "메타그래프"·"(주석 없음)" | 즉시 |
+| 19 | Stage 3 카드 기본 끔·근거 표시 | 구조 |
+| 20 | 이웃 관계 파일 포함 사유 | 구조 |
+| 21 | 요약·표 모순(소스 미확인) | 조사(2-d: 같은 응답 안의 모순, sql_survey.xml에 응답자 이메일 select 없음) |
+| 22 | "사유: 제공하지 않음" | 조사(2-d: `FileRelevanceVerifier.kt:69` 고정 문구, V2 형식이 제거 사유를 받지 않음) |
+| 23 | 판단 지점을 정제문 카드 하나로 | 설계 |
+| 확인 제출 뒤-a | 세션 유효 시간 마지막 활동 기준 30분 | 반영(2ad2b99), IDE 확인(5분 초과 확정 성공) |
+| 확인 제출 뒤-b | 확정 오류 때 "확인이 제출되었습니다" 문구 | 반영(2ad2b99), ui-check 확인(IDE에서는 오류가 나지 않아 미관찰) |
+| 확인 제출 뒤-c | 다시 시작 버튼·이전 발화 안내 | 반영(2ad2b99), ui-check 확인(IDE 미관찰) |
+| 추가 | `/clarify-confirm`의 EDT LLM 호출 | 반영(c435a58), 실 IDE 재확인 필요 |
+
+#### 5 IDE 재테스트(02ef82a) 기록
+**판단 지점 5개**(사용자가 직접 결정하거나 기다린 곳, 시각은 `idea.log`)
+
+| # | 지점 | 사용자 행동 | 결과 영향 |
+|---|---|---|---|
+| 1 | clarify 대화 | 발화 1회(15:49:05) 뒤 확정(16:13:21) | 확정까지 세션 활동 기준 23분 47초. 정제문 생성 중 EDT가 18.1초 멈춤(c435a58 이전 빌드) |
+| 2 | 정제문 확인 카드(16:13:39.761 표시) | 69.0초 뒤 **수정 제출**(16:14:48.774, 원문 50자 → 75자) | 분석 SR이 정제문 수정본으로 바뀜(clarify 경유 SR 75자) |
+| 3 | 패키지 선택 카드(16:14:48.870) | 90.0초 뒤 **취소**(16:16:18.896) | 전체 132개 그래프로 진행 |
+| 4 | 탐색 힌트 카드(L1, 16:16:33.026) | 68.7초 뒤 **취소**(16:17:41.698) | Turn 2~5 계속, 시드 SurveyServiceImpl, SurveyDto, SurveyDaoImpl 확정(16:19:18.699) |
+| 5 | Stage 3 확인 카드(16:19:18.883) | 76.4초 뒤 **취소**(16:20:35.302) | 14개 후보 그대로 LLM 검증(27.6초), 최종 3개 |
+
+- Stage 0 후보 8개 ∩ 최종 결과 = **0/8**(위 표).
+- **정제문 카드 IDE 첫 표시**: 확인(`refinedConfirmation/request` 16:13:39.761, 응답 `submit 수정(75자)`, `hide`).
+- **5분 초과 확정 성공**: 확인(세션 생성 15:46:51 후 26분 30초, 마지막 활동(요약 15:49:34) 후 23분 47초 뒤의 확정이 성공해 오류 없음).
+- **접힌 제외 목록 IDE 첫 표시**: `analyze_removed` 메시지가 16:21:03.130에 웹뷰로 전송된 것을 로그로 확인(화면 렌더링은 로그로 확인할 수 없어 사용자 확인 필요). 결과 본문에는 "Stage 3에서 제외된 후보 11개 … (사유: 제공하지 않음)"이 그대로 나왔다.
+- 카드 대기 합계: 69.0 + 90.0 + 68.7 + 76.4 = 304.1초(5분 4초)의 사용자 대기 구간(카드 4개 + 대화 확정 전 대기는 제외).
+
+#### 6 검증(커밋 c435a58 기준)
+| 검증 | 결과 |
+|---|---|
+| 전체 테스트(서버 의존 14클래스 제외) | 594개(이전 585 + 새 9), 실패 42, 건너뜀 18. 실패 42건은 기준과 판정 차이 0, 관찰 차이 0 |
+| clarify 패키지 | 278개(37 스위트), 실패 1(기존 1건), 건너뜀 3 |
+| 하네스 | EXACT_MATCH 5/5, MATCH_EXCLUDING 2/2 |
+| 실패 메시지 diff | 0 |
+| selftest | 24/24 |
+| 웹뷰 로직 테스트 | 43/43 |
+| ui-check | 30/30 |
+| 웹뷰 변경 | 없음(이번 작업은 라우터와 새 핸드오프 클래스만) |
+
+#### 예상과 다른 점
+1. 사전 등록한 e2 순서(`buildIntent → beginHandoff`)는 e4를 만족하지 못해 `beginHandoff`를 앞으로 옮겼다.
+2. EDT 네트워크 호출은 `/clarify-confirm` 외에 `/task`의 `IntentAnalyzer` LLM 분류가 하나 더 있다(수정 안 함).
+3. 후보 선정 대안 R1·R2·R3 모두 required 3건을 잃어 "손실 0" 기준을 못 채웠다. 후보 수는 크게 줄었다.
+4. 요약의 "기존 select로 이메일 조회"는 소스에서 확인되지 않는다(`sql_survey.xml`의 EMAIL은 관리자 계정 쿼리뿐).
+5. Stage 1 Turn 1 상위 10건이 최종 3개를 모두 담았지만 Stage 0 후보와는 겹침이 없다.
+6. 확정 후 카드가 4개 연속(정제문, 패키지, 탐색 힌트, Stage 3)이라 사용자 대기만 약 5분이다.
