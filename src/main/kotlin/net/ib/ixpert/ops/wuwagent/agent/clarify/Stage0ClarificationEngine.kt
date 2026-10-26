@@ -1531,6 +1531,22 @@ class Stage0ClarificationEngine(
 
     private val EXTRACT_FAIL_BODY_LIMIT = 500
 
+    /** 제약 추출 응답의 JSON 스키마(배열, kind는 ConstraintKind 값). 이스케이프 안 된 따옴표 같은 깨진 JSON을 서버가 만들지 못하게 한다. */
+    internal val CONSTRAINT_SCHEMA: Map<String, Any> = mapOf(
+        "type" to "array",
+        "items" to mapOf(
+            "type" to "object",
+            "properties" to mapOf(
+                "kind" to mapOf("type" to "string", "enum" to ConstraintKind.values().map { it.name }),
+                "value" to mapOf("type" to "string"),
+                "rawStatement" to mapOf("type" to "string"),
+                "evidence" to mapOf("type" to "string")
+            ),
+            "required" to listOf("kind", "value", "rawStatement", "evidence"),
+            "additionalProperties" to false
+        )
+    )
+
     /** 제약 추출 실패 로그 한 줄: 종류(응답 없음, [Error], 예외, 파싱 실패)와 응답 본문 앞 500자(짧으면 전체). 줄바꿈은 한 줄로 보이게 \\n으로 적는다. */
     internal fun extractFailLogLine(kind: String, body: String?, error: Throwable? = null): String {
         val text = body ?: ""
@@ -1586,7 +1602,14 @@ class Stage0ClarificationEngine(
 
             val userPrompt = userStatements.joinToString("\n") { "- $it" }
 
-            val response = client.chat(
+            // 구조화 출력(JSON 스키마)을 먼저 걸고, 서버가 지원하지 않거나 거부·오류면 기존 호출로 대체한다(파싱 경로는 그대로).
+            val structured = try {
+                client.chatJsonSchema(systemPrompt, userPrompt, 500, "constraints", CONSTRAINT_SCHEMA)
+            } catch (e: Exception) {
+                null
+            }
+            if (structured == null) println("[ExtractSchema] 구조화 출력 응답 없음 → 기존 호출로 대체")
+            val response = structured ?: client.chat(
                 systemPrompt = systemPrompt,
                 userCode = userPrompt,
                 maxTokens = 500

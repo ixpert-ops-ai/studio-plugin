@@ -86,6 +86,31 @@ class OpenAIClient(
         userCode: String,
         maxTokens: Int?,
         onChunk: ((String) -> Unit)?
+    ): OllamaChatResponse? = chatInternal(systemPrompt, userCode, maxTokens, onChunk, null)
+
+    /** response_format json_schema(vLLM 구조화 출력)를 건 비스트림 호출. 오류·빈 응답·서버 거부는 null(호출부가 기존 chat으로 대체). */
+    override fun chatJsonSchema(
+        systemPrompt: String,
+        userCode: String,
+        maxTokens: Int?,
+        schemaName: String,
+        schema: Map<String, Any>
+    ): OllamaChatResponse? {
+        val responseFormat = mapOf(
+            "type" to "json_schema",
+            "json_schema" to mapOf("name" to schemaName, "strict" to true, "schema" to schema)
+        )
+        val r = chatInternal(systemPrompt, userCode, maxTokens, null, responseFormat)
+        val content = r?.message?.content
+        return if (content.isNullOrBlank() || content.startsWith("[Error]")) null else r
+    }
+
+    private fun chatInternal(
+        systemPrompt: String,
+        userCode: String,
+        maxTokens: Int?,
+        onChunk: ((String) -> Unit)?,
+        responseFormat: Map<String, Any>?
     ): OllamaChatResponse? {
         val settings = getEffectiveSettings()
         val baseUrl = when (settings.apiType) {
@@ -98,13 +123,14 @@ class OpenAIClient(
             mapOf("role" to "system", "content" to systemPrompt),
             mapOf("role" to "user", "content" to userCode)
         )
-        val requestBody = mapOf(
+        val requestBody = mutableMapOf<String, Any>(
             "model" to settings.model,
             "messages" to messagesList,
             "stream" to (onChunk != null),
             "temperature" to settings.temperature,
             "max_tokens" to (maxTokens ?: 4096)
         )
+        if (responseFormat != null) requestBody["response_format"] = responseFormat
         val jsonPayload = gson.toJson(requestBody)
         val isStreaming = onChunk != null
         val shortCall = !isStreaming && (maxTokens ?: 4096) <= SHORT_CALL_MAX_TOKENS
@@ -237,7 +263,8 @@ class OpenAIClient(
                 else ->
                     "[Error] OpenAI 서버 통신 실패: ${e.message} ($serverUrl)"
             }
-            logger.error(errorMsg, e)
+            // 구조화 출력 시도의 거부·오류는 호출부가 기존 호출로 대체하므로 경고로만 남긴다
+            if (responseFormat != null) logger.warn(errorMsg) else logger.error(errorMsg, e)
             try {
                 if (debugEntry != null) {
                     debugEntry.durationMs = System.currentTimeMillis() - startMs
@@ -249,7 +276,8 @@ class OpenAIClient(
             OllamaChatResponse(null, null, OllamaMessage("assistant", errorMsg), true)
         } catch (e: Exception) {
             val errorMsg = "[Error] 예상치 못한 전송/파싱 오류: ${e.message} ($serverUrl)"
-            logger.error(errorMsg, e)
+            // 구조화 출력 시도의 거부·오류는 호출부가 기존 호출로 대체하므로 경고로만 남긴다
+            if (responseFormat != null) logger.warn(errorMsg) else logger.error(errorMsg, e)
             try {
                 if (debugEntry != null) {
                     debugEntry.durationMs = System.currentTimeMillis() - startMs

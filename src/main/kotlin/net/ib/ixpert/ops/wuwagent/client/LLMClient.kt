@@ -21,5 +21,17 @@ interface LLMClient {
         return null
     }
 
+    /**
+     * JSON 스키마(구조화 출력)를 걸어 비스트림으로 호출한다. 서버가 지원하지 않거나 거부하거나 오류면 null을 돌려주고,
+     * 호출한 쪽은 기존 `chat` 경로로 대체한다. 기본 구현은 지원하지 않음(null)이다.
+     */
+    fun chatJsonSchema(
+        systemPrompt: String,
+        userCode: String,
+        maxTokens: Int?,
+        schemaName: String,
+        schema: Map<String, Any>
+    ): OllamaChatResponse? = null
+
     fun fetchModels(baseUrl: String, apiKey: String): List<String>?
 }
