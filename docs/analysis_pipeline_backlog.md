@@ -1763,3 +1763,47 @@ ADR-001과의 관계: 새 필드도 디스크에서 자동으로 읽지 않으�
 4. 기존 코드에 이미 "도구를 쓰는 다중 턴 루프"와 "턴 사이 사용자 피드백 브리지"(`AgenticSeedSelector.kt:17`, :234 `clarificationBridge.requestClarification`)가 있다. 새 에이전트 루프를 처음부터 만들 필요는 없다.
 5. `findExclusionCandidates`(:1009)와 `transitionToStage1`(:1152)은 `src/main`에 호출자가 없다(분리 대상에서 삭제 후보).
 6. 시드 선정의 도구 호출 해석 성공률은 654/655이고 실패 1건이 스트림 절단 한 건(B-34 현상)이다. 도구 호출 자체는 안정적이고 시간이 병목이다(확정 턴 중앙 52.6초).
+
+### [B-67] 분석 시작 전 정제문 확인 카드, apc/ism 소스 폴더 기록, 호출자 없는 함수 기록, 에이전트 루프 보류 결정 (2026-10-26)
+
+사전 확인: `git status -s` 비어 있음, HEAD = origin = f6525b5. 구현 커밋은 0551784(Kotlin, 웹뷰, `npm run build` 산출물 `src/main/resources/webview/index.html` 포함).
+
+#### 1 확인 전 코드 위치(읽기, 변경 전 줄 번호)
+- **정제문이 만들어지고 Stage 1에 가는 길**: 라우터 `/clarify-confirm`은 `buildClarifyIntentChecked`(`WebviewActionRouter.kt:264`) → `removeSession` → `saveIntent`(:270) → `executeAnalyzePipeline`(:277), 발화 완료 경로는 :322 → :328 → :335로 같은 순서다. 정제문은 `Stage0ClarificationEngine.kt:1344-1457`(`refineRequirement` :1350/:1360 → `IdentifierRetentionChecker.checkRetention` → `ClarifyIntent`)에서 만들어지고, `executeAnalyzePipeline`이 `AnalyzeInputResolver.resolve`(`AnalyzeInputResolver.kt:52-85`: 본문 = `retentionAudit.rawRefinedRequirement ?: refinedRequirement`(:58), 비면 원문(:60-62), 빠진 식별자 줄 덧붙임(:68-72))로 `effectiveRequirement`를 만들어 `pipeline.analyze(primaryReq = effectiveRequirement, clarifyIntent, analyzeInput)`(:1570-1577)에 넘긴다.
+- **Stage3ConfirmationBridge**(`agent/Stage3ConfirmationBridge.kt`): 인터페이스 `requestConfirmation(candidates): List<String>?`(null = 건너뛰기, 시간 초과, Headless)와 `hideConfirmation()`. 구현 `JcefStage3ConfirmationBridge(project, timeoutSeconds = 300)`는 `project.locationHash`를 키로 `CompletableFuture`를 `pendingConfirmations`에 등록하고, `invokeLater`로 `stage3Confirmation/request`(messageId "system")를 웹뷰에 보낸 뒤 `future.get(timeout)`으로 기다린다. **`project == null`이면 곧바로 null**(카드 없이 진행). 전송 예외나 시간 초과는 항목을 지우고 null. 응답은 라우터 `stage3Confirmation/submit`/`cancel`(`WebviewActionRouter.kt:382-393`, 취소도 null 완료 = 건너뛰기)이 `completeConfirmation`/`cancelConfirmation`으로 되돌린다. 웹뷰는 `App.tsx:656-678`이 `Stage3ConfirmationForm`을 그리고 :1275-1291이 request/hide 메시지로 카드를 넣고 뺀다. 파이프라인 쪽 사용은 `RequirementAnalysisPipeline.kt:329`.
+- **정제문을 담는 필드와 저장 형식**: `ClarifyIntent.refinedRequirement`(`model/ClarifyIntent.kt:12`)와 `RetentionAudit.rawRefinedRequirement`(:107, Stage 1~3가 읽는 값). 저장은 `ClarifyIntentStore.saveIntent`(:60)가 `gson.toJson(intent)`를 `.wuwagent`의 인텐트 파일에 쓴다. `contractVersion` = "1.2".
+
+#### 2 구현(커밋 0551784)
+- **흐름**: 라우터 두 호출 지점 모두 `buildClarifyIntentChecked` → `removeSession` → `continueAfterClarify`(`WebviewActionRouter.kt:1546`, 호출 :270, :325)로 이어진다. 도우미는 `RefinedRequirementGate.handoff`(확인 → 저장 → 분석)를 부른다. 확인 카드는 응답을 기다리므로 `/clarify-confirm` 경로(원래 EDT)는 도우미를 `executeOnPooledThread`에서 부른다.
+- **게이트**(`agent/clarify/RefinedRequirementGate.kt`): 카드에 보이는 정제문은 `AnalyzeInputResolver`가 Stage 1~3 본문으로 읽는 값과 같다(`shownRefined`). 결정은 이대로(`Proceed`), 고침(`ProceedEdited`), 취소(`Cancel`), 결정 없음(null). 브리지가 null이거나 결정이 null이거나 예외면 받은 `ClarifyIntent`와 **같은 객체**로 진행한다. 고친 문장이 비어 있거나 보여 준 문장과 같으면 고치지 않은 것으로 본다. 고친 문장은 `refinedRequirement`와 `retentionAudit.rawRefinedRequirement`에 넣고, 식별자 보존 검사를 LLM 없이 다시 계산해 `missingBeforeFix` 등을 갱신한다(저장 형식과 `contractVersion` 1.2는 그대로).
+- **브리지**(`agent/RefinedRequirementConfirmationBridge.kt`): Stage 3 브리지와 같은 방식(`locationHash` 키, `CompletableFuture`, 300초, `project == null`이면 null, 전송 예외도 null). 응답 대기는 IDE 없이 테스트할 수 있게 `RefinedConfirmationRegistry`로 분리했다. 메시지는 `refinedConfirmation/request|hide`(화면으로), `refinedConfirmation/submit|cancel`(라우터로, `editedText`가 있으면 "수정한 내용으로 분석"). 취소 안내는 `analyze_notice` "분석을 취소했습니다."이며 error 형식을 쓰지 않는다.
+- **웹뷰**: `RefinedConfirmationForm.tsx`(원문과 정제문 나란히, 정제문은 편집 칸, 버튼 취소/이대로 분석/수정한 내용으로 분석), 순수 로직 `refinedConfirmLogic.ts`(고치기 전에는 수정 버튼 비활성, 빈 칸이면 진행 버튼 둘 다 비활성+경고+"원래대로 되돌리기"), `App.tsx`에서 카드와 `analyze_notice` 말풍선(오류 아님) 연결. 대기 표시(`clarifyWaitLogic.ts`)는 확인 카드가 오면 내려가도록 `END_SUBTYPES`에 `refinedConfirmation/request`, `analyze_notice`를 추가했다(사용자 응답을 기다리는 동안 "경과 N초"가 계속 늘어나는 것을 막기 위함).
+- **바꾸지 않은 것**: 정제문 생성 프롬프트, 작업 요약, 제약 추출, Stage 3 확인 카드, 하네스 경로(`LiveEvalTest`와 베이스라인 하네스는 게이트를 거치지 않는다), build.gradle, 운영 프롬프트.
+- **정직한 기록**: (1) 취소해도 대화 세션은 이미 닫혀 있다(`removeSession`은 카드 앞의 기존 순서 그대로). 취소 뒤에는 `/clarify`를 새로 시작해야 한다. (2) `FinalConstraintFailureNoticeTest#g4`가 라우터 소스 텍스트의 호출 횟수(분석 호출 2곳에 안내를 넘김)를 세고 있어, 구조가 도우미 한 곳으로 모이면서 실패했다. 동작이 아니라 소스 형태 검사이므로 기대를 "두 지점이 `continueAfterClarify`로 이어지고 안내는 그 안의 분석 호출 1곳이 넘긴다"로 고쳤다. (3) 확인 카드 대기 시간 초과(300초)는 정제문을 그대로 쓰고 진행한다(요청 사양). 단위 테스트는 레지스트리의 1초 대기로 검증했고 실제 300초는 기다리지 않았다. (4) IDE에서 실제 카드를 눌러 보는 끝단 확인은 하지 않았다(ui-check는 모의 브리지).
+
+#### 테스트와 검증 결과(0551784 기준)
+| 검증 | 결과 |
+|---|---|
+| 새 단위 테스트 `RefinedRequirementGateTest` | 13/13. g1~g2 브리지 없음·결정 없음은 같은 객체로 저장/분석(Stage 1 입력 문자열과 저장 JSON이 지금과 같음), g3~g5 고친 문장이 Stage 1 입력과 저장 JSON(`refinedRequirement`, `retentionAudit.rawRefinedRequirement`)에 들어가고 키 집합과 `contractVersion` 1.2는 그대로, g6~g7 취소는 저장·분석 0회, 안내는 `analyze_notice`이고 라우터에 error 전송 없음, g8~g9 빈 문장·같은 문장, g10~g12 대기 시간 초과·응답·예외, g13 식별자 보존 재계산 |
+| 전체 테스트(서버 의존 14클래스 제외) | 548개, 실패 42, 건너뜀 17. 실패 42건은 기준(42건)과 판정 차이 0, 관찰 차이 0(첫 실행은 위 정직한 기록 (2) 때문에 43건이었고 테스트 기대 수정 뒤 재실행) |
+| clarify 패키지 | 34개 스위트, 243개, 실패 1(기존 1건과 같음), 건너뜀 3 |
+| 하네스 | EXACT_MATCH 5/5, MATCH_EXCLUDING 2/2(`RefinedReq:` 줄만 제외) |
+| 실패 메시지 diff | 0 |
+| selftest | 24/24 |
+| 웹뷰 로직 테스트 | 34/34(`clarifyWaitLogic`, `errorDisplayLogic`, `removedCandidatesLogic`, 새 `refinedConfirmLogic`) |
+| 전체 ui-check | 25/25(기존 19 + 새 6: 카드 표시, 수정 후 진행, 이대로 분석, 취소+안내(오류 말풍선 증가 없음), 빈 문장 차단, hide) |
+| `npm run build` | 통과, 산출물 `src/main/resources/webview/index.html` 함께 커밋 |
+
+#### 3 읽기 기록
+- **3-a apc, ism 소스 폴더가 비어 있는 이유**: 확정은 못 했고 사실만 적는다. `C:/scrad/workspace/apc-pjt`(생성 2026-09-12)와 `C:/scrad/workspace/ism-pjt/ism-api-bo`(상위 생성 2026-08-06)에는 `.wuwagent`(`.gitignore`, `contracts`, apc에는 `shadow_logs.jsonl` 625KB, 최종 갱신 2026-10-23)만 있다. 그래프 JSON은 `C:/Workspace/graph/project-graph-a|i`에 있고 `projectRoot`가 위 경로, `generatedAt`이 2026-08-03(apc 05:13, ism 05:29)이다. 폴더 생성일(08-06, 09-12)이 그래프 생성일(08-03)보다 늦고 `.wuwagent`는 분석 실행이 `projectRoot`에 계약과 로그를 쓰는 곳(`ClarifyIntentStore.saveIntent`, `RequirementAnalysisPipeline.kt:331, :423-425`, `ShadowLogger.kt:34-37`, B 이전 기록 라인 760)이다. 따라서 그래프는 이 PC가 아닌 곳에서 만든 압축본(`project-graph-a.zip`, `project-graph-i.zip`이 같은 폴더에 있음)을 가져온 것으로 보이고, 이 PC에는 소스를 복사한 적이 없다고 **추정**한다. 원래 소스 경로의 기록: 저장소의 설정 파일과 문서에는 `scrad` 문자열이 `docs/analysis_pipeline_backlog.md`(위 관찰 기록)에만 있고, 그래프 `projectRoot` 외의 원본 위치 설정은 없다. 평가 시나리오의 그래프 경로는 `EvalScenarios.graphPaths()`(`EvalScenarios.kt:75-87`, `-Deval.graphs`로 바꿀 수 있음)에 고정돼 있다. 복사하지 않았다.
+- **3-b 호출자가 없는 함수와 관련 테스트**: `findExclusionCandidates`(`Stage0ClarificationEngine.kt:1009`)는 `src/main`과 `src/test` 모두 호출 0건이다(정의 1건). `transitionToStage1`(:1152)은 `src/main` 호출 0건이고 테스트가 14곳에서 부른다: `ClarificationContractStoreTest.kt:583`, `Stage0RouterAndContractTest.kt:225, 332, 349, 367, 383, 403, 426, 498, 499`, `Stage0SurveyAdminSnapshotTest.kt:160, 262, 418`, `Stage0UtteranceProcessTest.kt:464`. 지우지 않았다. 이 함수만이 `enrichedRequirementText`(:1202)를 채운다.
+
+#### 4 결정
+- **에이전트 루프 보류.** 근거: 조회 3단계(약 50초, 기존 시드 선정 턴 시간 중앙값 15~19초 ×3)와 질문 생성(출력 150~250토큰 ÷ 8 tok/s = 19~31초)을 합친 첫 질문까지 70~80초 추정(B-66). 대안은 **결정적 그래프 조회 + 질문 생성 LLM 1회**(조회는 코드로 정해진 순서, 모델은 질문과 선택지만 쓴다)다. 질문 생성 시간은 **아직 실측하지 않았다**(추정은 요약 호출의 출력 토큰 중앙값에서 가져온 값).
+- **출력 계약에서 의미 변경 위험은 `afterBehavior` 추출로 옮겨 간다.** B-66의 계약은 정제문 재작성 호출을 없애고 `afterBehavior` 문장을 사용자 확인으로 확정한다. 그러면 의미 변경(D2 "참조"→"추가", SR-07 "없어도 돼요"→"제공하지 않습니다")이 생길 자리는 모델이 `afterBehavior`를 뽑는 단계로 옮겨 가고, 이번 확인 카드가 그 위험에 대한 대응이다(현재는 정제문, 이후에는 `afterBehavior`를 같은 카드 방식으로 사용자가 보고 고친다).
+
+#### 예상과 다른 점
+1. `/clarify-confirm` 경로가 원래 EDT에서 정제문 LLM 호출과 분석 시작까지 하고 있었다. 응답을 기다리는 카드를 붙이려면 그 뒤를 백그라운드 스레드로 옮겨야 했다(옮기지 않으면 EDT에서 `future.get`이 교착한다).
+2. 전체 테스트 첫 실행에서 새 실패 1건이 나왔다. 동작 변화가 아니라 라우터 소스 텍스트를 세는 테스트였다(위 (2)).
+3. 확인 카드가 오면 clarify 카드의 "경과 N초" 대기 표시가 계속 올라가므로 대기 종료 신호에 카드 도착을 추가해야 했다.
+4. 취소 시 세션은 이미 닫혀 있어 대화를 이어갈 수 없다(요청 사양대로 분석만 막았다).
