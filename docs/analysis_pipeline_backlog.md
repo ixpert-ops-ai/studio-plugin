@@ -1807,3 +1807,100 @@ ADR-001과의 관계: 새 필드도 디스크에서 자동으로 읽지 않으�
 2. 전체 테스트 첫 실행에서 새 실패 1건이 나왔다. 동작 변화가 아니라 라우터 소스 텍스트를 세는 테스트였다(위 (2)).
 3. 확인 카드가 오면 clarify 카드의 "경과 N초" 대기 표시가 계속 올라가므로 대기 종료 신호에 카드 도착을 추가해야 했다.
 4. 취소 시 세션은 이미 닫혀 있어 대화를 이어갈 수 없다(요청 사양대로 분석만 막았다).
+
+### [B-68] 확인 카드의 백그라운드 전환 점검과 결함 수정, 그래프→소스 연결 확인 (2026-10-26)
+
+사전 확인: `git status -s` 비어 있음, HEAD = origin = e705158. 수정 커밋은 16cb296. LLM 호출, 외부 접속, 소스 복사 없음. IDE에서 실제로 눌러 본 확인은 아니며 소스 읽기와 모의 브리지 테스트로 확인했다.
+
+#### 1 읽기 결과와 결함 여부
+
+| 항목 | 결함 | 조치 |
+|---|---|---|
+| 1-a 스레드 | **결함 없음**(정적 확인) | 없음 |
+| 1-b 경합 | **결함 3건** | 수정 |
+| 1-c 시간 초과 뒤 카드 | **결함 1건**(안내 없음) | 수정 |
+| 1-d 식별자 덧붙이기 | **결함 1건** | 수정 |
+| 1-e 진행 표시 | **결함 없음** | 없음 |
+
+**1-a 스레드.** `continueAfterClarify`(`WebviewActionRouter.kt:1546`) 이후 백그라운드에서 실행되는 것: `RefinedRequirementGate.apply/handoff`(IDE API 없음), `JcefRefinedRequirementConfirmationBridge.requestConfirmation`(`invokeLater`로 카드를 보내고 `future.get`으로 대기), `ClarifyIntentStore.saveIntent`(`java.io.File`), `executeAnalyzePipeline`의 앞부분(`bridge.sendMessage("analyze_start")`, `sendMessageChunk`)과 그 안의 `executeOnPooledThread`. 뒤쪽(`GraphLoader.loadGraph`, `WuwLlmService.getClient`, `pipeline.analyze`)은 원래부터 백그라운드였다. PSI, VirtualFile, Document, FileEditorManager, ToolWindow, Notification 호출은 이 경로에 없다. **0551784 전에는 EDT였고 지금은 백그라운드인 것**은 `/clarify-confirm` 경로(원래 `invokeLater` 안)의 `saveIntent`와 `executeAnalyzePipeline` 앞부분뿐이다(`buildClarifyIntentChecked`는 여전히 EDT, 원래 동작). 그중 IDE API는 `JcefBridge.sendMessage` 하나다. 이 함수는 `executeJavaScript`를 부른 스레드에서 그대로 실행하고(`JcefBridge.kt:39-58`, 주석의 "같은 큐 순서 보장"은 EDT 호출을 가정), `sendMessageChunk`만 `invokeLater`를 쓴다. 같은 호출이 발화 완료 경로(`/clarify-utterance`)에서는 처음부터 `executeOnPooledThread` 안에서 불렸으므로 선례가 있고, 새 코드에서 EDT 전용 API를 새로 부르는 곳은 없다. 다만 `analyze_start`가 바로 실행되고 `hide`/`expired`는 `invokeLater`라서 두 메시지의 도착 순서는 보장되지 않는다(서로 영향이 없는 조합이라 결함으로 보지 않았다). 실제 IDE에서의 동작은 확인하지 못했고 아래 확인 목록에 넣었다.
+
+**1-b 경합.**
+- **새 /clarify**(결함, 수정): 카드가 응답을 기다리는 중 새 `/clarify`가 오면 기존 흐름은 `AnalysisSessionMemory.reset()`과 새 세션이 시작된 뒤에도 최대 300초 대기하다가 시간 초과로 **이전 요구사항의 분석을 시작**했다. 예전 카드가 남아 있으면 그 카드의 버튼이 새 흐름의 대기를 풀 수도 있었다(`/clarify` 분기는 확인 카드를 정리하지 않았다).
+- **레지스트리 정리 경합**(결함, 수정): `RefinedConfirmationRegistry.await`는 시간 초과 때 `pending.remove(key)`로 키만 보고 지웠다. 같은 키(`project.locationHash`)로 새 요청이 이미 등록돼 있으면 그 사이에 새 요청의 항목이 지워져 새 카드의 응답이 버려졌다. `register`는 같은 키의 이전 Future를 끝내지 않고 덮어써 이전 스레드가 시간 초과까지 매달렸다.
+- **두 번째 /clarify-confirm**(결함, 수정): 첫 확인에서 세션이 닫히므로 두 번째 확인은 "분석 세션이 만료되었거나 유효하지 않습니다" 오류 말풍선이 됐다.
+- **/restore**: 이전 분석의 `lastResult`와 `AnalysisSessionMemory`에만 작용한다. 카드 대기 중에도 그 이전 결과의 되살리기는 동작하고 새 분석이 `AnalysisSessionMemory.begin`(`RequirementAnalysisPipeline.kt:302`)으로 바꿀 때까지 유효하다. 결함 없음.
+- **/analyze**: 카드 대기와 무관하게 바로 독립 분석이 시작된다. 이후 카드 흐름도 분석을 시작하면 두 분석이 겹친다(`/analyze`를 연달아 두 번 보낸 것과 같은 기존 성질). 이번에는 고치지 않았다.
+- **같은 레지스트리나 키 공유**: 정제문 카드는 자체 `RefinedConfirmationRegistry`, Stage 3 카드는 `JcefStage3ConfirmationBridge.pendingConfirmations`(둘 다 키는 `project.locationHash`지만 별개 맵)이고 웹뷰 subType도 다르다. 공유 없음.
+- **Future 정리**: 응답, 취소, 시간 초과, 전송 예외 모두 항목을 지운다(위 정리 경합은 수정함).
+- **`AnalysisSessionMemory.reset` 순서**: `reset`은 `/clarify` 분기의 백그라운드 시작 부분에 있다. 수정 후에는 `/clarify` 분기가 `reset`보다 앞에서 대기 카드를 정리하므로 이전 흐름이 reset 뒤에 분석을 시작할 수 없다.
+
+**1-c 시간 초과 뒤 카드.** 300초 뒤 게이트가 `hideConfirmation`을 보내 카드는 **통째로 사라졌고** 안내는 없었다(`analyze_start`만 보임). 사라진 카드의 버튼은 누를 수 없다. 사라지기 직전에 눌린 응답은 `complete`가 항목을 못 찾아 아무 일도 없다. 결함: 왜 분석이 시작됐는지 알 수 없다.
+
+**1-d 식별자 덧붙이기.** `AnalyzeInputResolver.kt:58-72`는 `retentionAudit.missingBeforeFix`로 "빠진 식별자 줄"을 `effectiveRequirement`에 붙인다. 0551784의 `withEditedRefined`가 고친 문장에 대해 식별자 검사를 다시 계산해 `missingBeforeFix`에 채웠으므로, 사용자가 문장에서 일부러 지운 식별자가 **다시 붙었다**(커밋 0551784의 테스트 g13이 그 동작을 정상으로 기록하고 있었음). 고치지 않은 경우(이대로 분석, 브리지 없음, 시간 초과)는 `withEditedRefined`를 거치지 않아 모델이 빠뜨린 식별자 줄이 지금처럼 붙는다.
+
+**1-e 진행 표시.** 카드의 버튼을 누르면 해당 버튼이 "진행 중"으로 바뀌고 모두 비활성이 된다. 게이트가 응답 직후 `hide`를 보내 카드는 곧 사라지고, `saveIntent` 뒤 `analyze_start`("프로젝트 메타그래프 영향도 분석을 시작합니다")가 같은 호출 흐름에서 바로 나간다. 그 사이 공백은 파일 저장 시간(밀리초 단위 추정)이고 확정 직전의 "경과 N초" 표시는 카드 도착 때 내려가도록 B-67에서 처리했다. 결함 없음(체감 공백은 IDE에서 확인).
+
+#### 2 수정(커밋 16cb296)
+- **b**: 새 `/clarify`는 `supersedePending`으로 대기 카드를 정리한다(`RefinedConfirmationDecision.Superseded`: 저장, 분석, 안내 모두 없음, 이전 카드는 `hide`). `register`는 같은 키의 이전 요청을 `Superseded`로 끝내고, `await`의 정리는 `pending.remove(key, future)`로 자기 항목일 때만 지운다. 두 번째 확인은 `isHandoffActive`가 참이면 세션 조회 전에 무시한다(확정 두 지점이 세션을 닫기 전에 `beginHandoff`, `continueAfterClarify`가 `finally`에서 `endHandoff`, 새 `/clarify`가 표지도 푼다).
+- **c**: 시간 초과를 `RefinedConfirmationDecision.TimedOut`으로 구분해 `expireConfirmation` → `refinedConfirmation/expired`를 보낸다. 웹뷰는 카드를 지우지 않고 비활성으로 두며 "응답이 없어 원래 문장으로 분석을 진행했습니다."를 보인다(`markExpired`, `RefinedConfirmationForm`의 `expired`). 그 밖의 결정은 지금처럼 카드를 내린다.
+- **d**: 사용자가 고친 경우 `missingBeforeFix`를 비워 지운 식별자를 다시 붙이지 않는다(`withEditedRefined`). 고치지 않은 경우의 동작은 같다.
+- 하네스 경로(브리지 없음)는 `RefinedRequirementGate.apply`가 받은 객체를 그대로 돌려주는 것이 그대로다(테스트 g1, g14).
+- **정직한 기록**: (1) 레지스트리 교체 경로(`register`가 이전 요청을 `Superseded`로 끝내는 경우)에서는 이전 흐름의 `hide`가 새 카드를 지울 수 있는 경쟁이 이론상 남는다. 두 번째 확인을 막았으므로 정상 흐름에서는 일어나지 않는 경로라 고치지 않았다. (2) `/clarify-utterance`에 대기 중 발화가 오면 여전히 세션 만료 오류가 난다(요청 범위 밖). (3) 새 `/clarify`로 이전 흐름을 정리해도 이미 시작된 `/analyze`와 겹치는 문제는 그대로다.
+
+#### 테스트와 검증(16cb296 기준)
+| 검증 | 결과 |
+|---|---|
+| `RefinedRequirementGateTest` | 19/19(수정 항목별 추가: g10 시간 초과가 `TimedOut`, g13 지운 식별자 안 붙음, g14 고치지 않은 경우 지금과 같음, g15 만료 안내, g16 새 /clarify가 대신하면 분석 없음, g17 레지스트리 새 요청/정리 경합, g18 진행 표지, g19 라우터 소스 확인) |
+| 전체 테스트(서버 의존 14클래스 제외) | 554개, 실패 42, 건너뜀 17. 실패 42건은 기준과 판정 차이 0, 관찰 차이 0 |
+| clarify 패키지 | 249개, 실패 1(기존 1건), 건너뜀 3 |
+| 하네스 | EXACT_MATCH 5/5, MATCH_EXCLUDING 2/2 |
+| 실패 메시지 diff | 0 |
+| selftest | 24/24 |
+| 웹뷰 로직 테스트 | 35/35(만료 표시 1건 추가) |
+| 전체 ui-check | 26/26(기존 25 + 만료 카드: 비활성, 안내 문구, 이후 전송 0건) |
+| `npm run build` 산출물 | `src/main/resources/webview/index.html` 함께 커밋 |
+
+#### 1-f 그래프→소스 연결 확인(읽기만)
+- **노드가 가진 위치 정보**: `FileNode`(`MetaGraphModels.kt:135`)의 `path`는 **프로젝트 루트 기준 상대 경로**이고(apc 2,419개, ism 3,552개, member-market 90개 모두 상대, 절대 0), `methods`는 `MethodSignature(name, returnType, parameters, isInherited)`(:125)뿐이다. **줄 번호 필드는 없다**(`startLine`/`endLine` 0건). 리소스 노드는 `path`(상대), `type`, `layer`, `linkedTo`, `metadata`(`sql_id`, `table_name`, `include_ref`, `api_url` 등)이고 줄 번호가 없다. 관계(`relationships`)는 `source`/`target`(상대 경로), `type`, `strength`다.
+- **실행 때 basePath와 합치는 방식**: 소스를 읽는 곳마다 다르다. `ContractResolver.kt:311`, `:464`은 `"${project.basePath}/${path}"`로 `LocalFileSystem.findFileByPath`를 부르고, `ImplementService`/`ImplementContextBuilder`는 `sourceRoot = Paths.get(project.basePath)`에 `sourceRoot.resolve(spec.path)`(`WebviewActionRouter.kt:446`, `ImplementContextBuilder.kt:64`, `:137`, `ImplementService.kt:121`)를 쓴다. **`PseudoCodeParser.kt:179`만 `Path.of(graph.projectRoot, filePath)`로 그래프가 만들어진 시점의 절대 경로(projectRoot)를 쓴다.** 그래프를 읽는 쪽 `GraphLoader.kt:172-190`은 서브 모듈 그래프의 `projectRoot`가 basePath 아래일 때만 `path` 앞에 상대 접두사를 붙이고, 그 외에는 그대로 둔다.
+- **그래프 생성 시점의 정보**: 최상위 `generatedAt`(ISO 시각), `projectRoot`, `framework`, `statistics`뿐이다. **커밋 해시, 파일 해시, 파일 수정 시각은 없다**(`commit`, `mtime`, `lastModified`, `modifiedAt` 0건; "hash"/"sha" 검색 결과는 `hashCode`, `getHash` 같은 식별자 이름이다). `generatedAt`은 `ProjectGraphBuilder.kt:352` 등이 쓰고 `MetaGraphExporter.kt:76`이 다시 쓸 뿐 **읽는 곳이 없다**. `ClarificationContractStore.calculateGraphHash`(`:104`)는 파일 경로, 클래스명, 관계의 정렬된 문자열 해시로 소스 내용과 무관하다.
+- **그래프와 소스가 어긋난 것을 알아챌 방법**: **지금은 없다.** `GraphLoader`의 캐시는 그래프 파일의 수정 시각만 본다(`GraphLoader.kt:40-50`). 소스 파일 존재나 변경은 검사하지 않는다.
+- **소스가 없을 때, 메서드를 못 찾을 때의 동작과 사용자에게 보이는 것**:
+  - `inspect_node_detail`(`AgenticSeedSelector.kt:650-712`): 그래프 안의 `methods`, `koreanComments`, `apiEndpoints`, 의존 관계를 돌려주며 **소스를 읽지 않는다**. 노드가 없으면 `{"error":"노드를 찾을 수 없습니다: …"}`를 모델에게 돌려줄 뿐 사용자에게는 안 보인다. **리소스 노드는 `metadata`를 그대로 돌려준다**(`sql_id`, `table_name`, `include_ref` 포함). 그래서 B-66에서 "미확인"으로 남긴 "리소스 노드까지 돌려주도록 확장이 필요한지"는 **확장이 필요 없다**로 정정한다(파일명, 예: `ECMBTBISM006Mapper.xml`로 조회).
+  - Stage 3(`FileRelevanceVerifier.buildFileContext` :430-447): 소스가 아니라 `docs/<파일명>.md`를 읽고, 없으면 `buildGraphContext(node)`, 그것도 없으면 리소스 컨텍스트, 마지막에 "정보 없음"이다. 소스 폴더가 비어 있어도 영향을 받지 않고 사용자에게 아무 표시도 없다.
+  - `/implement`: 소스가 없으면 `sourceContent = ""`로 조용히 넘어가고(`ImplementService.kt:121-122`, `ImplementContextBuilder.kt:138`), 유사 구현 탐색은 해당 파일을 건너뛴다(:64-66). `PseudoCodeParser.kt:177-186`은 `exists()`가 거짓이면 소스 기반 검증을 건너뛴다. `ContractResolver`는 `findFileByPath`가 null이면 `continue`한다. 사용자에게는 경고가 없고 컨텍스트만 줄어든다.
+  - 메서드를 못 찾는 경우: 그래프의 메서드 목록은 소스와 대조하지 않는다. 소스가 있을 때 PSI(`ContractResolver`)가 읽은 실제 메서드와 그래프 메서드가 다른지를 비교하는 코드는 없다.
+- **apc, ism 그래프에 남은 생성 환경 정보**: `projectRoot` 하나뿐이다(apc `C:/scrad/workspace/apc-pjt`, ism `C:/scrad/workspace/ism-pjt/ism-api-bo`, `generatedAt` 2026-08-03 05:13/05:29 UTC). 커밋 정보, 호스트명, 사용자 이름, 로컬 경로(`C:/Users`)는 두 그래프에 **0건**이다. 같은 필드를 가진 member-market 그래프는 이 PC에서 만들어졌다(`C:/Workspace/member-market`, 의존 jar 경로 `C:/Users/dffrp/.gradle/...`가 149건 남아 있음). 평가용 소스를 맞추려면 **`projectRoot` 경로(`C:/scrad/workspace/...`)와 `generatedAt`(2026-08-03)** 이 단서의 전부이고, 그 날짜 시점의 소스(커밋은 모름)를 해당 경로에 두는 것이 근거가 된다. 소스를 복사하지 않았다.
+- **B-66 "현재 동작" 칸의 근거 등급**(확인 = 그래프 속성이나 소스를 직접 읽음, 추정 = 한글 주석이나 이름에서 읽은 동작, 미확인 = 근거 없음):
+
+| 건 | 문장 | 등급 | 근거 노드·속성 |
+|---|---|---|---|
+| SR-12 | 서비스에 `selAppVerUpdtInf`가 있고 최신앱버전 정보를 조회한다 | 메서드 존재 **확인** / 조회 동작 **추정** | 노드 `APCCSAppVerMngtBIZ` `methods[selAppVerUpdtInf(APCCSAppInfSVO)]`(확인), `koreanComments` "사용자 앱정보로 최신앱버전 정보조회"(추정) |
+| SR-12 | OS, 스토어, 버전을 입력으로 받는다 | **추정** | `koreanComments` "모바일OS구분코드", "앱스토어구분코드", "모바일앱버전명"(파라미터 타입 `APCCSAppInfSVO`의 필드는 미조회) |
+| SR-12 | 최신은 `selNewSappVer`, 중간은 `selMidlSappVer` | 메서드 존재 **확인** | 노드 `ACAOTBAPC003DEM` `methods` |
+| SR-12 | 중간 쿼리는 노출 여부('Y')를 조건으로 쓰고 최신 쿼리는 쓰지 않는 것으로 읽힌다 | **추정** | `APCCSAppVerMngtBIZ` `koreanComments`("selNewSappVer 쿼리와 유사하지만 … SPACD_DLSTM_USE_YN = 'Y' 사용"). SQL 본문 **미확인** |
+| SR-12 | 중간이 강제 유형이면 최신의 업데이트 유형과 메시지를 덮어쓴다 | **추정** | 같은 노드 `koreanComments` |
+| SR-12 | 관리 쪽에도 최신/중간 조회가 있고 서비스 쪽과 같은 쿼리를 쓰는지는 모른다 | 존재 **확인**, 쿼리 공유 **미확인** | 노드 `APCADUpdtVerMngtBIZ` `methods[selLtSappVer, selLtMidlSappVer]` |
+| SR-12 | 버전 번호가 가장 큰 것이 최신이라는 현재 규칙 | **미확인** | 근거 노드 없음(정렬은 SQL 안) |
+| D4 | 케어회원 목록, 개수, 상세, 저장, 수정 API가 있다 | **확인** | 노드 `CareMemberMgmtController` `apiEndpoints[httpMethod, path, handlerMethod]` |
+| D4 | 목록 쿼리는 `getCareMemberMgmtList`이고 5개 테이블을 조인하며 `getCareMemberMgmtListWhere`를 포함한다 | **확인**(`sql_id`, 테이블 이름, 포함 참조의 존재) | 리소스 노드 `ECMBTBISM006Mapper.xml` `metadata[sql_id, table_name, include_ref]`. 조건절의 내용은 **미확인** |
+| D4 | 요청/응답이 유의고객 등록·해제 정보를 다룬다 | **추정** | `CareMemberMgmtRequest`, `CareMemberMgmtResponse`의 `koreanComments`(필드 이름과의 대응은 미조회) |
+| D4 | 관리 화면(화면 파일) | **미확인** | careMember 관련 `resourceNodes`는 매퍼 2개뿐(화면 노드 0건) |
+| SR-05(참고) | 사용자용 조직 목록에 상태 조건이 없다 | **확인**(소스를 직접 읽음) | `OrganizationService.java:23-36`, `OrganizationRepository.java:14`(호출처 없음) |
+
+#### IDE에서 확인할 항목
+1. `/clarify` → 확정 뒤 확인 카드가 뜨고, "이대로 분석", "수정한 내용으로 분석", "취소"가 각각 의도대로 동작하는가(분석 시작 메시지가 뜨는가, 취소 안내가 오류 말풍선이 아닌가).
+2. 카드가 떠 있는 동안 EDT가 멈추지 않는가(에디터 입력, 다른 창 조작이 막히지 않는가). `analyze_start`와 `hide`/`expired`가 순서에 상관없이 정상 표시되는가(`JcefBridge.sendMessage`를 백그라운드에서 부르는 것).
+3. 카드 대기 중 새 `/clarify`를 보내면 이전 카드가 사라지고, 300초가 지나도 이전 요구사항의 분석이 시작되지 않는가.
+4. 확인 카드 대기 중 확정을 다시 보내려 하면(Enter 연타 등) 오류 말풍선이 뜨지 않고 무시되는가.
+5. 300초 무응답 뒤 카드가 남아 비활성이 되고 "응답이 없어 원래 문장으로 분석을 진행했습니다."가 보이며 분석이 시작되는가(대기 시간을 줄여 보는 것은 코드 변경이 필요하므로 실제 5분 대기로 확인).
+6. 문장에서 식별자(예: `SurveyServiceImpl`)를 지우고 "수정한 내용으로 분석"을 눌렀을 때 Stage 3 입력에 그 식별자가 다시 붙지 않는가(분석 결과의 프롬프트나 로그로 확인).
+7. 취소한 뒤 다시 `/clarify`를 시작해 정상 진행되는가(세션은 이미 닫혀 있음).
+8. 채팅을 저장했다가 다시 불러올 때 확인 카드가 남아 눌러도 반응 없는 카드로 복원되지 않는가(Stage 3 카드와 같은 기존 성질일 수 있음).
+
+#### 예상과 다른 점
+1. 새 /clarify가 카드를 정리하지 않아 300초 뒤 이전 요구사항의 분석이 시작될 수 있었다(예상보다 사용자에게 보이는 영향이 큰 결함).
+2. 정제문 카드 구현(0551784)의 테스트 g13이 사용자가 지운 식별자가 다시 붙는 동작을 정상으로 못 박고 있었다. 의도와 반대였고 이번에 기대를 바꿨다.
+3. Stage 3은 소스를 읽지 않고 `docs/*.md`와 그래프만 읽으므로, 소스 폴더가 비어 있어도 Stage 3 결과에는 영향이 없다. 소스를 읽는 쪽은 `/implement` 계열이며 그 안에서 `PseudoCodeParser`만 basePath가 아닌 그래프의 `projectRoot`를 쓴다.
+4. `inspect_node_detail`은 리소스 노드의 `metadata`(SQL id, 테이블)를 이미 돌려준다. B-66의 "확장이 필요한지 미확인"은 필요 없음으로 정정한다.
+5. 그래프에는 커밋, 파일 해시, 수정 시각이 없고 `generatedAt`도 읽는 곳이 없어 그래프와 소스의 어긋남을 알아챌 수단이 지금 없다.
