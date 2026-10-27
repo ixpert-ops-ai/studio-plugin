@@ -1,5 +1,6 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
+import com.google.gson.Gson
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.model.ChatChoice
 import net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse
@@ -20,12 +21,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume
 import org.junit.Before
 import org.junit.Test
+import java.io.File
 
 /**
  * B-74: 탐색기(시드 선정)나 검증기(Stage 3)가 대체 경로로 끝나면 결과 표와 /implement 안내 대신 안내와 "다시 시도"만 낸다.
  * 정상 경로의 출력은 바뀌지 않고, project가 없는 평가 하네스·단위 테스트(기본값)는 대체 경로 결과를 그대로 쓴다.
+ * R-EMAIL-PIPE: IDE 응답자 이메일 SR의 정제문 두 개를 모의 LLM(탐색기 도구 호출 재생)으로 파이프라인에 태운다.
  */
 class IncompleteAnalysisB74Test {
 
@@ -149,5 +153,46 @@ class IncompleteAnalysisB74Test {
         assertEquals("정상 사유", AnalysisResultWording.description("정상 사유"))
         assertEquals("", AnalysisResultWording.reasoning("Fallback: Keyword matching due to LLM failure or timeout"))
         assertEquals("1) 판정 근거", AnalysisResultWording.reasoning("1) 판정 근거"))
+    }
+
+    // ── R-EMAIL-PIPE: IDE 응답자 이메일 SR의 정제문 두 개(survey_admin 그래프, 모의 LLM) ──
+    private val surveyGraphFile = File("C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json")
+    private val refinedNew = "관리자 설문 상세 화면용 기존 설문조사 상세 조회 기능의 백엔드를 수정하여, 응답자 이메일 정보를 앞 2자리와 도메인만 보이도록 마스킹 처리한 상태로 함께 반환하도록 하세요."
+    private val refinedPrevious = "기존(관리자) 설문조사 상세 조회 기능의 백엔드를 수정하여 응답자 이메일 정보를 마스킹 처리한 상태로 함께 반환하도록 하세요."
+
+    private fun surveyGraph(): ProjectGraph {
+        Assume.assumeTrue(surveyGraphFile.isFile)
+        return Gson().fromJson(surveyGraphFile.readText(Charsets.UTF_8), ProjectGraph::class.java).normalizeLegacyCollections()
+    }
+
+    @Test
+    fun r_email_pipe_두_정제문_모두_도구_호출이_성공하면_시드에_설문_서비스_계층이_들어간다() {
+        val g = surveyGraph()
+        for (sr in listOf(refinedNew, refinedPrevious)) {
+            val stub = Stub("replay", "ok", listOf("SurveyServiceImpl", "SurveyDto", "SurveyDaoImpl"), listOf("SurveyServiceImpl.java", "SurveyDto.java", "sql_survey.xml"))
+            val seeds = AgenticSeedSelector(stub).selectSeeds(sr, g)
+            assertFalse(seeds.usedFallback)
+            assertTrue("시드에 설문 서비스 계층: ${seeds.seedClasses}", seeds.seedClasses.contains("SurveyServiceImpl"))
+            val (r, out) = run(Stub("replay", "ok", listOf("SurveyServiceImpl", "SurveyDto", "SurveyDaoImpl"), listOf("SurveyServiceImpl.java", "SurveyDto.java", "sql_survey.xml")), true, g, sr)
+            assertFalse(out, r.incomplete)
+            assertTrue(r.targetFiles.any { it.path.endsWith("SurveyServiceImpl.java") })
+            assertTrue(out, out.contains("| 순번 |") && !out.contains("파일 분석을 끝까지 하지 못했습니다"))
+        }
+    }
+
+    @Test
+    fun r_email_pipe_도구_호출_실패_때는_두_정제문_모두_안내와_다시_시도만_나온다() {
+        val g = surveyGraph()
+        for (sr in listOf(refinedNew, refinedPrevious)) {
+            // 탐색기 실패(도구 없이 끝남) → 대체 경로로 CallbackInfoDto 같은 엉뚱한 시드가 잡히던 상황
+            val (r1, out1) = run(Stub("none", "ok", listOf("SurveyServiceImpl"), listOf("SurveyServiceImpl.java")), true, g, sr)
+            assertTrue(r1.incomplete)
+            assertEquals(sr, r1.retryRequirement)
+            assertTrue(out1, out1.contains("파일 분석을 끝까지 하지 못했습니다") && !out1.contains("| 순번 |") && !out1.contains("/implement"))
+            // 검증기 실패
+            val (r2, out2) = run(Stub("replay", "none", listOf("SurveyServiceImpl", "SurveyDto", "SurveyDaoImpl"), emptyList()), true, g, sr)
+            assertTrue(r2.incomplete)
+            assertTrue(out2, out2.contains("파일 분석을 끝까지 하지 못했습니다") && !out2.contains("| 순번 |"))
+        }
     }
 }
