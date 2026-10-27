@@ -2817,3 +2817,97 @@ IDE의 14:47:19 `/clarify-confirm` 직후 오류는 **세션 유효 시간 초�
 3. 확정 직후 EDT 정지가 사라졌는지(정제문 생성 중 IDE 조작 가능 여부, c435a58).
 4. 분석 시작 실패 뒤 "다시 시도"(동기 실패를 일부러 만들 방법이 없어 IDE 재현은 어렵다).
 5. 소스 사실 질문 시제품은 연결하지 않았으므로 IDE 확인 대상이 아니다.
+
+
+### [B-74] 도구 호출 실패 원인 조사와 빈 응답 처리, 대체 경로 화면 처리, 탐색기 점수·화면 확장 조사, R-EMAIL-PIPE (2026-10-27)
+
+#### 0 사전 확인과 IDE 로그
+- 사전 확인: `git status -s` 비어 있음, HEAD = origin = 7b62a0a. 샌드박스 `idea.log`를 `build/ide-logs/b73_ide_20261027.log`(8.28MB, 커밋하지 않음)로 복사했다. 이 로그는 2026-10-26 이어서 쌓인 누적 파일이라 오늘 구간은 `2026-10-27 08:26:09` 시작부터다. 이번 IDE 테스트(08:26~08:42)의 채팅은 `chat_1793057322417`이다. 로그를 복사한 뒤에도 IDE가 계속 쓰여(08:48:39에 IDE 프로세스를 다시 시작, 09:14~09:16에 `/clarify`와 분석 1회) 그 구간은 현재 `idea.log`에서 읽었다.
+- **커밋 순서 이탈**: 지시한 순서는 1, 2, 4, docs인데 "커밋 1에 포함"하라는 보충 지시가 커밋 2와 4를 만든 뒤에 왔다. 이미 만든 로컬 커밋을 고칠 수 없어(`--amend`·force 금지) 순서가 2(`36b1a19`), 4(`cb4ac89`), 1(`b4c7d88`), docs가 되었다. 내용은 지시대로 나눴다.
+- **오늘 `[ExtractSchema]`, `[ExtractFail]`, `UI was frozen` 줄(회차별)**
+
+| 회차 | 시각 | 내용 | `[ExtractSchema]`(대체) | `[ExtractFail]` | `UI was frozen` | LLM 시간 |
+|---|---|---|---|---|---|---|
+| 1 | 08:28:52 `/clarify` | 초기 제약 추출(구조화 호출) | 0 | 0 | 0 | 11.7초(08:28:53.066~08:29:04.804) |
+| 2 | 08:33:01 `/clarify` | 〃 | 0 | 0 | 0 | 11.3초 |
+| 3 | 08:34:54 `/clarify` | 〃 | 0 | 0 | 0 | 11.2초 |
+| 3-발화 | 08:36:18 `/clarify-utterance` | 발화 제약 추출 | 0 | 0 | 0 | 14.2초 |
+| 3-확정 | 08:37:40 `/clarify-confirm` | 정제문 생성 → 카드 요청(08:38:02.479) | 0 | 0 | **0**(EDT 해제 후 22.4초 대기에도 정지 경고 없음) | 22.4초 |
+| 분석 | 08:39:45~08:41:53 | 탐색기 Turn 1, 검증기 | – | – | 0 | 아래 1 |
+| 별도 프로세스 | 09:14:52 `/clarify` | 초기 추출 | 0 | 0 | 0 | 12.2초 |
+`[ExtractSchema]`가 없다는 것은 구조화 호출이 매번 null이 아닌 응답을 받았다는 뜻이고(실패하면 이 줄이 찍힌다), `[ExtractFail]`이 없다는 것은 세 회 모두 초기 추출이 실패하지 않았다는 뜻이다(실패 경로는 모두 이 줄을 먼저 찍는다). 전날 같은 SR이 3회 중 2회 실패했던 것과 대조된다. 이 로그 전체에서 `UI was frozen`은 어제 16:13:39의 18131ms 한 줄뿐이다. 분석 단계의 도구 호출 실패(`chunks=0`)는 아래 1에서 다룬다.
+
+#### 1 도구 호출 실패 원인(최우선)
+**오늘 로그에서 확인한 사실**: 도구 호출 응답이 `chunks=0, toolCalls=0, finishReason=null`로 끝난 것이 **세 번**이다. (1) 08:40:50.592 → 08:40:51.134(0.54초) 탐색기 Turn 1, (2) 08:41:47.868 → 08:41:53.281(5.4초) `FileRelevanceVerifier`, (3) 09:16:09.656 → 09:16:10.048(0.39초) 탐색기 Turn 1(다른 IDE 프로세스, 원문 SR). 어제 16:13~16:21 분석은 탐색기 Turn 1~5와 검증기가 모두 정상이었다. `chunks=0`은 서버가 SSE 데이터 줄을 하나도 보내지 않았다는 뜻으로 모델이 "도구 없이 끝낸" 것(그 경우 내용 청크가 있고 `finish_reason=stop`)과 다르다.
+
+**1-a 읽기: 68592ec가 공용 요청 생성을 바꿨는가** — 아니다.
+- `git diff eed0278 HEAD -- OpenAIClient.kt`에는 도구 호출 함수가 없다. 68592ec는 `chat`을 `chatInternal`로 옮기고 `chatJsonSchema`를 더했을 뿐이다. `response_format`은 `OpenAIClient.kt:139`(`chatInternal`, `responseFormat != null`일 때만)에서만 붙고 그 호출자는 `chatJsonSchema` 하나이며 `chatJsonSchema`의 호출자는 `Stage0ClarificationEngine.kt:1607`(제약 추출) 하나뿐이다(`grep chatJsonSchema`). 도구 호출 본문은 `chatWithToolsOnce`(`:357` 이하)에서 따로 만들고 `tools`/`tool_choice`는 호출부 인자로만 들어간다(`:392`, `:394`). 즉 제약 추출 밖으로 새는 `response_format`·`tool_choice` 변화 경로는 없다.
+
+**1-b 재현**(탐색기 Turn 1, `AgenticSeedSelector.selectSeeds`의 첫 `chatWithTools`, 가짜 중계 서버로 요청·응답 기록, 정제문은 지시문의 것, 실행 08:53~08:57, 사전 예측은 `build/eval-reports/pred_b74.md`)
+- HEAD(7b62a0a)의 `OpenAIClient`와 eed0278의 `OpenAIClient`(`git show`로 가져온 테스트용 복사본) 각 5회: **10/10 모두 도구 호출 3개(`search_graph_nodes`), finish `tool_calls`, HTTP 200, 응답 10937바이트, 13.8~14.0초**. 요청 본문은 HEAD끼리, eed0278끼리, HEAD와 eed0278 모두 **바이트까지 같다**(4161자). 응답 원문 앞부분은 `data: {"id":"chatcmpl-…","object":"chat.completion.chunk",…,"delta":{"role":"assistant","content":""}…`(role만 있는 첫 청크)로 시작했다.
+- 사전 예측과 대조: P1(요청 본문 동일) 맞음, P2(10/10 도구 호출) 맞음, P3(실패가 나오면 같은 비율)은 실패가 없어 판정 불가, P4(10~30초) 맞음(13.8~14.0), P5(첫 청크에 도구 호출 또는 reasoning) **틀림**: 첫 청크는 role만 있고 빈 content였다.
+- **stream=true와 stream=false 비교**(보충 지시, 같은 요청 본문을 캡처해 각 3회, 08시 이후 9:27~9:28): stream=true는 3/3 정상(9.6~9.8초, `data:` 줄 36개, 도구 호출 델타 8개, finish `tool_calls`), stream=false도 3/3 정상(9.5~9.7초, JSON 913바이트, `id`와 `usage` 있음, 도구 호출 2개, finish `tool_calls`). 두 방식의 결과는 같고 서버 속도는 어제 14초에서 9.7초로 빨라졌다. 이 재현에서 빈 응답은 한 번도 나오지 않았다(총 16/16 정상).
+
+**1-c 판정: 회귀가 아니다**(요청이 같고 같은 요청이 16/16 성공). 원인 후보(추정)만 적는다.
+- (후보 1) 서버·전송의 일시 현상: 세 번의 실패는 0.4~5초 안에 SSE 데이터 없이 끝났다. 어제와 오늘 재현에서 같은 요청이 성공하므로 요청 내용 문제가 아니다. 다만 오늘 IDE 프로세스에서는 도구 호출 3건이 모두 비었고(08:2x 프로세스 2/2, 08:48 프로세스 1/1) 같은 IDE에서 `chat`(스트림 아님) 호출은 정상이었다. IDE 프로세스와 재현(같은 `OpenAIClient` 코드, 중계 서버 경유, 키 없음)의 차이로 설명되는지는 확인하지 못했다.
+- (후보 2) 서버가 SSE가 아닌 본문(오류 JSON 등)을 보냈고 스트림 읽기가 `data: `로 시작하지 않는 줄을 조용히 버렸다(`OpenAIClient.kt`의 이전 `startsWith("data: ")` 조건). 이번 수정 전에는 서버 원문이 어디에도 남지 않아 **확인할 수 없었다**.
+- (후보 3) `data:` 뒤 공백이 없는 SSE: 이전 코드는 `data: `(공백 포함)만 읽어 `data:{...}` 응답을 통째로 버렸다. vLLM이 그렇게 보냈다는 근거는 없다.
+- 이전의 `retry`는 "도구 인자 JSON 절단"(`isTruncatedToolCall`)만 다시 호출했고 빈 응답(청크 0개)은 다시 호출하지 않았다.
+
+**사용자 덤프(req-3)의 위치와 시각**: 덤프는 **디스크에 없다**. `DebugManager`(`service/DebugManager.kt`)의 메모리 목록(최대 50개, IDE 프로세스마다 `req-N`이 1부터)으로 LLM 디버그 도구창이 읽는다. `req-3`은 08:48:39에 다시 시작한 IDE 프로세스의 세 번째 호출이다: req-1 = 09:14:52.900 초기 제약 추출(원본 응답 797자), req-2 = 09:15:05.220(원본 응답 837자), **req-3 = 09:16:09.656 탐색기 Turn 1, 완료 09:16:10.048(392ms), `chunks=0, toolCalls=0, finishReason=null`**. 그 분석의 SR은 정제 없이 원문 51자("기존 설문조사 상세 조회 기능에 응답자 이메일 정보도 같이 내려주도록 백엔드를 수정해주세요.")였다(`분석 시작 직전 SR(51자, clarify 경유)`).
+
+**(b) 덤프의 응답 원문은 서버 원문이 아니라 스트림 조립 결과다**: `OpenAIClient.kt:581`(수정 전 `debugEntry.responseText = gson.toJson(response)`)은 `:568`의 `finishReason = finishReason ?: "stop"`으로 만든 조립 객체를 직렬화한 것이다. 그래서 (가) 서버가 `finish_reason`을 주지 않았는데 덤프에는 `stop`으로 보이고(로그는 `finishReason=null`), (나) `id`(응답에서 못 읽음), `model`, `usage`가 조립 객체에 없어 덤프에 없고, (다) 요청이 `stream=true`인데 메타가 `streaming=false`인 것은 `newEntry(..., false)`로 상수 `false`를 넘긴 것(`:405`, 이제 `true`)이다. 즉 덤프의 세 모순은 모두 조립·메타 쪽 사정이고 서버가 준 것이 아니다. 조립 중 `tool_calls` 델타를 버리는 결함은 확인되지 않았다(델타는 `index`별로 누적한다). 실제로 버려지던 것은 (i) `data:`(공백 없음), (ii) SSE가 아닌 본문, (iii) 오류 본문이었다.
+
+**커밋 1(b4c7d88) 수정**(1-c의 "회귀면 즉시 수정"과 무관하게 보충 지시로 포함)
+- (a) `content`와 `tool_calls`가 모두 빈 응답은 오류로 분류(`OpenAIClient.isEmptyToolResponse`, `:41`), `chatWithTools`(`:331`)가 `[EmptyResponse]` 경고와 함께 **1회 다시 호출**하고 그래도 비면 그대로 돌려준다. 호출부: `AgenticSeedSelector`는 `[EmptyResponse] LLM 응답이 비어 있음`과 `LLM finished without tool calls`를 구분해 기록하고(`:117` 부근), `FileRelevanceVerifier`는 `[EmptyResponse] FileRelevanceVerifier: …`와 기존 `No valid tool call found`를 구분한다(`:334`). 둘 다 `usedFallback`이 되어 B-74 2번 화면 처리로 간다.
+- (b) 스트림 읽기: `data:`(공백 없음)도 읽고(`:454`), 청크가 0개일 때 버려지던 본문을 JSON으로 해석해 일반 완료 응답이면 도구 호출·내용을 읽고 오류 JSON이면 `서버 오류 응답`으로 예외를 던진다(오류 본문은 재시도하지 않는다). 청크 0개이면 서버 본문 앞부분 300자를 `[EmptyStream]` 경고로 남긴다(`:510`). 디버그 항목은 "스트림 조립 결과, 서버 원문 아님" 머리말을 달고(`:581`), 빈 응답이면 서버 원문 앞부분을 덧붙이며, 도구 호출 항목을 스트리밍으로 표시한다.
+- 테스트(`EmptyToolResponseB74Test` 8개, 가짜 서버): 빈 응답 → 1회 재시도 뒤 정상이면 사용(서버 2회 호출), 계속 빈 응답이면 2회 호출 뒤 빈 응답 반환, 정상·"내용만 있는 응답"은 재시도 없음, `data:` 공백 없음 파싱, 일반 JSON 본문의 도구 호출 파싱, 오류 본문은 오류(재시도 없음), 탐색기와 검증기의 빈 응답·도구 없음 구분과 대체 경로 표시. 기존 `OpenAIClientNonStreamRetryTest`(6), `OpenAIClientStreamRetryTest`(4) 불변.
+
+#### 2 커밋 2(36b1a19) 대체 경로 화면 처리
+- `SeedSelectionResult`/`DiscoveryMetadata`/`VerificationOutput`에 `usedFallback`이 생겼다(탐색기 대체 경로, 검증기 도구 호출 없음). `RequirementAnalysisPipeline(project, client, incompleteOnFallback = project != null)`: 켜져 있고 둘 중 하나가 대체 경로면 결과 표와 `/implement` 안내, 계약 저장, 가드 기록, 마지막 결과 갱신 없이 안내("파일 분석을 끝까지 하지 못했습니다")만 내고 `analyze_incomplete`와 "다시 시도" 버튼이 같은 정제문을 `/analyze`로 다시 보낸다(발화 재전송 없음, 버튼은 한 번 누르면 비활성). `/analyze`는 인텐트 없이 시작하므로 이미 제외한 파일(`excludedFiles`)은 다시 시도에서 빠진다. 기본값은 IDE(project 있음)에서만 켜져 평가 하네스·단위 테스트(project 없음)는 대체 경로 결과를 그대로 쓴다.
+- 결과 화면의 내부 문구: `AnalysisResultWording`이 표시용으로 `Score: N, Via: …`("근거를 확인하지 못해 후보로만 남았습니다"), `[Bypass: …]`(제거), `Fallback: Keyword matching…`(제거)를 바꾼다(저장 값은 그대로).
+- 테스트(`IncompleteAnalysisB74Test` i1~i6 + 웹뷰 3 + ui-check 34): 탐색기 대체 경로(표·`/implement`·내부 문구 없음, 마지막 결과 없음), 검증기 대체 경로, 정상 경로(표 그대로, 안내 없음), 기본값(대체 경로 결과 그대로), 시드 선정의 `usedFallback`, 문구 변환. ui-check 34: 안내만 있고 표·`/implement`·`Score`/`Fallback`/`Bypass` 없음, 다시 시도 1개, 눌러도 `/analyze`는 같은 요구사항으로 1회, 비활성, 정상 결과에는 버튼 없음.
+
+#### 3 탐색기 대체 경로와 화면 확장(읽기만)
+**3-a 도구 없이 끝나면 바로 휴리스틱으로 가는 것 vs 재시도 1회**: 재시도 1회가 낫다고 판단하며 **빈 응답(청크 0개)에 한해** 커밋 1에서 이미 넣었다. 근거: (1) 오늘 실패 세 번은 모두 `chunks=0`·`finishReason=null`로 0.4~5초 안에 끝나 모델의 판단이 아니라 전송 단계의 결과로 보이고, 같은 요청이 16/16 성공했다. (2) 대체 경로의 결과는 엉뚱한 시드다(오늘 CallbackInfoDto, 아래 3-b). (3) 비용은 실패 때만 호출 1회(0.4초 응답 후 재호출이면 10~14초 추가)다. 단 모델이 내용을 쓰고 도구 없이 끝낸(`content` 있음) 경우는 재시도하지 않는다(모델 판단일 수 있어 같은 응답이 되풀이될 가능성이 크다). 재시도 뒤에도 비면 2번 화면 처리로 간다.
+
+**3-b CallbackInfoDto 95점과 범용 번역의 영향**
+- 95점 내역(`RelevanceScorer.kt:61-130`의 FileNode 점수): hop 점수 40(시드 hop 0) + 이름 일치 20.1(`NAMEMATCH-DIAG: Direct [], Trans [info], Weak [info, info]`; `Trans` 일치는 `30 × IDF 가중치`, 즉 번역 토큰 `info` 하나로 20.1점) + 나머지 34.9(레이어 일치 15와 주석 일치 20으로 합이 맞지만 두 값은 로그에 없어 **추정**). 정확히는 CallbackInfoDto가 Seed가 된 이유가 점수 이전의 키워드 대체 선정이다: `AgenticSeedSelector.fallbackSelection`(`:334-360`)이 `정보 → info`(`translate("정보") = [info, information, data]`, 확인)로 영문 토큰을 만들고 `className.contains("info")`인 클래스를 시드(최대 5개)로 뽑았다. 시드가 되면 hop 40이 붙고 이름 일치 20.1이 더해진다.
+- **기존 시나리오 16개에서 오프라인 집계**(스캐너 복사 없이 대체 선정 규칙을 그대로 복제, 범용 단어 = 스캐너 불용어 + information/edit/modify/change/add/remove/show/display; 점수가 아니라 시드 선정에 대한 집계): 범용 번역만으로 뽑힌 시드가 있는 시나리오 3개(S2, SR-05, SR-07), 전체 시드 77개 중 범용 번역만으로 뽑힌 것 5개, 첫 시드가 범용 번역만인 시나리오 3개, 범용 번역을 빼면 시드가 달라지는 시나리오 3개, **정답 필수 파일과 겹친 시드는 포함 8개/제외 8개로 같다**(recall 영향 없음). 즉 이 평가 세트에서는 범용 번역의 영향이 시나리오의 약 19%에서 시드 일부(약 6.5%)에 있고 정답 파일에는 영향이 없었다. 한계: 점수 단계(`RelevanceScorer`)의 Trans 기여 전체는 집계하지 않았다.
+
+**3-c `frontendRelevant`가 true가 되는 단어와 위치**: `AgenticSeedSelector.kt:271-278`(LLM이 시드를 확정한 경로)과 `:363`(대체 경로)에서 SR 문장에 **"어드민", "화면", "UI", "프론트", "vue", "jsp", "페이지", "웹", "frontend", "admin"** 중 하나라도 부분 문자열로 들어 있으면 true다(`"UI"`와 `"웹"`은 다른 단어 안에도 걸린다). **"백엔드"가 명시돼도 부정하지 않는다**: 정제문 "관리자 설문 상세 **화면**용 … 백엔드를 수정하여"는 "화면" 때문에 true였다(로그 `[DEBUG-EXPANDER] frontendRelevant: true`). 이전 정제문(화면 단어 없음)은 단어 규칙으로는 false이고 `isFrontendByStructure`(시드가 컨트롤러·화면 리소스인지)로만 true가 될 수 있다. true이면 `GraphExpander.kt:334-336`의 Step D가 화면(Vue/JS/JSP) 연결을 확장하고 `RelevanceScorer.kt:23`의 프런트 힌트 보호가 켜진다(오늘 `survey.list.js`, `survey.preview.js`가 "Frontend Resource" 구제로 들어왔다).
+
+**3-d "관리자→manager"가 manager_* 37점의 원인인가**: **정확히는 아니다.** `translate("관리자") = [manage, management, mgr]`(확인; manager가 아님)이고, 리소스 이름 일치가 `fileName.contains(eng)`(`RelevanceScorer.kt` 리소스 점수부 `:226` 부근)의 부분 문자열이라 `manage`가 `manager`를 포함한 `manager.list.js`(37점, `LINKED_TO`), `approve_manager.jsp`, `manager_list.jsp`, `manager_list_old.jsp`와 `authority_manage.jsp`, `company_manage.jsp`에 걸린다. survey_admin에는 클래스명에 manager가 없고 리소스 파일명에 manager가 4개 있다(`admin` 포함 클래스는 0개).
+
+#### 4 회귀 시나리오 R-EMAIL-PIPE(모의 LLM, `cb4ac89`)
+- 정제문 둘: (새) "관리자 설문 상세 화면용 기존 설문조사 상세 조회 기능의 백엔드를 수정하여, 응답자 이메일 정보를 앞 2자리와 도메인만 보이도록 마스킹 처리한 상태로 함께 반환하도록 하세요."(오늘 IDE의 정제문), (이전) "기존(관리자) 설문조사 상세 조회 기능의 백엔드를 수정하여 응답자 이메일 정보를 마스킹 처리한 상태로 함께 반환하도록 하세요."(지시문의 앞부분 + 어제 로그의 정제문 뒷부분을 이어 만든 문장).
+- `IncompleteAnalysisB74Test`의 `r_email_pipe_*` 2개(survey_admin 그래프, 탐색기는 IDE 성공 실행을 재생): **도구 호출이 성공하면** 두 정제문 모두 시드에 `SurveyServiceImpl`이 들어가고(`usedFallback` false) 파이프라인 결과가 완료(표 있음, 안내 없음)이며 대상 파일에 `SurveyServiceImpl.java`가 있다. **탐색기 또는 검증기 도구 호출이 실패하면** 두 정제문 모두 결과 표와 `/implement` 없이 안내만 나오고 `retryRequirement`가 같은 정제문이다. 통과.
+- 한계: 모의 LLM으로 탐색기 응답을 재생한 것이라 실제 모델이 항상 설문 서비스를 시드로 고른다는 뜻이 아니다.
+
+#### 5 기록만(수정 없음)
+- **GUARD-SHADOW 한글**: 이번 로그도 파일은 정상 UTF-8(대체 문자 U+FFFD 0건), IDE 시작 로그가 `locale=ko_KR JNU=MS949 file.encoding=UTF-8`이다(B-71 추가 2-h 결론 그대로). 경고 원문은 `[GUARD-SHADOW] 차단 대상이었으나 shadow 모드라 통과시킴: [역할 누락/PERSISTENCE] DB 데이터 조회/저장 필요 → DAO_INTERFACE 가 REQUIRED 집합에 없습니다. …; [역할 누락/BUSINESS] …`로 파일에 정상 기록돼 있다.
+- **`saveChat` 반복 호출**: 이번 IDE 세션(08:26~08:49) 전체 246회, 분석 단계(08:37:40~08:41:54) 19회, 그 앞 clarify·일반 채팅 구간 226회(08:34:23의 일반 채팅 스트리밍이 청크마다 저장해 대부분을 차지). 원인과 호출처는 B-71 추가 2-j와 같다(`App.tsx`의 `useEffect([messages, chatId])`가 `messages`가 바뀔 때마다 전송).
+
+#### 6 검증(커밋 b4c7d88 기준)
+| 검증 | 결과 |
+|---|---|
+| 전체 테스트(서버 의존 14클래스 제외) | 627개(이전 611 + 새 16), 실패 42, 건너뜀 18. 실패 42건은 기준과 판정 차이 0, 관찰 차이 0 |
+| clarify 패키지 | 292개(39 스위트), 실패 1(기존 1건), 건너뜀 3 |
+| 하네스 | EXACT_MATCH 5/5, MATCH_EXCLUDING 2/2 |
+| 실패 메시지 diff | 0 |
+| selftest | 24/24 |
+| 웹뷰 로직 테스트 | 53/53(이전 50 + 새 3) |
+| ui-check | 34/34(이전 33 + 새 34) |
+| `npm run build` 산출물 | 커밋 2에 `index.html`, `tsconfig.tsbuildinfo` 포함 |
+**기존 테스트 기대값 변경: 없음**(새 테스트와 새 필드만 추가, 기본값은 기존 동작). 확인: `RequirementPipelineHardLimitTest`(`N=201 should throw Hard Limit exception`)의 실패는 baseline(`msgs_baseline.json`)에 있는 기존 실패다.
+
+#### 예측과 맞은 것·틀린 것, 미확인 사항
+- 맞음: 1-b의 P1(요청 동일), P2(10/10), P4(시간). 틀림: P5(첫 청크에 도구 호출 또는 reasoning; 실제는 role만 있는 빈 content 청크).
+- 예상과 달랐던 것: 회귀가 아니었고 재현 16/16 성공이라 오늘 실패의 직접 원인(서버 본문)을 알 수 없다. "관리자→manager"가 아니라 `manage`의 부분 문자열 일치였다. 덤프의 모순은 서버가 아니라 조립·메타 쪽 사정이었다.
+- 미확인: 오늘 세 번의 빈 스트림에서 서버가 실제로 보낸 본문(수정 전에는 남지 않았다), IDE 프로세스에서만 빈 응답이 나는 이유, 점수 단계의 Trans 기여 전체, `/analyze` 다시 시도에서 제외 파일이 빠지는 영향의 크기.
+
+#### IDE에서 직접 볼 항목
+1. 같은 SR로 분석을 여러 번: 탐색기 Turn 1이 빈 스트림으로 끝나면 `idea.log`에 `[EmptyStream]`(서버 본문 앞부분)과 `[EmptyResponse]`가 남고 자동으로 1회 다시 호출하는지, 그래도 비면 결과 표 대신 "파일 분석을 끝까지 하지 못했습니다"와 "다시 시도"가 나오는지(눌러서 같은 요구사항으로 `/analyze`가 시작되는지).
+2. 검증기(Stage 3)에서 빈 응답이면 같은 화면이 나오는지.
+3. 정상 분석의 결과 표 화면이 이전과 같은지(내부 문구 없음).
+4. LLM 디버그 도구창의 빈 응답 항목에 "스트림 조립 결과, 서버 원문 아님"과 서버 원문 앞부분이 보이는지, 스트리밍 표시가 맞는지.
