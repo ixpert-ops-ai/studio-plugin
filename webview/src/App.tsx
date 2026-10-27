@@ -15,6 +15,7 @@ import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
 import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
+import { RETRY_LABEL, RETRYING_LABEL, parseIncompletePayload, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardPendingAfter, isCardHide, isCardRequest, submittedStatusText } from './cardWaitLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
@@ -64,7 +65,31 @@ interface Message {
   // 분석 결과에서 빠진 후보(analyze_removed 메시지). 없는 예전 결과에서는 패널을 표시하지 않는다.
   removedCandidates?: RemovedCandidate[];
   restoreNotice?: RestoreNotice;
+  // 파일 분석이 대체 경로로 끝나 결과를 내지 않았을 때 다시 시도에 쓸 같은 요구사항(analyze_incomplete 메시지)
+  retryRequirement?: string;
 }
+
+// 분석 미완료 안내 아래의 "다시 시도" 버튼: 같은 요구사항을 /analyze로 다시 보낸다(한 번 누르면 비활성, 발화는 보내지 않는다).
+const IncompleteRetryButton: React.FC<{ requirement: string }> = ({ requirement }) => {
+  const [clicked, setClicked] = useState(false);
+  return (
+    <div style={{ marginTop: '12px' }}>
+      <button
+        type="button"
+        data-analyze-retry="true"
+        disabled={clicked}
+        onClick={() => {
+          if (clicked) return;
+          setClicked(true);
+          window.sendToIde?.(JSON.stringify(retryRequest(requirement)));
+        }}
+        style={{ padding: '6px 14px', fontSize: '12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: clicked ? 'default' : 'pointer', fontWeight: 'bold' }}
+      >
+        {clicked ? RETRYING_LABEL : RETRY_LABEL}
+      </button>
+    </div>
+  );
+};
 
 // ─────────────────────────────────────────────
 //  컴포넌트: StepNotiItem (스텝 진행 알림 카드)
@@ -936,6 +961,8 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
 
         {isError && <div className="error-badge" style={{ marginTop: '12px' }}>ERROR</div>}
 
+        {!isError && !msg.isLoading && msg.retryRequirement && <IncompleteRetryButton requirement={msg.retryRequirement} />}
+
         {/* 분석 결과에서 빠진 후보(접힌 목록)와 되살리기. 메시지가 있는 결과에만 표시한다 */}
         {!isError && !msg.isLoading && (msg.removedCandidates || msg.restoreNotice) && (
           <RemovedCandidatesPanel messageId={msg.id} candidates={msg.removedCandidates ?? []} notice={msg.restoreNotice} />
@@ -1268,6 +1295,15 @@ function App() {
       }
 
       const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
+
+      if (data.subType === 'analyze_incomplete') {
+        // 결과 표 없이 끝난 분석: 같은 메시지에 다시 시도 버튼용 요구사항만 붙인다
+        const req = messageId ? parseIncompletePayload(data.content) : null;
+        if (messageId && req) {
+          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, retryRequirement: req } : m));
+        }
+        return;
+      }
 
       if (data.subType === 'analyze_removed') {
         // 분석 스트리밍이 끝난 뒤 따로 도착한다: 같은 결과 메시지에 빠진 후보 목록만 붙인다(순서는 받은 그대로).

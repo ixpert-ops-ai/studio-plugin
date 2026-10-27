@@ -11,6 +11,8 @@ data class SeedSelectionResult(
     val reasoning: String,
     val frontendFileHints: List<String>? = null,
     val judgePicks: List<String> = emptyList(),
+    /** 탐색기가 도구 없이 끝나거나 실패해 키워드 휴리스틱 대체 경로로 시드를 골랐다. */
+    val usedFallback: Boolean = false,
     val rawCandidates: List<String> = emptyList()
 )
 
@@ -68,7 +70,9 @@ data class DiscoveryMetadata(
     val reasoning: String = "",
     val rawCandidates: List<String> = emptyList(),
     val judgePicks: List<String> = emptyList(),
-    val frontendFileHints: List<String> = emptyList()
+    val frontendFileHints: List<String> = emptyList(),
+    /** 시드를 키워드 휴리스틱 대체 경로로 골랐다(탐색기 실패). */
+    val usedFallback: Boolean = false
 )
 
 /**

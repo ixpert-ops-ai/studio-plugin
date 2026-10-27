@@ -66,10 +66,19 @@ data class RequirementAnalysisResult(
     val rawResponse: String,
     val suggestedNewFiles: List<net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.NewFileProposal> = emptyList(),
     // 선택 필드: 최종 목록에서 빠진 후보(USER_EXCLUDED 먼저, 나머지는 stageRank 순). 옛 결과(필드 없음, null)는 빈 목록으로 본다.
-    val removedCandidates: List<RemovedCandidate>? = null
+    val removedCandidates: List<RemovedCandidate>? = null,
+    // 탐색기·검증기가 대체 경로로 끝나 결과를 내지 않았다(화면은 안내와 "다시 시도"만 보인다)
+    val incomplete: Boolean = false,
+    // incomplete일 때 다시 시도에 쓸 같은 요구사항(분석에 쓴 문장)
+    val retryRequirement: String? = null
 )
 
-class RequirementAnalysisPipeline(private val project: Project?, private val client: LLMClient) {
+class RequirementAnalysisPipeline(
+    private val project: Project?,
+    private val client: LLMClient,
+    // 대체 경로(탐색기 도구 없음, 검증기 도구 없음)로 끝나면 결과 표 대신 안내를 낸다. IDE(project 있음)에서만 켠다: 평가 하네스와 단위 테스트(project 없음)는 대체 경로 결과를 그대로 쓴다.
+    private val incompleteOnFallback: Boolean = project != null
+) {
     constructor(client: LLMClient) : this(null, client)
 
     companion object {
@@ -386,6 +395,20 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             println("[STAGE 3 LOG] Target GT ($targetGt) Rank: ${if (stage3Rank > 0) stage3Rank else "Not Found"}")
         }
         
+        // 탐색기(시드 선정)나 검증기(Stage 3)가 대체 경로로 끝났다: 잘못된 결과 표를 내지 않고 안내만 낸다(계약 저장, 가드 기록, 마지막 결과 갱신도 하지 않는다)
+        if (incompleteOnFallback && (discoveryResult.metadata.usedFallback || verificationOutput.usedFallback)) {
+            logger.warn("분석을 결과 없이 끝냈습니다: 탐색기 대체 경로=${discoveryResult.metadata.usedFallback}, 검증기 대체 경로=${verificationOutput.usedFallback}")
+            onChunk?.invoke("\n" + IncompleteAnalysisNotice.text() + "\n")
+            return RequirementAnalysisResult(
+                summary = "",
+                targetFiles = emptyList(),
+                warnings = "",
+                rawResponse = "분석 미완료(대체 경로)",
+                incomplete = true,
+                retryRequirement = primaryReq
+            )
+        }
+
         // --- SHADOW LOGGER INTEGRATION ---
         try {
             val guard = net.ib.ixpert.ops.wuwagent.agent.completeness.CompletenessGuardIntegration(net.ib.ixpert.ops.wuwagent.agent.completeness.GuardMode.SHADOW)
@@ -440,7 +463,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
             } else {
                 appendLine("> ⚠️ **검증 단계 파싱 실패**: LLM 응답 포맷 오류로 인해 Stage 1/2 후보 결과를 모두 유지합니다. 결과를 직접 확인하세요.")
                 appendLine()
-                val formattedReasoning = discoveryResult.metadata.reasoning.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n")
+                val formattedReasoning = AnalysisResultWording.reasoning(discoveryResult.metadata.reasoning).replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n")
                 if (formattedReasoning.isNotBlank()) {
                     appendLine(formattedReasoning)
                 }
@@ -471,7 +494,7 @@ class RequirementAnalysisPipeline(private val project: Project?, private val cli
                         "DELETE" -> "삭제"
                         else -> it.type
                     }
-                    val descForTable = it.description.replace("\n", "<br>")
+                    val descForTable = AnalysisResultWording.description(it.description).replace("\n", "<br>")
                     appendLine("| ${it.order} | ${it.path} | $koreanType | $descForTable |")
                 }
             } else {

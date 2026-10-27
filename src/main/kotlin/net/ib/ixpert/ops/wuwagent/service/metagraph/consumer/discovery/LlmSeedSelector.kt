@@ -324,7 +324,8 @@ class LlmSeedSelector(private val llmClient: LLMClient) : SeedSelector {
             changeIntent = if (isCreate) ChangeIntent.CREATE else if (isDelete) ChangeIntent.DELETE else ChangeIntent.MODIFY,
             layerHint = listOf("SERVICE", "PRESENTATION"), // 임의 기본값
             frontendRelevant = isFrontend,
-            reasoning = "Fallback: Keyword matching due to LLM failure or timeout"
+            reasoning = "Fallback: Keyword matching due to LLM failure or timeout",
+            usedFallback = true
         )
     }
 }

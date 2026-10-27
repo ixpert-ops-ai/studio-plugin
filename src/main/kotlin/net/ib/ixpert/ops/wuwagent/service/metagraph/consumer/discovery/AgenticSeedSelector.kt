@@ -368,7 +368,8 @@ class AgenticSeedSelector(
             changeIntent = if (isCreate) ChangeIntent.CREATE else if (isDelete) ChangeIntent.DELETE else ChangeIntent.MODIFY,
             layerHint = listOf("SERVICE", "PRESENTATION"),
             frontendRelevant = isFrontend,
-            reasoning = "Fallback: Keyword matching due to LLM failure or timeout"
+            reasoning = "Fallback: Keyword matching due to LLM failure or timeout",
+            usedFallback = true
         )
     }
 

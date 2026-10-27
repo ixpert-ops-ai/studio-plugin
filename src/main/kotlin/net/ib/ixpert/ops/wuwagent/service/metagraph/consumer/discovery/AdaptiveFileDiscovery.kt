@@ -65,7 +65,8 @@ object AdaptiveFileDiscovery {
             reasoning = seedResult.reasoning,
             rawCandidates = seedResult.rawCandidates,
             judgePicks = seedResult.judgePicks,
-            frontendFileHints = seedResult.frontendFileHints ?: emptyList()
+            frontendFileHints = seedResult.frontendFileHints ?: emptyList(),
+            usedFallback = seedResult.usedFallback
         )
 
         return DiscoveryResult(

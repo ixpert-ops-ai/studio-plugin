@@ -1661,6 +1661,16 @@ class WebviewActionRouter(private val project: Project) {
                 }
 
                 ApplicationManager.getApplication().invokeLater {
+                    // 탐색기·검증기 대체 경로로 끝났다: 결과 표와 /implement 안내 없이 안내와 "다시 시도"만 보낸다
+                    if (result.incomplete) {
+                        bridge.sendMessage("chat", "", messageId)
+                        bridge.sendMessage(
+                            "analyze_incomplete",
+                            com.google.gson.Gson().toJson(mapOf("requirement" to (result.retryRequirement ?: initialRequirement))),
+                            messageId
+                        )
+                        return@invokeLater
+                    }
                     if (result.targetFiles.isNotEmpty()) {
                         var extraText = ""
                         
@@ -1671,7 +1681,7 @@ class WebviewActionRouter(private val project: Project) {
                             extraText += "| 순서 | 파일 경로 | 유형 | 작업 내용 |\n"
                             extraText += "|:---:|:---|:---:|:---|\n"
                             result.targetFiles.forEach { file ->
-                                extraText += "| ${file.order} | ${file.path} | **${file.type}** | ${file.description} |\n"
+                                extraText += "| ${file.order} | ${file.path} | **${file.type}** | ${net.ib.ixpert.ops.wuwagent.agent.AnalysisResultWording.description(file.description)} |\n"
                             }
                         }
 

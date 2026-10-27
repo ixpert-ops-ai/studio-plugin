@@ -53,7 +53,9 @@ class FileRelevanceVerifier(
         val removed: List<String> = emptyList(),   // Stage 3에서 제거된 후보 경로(사유는 받지 않는다)
         val unjudged: List<String> = emptyList(),  // 제거·유지 어느 쪽에도 없어 유지된 후보 경로(판정 누락)
         val candidatePaths: List<String> = emptyList(),  // 이번 호출의 번호표(1번부터의 후보 경로 순서)
-        val removedReasons: Map<String, String> = emptyMap()  // 제거 사유(모델이 준 것만. 출력 축소 형식은 근거 미제시 제거에만 있다)
+        val removedReasons: Map<String, String> = emptyMap(),  // 제거 사유(모델이 준 것만. 출력 축소 형식은 근거 미제시 제거에만 있다)
+        /** 검증 응답에 도구 호출이 없어 후보 전체를 그대로 유지했다(대체 경로). */
+        val usedFallback: Boolean = false
     ) {
         /** 화면에 보일 요약: 모델이 인용한 후보 번호를 파일명으로 바꾼다(판정·저장 값은 그대로). */
         fun displayReasoning(): CitationResult = substituteCandidateNumbers(reasoning, candidatePaths)
@@ -233,6 +235,7 @@ class FileRelevanceVerifier(
         val toolCall = response?.toolCalls?.firstOrNull { it.function.name == "submit_verification" }
         var argsStr = toolCall?.function?.arguments
         var finalReasoning = ""
+        var usedFallback = false
         
         if (argsStr == null) {
             val content = response?.content ?: ""
@@ -328,6 +331,7 @@ class FileRelevanceVerifier(
             }
         } else {
             logger.warn("No valid tool call found, keeping all files as fallback.")
+            usedFallback = true
             verifiedTopFiles.addAll(topFiles)
         }
         
@@ -343,7 +347,8 @@ class FileRelevanceVerifier(
             removed = removedPaths.filter { it !in keptPaths },
             unjudged = unjudgedPaths,
             candidatePaths = topFiles.map { it.path },
-            removedReasons = removedReasons.filterKeys { it !in keptPaths }
+            removedReasons = removedReasons.filterKeys { it !in keptPaths },
+            usedFallback = usedFallback
         )
     }
 
