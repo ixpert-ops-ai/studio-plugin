@@ -37,6 +37,12 @@ class OpenAIClient(
         val streamRetryFailedCount = java.util.concurrent.atomic.AtomicInteger()
 
         /** 도구 호출 인자가 하나라도 JSON으로 해석되지 않으면 절단으로 본다. 토큰 상한(length)으로 끝난 응답은 같은 요청이 다시 같은 곳에서 끊기므로 제외한다. */
+        /** 도구 호출 응답이 content와 tool_calls 모두 비었다(서버·스트림 오류로 본다. 모델이 "도구 없이 답을 끝낸" 것과 다르다). */
+        internal fun isEmptyToolResponse(response: net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse?): Boolean {
+            val message = response?.choices?.firstOrNull()?.message ?: return false
+            return message.content.isNullOrBlank() && message.toolCalls.isNullOrEmpty()
+        }
+
         internal fun isTruncatedToolCall(response: net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse?): Boolean {
             val choice = response?.choices?.firstOrNull() ?: return false
             if (choice.finishReason == "length") return false
@@ -330,7 +336,13 @@ class OpenAIClient(
         toolChoice: Any?,
         temperature: Double?
     ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
-        val first = chatWithToolsOnce(systemPrompt, messages, maxTokens, tools, toolChoice, temperature)
+        var first = chatWithToolsOnce(systemPrompt, messages, maxTokens, tools, toolChoice, temperature)
+        // content와 tool_calls가 모두 빈 응답은 오류로 분류하고 1회 다시 호출한다(그래도 비면 그대로 돌려주어 호출부가 실패로 처리한다)
+        if (isEmptyToolResponse(first) && !TaskCancellationToken.isCancelled.get()) {
+            logger.warn("[EmptyResponse] OpenAIClient (ToolCalling): content와 tool_calls가 모두 빈 응답 → 오류로 분류, 1회 재시도")
+            first = chatWithToolsOnce(systemPrompt, messages, maxTokens, tools, toolChoice, temperature)
+            if (isEmptyToolResponse(first)) logger.warn("[EmptyResponse] OpenAIClient (ToolCalling): 재시도 후에도 빈 응답 — 실패로 처리")
+        }
         if (!isTruncatedToolCall(first) || TaskCancellationToken.isCancelled.get()) return first
         streamRetryCount.incrementAndGet()
         logger.warn("OpenAIClient (ToolCalling): 스트림 절단 감지(도구 인자 JSON 해석 불가) → 1회 재시도")
@@ -390,7 +402,7 @@ class OpenAIClient(
         val startMs = System.currentTimeMillis()
         val debugEntry = if (settings.enableLlmDebug) {
             try {
-                DebugManager.getInstance().newEntry(settings.model, serverUrl, jsonPayload, messages.size + 1, false)
+                DebugManager.getInstance().newEntry(settings.model, serverUrl, jsonPayload, messages.size + 1, true)
             } catch (_: Exception) { null }
         } else null
 
@@ -424,6 +436,10 @@ class OpenAIClient(
                     var responseId: String? = null
                     var finishReason: String? = null
                     var totalChunks = 0
+                    // "data:"로 시작하지 않아 지금까지 버려지던 줄(서버 오류 본문, 비스트림 응답 본문 등)과 서버 원문 앞부분(디버그용)
+                    val droppedLines = StringBuilder()
+                    val rawHead = StringBuilder()
+                    var errorEventMessage: String? = null
 
                     try {
                         var line: String? = reader.readLine()
@@ -433,12 +449,17 @@ class OpenAIClient(
                                 logger.info("OpenAIClient (ToolCalling): 취소 감지 → 스트림 중단")
                                 break
                             }
-                            if (currentLine.startsWith("data: ")) {
-                                val data = currentLine.removePrefix("data: ").trim()
+                            if (rawHead.length < 2000) rawHead.append(currentLine).append('\n')
+                            // SSE는 "data:" 뒤 공백이 없어도 된다("data:{...}"). 이전에는 "data: "(공백 포함)만 읽어 그런 응답을 통째로 버렸다
+                            if (currentLine.startsWith("data:")) {
+                                val data = currentLine.removePrefix("data:").trim()
                                 if (data == "[DONE]") break
                                 totalChunks++
                                 try {
                                     val json = JsonParser.parseString(data).asJsonObject
+                                    json.get("error")?.let { e ->
+                                        errorEventMessage = if (e.isJsonObject) (e.asJsonObject.get("message")?.takeIf { it.isJsonPrimitive }?.asString ?: e.toString()) else e.toString()
+                                    }
                                     if (responseId == null) {
                                         responseId = json.get("id")?.takeIf { it.isJsonPrimitive }?.asString
                                     }
@@ -468,6 +489,8 @@ class OpenAIClient(
                                 } catch (e: Exception) {
                                     logger.warn("Failed to parse tool calling SSE chunk: $currentLine", e)
                                 }
+                            } else if (currentLine.isNotBlank() && droppedLines.length < 4000) {
+                                droppedLines.append(currentLine).append('\n')
                             }
                             line = reader.readLine()
                         }
@@ -479,6 +502,40 @@ class OpenAIClient(
                         }
                     } finally {
                         TaskCancellationToken.activeInputStream = null
+                    }
+
+                    if (totalChunks == 0) {
+                        // SSE 청크가 하나도 없었다: 서버가 스트림 대신 일반 JSON(응답 또는 오류)을 보냈거나 본문이 비었다. 버려지던 본문을 해석한다.
+                        val dropped = droppedLines.toString().trim()
+                        logger.warn("[EmptyStream] OpenAIClient (ToolCalling): SSE 청크 0개, 서버 본문 앞부분(${dropped.length}자): ${dropped.take(300).replace('\n', ' ')}")
+                        if (dropped.isNotEmpty()) {
+                            try {
+                                val body = JsonParser.parseString(dropped).asJsonObject
+                                body.get("error")?.let { e ->
+                                    errorEventMessage = if (e.isJsonObject) (e.asJsonObject.get("message")?.takeIf { it.isJsonPrimitive }?.asString ?: e.toString()) else e.toString()
+                                }
+                                val msg = body.getAsJsonArray("choices")?.get(0)?.asJsonObject
+                                if (responseId == null) responseId = body.get("id")?.takeIf { it.isJsonPrimitive }?.asString
+                                msg?.get("finish_reason")?.takeIf { it.isJsonPrimitive }?.asString?.let { if (it.isNotBlank()) finishReason = it }
+                                val message = msg?.getAsJsonObject("message")
+                                message?.get("content")?.takeIf { it.isJsonPrimitive }?.asString?.let { contentBuilder.append(it) }
+                                message?.get("reasoning_content")?.takeIf { it.isJsonPrimitive }?.asString?.let { reasoningBuilder.append(it) }
+                                message?.getAsJsonArray("tool_calls")?.forEachIndexed { i, tcElem ->
+                                    val tcObj = tcElem.asJsonObject
+                                    val acc = toolCallsMap.getOrPut(i) { ToolCallAccumulator() }
+                                    tcObj.get("id")?.takeIf { it.isJsonPrimitive }?.asString?.let { if (it.isNotBlank()) acc.id = it }
+                                    tcObj.get("type")?.takeIf { it.isJsonPrimitive }?.asString?.let { if (it.isNotBlank()) acc.type = it }
+                                    val fn = tcObj.getAsJsonObject("function")
+                                    fn?.get("name")?.takeIf { it.isJsonPrimitive }?.asString?.let { if (it.isNotBlank()) acc.name = it }
+                                    fn?.get("arguments")?.takeIf { it.isJsonPrimitive }?.asString?.let { acc.arguments.append(it) }
+                                }
+                            } catch (_: Exception) {
+                                // JSON이 아닌 본문: 위 경고 로그로 앞부분이 남아 있다
+                            }
+                        }
+                    }
+                    if (errorEventMessage != null && contentBuilder.isEmpty() && toolCallsMap.isEmpty()) {
+                        throw IOException("서버 오류 응답: $errorEventMessage")
                     }
 
                     val toolCallsList = if (toolCallsMap.isNotEmpty()) {
@@ -520,7 +577,9 @@ class OpenAIClient(
                         if (debugEntry != null) {
                             debugEntry.durationMs = System.currentTimeMillis() - startMs
                             debugEntry.isSuccess = true
-                            debugEntry.responseText = gson.toJson(response)
+                            // 서버 원문이 아니라 스트림을 조립한 결과다(finish_reason이 없으면 stop으로 채운다). 빈 응답이면 서버 원문 앞부분을 덧붙인다.
+                            debugEntry.responseText = "[스트림 조립 결과, 서버 원문 아님] " + gson.toJson(response) +
+                                (if (isEmptyToolResponse(response)) "\n[서버 원문 앞부분] " + rawHead.toString().take(1500) else "")
                             debugEntry.responseLength = (toolCallsList?.sumOf { it.function.arguments.length } ?: 0) + (assembledContent?.length ?: 0)
                             DebugManager.getInstance().addLog(debugEntry)
                         }

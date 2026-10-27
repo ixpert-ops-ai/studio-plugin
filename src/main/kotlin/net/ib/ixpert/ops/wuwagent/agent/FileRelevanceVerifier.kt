@@ -330,7 +330,11 @@ class FileRelevanceVerifier(
                 verifiedTopFiles.addAll(topFiles.filter { it.type != "CREATE" && it.type != "신규" })
             }
         } else {
-            logger.warn("No valid tool call found, keeping all files as fallback.")
+            if (response != null && response.content.isNullOrBlank() && response.toolCalls.isNullOrEmpty()) {
+                logger.warn("[EmptyResponse] FileRelevanceVerifier: LLM 응답이 비어 있음(content·tool_calls 없음, 서버/스트림 오류로 분류), keeping all files as fallback.")
+            } else {
+                logger.warn("No valid tool call found, keeping all files as fallback.")
+            }
             usedFallback = true
             verifiedTopFiles.addAll(topFiles)
         }

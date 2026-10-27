@@ -112,7 +112,12 @@ class AgenticSeedSelector(
 
             val toolCalls = assistantMessage.toolCalls
             if (toolCalls.isNullOrEmpty()) {
-                println("[AgenticGraphExplorer] Turn $turn: LLM finished without tool calls.")
+                if (assistantMessage.content.isNullOrBlank()) {
+                    // content와 tool_calls가 모두 빈 응답: 서버·스트림 오류로 분류한다(모델이 도구 없이 끝낸 것이 아니다)
+                    println("[AgenticGraphExplorer] Turn $turn: [EmptyResponse] LLM 응답이 비어 있음(content·tool_calls 없음, 서버/스트림 오류로 분류).")
+                } else {
+                    println("[AgenticGraphExplorer] Turn $turn: LLM finished without tool calls.")
+                }
                 break
             }
 
