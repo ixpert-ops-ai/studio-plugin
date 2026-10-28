@@ -2911,3 +2911,123 @@ IDE의 14:47:19 `/clarify-confirm` 직후 오류는 **세션 유효 시간 초�
 2. 검증기(Stage 3)에서 빈 응답이면 같은 화면이 나오는지.
 3. 정상 분석의 결과 표 화면이 이전과 같은지(내부 문구 없음).
 4. LLM 디버그 도구창의 빈 응답 항목에 "스트림 조립 결과, 서버 원문 아님"과 서버 원문 앞부분이 보이는지, 스트리밍 표시가 맞는지.
+
+
+### [B-75] IDE 로그 판정, 빈 스트림 유휴 실험, 다시 시도의 인텐트 보존, 휴리스틱 오탐 제거, 틀린 전제 경고 (2026-10-28)
+
+#### 0 사전 확인과 로그 정리(읽기만)
+- 사전 확인: `git status -s` 비어 있음, HEAD = origin = bb524ed. 처음에는 `runIde`와 샌드박스 IDE가 떠 있어(PID 13920, 19208) 지시대로 작업하지 않고 멈췄고, 사용자가 종료한 뒤 시작했다(남은 java는 Gradle 데몬뿐). 작업 중 `runIde`는 실행하지 않았다.
+- 로그 복사: `build/ide-logs/b74_ide_20261028.log`(9.34MB, 커밋하지 않음). 가장 최근 채팅 파일: `C:\Users\dffrp\AppData\Roaming\ixpert\chats\chat_1793063859962.json`(최종 저장 2026-10-27 10:35:39). 로그는 누적 파일이라 이번 테스트는 `2026-10-27 10:15:51` IDE 시작 구간(로그 37436~41471행)이고, 2026-10-28 09:09:48에 다시 시작한 프로세스는 시작 로그뿐이다. 지시문의 "오늘"은 이 2026-10-27 테스트다.
+- 이번 테스트 SR: 확정 정제문(87자) "관리자 설문 상세 화면용 기존 설문조사 상세 조회 기능에서 응답자 이메일 정보를 앞 2자리와 도메인만 보이도록 마스킹하여 함께 반환하도록 백엔드를 수정한다."(`분석 시작 직전 SR(87자, clarify 경유)`). 결과: Seed 3(SurveyServiceImpl, SurveyDaoImpl, SurveyDto), 평가 61, 선정 30, 최종 2(SurveyDto, SurveyServiceImpl), Stage 3에서 제외 28.
+
+**LLM 호출 표**(각 호출 시작과 직전 호출 끝의 간격 포함, 로그 `OpenAI API Call`/`Raw Response`/`Stream Complete`에서 계산; 5번 호출은 6번과 병렬이라 끝 줄이 하나뿐)
+
+| # | 종류 | 시작 | 끝 | 소요(초) | 직전 호출과의 간격(초) | 결과 |
+|---|---|---|---|---|---|---|
+| 1 | 초기 제약 추출(비스트림) | 10:17:47.443 | 10:17:58.322 | 10.9 | - | 응답 796자 |
+| 2 | 작업 요약 | 10:17:58.651 | 10:18:10.588 | 11.9 | 0.3 | 837자 |
+| 3 | 발화 제약 추출 | 10:18:44.445 | 10:18:58.525 | 14.1 | 33.9 | 877자 |
+| 4 | 요약 | 10:18:58.535 | 10:19:18.849 | 20.3 | 0.0 | 998자 |
+| 5, 6 | 확정: 최종 추출·정제문(병렬) | 10:19:29.617 / .618 | 10:19:35.175(6번) | 5.6 | 10.8 | 655자 |
+| 7 | 탐색기 Turn 1(스트림) | 10:22:13.086 | 10:22:26.337 | 13.3 | **157.9** | chunks=62, toolCalls=2 |
+| 8 | Turn 2 | 10:25:04.859 | 10:25:15.918 | 11.1 | **158.5** | chunks=41, toolCalls=2 |
+| 9 | Turn 3 | 10:28:08.542 | 10:28:22.937 | 14.4 | **172.6** | chunks=58, toolCalls=2 |
+| 10~13 | Turn 4~7 | 10:28:22.939 ~ 10:29:08.519 | ~10:29:59.316 | 16.3, 19.3, 9.9, 50.8 | 0.0 | chunks 73, 89, 48, 220 (Turn 7에서 시드 확정) |
+| 14 | Stage 3 검증 | 10:34:59.551 | 10:35:39.056 | 39.5 | **300.2**(Stage 3 확인 카드 5분 타임아웃 뒤) | chunks=287, finish stop |
+
+**요청한 줄의 시각순 표**(이 구간 전체)
+| 시각 | 줄 |
+|---|---|
+| 10:29:59.321 | `SEEDS CONFIRMED! (3 classes): [SurveyServiceImpl, SurveyDaoImpl, SurveyDto]` |
+| 10:29:59.333 | `[DEBUG-EXPANDER] frontendRelevant: true` |
+| (없음) | `[EmptyStream]` 0, `[EmptyResponse]` 0, `UI was frozen` 0, `[ExtractSchema]` 0, `[ExtractFail]` 0, `No valid tool call` 0, `without tool calls` 0 |
+
+**판정**
+- a) **2분·3분 대기 직후 호출에서 빈 스트림이 났는가: 아니오(확인).** 158초, 173초 쉰 직후의 Turn 2, Turn 3도, Stage 3 카드 5분 타임아웃(300.2초 간격) 직후의 검증기 호출도 모두 `chunks>0`으로 정상이었고 `[EmptyStream]`·`[EmptyResponse]`가 한 줄도 없다. 재시도(b4c7d88)가 덮은 것이 아니라 처음부터 비지 않았다(재시도 경고가 없다). 어제 IDE의 빈 응답 3건(B-74)의 간격은 52~168초였다.
+- b) **확정 뒤 `UI was frozen`: 0건(확인, c435a58의 두 번째 확인).** 확정 수신 10:19:29.6부터 정제문 카드 요청 10:19:52.0까지 22.4초 LLM을 기다렸지만 정지 경고가 없다. 이 로그 전체에서 `UI was frozen`은 2026-10-26 16:13:39의 한 줄뿐이다.
+- c) **`frontendRelevant`는 true(확인), 정한 단어는 "화면"(확인: 규칙 목록 중 SR에 있는 단어는 "화면"뿐)**. SR의 "관리자 설문 상세 **화면용**"(`AgenticSeedSelector.kt` 화면 키워드 목록). "백엔드를 수정한다"가 있어도 true였다(B-74 3-c).
+
+#### 1 빈 스트림 원인
+**1-a HTTP 클라이언트(읽기)**: `OpenAIClient`는 IntelliJ `HttpRequests.post(...)`(`OpenAIClient.kt:156`, 도구 호출 `:410`)를 쓰고 그 아래는 JDK `HttpURLConnection`이다. 연결 재사용·풀 크기·idle 유지 시간을 코드에서 따로 설정하지 않는다(`grep keepAlive|maxConnections|http.keepAlive` 결과 없음, `build.gradle.kts`/`gradle.properties`에도 없음) → JDK 기본값: `http.maxConnections` 5(호스트당 keep-alive 풀), 서버가 `Keep-Alive: timeout`을 주지 않으면 유휴 연결 보관 5초(`http.keepAlive.time.server` 기본). 타임아웃: 연결 30초(`:162`, `:417`), 읽기는 일반 호출 `settings.timeoutSeconds`(기본 300초), 짧은 비스트림 호출(`max_tokens <= 1000`)은 90초(`:143`, `NON_STREAM_READ_TIMEOUT_SEC = 90`, 재시도 1회), 모델 목록 5초(`:615`). 서버는 Cloudflare 뒤에 있다(`GET /v1/models` 응답 헤더 `Server: cloudflare`, `Connection: keep-alive`, 응답에 `Keep-Alive` 헤더 없음, 이전 524 오류도 Cloudflare 코드). vLLM·프록시의 keep-alive 설정 값은 알 수 없다.
+
+**1-b 유휴 실험**(같은 `OpenAIClient` 인스턴스, 탐색기 Turn 1 요청 본문, 호출 → 60/180/300초 쉼 → 호출, 각 3회, 실서버 직접 18호출, 09:21~09:51; 사전 예측은 `build/eval-reports/pred_b75.md`)
+- 결과: **18/18 정상, 빈 스트림 0건.** 모든 호출이 HTTP 요청 1회(재시도 없음), 도구 호출 2개, finish `tool_calls`, 소요 9.5~9.8초(쉰 시간과 무관). 응답 헤더(JDK 로그): `Content-Type=text/event-stream; charset=utf-8`, `Transfer-Encoding=chunked`, `Connection=keep-alive`, `Server=cloudflare`(18/18 동일). 쉬기 전/후 모두 같다.
+- 예측 대조: P1(재현 없음) 맞음, P3(헤더) 맞음(`Transfer-Encoding: chunked`는 예측에 없던 추가), P4(쉼과 무관, 9~15초) 맞음, P5(재현이 있다면 300초 뒤)는 재현이 없어 판정 불가. P2(60초 이상 쉬면 새 연결)는 **확인하지 못했다**: JDK 로그에서 연결 재사용 여부를 읽어내지 못했다.
+- **1-c 판정: 재현되지 않았으므로 고치지 않았다(커밋 1 없음).** 0번 a)의 IDE 쪽 재현도 이번 테스트에는 없다(빈 스트림 0건). 따라서 "오래 쉰 연결 재사용이 빈 스트림을 만든다"는 가설은 오늘 데이터로는 지지되지 않는다. 같은 클라이언트 인스턴스로 쉬어도 어제 IDE의 52~168초 간격 실패는 재현되지 않았다.
+- **새 관찰(4번 실측 중)**: 4번 실행의 6번째(정제문 2의 3회차) 분석이 10:24경 `OpenAI API ToolCalling Failed: Connection reset`(IOException, 쉬는 중이 아니라 한창 호출 중)으로 끝났다. 도구 호출 경로는 이 예외를 재시도하지 않고 던진다(`chatWithToolsOnce`의 `throw e`). IDE에서는 탐색기가 예외를 잡아 대체 경로로 가고 B-74의 안내 화면으로 이어진다. **연결 리셋도 같은 계열의 전송 실패일 수 있다는 후보**이며, 재시도 대상으로 넣을지는 이번에 판단하지 않았다.
+
+#### 2 커밋 2(55184f8) "다시 시도"의 인텐트 보존
+- `IncompleteAnalysisStore`(새 파일, 메모리에만, 5개까지)가 실패한 분석의 시작 입력과 `ClarifyIntent`(제외 파일, 제약, 정제문)를 보관한다. `analyze_incomplete` 본문에 인텐트가 있을 때만 `retryKey`가 붙는다(인텐트 없이 시작한 분석은 키 없음). 새 `/analyze-retry` 분기가 키로 보관한 입력과 인텐트로 `executeAnalyzePipeline`을 다시 시작한다(키가 없으면 요구사항만으로, 그것도 없으면 오류 안내). 웹뷰는 키가 있으면 `/analyze-retry`(요구사항 + `retryKey`), 없으면 이전처럼 `/analyze`를 보낸다. 발화는 다시 보내지 않는다. 디스크에 쓰지 않으므로 ADR-001은 지켜진다.
+- 테스트: `RetryIntentB75Test`(3): "제외한 파일이 다시 시도 뒤에도 빠져 있음"(첫 실행 미완료 → 보관한 인텐트로 재실행 → 결과에 제외 파일 없음, 빠진 후보에 USER_EXCLUDED), "제약이 유지됨"(`effectiveIntent.constraints`, `excludedFiles`, `rawRefined` 동일, 같은 인텐트 객체), 보관 한도 5개·없는 키, 라우터 소스에 키 생성 조건과 재시도 분기. 웹뷰 로직 테스트 +2, ui-check 35(키가 있는 미완료에서 `/analyze-retry`에 같은 정제문과 키가 1회, 다른 전송 없음, 비활성). 기존 테스트 기대값은 바뀌지 않았다.
+
+#### 3 커밋 3(dd60fa5) 휴리스틱과 후보 확장의 오탐
+- 변경(`HeuristicRules.kt` 새 파일, `AgenticSeedSelector`, `RelevanceScorer`): (a) SR에 "백엔드/서버/API"가 있으면 `frontendRelevant`를 false로 두고(구조 판정 포함), "~화면용", "~화면에서 쓰는/사용하는"은 화면 키워드로 세지 않는다. (b) 범용 번역 토큰(info, data, manage 등 `GenericTranslationTokens`)은 키워드 대체 시드 근거에서 빼고, 점수 단계에서는 약한 일치(가중치 15)로만 쓴다. (c) 리소스 파일명 일치를 단어 경계로 바꿨다(`NameWordMatch`: `manage`가 `manager.list.js`를 맞히지 않는다).
+- **16개 시나리오 회귀 비교**(오프라인, LLM 없음, 후보 = Stage 1·2 결과, required = 정답 필수 파일; 변경 전과 후):
+
+| 시나리오 | 후보 수 전 → 후 | required 적중 전 → 후 | 비고 |
+|---|---|---|---|
+| D1 survey_admin | 11 → 11 | 2 → 2 | |
+| D2, D3 (apc) | 19 → 19, 20 → 20 | 0 → 0 | |
+| D4 (ism) | 30 → 30 | 0 → 0 | |
+| D5 | 11 → 11 | 1 → 1 | |
+| S1 member_market | 10 → 10 | 3 → 3 | |
+| S2 | 12 → 13 | 1 → 1 | |
+| S3 | 12 → 12 | 3 → 3 | |
+| SR-01, SR-02 | 11 → 11 | 1 → 1, 4 → 4 | |
+| SR-04 | 12 → 12 | 1 → 1 | |
+| SR-05 | 12 → 12 | **0 → 1** | OrganizationRepository 새로 적중 |
+| SR-07 (ism) | 18 → 13 | 0 → 0 | |
+| SR-08 | 10 → 10 | 0 → 0 | |
+| SR-11, SR-12 (apc) | 16 → 16, 19 → 19 | 1 → 1, 1 → 1 | |
+| **합계** | | **18 → 19** | **required를 잃은 시나리오 0건** |
+→ 조건(required 손실 0건)을 만족해 반영했다.
+- **오늘 SR(시드는 IDE가 확정한 SurveyServiceImpl, SurveyDaoImpl, SurveyDto)**: 변경 전 재현이 IDE와 같다(평가 61, 선정 30, `frontendRelevant=true`). 변경 후 **평가 61 → 30, 선정 30 → 16, `frontendRelevant=false`**, 사라진 후보는 `manager.list.js`, `approve_manager.jsp`, `authority_manage.jsp`, `company_manage.jsp`, `manager_list*.jsp`와 화면 리소스(`survey.list.js`, `survey_*.jsp` 등 14개)이고, 남은 16개에 `SurveyServiceImpl`, `SurveyDto`, `SurveyDaoImpl`, `sql_survey.xml`이 그대로 있다. **Stage 3 입력 17172자 → 11364자(-34%)**.
+- 테스트: `HeuristicRulesB75Test`(6): 백엔드/서버/API, "화면용", 화면 수정이 목적인 요구사항(어드민, jsp, Vue, 프론트)은 그대로 true, 범용 토큰, 단어 경계(`manage` 대 `manager`), 카멜 경계.
+- 한계: 오프라인 비교는 키워드 대체 시드로 했다(LLM이 시드를 고르는 경로의 후보 변화는 4번 실측에서 6회로 봤다). `GenericTranslationTokens` 목록은 스캐너 불용어와 동의어(information/edit/modify/change/add/remove/show/display)를 합친 임의 구성이다.
+
+#### 4 결과 변동 측정(실제 LLM, 결과만 기록, 기대값 없음)
+R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝트·카드 없음, 운영 클라이언트, 10:10~10:24). 정제문 1 = 그제 문장 "관리자 설문 상세 조회 기능의 백엔드를 수정하여, 응답자 이메일을 마스킹(앞 2자리와 도메인만 표시)한 상태로 함께 반환하도록 하세요."(어제 로그의 75자), 정제문 2 = 오늘 문장(87자, "…백엔드를 수정한다.").
+
+| 정제문 | 회 | 소요(초) | Seed | 평가/선정 | 최종 파일 | sql_survey.xml | 요약과 표 | 빈 응답 | 미완료 | 확인 안 됨 경고 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 1 | 129 | SurveyServiceImpl, SurveyDto, SurveyDaoImpl | 30/14 | SurveyDto, SurveyServiceImpl | 없음 | 일치 | 없음 | 아니오 | 없음(주장 문구 없음) |
+| 1 | 2 | 129 | 〃 | 30/14 | sql_survey.xml, SurveyDto, SurveyServiceImpl | **있음** | 일치 | 없음 | 아니오 | **있음** |
+| 1 | 3 | 127 | 〃 | 30/14 | sql_survey.xml, SurveyDto, SurveyServiceImpl | **있음** | 일치 | 없음 | 아니오 | 없음 |
+| 2 | 1 | 156 | SurveyServiceImpl, SurveyDaoImpl, SurveyDto | 30/16 | sql_survey.xml, SurveyDto, SurveyServiceImpl | 있음 | **불일치** | 없음 | 아니오 | 없음 |
+| 2 | 2 | 162 | 〃 | 30/16 | sql_survey.xml, SurveyDto, SurveyServiceImpl | 있음 | **불일치** | 없음 | 아니오 | **있음** |
+| 2 | 3 | 129(중단) | - | - | - | - | - | - | - | `Connection reset`으로 예외(IDE에서는 대체 경로 → 안내 화면) |
+- 관찰: (1) 같은 정제문이어도 최종 파일이 달라진다: 정제문 1은 1회차만 `sql_survey.xml`이 빠지고 2·3회차에는 들어왔다(`sql_survey.xml` 포함 여부가 회차마다 다름). 요약도 회차마다 다르다("DAO/SQL/인터페이스 변경 불필요"(1회), "DAO/인터페이스/MyBatis는 기존 이메일 컬럼 조회만 유지하면 됨"(2회), "DTO … SQL에서 이메일 컬럼 조회가 핵심"(3회) 등). (2) 정제문 2의 두 회차는 요약이 "DAO/MyBatis는 이메일 컬럼이 이미 조회된다면 수정 불필요"라고 하면서 표에는 `sql_survey.xml`이 있는 불일치였다(불일치 판정은 요약에서 DAO/Mapper가 "수정 불필요"라고 한 문장과 표의 DAO/매퍼 파일 유무로 가른 단순 규칙이며 요약과 표 전체를 사람이 읽고 판단한 것이 아니다). (3) 시드는 6회 중 5회가 같은 세 클래스(순서만 다름)였다. 이번 6회에서는 빈 응답·도구 없음 로그가 한 번도 없었다(`[EmptyResponse]`, `[EmptyStream]`, `without tool calls` 모두 0).
+- 4번 실행은 5번(경고)과 같은 빌드(커밋 4 포함)에서 돌아서 "확인 안 됨 경고" 열을 함께 적었다. 경고는 요약이 "그대로 조회/전달"을 주장한 회차(정제문 1의 2회, 정제문 2의 2회)에만 붙었다.
+
+#### 5 틀린 전제 검사와 경고(커밋 4: e501a95)
+- **5-a Stage 3 검증기 입력에 메서드 본문이나 SQL 본문이 들어가는가: 들어가지 않는다.** `FileRelevanceVerifier.buildBatchPrompt`(`:415-433`)가 후보마다 `buildFileContext`(`:439-457`)를 쓰는데, `<프로젝트>/docs/<파일명>.md`가 있으면 그 문서의 1·3·5절(`extractMdSections`, `:493-525`), 없으면 그래프 정보뿐이다: 자바는 fileType, layer, className, 메서드 **이름** 요약, injections, dependedBy, 한글 주석 5개(`buildGraphContext`, `:541-555`), 리소스는 type, layer, linkedTo, inputFields, **메서드 이름**, `sqlIds`(SQL id 이름)(`buildResourceContext`, `:462-483`). 메서드 본문, SQL 본문, 컬럼 목록은 없다. survey_admin에는 `docs` 폴더가 없다. 따라서 "DAO, Mapper는 이메일 원본 데이터를 그대로 조회/전달하므로 수정 불필요"라는 판정은 **본문 근거 없이 이름·구조만 보고 모델이 추정한 것**이고(그 문장이 틀린 것은 B-72 2-g의 소스 사실과 어긋난다), 요약은 이를 단정으로 적었다.
+- **5-b 실험 코드**: `ClaimedFieldWarningProbeTest`(4)가 요약에서 "그대로/기존 + 조회/전달/반환/select" 주장 문장과 그 안의 데이터 명사(이메일 등)를 뽑고, 4292986 프로토타입의 근거 수집(시드의 패키지 자바 파일, 시드 클래스 토큰을 이름에 가진 매퍼, MyBatis 문장별 테이블과 주석 처리 여부)으로 업무 코드에서 그 필드를 찾는다. 없으면 "확인 안 됨: 응답자 이메일을(를) 조회하는 코드/SQL을 찾지 못했습니다"를 만든다.
+- **5-c 결과**: 오늘 요약(저장된 채팅의 두 문장)에서 경고 1개가 나온다: "확인 안 됨: 응답자 이메일을(를) 조회하는 코드/SQL을 찾지 못했습니다 (범위 파일 26개를 읽어 확인). 다른 업무 코드에서만 발견: sql_survey.xml:670, sql_survey.xml:841, sql_survey.xml:857"(`ISSW_ADMIN_USER` 문장들). 이메일이 실제로 있는 시나리오 2개에서는 경고가 없다(survey_admin의 사용자 도메인 `UserServiceImpl/UserDto/UserDaoImpl`, member_market의 `MemberResponse/Member/MemberController`). 주장이 없거나 데이터 명사가 없는 요약에도 경고가 없다.
+- **운영 연결(커밋 4)** — 두 조건을 모두 만족해 반영했다: (1) 하네스 EXACT_MATCH 5 / MATCH_EXCLUDING 2 그대로(`harness_c4_m75.xml`), (2) 오탐 0건(이메일이 있는 2개 시나리오, 주장 없는 2개 요약, 소스를 못 읽는 합성 그래프). `ClaimedFieldCheck`(`agent/`)로 옮겨 `RequirementAnalysisPipeline`이 요약 아래에 한 줄(`> ⚠️ 확인 안 됨: …`)을 붙인다. **범위 파일을 모두 읽었을 때만** 경고하고(못 읽은 파일이 있으면 침묵), 실패해도 결과는 바뀌지 않는다. `ClaimedFieldPipelineB75Test`(4): 오늘 결과처럼 주장하는데 설문 코드에 없으면 경고 1줄과 `sql_survey.xml:670` 인용, 주장 없음, 사용자 도메인에서는 경고 없음, 루트가 없거나 파일이 없으면 경고 없음.
+- 한계: 오탐 검사 표본이 작다(이메일이 있는 시나리오 2개). 명사 사전이 6개(이메일, 전화번호, 생년월일, 비밀번호, 계좌번호, 카드번호)뿐이고 주장 문장은 정규식 한 개로 잡는다. 4번 실측에서 요약이 "DAO/MyBatis는 이메일 컬럼이 이미 조회된다면 수정 불필요"처럼 조건부로 말한 회차에는 "그대로" 문구가 없어 경고가 붙지 않았다.
+
+#### 6 기록만(수정 없음)
+- **Stage 3 제외 사유가 "제공하지 않음"인 이유**: `FileRelevanceVerifier.kt:69`의 고정 문구이고 V2 출력 형식은 제거 후보의 번호만 받는다(`removedFiles: List<Int>`, 사유 없음). 이번 결과에서 `sql_survey.xml`이 제외된 근거는 **남아 있지 않다**: 제거는 모델의 `removedFiles` 번호이고 `removedReasons`는 비어 있다. 모델이 본 입력에는 `sql_survey.xml`의 type, layer, linkedTo, `sqlIds`(SQL id 이름)뿐이라 컬럼(EMAIL 등) 근거로 제외했다고 볼 수 없다(5-a).
+- **오늘 Stage 3 확인 카드가 안 뜬 이유(판단 불가)**: 백엔드는 카드를 요청했다. `RequirementAnalysisPipeline.kt:338-339` `confirmationBridge.requestConfirmation(stage3Candidates)`는 조건 없이 호출되고(`:390` finally에서 `hideConfirmation`), 로그에 `stage3Confirmation/request` 전송 10:29:59.536, 웹뷰 반응 `saveChat` 10:29:59.550(14ms 뒤, 화면 상태가 바뀐 흔적), 응답 없이 정확히 5분(300.015초, `Stage3ConfirmationBridge.kt:32` 타임아웃 300초) 뒤 10:34:59.551에 검증기 호출이 이어졌다. **B-74 변경은 이 경로를 건드리지 않는다**: B-74의 미완료 조기 반환(`RequirementAnalysisPipeline.kt:399`)은 `finally`로 카드를 내린 뒤에 있다. 웹뷰가 카드를 그렸는지는 로그로 알 수 없다(화면 렌더 로그 없음).
+- **힌트 카드 Turn 2가 화면에 두 번 붙었는가(판단 불가)**: 백엔드는 `l1Clarification/request`를 Turn 1(10:22:26.428)과 Turn 2(10:25:16.003) 각 1회씩 총 2회 보냈다(로그 2건). 웹뷰 처리(`App.tsx`의 `l1Clarification/request`)는 이전 힌트 카드를 걸러낸 뒤 하나를 붙이는 방식이라 코드상 겹쳐 붙지 않는다. 화면에 실제로 두 번 보였는지는 로그로 확인할 수 없다.
+- **힌트 카드의 내부 표기**: `INTERFACE`, `UNKNOWN`은 `FileNode.fileType`의 이름을 그대로 보인 것(`L1ClarificationForm.tsx:207` `cand.fileType`), `150점`은 검색 점수 원값(`:210` `cand.matchScore`, 백분율이 아님). "감지된 패키지/도메인 영역"(`:137-143`)의 `mysql`, `batch`는 `extractDomainFromPath`(`AgenticSeedSelector.kt:381-404`)가 경로에서 도메인 이름을 못 찾으면 **파일의 부모 디렉터리 이름**(`parts[size-2]`)을 쓰기 때문이다(`sql/mysql/sql_survey.xml` → `mysql`, `batch/Foo.java` → `batch`).
+- **Turn 2 검색어에 "List"가 들어간 것과 Stage 0 범위 전달 경로**: Turn 2 검색어 `Survey Detail Response`, `Survey Result List`는 탐색기 LLM이 만든 것이다. Stage 0 범위("상세 화면용")가 구조 데이터로 탐색기에 전달되는 경로가 없다: `AdaptiveFileDiscovery.filter(primaryReq = effectiveReq, secondaryReq, graph, client, project, projectBasePath, enhancedRequirements)`(`RequirementAnalysisPipeline.kt:237-246`)에 `ClarifyIntent`(제약, 발화)가 인자로 없고, 탐색기 메시지는 SR 문장 하나만 받는다(`AgenticSeedSelector.kt:43-47` `요구사항(SR):\n$srText`). 그래서 사용자 발화는 정제문 산문에 녹아 있을 때만 탐색에 반영된다(개선점 9: SCOPE → Stage 1은 지금도 구조로는 연결되지 않는다).
+- **saveChat 호출 횟수**: 이번 테스트(10:17:47~10:35:40) 28회, 그중 확정~결과(10:19:29~10:35:40) 26회, 이번 구간 로그 전체 29회. 원인과 호출처는 B-71 추가 2-j와 같다(`messages`가 바뀔 때마다 전송, 디바운스 없음).
+
+#### 7 검증(커밋 e501a95 기준)
+| 검증 | 결과 |
+|---|---|
+| 전체 테스트(서버 의존 14클래스 제외) | 645개(이전 627 + 새 18), 실패 42, 건너뜀 19(이전 18 + 실행 중 들어와 있던 게이트된 임시 실험 테스트 1개). 실패 42건은 기준과 판정 차이 0, 관찰 차이 0 |
+| clarify 패키지 | 292개(39 스위트), 실패 1(기존 1건), 건너뜀 3 |
+| 하네스 | EXACT_MATCH 5/5, MATCH_EXCLUDING 2/2 |
+| 실패 메시지 diff | 0 |
+| selftest | 24/24 |
+| 웹뷰 로직 테스트 | 55/55(이전 53 + 새 2) |
+| ui-check | 35/35(이전 34 + 새 35) |
+| `npm run build` 산출물 | 커밋 2에 `index.html`, `tsconfig.tsbuildinfo` 포함 |
+**기존 테스트 기대값 변경: 없음**(새 테스트와 새 함수만 추가, 기본 동작은 그대로). 커밋: 1(없음: 유휴 재현 안 됨), 2 = 55184f8, 3 = dd60fa5, 4 = e501a95, 문서 = 다음 커밋. 개선점 표 변경: 11 진행 문구·14는 B-72 반영 그대로, 9(SCOPE → Stage 1)는 6번 읽기 결과대로 구조 연결 없음(미해결), 21(요약·표 모순)에 5번 경고 부분 반영, 22("사유: 제공하지 않음")는 6번 근거 확인(미수정).
+
+#### 예측과 결과의 차이, 확인하지 못한 것
+- 틀린 예측: 없음(1-b의 P1, P3, P4 맞음). 단 P2(유휴 후 새 연결)는 확인하지 못했고 P5는 재현이 없어 판정 불가.
+- 확인하지 못한 것: (1) 어제 IDE의 빈 스트림 3건의 서버 원문(그때는 남지 않았고 이제 `[EmptyStream]`이 남기는데 이번 테스트에서는 한 번도 안 났다). (2) 연결 재사용 여부. (3) `Connection reset`이 어제의 빈 스트림과 같은 원인인지와 재시도 대상으로 삼을지. (4) 5번 경고의 오탐률(표본 작음)과 사용자가 경고를 어떻게 받아들이는지. (5) 3번 변경이 LLM이 시드를 고르는 경로의 모든 후보를 바꾸지 않는지는 6회 실측으로만 봤다(결과 파일이 회차마다 달랐다).
+- IDE에서 직접 볼 항목: (1) 같은 SR의 분석에서 `frontendRelevant=false`, 평가·선정 개수가 줄었는지(오늘 SR은 61/30 → 30/16 예상)와 결과에 `manager.*`가 없는지. (2) 요약이 "그대로 조회/전달"을 주장할 때 "⚠️ 확인 안 됨" 줄이 한 줄 나오는지(`sql_survey.xml:670` 인용). (3) 분석 미완료 화면에서 "다시 시도"를 누르면 제외한 파일이 계속 빠져 있는지. (4) 같은 SR 여러 번의 `sql_survey.xml` 포함 여부 변동.
