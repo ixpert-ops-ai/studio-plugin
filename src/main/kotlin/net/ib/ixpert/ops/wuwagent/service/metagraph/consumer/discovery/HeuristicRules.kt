@@ -14,10 +14,27 @@ object FrontendKeywordRule {
 
     private val FRONT = listOf("어드민", "화면", "UI", "프론트", "vue", "jsp", "페이지", "웹", "frontend", "admin")
 
+    /** 화면을 직접 고치라는 뜻이 분명한 표현(B-77): 화면에/화면도 + 추가·표시·반영 같은 동사, 화면 기술 이름, 버튼·레이아웃. "화면에서 ~"(화면이 출처인 말)과 "화면의 백엔드"는 아니다. */
+    private val SCREEN_EDIT = Regex(
+        "(화면|페이지|팝업|어드민|admin|UI)\\s*(에도|에|도|을|를)(?!서)[^.\\n]{0,20}(추가|표시|노출|반영|변경|수정|개선|출력)|\\bjsp\\b|\\bvue\\b|\\.js\\b|\\bhtml\\b|\\bcss\\b|프론트|frontend|버튼|레이아웃",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** "백엔드/서버"를 직접 말했는가(API는 화면이 부르는 경우도 많아 단독으로는 세지 않는다). */
+    private val BACKEND_EXPLICIT = Regex("백엔드|서버|backend", RegexOption.IGNORE_CASE)
+
     fun mentionsBackend(srText: String): Boolean = BACKEND.containsMatchIn(srText)
 
+    fun hasScreenEditIntent(srText: String): Boolean = SCREEN_EDIT.containsMatchIn(SCREEN_AS_AUDIENCE.replace(srText, " "))
+
+    /**
+     * 백엔드/서버만 말하고 화면 수정 의도가 없는가. 이때만 화면 쪽 확장(frontendRelevant)을 끈다(B-77: 전에는 API 한 단어만 있어도 껐고,
+     * D1 같은 화면 파일이 필요한 요구사항에 API 문구가 붙으면 화면 파일 4개를 잃었다).
+     */
+    fun isBackendOnly(srText: String): Boolean = BACKEND_EXPLICIT.containsMatchIn(srText) && !hasScreenEditIntent(srText)
+
     fun isExplicitFrontend(srText: String): Boolean {
-        if (mentionsBackend(srText)) return false
+        if (mentionsBackend(srText) && !hasScreenEditIntent(srText)) return false
         val text = SCREEN_AS_AUDIENCE.replace(srText, " ")
         return FRONT.any { text.contains(it, ignoreCase = true) }
     }

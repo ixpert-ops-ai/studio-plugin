@@ -275,7 +275,7 @@ class AgenticSeedSelector(
 
         // "백엔드/서버/API"가 있으면 화면 확장을 하지 않고 "~화면용"은 화면 키워드로 세지 않는다(FrontendKeywordRule)
         val isExplicitFrontendByKeyword = FrontendKeywordRule.isExplicitFrontend(srText)
-        val mentionsBackend = FrontendKeywordRule.mentionsBackend(srText)
+        val backendOnly = FrontendKeywordRule.isBackendOnly(srText) // 백엔드/서버만 말하고 화면 수정 의도가 없을 때만 화면 확장을 끈다(B-77)
 
         fun isFrontendByStructure(seeds: List<String>): Boolean {
             return seeds.any { seed ->
@@ -296,7 +296,7 @@ class AgenticSeedSelector(
         }
 
         if (finalSeeds.isNotEmpty()) {
-            val isFrontend = !mentionsBackend && (isExplicitFrontendByKeyword || isFrontendByStructure(finalSeeds))
+            val isFrontend = !backendOnly && (isExplicitFrontendByKeyword || isFrontendByStructure(finalSeeds))
             return SeedSelectionResult(
                 seedClasses = finalSeeds,
                 changeIntent = ChangeIntent.MODIFY,
@@ -315,7 +315,7 @@ class AgenticSeedSelector(
                 .take(3)
                 .map { it.key }
             println("[AgenticGraphExplorer] Guard 2: Auto-adopting top candidates after turn limit: $topPicks")
-            val isFrontend = !mentionsBackend && (isExplicitFrontendByKeyword || isFrontendByStructure(topPicks))
+            val isFrontend = !backendOnly && (isExplicitFrontendByKeyword || isFrontendByStructure(topPicks))
             return SeedSelectionResult(
                 seedClasses = topPicks,
                 changeIntent = ChangeIntent.MODIFY,
@@ -367,7 +367,7 @@ class AgenticSeedSelector(
             val isCreate = srText.contains("추가") || srText.contains("생성") || srText.contains("신규")
             val isDelete = srText.contains("삭제") || srText.contains("제거")
             val isExplicitFrontend = FrontendKeywordRule.isExplicitFrontend(srText)
-            val isFrontend = !FrontendKeywordRule.mentionsBackend(srText) && (isExplicitFrontend || seeds.any { it.endsWith("Controller") || it.endsWith("View") })
+            val isFrontend = !FrontendKeywordRule.isBackendOnly(srText) && (isExplicitFrontend || seeds.any { it.endsWith("Controller") || it.endsWith("View") })
 
             return SeedSelectionResult(
                 seedClasses = seeds.toList(),
