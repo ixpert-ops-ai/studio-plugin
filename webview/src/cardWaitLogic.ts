@@ -28,3 +28,27 @@ export const cardPendingAfter = (pending: boolean, subType: string | undefined):
 
 /** 확인 제출 뒤 문구(ClarifyForm): 카드를 기다리는 중이면 대기 문구, 아니면 진행 문구. */
 export const submittedStatusText = (pending: boolean): string => `✓ 확인이 제출되었습니다. ${pending ? WAITING_TEXT : RUNNING_TEXT}...`;
+
+/** 카드 종류별 대기 안내: 사용자가 응답하지 않을 때 백엔드가 몇 초 뒤 무엇으로 진행하는지(백엔드 타임아웃과 같은 값). */
+export const CARD_WAIT_INFO: Record<string, { timeoutSec: number; fallback: string }> = {
+  scope: { timeoutSec: 300, fallback: '전체 프로젝트로' },
+  l1: { timeoutSec: 300, fallback: '힌트 없이' },
+  stage3: { timeoutSec: 300, fallback: '전체 후보로' },
+  refined: { timeoutSec: 300, fallback: '원래 문장으로' },
+};
+
+/** 경과 시간 표시: 60초 미만은 "N초", 이상은 "M분 S초". */
+export const cardElapsedText = (seconds: number): string => {
+  const s = Math.max(0, Math.floor(seconds));
+  return s < 60 ? `${s}초` : `${Math.floor(s / 60)}분 ${s % 60}초`;
+};
+
+/** 카드 상단 대기 줄: 대기 상태, 경과 시간, 응답이 없을 때의 진행 방식. */
+export const cardWaitLine = (kind: string, seconds: number): string => {
+  const info = CARD_WAIT_INFO[kind];
+  const tail = info ? ` (${Math.round(info.timeoutSec / 60)}분 안에 응답이 없으면 ${info.fallback} 진행합니다)` : '';
+  return `확인을 기다리고 있습니다 · 경과 ${cardElapsedText(seconds)}${tail}`;
+};
+
+/** 카드가 화면(뷰포트) 안에 보이는가: 위쪽이 화면 아래쪽보다 위이고 아래쪽이 화면 위쪽보다 아래면 보인다. */
+export const isCardInViewport = (top: number, bottom: number, viewportHeight: number): boolean => top < viewportHeight && bottom > 0;

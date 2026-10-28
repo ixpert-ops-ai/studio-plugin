@@ -90,6 +90,11 @@ class JcefL1ClarificationBridge(
 
         return try {
             future.get(timeoutSeconds, TimeUnit.SECONDS)
+        } catch (e: java.util.concurrent.TimeoutException) {
+            // 응답 없이 시간이 지나 힌트 없이 진행한다: 말없이 넘어가지 않게 안내한다
+            pendingClarifications.remove(projectId)
+            CardTimeoutNotice.send(project, CardTimeoutNotice.L1)
+            null
         } catch (e: Exception) {
             pendingClarifications.remove(projectId)
             null

@@ -44,3 +44,28 @@ test('탐색 힌트 카드: 메타그래프는 프로젝트 코드 구조로, �
   assert.equal(localNameLabel('  '), '');
   assert.equal(localNameLabel('설문클로징 혜택링크'), '(설문클로징 혜택링크)');
 });
+
+import { cardElapsedText, cardWaitLine, isCardInViewport } from '../src/cardWaitLogic.ts';
+
+test('경과 시간 표시: 60초 미만은 초, 이상은 분 초', () => {
+  assert.equal(cardElapsedText(0), '0초');
+  assert.equal(cardElapsedText(59), '59초');
+  assert.equal(cardElapsedText(60), '1분 0초');
+  assert.equal(cardElapsedText(125.9), '2분 5초');
+  assert.equal(cardElapsedText(-3), '0초');
+});
+
+test('카드 대기 줄: 대기 상태, 경과 시간, 응답이 없을 때의 진행 방식', () => {
+  assert.equal(cardWaitLine('stage3', 12), '확인을 기다리고 있습니다 · 경과 12초 (5분 안에 응답이 없으면 전체 후보로 진행합니다)');
+  assert.equal(cardWaitLine('scope', 0), '확인을 기다리고 있습니다 · 경과 0초 (5분 안에 응답이 없으면 전체 프로젝트로 진행합니다)');
+  assert.equal(cardWaitLine('l1', 65), '확인을 기다리고 있습니다 · 경과 1분 5초 (5분 안에 응답이 없으면 힌트 없이 진행합니다)');
+  assert.equal(cardWaitLine('refined', 1), '확인을 기다리고 있습니다 · 경과 1초 (5분 안에 응답이 없으면 원래 문장으로 진행합니다)');
+  assert.equal(cardWaitLine('other', 3), '확인을 기다리고 있습니다 · 경과 3초');
+});
+
+test('카드가 뷰포트 안에 보이는가', () => {
+  assert.equal(isCardInViewport(100, 400, 900), true);
+  assert.equal(isCardInViewport(2198, 2689, 902), false);
+  assert.equal(isCardInViewport(-500, -10, 900), false);
+  assert.equal(isCardInViewport(-100, 50, 900), true);
+});

@@ -78,6 +78,11 @@ class JcefStage3ConfirmationBridge(
 
         return try {
             future.get(timeoutSeconds, TimeUnit.SECONDS)
+        } catch (e: java.util.concurrent.TimeoutException) {
+            // 응답 없이 시간이 지나 전체 후보로 진행한다: 말없이 넘어가지 않게 안내한다
+            pendingConfirmations.remove(projectId)
+            CardTimeoutNotice.send(project, CardTimeoutNotice.STAGE3)
+            null
         } catch (e: Exception) {
             pendingConfirmations.remove(projectId)
             null

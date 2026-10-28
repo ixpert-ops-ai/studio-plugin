@@ -16,7 +16,7 @@ import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type Res
 import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
-import { applyCardStatus, cardPendingAfter, isCardHide, isCardRequest, submittedStatusText } from './cardWaitLogic';
+import { applyCardStatus, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
@@ -70,6 +70,41 @@ interface Message {
   // 같은 인텐트로 다시 시작하기 위한 백엔드 보관 키(인텐트 없이 시작한 분석은 없다)
   retryKey?: string;
 }
+
+// 웹뷰의 화면 진단을 백엔드 로그([WebviewUi])로 보낸다(IDE 밖에서는 아무 일도 없다).
+const sendUiLog = (text: string) => {
+  try { window.sendToIde?.(JSON.stringify({ command: '/uiLog', text })); } catch { /* 진단 로그는 실패해도 무시 */ }
+};
+
+// 사용자 응답을 기다리는 확인 카드의 틀: 대기 상태와 경과 시간을 보이고, 카드가 도착하면 하단 근접 여부와 무관하게 화면 안으로 스크롤하며, 렌더 결과(뷰포트 안인지)를 진단 로그로 남긴다.
+const CardWaitFrame: React.FC<{ kind: string; msgId: string; children: React.ReactNode }> = ({ kind, msgId, children }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    const report = (phase: string) => {
+      const el = ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const list = el.closest('.chat-list') as HTMLElement | null;
+      sendUiLog(`카드 렌더 ${phase} kind=${kind} id=${msgId} 뷰포트안=${isCardInViewport(r.top, r.bottom, window.innerHeight)} top=${Math.round(r.top)} bottom=${Math.round(r.bottom)} 창높이=${window.innerHeight}${list ? ` 스크롤=${Math.round(list.scrollTop)}/${list.scrollHeight}` : ''}`);
+    };
+    // 카드는 사용자의 응답이 필요하므로 도착하면 항상 화면 안으로 스크롤한다(자동 스크롤은 하단 근접일 때만이라 카드가 화면 밖에 붙을 수 있었다)
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    requestAnimationFrame(() => report('직후'));
+    const later = setTimeout(() => report('0.8초 뒤'), 800);
+    return () => { clearInterval(timer); clearTimeout(later); };
+  }, []);
+  return (
+    <div ref={ref} data-card-kind={kind} data-card-id={msgId}>
+      <div className="card-wait-banner" role="status" data-card-wait="true" style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 6px 2px' }}>
+        {cardWaitLine(kind, seconds)}
+      </div>
+      {children}
+    </div>
+  );
+};
 
 // 분석 미완료 안내 아래의 "다시 시도" 버튼: 같은 요구사항을 /analyze로 다시 보낸다(한 번 누르면 비활성, 발화는 보내지 않는다).
 const IncompleteRetryButton: React.FC<{ requirement: string; retryKey?: string }> = ({ requirement, retryKey }) => {
@@ -706,6 +741,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   // 0.6 Scope Selection
   if (msg.subType === 'scopeSelection/showTree') {
     return (
+      <CardWaitFrame kind="scope" msgId={msg.id}>
       <ScopeSelectionTree
         payload={msg.content}
         onCancel={() => {
@@ -724,12 +760,14 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
           window.postMessage({ type: 'ai_message', subType: 'scopeSelection/hideTree', id: 'system' }, '*');
         }}
       />
+      </CardWaitFrame>
     );
   }
 
   // 0.7 L1 Clarification (도메인 힌트 및 멀티턴 탐색 피드백)
   if (msg.subType === 'l1Clarification/request') {
     return (
+      <CardWaitFrame kind="l1" msgId={msg.id}>
       <L1ClarificationForm
         key={msg.id}
         payload={msg.content}
@@ -750,12 +788,14 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
           }
         }}
       />
+      </CardWaitFrame>
     );
   }
 
   // 0.8 Stage 3 User Confirmation (최종 LLM 검증 전 대상 파일 확인)
   if (msg.subType === 'stage3Confirmation/request') {
     return (
+      <CardWaitFrame kind="stage3" msgId={msg.id}>
       <Stage3ConfirmationForm
         key={msg.id}
         payload={msg.content}
@@ -776,12 +816,14 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
           }
         }}
       />
+      </CardWaitFrame>
     );
   }
 
   // 0.85 분석 시작 전 정제문 확인 카드 (원문과 정제문을 나란히 보이고, 정제문을 고쳐 진행하거나 취소)
   if (msg.subType === 'refinedConfirmation/request') {
     return (
+      <CardWaitFrame kind="refined" msgId={msg.id}>
       <RefinedConfirmationForm
         key={msg.id}
         payload={msg.content}
@@ -803,6 +845,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
           }
         }}
       />
+      </CardWaitFrame>
     );
   }
 
@@ -1235,6 +1278,8 @@ function App() {
       // 확인 카드가 뜨면 진행 중 메시지의 상단 문구를 "확인을 기다리고 있습니다"로, 카드 응답 뒤에는 "분석을 진행 중입니다"로 바꾼다
       if (isCardRequest(data.subType) || isCardHide(data.subType)) {
         setMessages(prev => applyCardStatus(prev, data.subType));
+        // 진단: 카드 메시지를 웹뷰가 받은 시점의 상태(렌더 결과는 CardWaitFrame이 따로 남긴다)
+        sendUiLog(`카드 수신 subType=${data.subType} 메시지수=${messagesRef.current.length} 하단근접=${isNearBottom.current}`);
       }
 
       if (data.subType === 'selected_model') {

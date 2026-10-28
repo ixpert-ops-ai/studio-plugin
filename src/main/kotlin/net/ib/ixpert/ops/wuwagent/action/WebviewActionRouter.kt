@@ -199,6 +199,11 @@ class WebviewActionRouter(private val project: Project) {
                     executeAnalyzePipeline(project, bridge, rawInput, messageId, null)
                 }
 
+                // ── 웹뷰 화면 진단(카드 수신·렌더 결과)을 로그로 남긴다 ──
+                "/uiLog" -> {
+                    logger.info("[WebviewUi] " + (payload["text"] ?: "").take(400))
+                }
+
                 // ── 분석 미완료 뒤 "다시 시도": 보관한 인텐트(제외 파일, 제약, 정제문)로 같은 분석을 다시 시작한다 ──
                 "/analyze-retry" -> {
                     logger.info("Router: /analyze-retry 분기")

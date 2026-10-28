@@ -25,7 +25,8 @@ object ScopeSelectionBridge {
         if (project == null) return null
         val projectId = project.locationHash
 
-        return withTimeoutOrNull(5 * 60 * 1000L) { // 5 minutes timeout
+        val startedMs = System.currentTimeMillis()
+        val result = withTimeoutOrNull(5 * 60 * 1000L) { // 5 minutes timeout
             suspendCancellableCoroutine { continuation ->
                 scopeSelectionContinuations[projectId] = continuation
 
@@ -46,6 +47,11 @@ object ScopeSelectionBridge {
                 }
             }
         }
+        // 사용자의 건너뛰기(취소)는 곧바로 null이 되고, 타임아웃은 5분을 채운 뒤 null이다: 후자일 때만 안내한다
+        if (result == null && System.currentTimeMillis() - startedMs >= 5 * 60 * 1000L - 1000L) {
+            CardTimeoutNotice.send(project, CardTimeoutNotice.SCOPE)
+        }
+        return result
     }
 
     suspend fun requestDependencyConfirmation(
