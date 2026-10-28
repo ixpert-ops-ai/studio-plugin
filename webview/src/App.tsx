@@ -15,7 +15,7 @@ import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
 import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
-import { RETRY_LABEL, RETRYING_LABEL, parseIncompletePayload, retryRequest } from './incompleteAnalysisLogic';
+import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardPendingAfter, isCardHide, isCardRequest, submittedStatusText } from './cardWaitLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
@@ -67,10 +67,12 @@ interface Message {
   restoreNotice?: RestoreNotice;
   // 파일 분석이 대체 경로로 끝나 결과를 내지 않았을 때 다시 시도에 쓸 같은 요구사항(analyze_incomplete 메시지)
   retryRequirement?: string;
+  // 같은 인텐트로 다시 시작하기 위한 백엔드 보관 키(인텐트 없이 시작한 분석은 없다)
+  retryKey?: string;
 }
 
 // 분석 미완료 안내 아래의 "다시 시도" 버튼: 같은 요구사항을 /analyze로 다시 보낸다(한 번 누르면 비활성, 발화는 보내지 않는다).
-const IncompleteRetryButton: React.FC<{ requirement: string }> = ({ requirement }) => {
+const IncompleteRetryButton: React.FC<{ requirement: string; retryKey?: string }> = ({ requirement, retryKey }) => {
   const [clicked, setClicked] = useState(false);
   return (
     <div style={{ marginTop: '12px' }}>
@@ -81,7 +83,7 @@ const IncompleteRetryButton: React.FC<{ requirement: string }> = ({ requirement 
         onClick={() => {
           if (clicked) return;
           setClicked(true);
-          window.sendToIde?.(JSON.stringify(retryRequest(requirement)));
+          window.sendToIde?.(JSON.stringify(retryRequest(requirement, retryKey)));
         }}
         style={{ padding: '6px 14px', fontSize: '12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: clicked ? 'default' : 'pointer', fontWeight: 'bold' }}
       >
@@ -961,7 +963,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
 
         {isError && <div className="error-badge" style={{ marginTop: '12px' }}>ERROR</div>}
 
-        {!isError && !msg.isLoading && msg.retryRequirement && <IncompleteRetryButton requirement={msg.retryRequirement} />}
+        {!isError && !msg.isLoading && msg.retryRequirement && <IncompleteRetryButton requirement={msg.retryRequirement} retryKey={msg.retryKey} />}
 
         {/* 분석 결과에서 빠진 후보(접힌 목록)와 되살리기. 메시지가 있는 결과에만 표시한다 */}
         {!isError && !msg.isLoading && (msg.removedCandidates || msg.restoreNotice) && (
@@ -1298,9 +1300,9 @@ function App() {
 
       if (data.subType === 'analyze_incomplete') {
         // 결과 표 없이 끝난 분석: 같은 메시지에 다시 시도 버튼용 요구사항만 붙인다
-        const req = messageId ? parseIncompletePayload(data.content) : null;
-        if (messageId && req) {
-          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, retryRequirement: req } : m));
+        const detail = messageId ? parseIncompleteDetail(data.content) : null;
+        if (messageId && detail) {
+          setMessages(prev => prev.map(m => m.id === messageId ? { ...m, retryRequirement: detail.requirement, retryKey: detail.retryKey } : m));
         }
         return;
       }

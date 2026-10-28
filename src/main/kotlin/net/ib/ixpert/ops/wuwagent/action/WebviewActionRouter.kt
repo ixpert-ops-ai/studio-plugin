@@ -199,6 +199,19 @@ class WebviewActionRouter(private val project: Project) {
                     executeAnalyzePipeline(project, bridge, rawInput, messageId, null)
                 }
 
+                // ── 분석 미완료 뒤 "다시 시도": 보관한 인텐트(제외 파일, 제약, 정제문)로 같은 분석을 다시 시작한다 ──
+                "/analyze-retry" -> {
+                    logger.info("Router: /analyze-retry 분기")
+                    val messageId = "analyze_${System.currentTimeMillis()}"
+                    val entry = net.ib.ixpert.ops.wuwagent.agent.clarify.IncompleteAnalysisStore.get(payload["retryKey"])
+                    val requirement = textBody.trim()
+                    when {
+                        entry != null -> executeAnalyzePipeline(project, bridge, entry.rawInput, messageId, entry.intent)
+                        requirement.isNotBlank() -> executeAnalyzePipeline(project, bridge, requirement, messageId, null)
+                        else -> bridge.sendMessage("error", "다시 시도할 요구사항을 찾지 못했습니다. 요구사항을 다시 입력해 주세요.", messageId)
+                    }
+                }
+
                 // ── 요구사항 구체화 확인 (Stage 0 -> Stage 1) ────────
                 "/clarify-confirm", "/analyze-confirm" -> {
                     logger.info("Router: /clarify-confirm or /analyze-confirm 분기")
@@ -1666,7 +1679,15 @@ class WebviewActionRouter(private val project: Project) {
                         bridge.sendMessage("chat", "", messageId)
                         bridge.sendMessage(
                             "analyze_incomplete",
-                            com.google.gson.Gson().toJson(mapOf("requirement" to (result.retryRequirement ?: initialRequirement))),
+                            com.google.gson.Gson().toJson(
+                                buildMap<String, String> {
+                                    put("requirement", result.retryRequirement ?: initialRequirement)
+                                    // 같은 인텐트(제외 파일, 제약, 정제문)로 다시 시작하도록 인텐트를 메모리에 보관하고 키를 보낸다(인텐트 없이 시작한 분석은 키 없음)
+                                    if (inMemoryClarifyIntent != null) {
+                                        put("retryKey", net.ib.ixpert.ops.wuwagent.agent.clarify.IncompleteAnalysisStore.put(rawInput, inMemoryClarifyIntent))
+                                    }
+                                }
+                            ),
                             messageId
                         )
                         return@invokeLater
