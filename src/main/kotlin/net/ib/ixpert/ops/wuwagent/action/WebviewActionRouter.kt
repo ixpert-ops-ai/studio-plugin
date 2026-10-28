@@ -1719,6 +1719,10 @@ class WebviewActionRouter(private val project: Project) {
                             }
                         }
 
+                        // 경고(확인 안 됨)가 있으면 /implement 안내 앞에 확인 요청 한 줄(/implement 자체를 막지는 않는다)
+                        if (result.confirmItems.isNotEmpty()) {
+                            extraText += "\n\n> ⚠️ **" + net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.implementCaution(result.confirmItems) + "**"
+                        }
                         extraText += "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
                         bridge.sendMessageChunk(messageId, extraText)
                     }

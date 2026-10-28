@@ -70,7 +70,9 @@ data class RequirementAnalysisResult(
     // 탐색기·검증기가 대체 경로로 끝나 결과를 내지 않았다(화면은 안내와 "다시 시도"만 보인다)
     val incomplete: Boolean = false,
     // incomplete일 때 다시 시도에 쓸 같은 요구사항(분석에 쓴 문장)
-    val retryRequirement: String? = null
+    val retryRequirement: String? = null,
+    // 경고(확인 안 됨)가 붙은 항목 이름(예: "응답자 이메일"): 결과 화면이 /implement 안내 앞에 "구현 전에 확인이 필요합니다" 한 줄을 붙인다
+    val confirmItems: List<String> = emptyList()
 )
 
 class RequirementAnalysisPipeline(
@@ -447,6 +449,16 @@ class RequirementAnalysisPipeline(
         }
         // ---------------------------------
 
+        // SR이 다루는 데이터 항목(응답자 이메일 등)을 시드의 업무 코드에서 소스로 확인한다(범위 파일을 모두 읽은 경우만, 실패해도 결과는 그대로)
+        val claimFindings = try {
+            val seedPaths = projectGraph.files.values.filter { it.className in discoveryResult.metadata.seedClasses }.map { it.path }
+            val claimRoot = projectRoot ?: project?.basePath?.let { java.io.File(it) }
+            ClaimedFieldCheck.check(primaryReq, projectGraph, claimRoot, seedPaths)
+        } catch (e: Exception) {
+            logger.warn("ClaimedFieldCheck 실패(경고 없이 진행)", e)
+            emptyList()
+        }
+
         val formattedOutput = buildString {
             appendLine("### 요구사항 분석 요약")
             // 제외 결과 표시(동작 변경 없음): 확정된 제외 파일과 확정되지 않은 제외 요청 문장
@@ -468,14 +480,8 @@ class RequirementAnalysisPipeline(
                     appendLine(formattedReasoning)
                 }
             }
-            // 요약이 "기존 조회/전달된다"고 주장하는 데이터 필드(이메일 등)를 시드의 업무 코드에서 찾지 못하면 경고 한 줄(범위 파일을 모두 읽은 경우만, 실패해도 결과는 그대로)
-            try {
-                val seedPaths = projectGraph.files.values.filter { it.className in discoveryResult.metadata.seedClasses }.map { it.path }
-                val claimRoot = projectRoot ?: project?.basePath?.let { java.io.File(it) }
-                ClaimedFieldCheck.warnings(verificationOutput.reasoning, primaryReq, projectGraph, claimRoot, seedPaths).forEach { appendLine("> ⚠️ $it") }
-            } catch (e: Exception) {
-                logger.warn("ClaimedFieldCheck 실패(경고 없이 진행)", e)
-            }
+            // SR의 데이터 항목을 업무 코드에서 찾지 못하면 경고 한 줄
+            claimFindings.forEach { appendLine("> ⚠️ ${ClaimedFieldCheck.render(it)}") }
             // Stage 3에서 제거된 후보와 판정 누락 후보(출력 축소 형식은 제거 사유를 받지 않는다)
             verificationOutput.noticeLines(validatedTargetFiles.map { it.path }.toSet()).takeIf { it.isNotEmpty() }?.let { lines ->
                 appendLine()
@@ -555,7 +561,8 @@ class RequirementAnalysisPipeline(
             warnings = discoveryResult.metadata.reasoning,
             rawResponse = "그래프 탐색 결과 처리 완료",
             suggestedNewFiles = verifiedSuggestedNewFiles,
-            removedCandidates = removedCandidates
+            removedCandidates = removedCandidates,
+            confirmItems = claimFindings.map { it.label }
         )
 
         // --- ClarificationContract 생산 및 디스크 저장 (Analyze 산출물 계약 단독 생산) ---

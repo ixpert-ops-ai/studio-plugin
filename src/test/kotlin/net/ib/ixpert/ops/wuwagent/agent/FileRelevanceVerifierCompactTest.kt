@@ -100,14 +100,14 @@ class FileRelevanceVerifierCompactTest {
         assertEquals(emptyList<String>(), out.unjudged)
     }
 
-    // C5 안내 줄: 제거 후보는 10개까지 이름을 보이고 나머지는 "외 N개", 사유는 제공하지 않음. 판정 누락 줄. 남은 파일은 제거 목록에서 뺀다.
+    // C5 안내 줄: 제거 후보는 10개까지 이름을 보이고 나머지는 "외 N개"(B-76 3a: 사유가 없으므로 사유 문구를 붙이지 않는다). 판정 누락 줄. 남은 파일은 제거 목록에서 뺀다.
     @Test
     fun c5_noticeLines() {
         val removed = (1..12).map { "/src/R$it.java" }
         val out = FileRelevanceVerifier.VerificationOutput(files = emptyList(), reasoning = "", removed = removed, unjudged = listOf("/src/U1.java", "/src/U2.java"))
         val lines = out.noticeLines()
         assertEquals(
-            "- Stage 3에서 제외된 후보 12개: R1.java, R2.java, R3.java, R4.java, R5.java, R6.java, R7.java, R8.java, R9.java, R10.java 외 2개 (사유: 제공하지 않음)",
+            "- Stage 3에서 제외된 후보 12개: R1.java, R2.java, R3.java, R4.java, R5.java, R6.java, R7.java, R8.java, R9.java, R10.java 외 2개",
             lines[0]
         )
         assertEquals("- 판정 누락으로 유지된 후보: U1.java, U2.java", lines[1])

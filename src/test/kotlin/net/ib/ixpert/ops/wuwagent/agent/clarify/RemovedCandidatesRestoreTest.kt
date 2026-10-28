@@ -277,7 +277,8 @@ class RemovedCandidatesRestoreTest {
         // (3) noticeLines와 마크다운: 제외 안내 줄과 파일 표가 기존 형식 그대로이고, 새 필드의 어휘가 나오지 않는다
         val md = chunks.toString()
         val names = listOf(cands[1], cands[2]).joinToString(", ") { it.substringAfterLast('/') }
-        assertTrue(md, md.contains("- Stage 3에서 제외된 후보 2개: $names (사유: 제공하지 않음)"))
+        // B-76 3a: 사유가 없으면 "(사유: 제공하지 않음)"을 붙이지 않는다
+        assertTrue(md, md.contains("- Stage 3에서 제외된 후보 2개: $names") && !md.contains("사유: 제공하지 않음"))
         result.targetFiles.forEach { assertTrue(md, md.contains("| ${it.order} | ${it.path} | 수정 | ${it.description} |")) }
         listOf("removedCandidates", "STAGE3_", "USER_EXCLUDED", "되살").forEach { assertFalse("마크다운에 \"$it\"가 나오면 안 된다", md.contains(it)) }
         assertTrue(md.contains("### 요구사항 분석 요약"))

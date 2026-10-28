@@ -5,8 +5,9 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import java.io.File
 
 /**
- * 결과 요약이 "기존 조회/전달된다"고 주장하는 데이터 필드(이메일 등)가 시드의 업무 코드(자바, MyBatis 매퍼)에 실제로 있는지 소스를 읽어 확인하고,
- * 없으면 결과 화면에 한 줄 경고를 만든다(B-75 5). 4292986 프로토타입의 근거 수집을 옮긴 것이다.
+ * SR(정제문)이 다루는 데이터 필드(응답자 이메일 등)가 시드의 업무 코드(자바, MyBatis 매퍼)에 실제로 있는지 소스를 읽어 확인하고,
+ * 없으면 결과 화면에 한 줄 경고를 만든다(B-75 5, B-76 3-d에서 요약 문구가 아니라 SR에서 항목을 뽑도록 바꿨다).
+ * 4292986 프로토타입의 근거 수집을 옮긴 것이다. 결과 요약의 문구는 보지 않는다(요약이 "이미 존재"라고 말하는 방식은 모델마다 달라 패턴으로 잡을 수 없었다).
  *
  * - 경고는 범위 파일을 **모두 읽었을 때만** 낸다(못 읽은 파일이 있으면 침묵: 오탐 방지).
  * - 업무 판단은 하지 않는다: "코드/SQL을 찾지 못했다"는 사실만 알리고 다른 업무에서 발견된 위치(file:line)를 붙인다.
@@ -29,17 +30,21 @@ object ClaimedFieldCheck {
         "util", "helper", "common", "config", "job", "batch", "list", "get", "set", "api", "main", "app"
     )
 
-    /** "그대로/기존 + 조회/전달/반환/select" 형태의 주장 문장. */
-    private val CLAIM = Regex("(그대로|기존)[^.\\n]{0,40}(조회|전달|반환|select)|(조회|전달|반환)[^.\\n]{0,20}그대로", RegexOption.IGNORE_CASE)
-
     private class Stmt(val id: String, val start: Int, val end: Int, val tables: Set<String>, val commented: Boolean)
 
-    class Finding(val noun: String, val subject: String?, val filesRead: Int, val otherCites: List<String>)
+    class Finding(val noun: String, val subject: String?, val filesRead: Int, val otherCites: List<String>) {
+        /** 화면에 보이는 항목 이름(예: "응답자 이메일"). */
+        val label: String get() = (subject?.let { "$it " } ?: "") + noun
+    }
 
-    /** 요약에서 주장 문장이 가리키는 데이터 명사(사전에 있는 것)와 SR에서 그 앞 단어(예: "응답자")를 찾는다. */
-    private fun claimedNouns(summary: String): List<DataNoun> {
-        val sentences = summary.split(Regex("(?<=[.다요])\\s+|\\n")).filter { CLAIM.containsMatchIn(it) }
-        return LEXICON.filter { d -> sentences.any { s -> d.korean.any { s.contains(it) } } }
+    /** SR에서 사전에 있는 데이터 명사를 찾는다. */
+    private fun requestedNouns(srText: String): List<DataNoun> = LEXICON.filter { d -> d.korean.any { srText.contains(it) } }
+
+    /** 받침 유무에 따라 "을"/"를"을 고른다(한글이 아니면 "을(를)"). */
+    fun eulReul(word: String): String {
+        val c = word.trimEnd().lastOrNull() ?: return "을(를)"
+        if (c !in '가'..'힣') return "을(를)"
+        return if ((c - '가') % 28 != 0) "을" else "를"
     }
 
     private fun subjectOf(sr: String, noun: DataNoun): String? {
@@ -91,9 +96,9 @@ object ClaimedFieldCheck {
     }
 
     /** 주장한 필드마다, 범위 파일을 모두 읽었고 업무 코드에서 찾지 못했으면 Finding을 돌려준다(근거가 없으면 빈 목록). */
-    fun check(summary: String, srText: String, graph: ProjectGraph, projectRoot: File?, seedPaths: List<String>): List<Finding> {
+    fun check(srText: String, graph: ProjectGraph, projectRoot: File?, seedPaths: List<String>): List<Finding> {
         if (projectRoot == null || seedPaths.isEmpty()) return emptyList()
-        val nouns = claimedNouns(summary)
+        val nouns = requestedNouns(srText)
         if (nouns.isEmpty()) return emptyList()
         val (files, tokens) = scopeOf(graph, seedPaths)
         if (files.isEmpty()) return emptyList()
@@ -132,11 +137,15 @@ object ClaimedFieldCheck {
         return findings
     }
 
-    /** 결과 화면에 붙일 경고 한 줄(없으면 빈 목록). */
-    fun warnings(summary: String, srText: String, graph: ProjectGraph, projectRoot: File?, seedPaths: List<String>): List<String> =
-        check(summary, srText, graph, projectRoot, seedPaths).map { f ->
-            val who = f.subject?.let { "$it " } ?: ""
-            "확인 안 됨: ${who}${f.noun}을(를) 조회하는 코드/SQL을 찾지 못했습니다 (범위 파일 ${f.filesRead}개를 읽어 확인)" +
-                (if (f.otherCites.isNotEmpty()) ". 다른 업무 코드에서만 발견: ${f.otherCites.joinToString(", ")}" else "")
-        }
+    /** 결과 화면에 붙일 경고 한 줄. */
+    fun render(f: Finding): String =
+        "확인 안 됨: ${f.label}${eulReul(f.label)} 조회하는 코드/SQL을 찾지 못했습니다 (범위 파일 ${f.filesRead}개를 읽어 확인)" +
+            (if (f.otherCites.isNotEmpty()) ". 다른 업무 코드에서만 발견: ${f.otherCites.joinToString(", ")}" else "")
+
+    /** 구현 전에 확인이 필요한 항목 한 줄(경고가 있을 때 /implement 안내 앞에 붙는다). */
+    fun implementCaution(items: List<String>): String =
+        "구현 전에 확인이 필요합니다: ${items.joinToString(", ")}의 출처를 정해 주세요"
+
+    fun warnings(srText: String, graph: ProjectGraph, projectRoot: File?, seedPaths: List<String>): List<String> =
+        check(srText, graph, projectRoot, seedPaths).map { render(it) }
 }

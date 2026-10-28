@@ -77,14 +77,22 @@ class ClaimedFieldPipelineB75Test {
         val out = run(Stub(listOf("SurveyServiceImpl", "SurveyDaoImpl", "SurveyDto"), claim), survey(), srToday, surveyRoot)
         val warn = out.lines().filter { it.startsWith("> ⚠️ 확인 안 됨:") }
         assertEquals(out, 1, warn.size)
-        assertTrue(warn[0], warn[0].contains("응답자 이메일을(를) 조회하는 코드/SQL을 찾지 못했습니다"))
+        assertTrue(warn[0], warn[0].contains("응답자 이메일을 조회하는 코드/SQL을 찾지 못했습니다"))
         assertTrue(warn[0], warn[0].contains("sql_survey.xml:670"))
         assertTrue("요약은 그대로 나온다", out.contains("DAO, Mapper는 이메일 원본 데이터를 그대로 조회/전달하므로 수정 불필요합니다."))
     }
 
     @Test
-    fun c2_주장이_없으면_경고가_없다() {
-        val out = run(Stub(listOf("SurveyServiceImpl", "SurveyDaoImpl", "SurveyDto"), "1) 이메일 마스킹은 Service에서 새로 구현해야 합니다."), survey(), srToday, surveyRoot)
+    fun c2_요약에_주장_문구가_없어도_SR의_항목을_업무_코드에서_찾지_못하면_경고가_나온다() {
+        // B-76 3d: 요약 문구가 아니라 SR에서 항목을 뽑는다(어제 요약의 "그대로 조회"가 아니라 오늘 요약의 "이미 존재" 표현도 잡는다)
+        val summary = "1) 응답자 이메일은 기존 설문 응답 데이터에 이미 존재하므로 SurveyDto에 필드 추가와 MyBatis mapper SQL 컬럼 추가만 하면 된다."
+        val out = run(Stub(listOf("SurveyServiceImpl", "SurveyDaoImpl", "SurveyDto"), summary), survey(), srToday, surveyRoot)
+        assertEquals(out, 1, out.lines().count { it.startsWith("> ⚠️ 확인 안 됨:") })
+    }
+
+    @Test
+    fun c2b_SR에_데이터_항목이_없으면_경고가_없다() {
+        val out = run(Stub(listOf("SurveyServiceImpl", "SurveyDaoImpl", "SurveyDto"), claim), survey(), "설문 상세 조회 기능의 응답 건수 표시를 수정한다", surveyRoot)
         assertFalse(out, out.contains("확인 안 됨"))
     }
 

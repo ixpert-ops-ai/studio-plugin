@@ -13,10 +13,9 @@ import java.io.File
  * 없으면 "확인 안 됨" 경고를 만든다. 4292986 프로토타입의 근거 수집(SourceFactQuestionProbe)을 재사용한다. 운영 경로에는 연결하지 않는다(이 파일은 테스트 소스).
  */
 object ClaimedFieldWarningProbe {
-    fun warnings(summary: String, srText: String, graph: ProjectGraph, projectRoot: String, seedPaths: List<String>): List<String> {
-        // 운영 코드(ClaimedFieldCheck)로 옮겼다: 4292986 프로토타입의 근거 수집을 그대로 쓴다
-        return net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.warnings(summary, srText, graph, java.io.File(projectRoot), seedPaths)
-    }
+    /** B-76: 요약 문구는 보지 않고 SR의 데이터 항목을 소스로 확인한다(summary는 호출 호환용으로만 남겼다). */
+    fun warnings(@Suppress("UNUSED_PARAMETER") summary: String, srText: String, graph: ProjectGraph, projectRoot: String, seedPaths: List<String>): List<String> =
+        net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.warnings(srText, graph, java.io.File(projectRoot), seedPaths)
 }
 
 class ClaimedFieldWarningProbeTest {
@@ -43,7 +42,7 @@ class ClaimedFieldWarningProbeTest {
         val w = ClaimedFieldWarningProbe.warnings(summaryToday, srToday, g, surveyRoot, seeds)
         println("[w1] $w")
         assertEquals(1, w.size)
-        assertTrue(w[0], w[0].startsWith("확인 안 됨: 응답자 이메일을(를) 조회하는 코드/SQL을 찾지 못했습니다"))
+        assertTrue(w[0], w[0].startsWith("확인 안 됨: 응답자 이메일을 조회하는 코드/SQL을 찾지 못했습니다"))
         assertTrue(w[0], w[0].contains("sql_survey.xml:670"))
     }
 
@@ -69,12 +68,11 @@ class ClaimedFieldWarningProbeTest {
     }
 
     @Test
-    fun w4_주장이_없거나_데이터_명사가_없으면_경고가_없다() {
+    fun w4_SR에_데이터_명사가_없으면_요약과_무관하게_경고가_없다() {
         val g = load("$surveyRoot/.meta/project-graph.json"); Assume.assumeNotNull(g); g!!
         val seeds = listOf("SurveyServiceImpl", "SurveyDaoImpl", "SurveyDto").map { pathOf(g, it) }
-        // 주장 문장 없음(이메일을 새로 처리한다는 말)
-        assertTrue(ClaimedFieldWarningProbe.warnings("이메일 마스킹은 Service에서 새로 구현해야 합니다.", srToday, g, surveyRoot, seeds).isEmpty())
-        // 데이터 명사 없음
-        assertTrue(ClaimedFieldWarningProbe.warnings("DAO와 Controller는 기존 조회 결과를 그대로 전달하므로 수정 불필요합니다.", srToday, g, surveyRoot, seeds).isEmpty())
+        // SR에 데이터 명사가 없으면 요약이 무엇을 말하든 경고가 없다
+        assertTrue(ClaimedFieldWarningProbe.warnings(summaryToday, "설문 상세 조회 기능의 응답 건수 표시를 수정한다", g, surveyRoot, seeds).isEmpty())
+        assertTrue(ClaimedFieldWarningProbe.warnings("", "설문 목록 정렬 기준을 바꾼다", g, surveyRoot, seeds).isEmpty())
     }
 }

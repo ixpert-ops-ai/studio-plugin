@@ -68,7 +68,8 @@ class FileRelevanceVerifier(
                 return n.take(NOTICE_NAME_LIMIT).joinToString(", ") + if (n.size > NOTICE_NAME_LIMIT) " 외 ${n.size - NOTICE_NAME_LIMIT}개" else ""
             }
             val shownRemoved = removed.filter { it !in keptPaths }
-            if (shownRemoved.isNotEmpty()) lines.add("- Stage 3에서 제외된 후보 ${shownRemoved.size}개: ${names(shownRemoved)} (사유: 제공하지 않음)")
+            if (shownRemoved.isNotEmpty()) // 출력 축소 형식은 제거 사유를 받지 않으므로 사유가 없는 말은 하지 않는다("사유: 제공하지 않음"은 사용자에게 의미가 없다)
+                lines.add("- Stage 3에서 제외된 후보 ${shownRemoved.size}개: ${names(shownRemoved)}")
             if (unjudged.isNotEmpty()) lines.add("- 판정 누락으로 유지된 후보: ${names(unjudged)}")
             return lines
         }
