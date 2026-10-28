@@ -3103,3 +3103,8 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 - 틀린 예측: 4번 P2(시간), P3의 "xml이 상위 5개 밖이면 N=5는 N=0과 같다"(87자 N=5는 3/3 유지로 달랐다).
 - 확인하지 못한 것: (1) 어제 카드 미표시의 IDE 원인(오늘은 재현되지 않았고 후보 (라)는 ui-check 재현뿐). (2) 4번의 차이가 우연이 아닌지. (3) 4번 정제문 2개가 사용자 의도(오늘 정제문 2개)와 같은지(해석). (4) 4번 후보 목록이 IDE와 같은지. (5) 3-d 경고가 영문 필드명이 다른 코드에서 오탐을 내는 정도. (6) 5번 규칙이 켜지는 실제 SR에서의 화면 파일 손실 빈도. (7) `ReviewDto`처럼 요약에 언급이 없는데 표에 남은 파일(50자 N=0 2회차)의 이유.
 - IDE에서 직접 볼 항목: (1) 같은 SR의 Stage 3 카드가 뷰포트 안에 보이고 대기 줄(경과 시간)이 올라가는지, `[WebviewUi]` 로그에 `카드 수신`과 `카드 렌더 … 뷰포트안=` 줄이 남는지. (2) 5분 무응답 때 "응답이 없어 전체 후보로 진행했습니다." 안내가 나오는지. (3) 오늘 SR(응답자 이메일)의 결과 화면에 "확인 안 됨: 응답자 이메일을 …" 경고와 /implement 앞의 "구현 전에 확인이 필요합니다" 줄이 나오는지, "사유: 제공하지 않음"이 없는지. (4) `[TransientRetry]` 로그가 실제로 나오는지(연결 끊김이 났을 때).
+
+#### 최종 검증(HEAD 3d3fcca, 태그 m77)
+- 전체 테스트 669개, 실패 42개(기준과 실패 메시지 diff 0), 건너뜀 21개. clarify 패키지 292/1/3(실패 1개는 기준선과 같은 `Stage0GraphScannerTest.testInvariant_LocalNameMatchingAndCrossValidationPromotion`). 하네스 EXACT_MATCH 5 + MATCH_EXCLUDING 2. selftest 24/24. 웹뷰 58/58. ui-check 39/39(37 + 신규 2).
+- 기존 테스트 기대값 변경: **없음**(`HeuristicRulesB75Test` 포함 그대로 통과).
+- 신규 시험: `ClarifyFieldQuestionB77Test` 5, `FrontendRuleRegressionB77Test` 1, `ScopeCardLossB77Test` 1(보고용), 라이브 전용 2(`Stage3BodyExperimentB77Test`, `SummaryFieldClaimB77Test`).
