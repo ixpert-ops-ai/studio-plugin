@@ -37,6 +37,12 @@ class OpenAIClient(
         val streamRetryFailedCount = java.util.concurrent.atomic.AtomicInteger()
 
         /** 도구 호출 인자가 하나라도 JSON으로 해석되지 않으면 절단으로 본다. 토큰 상한(length)으로 끝난 응답은 같은 요청이 다시 같은 곳에서 끊기므로 제외한다. */
+        private val TRANSIENT_IO = Regex("(?i)(connection reset|unexpected end of (file|stream)|premature eof|broken pipe|connection closed|connection abort)")
+
+        /** 연결이 끊기거나 응답이 도중에 끊긴 일시 오류(Connection reset 등). 타임아웃은 일시 오류로 보지 않는다(읽기 타임아웃은 이미 길다). */
+        internal fun isTransientIo(e: java.io.IOException): Boolean =
+            e !is java.net.SocketTimeoutException && (TRANSIENT_IO.containsMatchIn(e.message.orEmpty()) || TRANSIENT_IO.containsMatchIn(e.cause?.message.orEmpty()))
+
         /** 도구 호출 응답이 content와 tool_calls 모두 비었다(서버·스트림 오류로 본다. 모델이 "도구 없이 답을 끝낸" 것과 다르다). */
         internal fun isEmptyToolResponse(response: net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse?): Boolean {
             val message = response?.choices?.firstOrNull()?.message ?: return false
@@ -305,7 +311,7 @@ class OpenAIClient(
             return block()
         } catch (e: IOException) {
             if (isStreaming || TaskCancellationToken.isCancelled.get() || !isRetryable(e, retryOnTimeout)) throw e
-            logger.warn("OpenAI 비스트림 호출 실패(${e.message}), ${retryWaitMs}ms 뒤 1회 다시 호출합니다.")
+            logger.warn("${if (isTransientIo(e)) "[TransientRetry] " else ""}OpenAI 비스트림 호출 실패(${e.javaClass.name}: ${e.message}), ${retryWaitMs}ms 뒤 1회 다시 호출합니다.")
             try {
                 Thread.sleep(retryWaitMs)
             } catch (ie: InterruptedException) {
@@ -322,7 +328,7 @@ class OpenAIClient(
             ?: Regex("""HTTP response code: (\d{3})""").find(e.message.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
 
     private fun isRetryable(e: IOException, retryOnTimeout: Boolean): Boolean =
-        statusOf(e) in RETRYABLE_STATUS || (retryOnTimeout && e is java.net.SocketTimeoutException)
+        statusOf(e) in RETRYABLE_STATUS || (retryOnTimeout && e is java.net.SocketTimeoutException) || isTransientIo(e)
 
     /**
      * 스트림 절단(도구 인자 JSON 해석 불가)일 때만 1회 다시 호출한다. 타임아웃·연결 오류 등 예외는 그대로 던지고 다시 호출하지 않는다.
@@ -336,12 +342,27 @@ class OpenAIClient(
         toolChoice: Any?,
         temperature: Double?
     ): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
-        var first = chatWithToolsOnce(systemPrompt, messages, maxTokens, tools, toolChoice, temperature)
-        // content와 tool_calls가 모두 빈 응답은 오류로 분류하고 1회 다시 호출한다(그래도 비면 그대로 돌려주어 호출부가 실패로 처리한다)
-        if (isEmptyToolResponse(first) && !TaskCancellationToken.isCancelled.get()) {
-            logger.warn("[EmptyResponse] OpenAIClient (ToolCalling): content와 tool_calls가 모두 빈 응답 → 오류로 분류, 1회 재시도")
+        val startedMs = System.currentTimeMillis()
+        var transientRetried = false
+        // Connection reset 계열 IOException과 빈 스트림(chunks=0)은 같은 일시 오류다: 합쳐서 1회만 다시 호출한다.
+        // 재시도도 실패하면 예외를 그대로 던져 호출부가 기존 "끝까지 하지 못했습니다" 처리(대체 경로 → 안내 화면)로 간다.
+        var first = try {
+            chatWithToolsOnce(systemPrompt, messages, maxTokens, tools, toolChoice, temperature)
+        } catch (e: IOException) {
+            if (!isTransientIo(e) || TaskCancellationToken.isCancelled.get()) throw e
+            transientRetried = true
+            logger.warn("[TransientRetry] OpenAIClient (ToolCalling): 일시 오류 원문=${e.javaClass.name}: ${e.message}, 경과 ${System.currentTimeMillis() - startedMs}ms → 1회 재시도")
+            try {
+                chatWithToolsOnce(systemPrompt, messages, maxTokens, tools, toolChoice, temperature)
+            } catch (e2: IOException) {
+                logger.error("[TransientRetry] OpenAIClient (ToolCalling): 재시도도 실패 원문=${e2.javaClass.name}: ${e2.message}, 경과 ${System.currentTimeMillis() - startedMs}ms — 실패로 처리", e2)
+                throw e2
+            }
+        }
+        if (!transientRetried && isEmptyToolResponse(first) && !TaskCancellationToken.isCancelled.get()) {
+            logger.warn("[TransientRetry] [EmptyResponse] OpenAIClient (ToolCalling): content와 tool_calls가 모두 빈 응답(chunks=0) → 일시 오류로 분류, 경과 ${System.currentTimeMillis() - startedMs}ms, 1회 재시도")
             first = chatWithToolsOnce(systemPrompt, messages, maxTokens, tools, toolChoice, temperature)
-            if (isEmptyToolResponse(first)) logger.warn("[EmptyResponse] OpenAIClient (ToolCalling): 재시도 후에도 빈 응답 — 실패로 처리")
+            if (isEmptyToolResponse(first)) logger.warn("[TransientRetry] [EmptyResponse] OpenAIClient (ToolCalling): 재시도 후에도 빈 응답, 경과 ${System.currentTimeMillis() - startedMs}ms — 실패로 처리")
         }
         if (!isTruncatedToolCall(first) || TaskCancellationToken.isCancelled.get()) return first
         streamRetryCount.incrementAndGet()
@@ -589,7 +610,8 @@ class OpenAIClient(
                 }
         } catch (e: Exception) {
             val errorMsg = e.message ?: "Unknown error"
-            logger.error("OpenAI API ToolCalling Failed: $errorMsg", e)
+            // 일시 오류(Connection reset 등)는 호출부(chatWithTools)가 1회 재시도하므로 여기서는 경고로만 남긴다
+            if (e is IOException && isTransientIo(e)) logger.warn("OpenAI API ToolCalling 일시 오류: ${e.javaClass.name}: $errorMsg") else logger.error("OpenAI API ToolCalling Failed: $errorMsg", e)
             
             try {
                 if (debugEntry != null) {
