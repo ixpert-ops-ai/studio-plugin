@@ -273,13 +273,9 @@ class AgenticSeedSelector(
 
         clarificationBridge?.hideClarification()
 
-        val isExplicitFrontendByKeyword = srText.contains("어드민") || srText.contains("화면") || 
-                                          srText.contains("UI") || srText.contains("프론트") || 
-                                          srText.contains("vue", ignoreCase = true) || 
-                                          srText.contains("jsp", ignoreCase = true) || 
-                                          srText.contains("페이지") || srText.contains("웹") ||
-                                          srText.contains("frontend", ignoreCase = true) ||
-                                          srText.contains("admin", ignoreCase = true)
+        // "백엔드/서버/API"가 있으면 화면 확장을 하지 않고 "~화면용"은 화면 키워드로 세지 않는다(FrontendKeywordRule)
+        val isExplicitFrontendByKeyword = FrontendKeywordRule.isExplicitFrontend(srText)
+        val mentionsBackend = FrontendKeywordRule.mentionsBackend(srText)
 
         fun isFrontendByStructure(seeds: List<String>): Boolean {
             return seeds.any { seed ->
@@ -300,7 +296,7 @@ class AgenticSeedSelector(
         }
 
         if (finalSeeds.isNotEmpty()) {
-            val isFrontend = isExplicitFrontendByKeyword || isFrontendByStructure(finalSeeds)
+            val isFrontend = !mentionsBackend && (isExplicitFrontendByKeyword || isFrontendByStructure(finalSeeds))
             return SeedSelectionResult(
                 seedClasses = finalSeeds,
                 changeIntent = ChangeIntent.MODIFY,
@@ -319,7 +315,7 @@ class AgenticSeedSelector(
                 .take(3)
                 .map { it.key }
             println("[AgenticGraphExplorer] Guard 2: Auto-adopting top candidates after turn limit: $topPicks")
-            val isFrontend = isExplicitFrontendByKeyword || isFrontendByStructure(topPicks)
+            val isFrontend = !mentionsBackend && (isExplicitFrontendByKeyword || isFrontendByStructure(topPicks))
             return SeedSelectionResult(
                 seedClasses = topPicks,
                 changeIntent = ChangeIntent.MODIFY,
@@ -343,7 +339,8 @@ class AgenticSeedSelector(
             .filter { it !in stopWords }
             .toList()
         val dict = DomainDictionary.load(graph)
-        val translatedTokens = koreanTokens.flatMap { dict.translate(it) }.filter { it.length >= 2 }
+        // 범용 번역(info, data, manage 등)은 시드 근거에서 뺀다(GenericTranslationTokens)
+        val translatedTokens = koreanTokens.flatMap { dict.translate(it) }.filter { it.length >= 2 && !GenericTranslationTokens.isGeneric(it) }
         val englishTokens = (directEnglishTokens + translatedTokens).distinct()
         
         val seeds = mutableSetOf<String>()
@@ -365,8 +362,8 @@ class AgenticSeedSelector(
 
         val isCreate = srText.contains("추가") || srText.contains("생성") || srText.contains("신규")
         val isDelete = srText.contains("삭제") || srText.contains("제거")
-        val isExplicitFrontend = srText.contains("어드민") || srText.contains("화면") || srText.contains("UI") || srText.contains("프론트") || srText.contains("vue", ignoreCase = true) || srText.contains("jsp", ignoreCase = true)
-        val isFrontend = isExplicitFrontend || seeds.any { it.endsWith("Controller") || it.endsWith("View") }
+        val isExplicitFrontend = FrontendKeywordRule.isExplicitFrontend(srText)
+        val isFrontend = !FrontendKeywordRule.mentionsBackend(srText) && (isExplicitFrontend || seeds.any { it.endsWith("Controller") || it.endsWith("View") })
 
         return SeedSelectionResult(
             seedClasses = seeds.toList(),

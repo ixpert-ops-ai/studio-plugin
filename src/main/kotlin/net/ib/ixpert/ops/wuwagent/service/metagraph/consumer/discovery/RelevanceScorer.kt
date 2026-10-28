@@ -215,15 +215,15 @@ class RelevanceScorer(
                 // NameMatchScore for ResourceNode (using filename)
                 val fileName = path.substringAfterLast("/")
                 var nameMatchScore = 0.0
-                val directMatches = keywords.directEnglish.filter { eng -> fileName.contains(eng, ignoreCase = true) }
+                val directMatches = keywords.directEnglish.filter { eng -> NameWordMatch.containsWord(fileName, eng) }
                 if (directMatches.isNotEmpty()) {
                     nameMatchScore = 50.0 * directMatches.maxOf { getIdfWeight(it) }
                 } else {
-                    val transMatches = keywords.translatedEnglish.filter { eng -> fileName.contains(eng, ignoreCase = true) }
+                    val transMatches = keywords.translatedEnglish.filter { eng -> NameWordMatch.containsWord(fileName, eng) }
                     if (transMatches.isNotEmpty()) {
                         nameMatchScore = 30.0 * transMatches.maxOf { getIdfWeight(it) }
                     } else {
-                        val weakMatches = keywords.weakTranslatedEnglish.filter { eng -> fileName.contains(eng, ignoreCase = true) }
+                        val weakMatches = keywords.weakTranslatedEnglish.filter { eng -> NameWordMatch.containsWord(fileName, eng) }
                         if (weakMatches.isNotEmpty()) {
                             nameMatchScore = 15.0 * weakMatches.maxOf { getIdfWeight(it) }
                         }
@@ -556,7 +556,9 @@ class RelevanceScorer(
             if (crudVerbs.any { cleanWord.contains(it) }) {
                 weakTranslatedEnglish.addAll(translated)
             } else {
-                translatedEnglish.addAll(translated)
+                // 범용 번역(info, data, manage 등)은 약한 일치(가중치 15)로만 쓴다(GenericTranslationTokens)
+                translatedEnglish.addAll(translated.filterNot { GenericTranslationTokens.isGeneric(it) })
+                weakTranslatedEnglish.addAll(translated.filter { GenericTranslationTokens.isGeneric(it) })
             }
         }
 
