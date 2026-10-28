@@ -1,5 +1,7 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
+import net.ib.ixpert.ops.wuwagent.agent.clarify.model.FieldFact
+import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AgenticSeedSelector
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DomainDictionary
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import java.io.File
@@ -7,6 +9,7 @@ import java.io.File
 /**
  * SR(정제문)이 다루는 데이터 필드(응답자 이메일 등)가 시드의 업무 코드(자바, MyBatis 매퍼)에 실제로 있는지 소스를 읽어 확인하고,
  * 없으면 결과 화면에 한 줄 경고를 만든다(B-75 5, B-76 3-d에서 요약 문구가 아니라 SR에서 항목을 뽑도록 바꿨다).
+ * B-77: 같은 검사를 /clarify 첫 요약 단계에서도 쓴다(stage0Facts). 그때는 시드를 LLM 없이 키워드로 고르고(AgenticSeedSelector.heuristicSeeds), 결과를 질문과 요약 프롬프트의 사실로 쓴다.
  * 4292986 프로토타입의 근거 수집을 옮긴 것이다. 결과 요약의 문구는 보지 않는다(요약이 "이미 존재"라고 말하는 방식은 모델마다 달라 패턴으로 잡을 수 없었다).
  *
  * - 경고는 범위 파일을 **모두 읽었을 때만** 낸다(못 읽은 파일이 있으면 침묵: 오탐 방지).
@@ -32,7 +35,13 @@ object ClaimedFieldCheck {
 
     private class Stmt(val id: String, val start: Int, val end: Int, val tables: Set<String>, val commented: Boolean)
 
-    class Finding(val noun: String, val subject: String?, val filesRead: Int, val otherCites: List<String>) {
+    /** 다른 업무 코드에서 발견된 줄. SQL 문장 안이면 그 문장이 읽는 테이블을 함께 가진다. */
+    private class OtherHit(val cite: String, val tables: Set<String>)
+
+    /** 항목 하나의 확인 결과(찾았는지, 근거, 읽은 파일 수). */
+    private class Eval(val noun: DataNoun, val subject: String?, val read: Int, val unread: Int, val inDomainCites: List<String>, val other: List<OtherHit>)
+
+    class Finding(val noun: String, val subject: String?, val filesRead: Int, val otherCites: List<String>, val otherTables: List<String> = emptyList()) {
         /** 화면에 보이는 항목 이름(예: "응답자 이메일"). */
         val label: String get() = (subject?.let { "$it " } ?: "") + noun
     }
@@ -96,18 +105,26 @@ object ClaimedFieldCheck {
     }
 
     /** 주장한 필드마다, 범위 파일을 모두 읽었고 업무 코드에서 찾지 못했으면 Finding을 돌려준다(근거가 없으면 빈 목록). */
-    fun check(srText: String, graph: ProjectGraph, projectRoot: File?, seedPaths: List<String>): List<Finding> {
+    fun check(srText: String, graph: ProjectGraph, projectRoot: File?, seedPaths: List<String>): List<Finding> =
+        evaluate(srText, graph, projectRoot, seedPaths).filter { it.inDomainCites.isEmpty() && it.unread == 0 && it.read > 0 }.map { toFinding(it) }
+
+    private fun toFinding(e: Eval) = Finding(
+        e.noun.korean.first(), e.subject, e.read, e.other.map { it.cite }.take(3),
+        e.other.flatMap { it.tables }.distinct().take(3)
+    )
+
+    private fun evaluate(srText: String, graph: ProjectGraph, projectRoot: File?, seedPaths: List<String>): List<Eval> {
         if (projectRoot == null || seedPaths.isEmpty()) return emptyList()
         val nouns = requestedNouns(srText)
         if (nouns.isEmpty()) return emptyList()
         val (files, tokens) = scopeOf(graph, seedPaths)
         if (files.isEmpty()) return emptyList()
-        val findings = mutableListOf<Finding>()
+        val results = mutableListOf<Eval>()
         for (noun in nouns) {
             var read = 0
             var unread = 0
-            var inDomain = 0
-            val other = mutableListOf<String>()
+            val inDomainCites = mutableListOf<String>()
+            val other = mutableListOf<OtherHit>()
             for (rel in files) {
                 val f = File(projectRoot, rel)
                 if (!f.isFile) { unread++; continue }
@@ -121,21 +138,48 @@ object ClaimedFieldCheck {
                     val cite = "${rel.substringAfterLast('/')}:$ln"
                     if (st != null) {
                         val domainTable = st.tables.any { t -> tokens.any { it in t.lowercase() } }
-                        if (domainTable && !st.commented) inDomain++ else other.add(cite)
+                        if (domainTable && !st.commented) inDomainCites.add(cite) else other.add(OtherHit(cite, st.tables))
                     } else if (!rel.endsWith(".java")) {
                         // 화면 스크립트 등: 업무를 줄만으로 가릴 수 없다(근거에서 뺀다)
                     } else {
                         val cls = rel.substringAfterLast('/').substringBeforeLast('.')
-                        if (camelTokens(cls).any { it in tokens }) inDomain++ else other.add(cite)
+                        if (camelTokens(cls).any { it in tokens }) inDomainCites.add(cite) else other.add(OtherHit(cite, emptySet()))
                     }
                 }
             }
-            if (inDomain > 0) continue
-            if (unread > 0 || read == 0) continue // 못 읽은 파일이 있으면 침묵(오탐 방지)
-            findings.add(Finding(noun.korean.first(), subjectOf(srText, noun), read, other.take(3)))
+            results.add(Eval(noun, subjectOf(srText, noun), read, unread, inDomainCites, other))
         }
-        return findings
+        return results // 못 읽은 파일이 있으면 호출한 쪽이 침묵한다(오탐 방지)
     }
+
+    /**
+     * /clarify 첫 요약 단계의 소스 확인(B-77). 시드는 LLM 없이 키워드로 고른다. 항목마다 업무 코드에서 찾았는지/못 찾았는지를 사실로 돌려주고,
+     * 못 찾은 항목에는 근거를 붙인 질문을 만든다. 범위 파일을 다 읽지 못했거나 시드가 없으면 그 항목은 사실로 만들지 않는다(침묵).
+     */
+    fun stage0Facts(srText: String, graph: ProjectGraph, projectRoot: File?): List<FieldFact> {
+        if (projectRoot == null || requestedNouns(srText).isEmpty()) return emptyList()
+        val seeds = AgenticSeedSelector.heuristicSeeds(srText, graph).seedClasses
+            .mapNotNull { c -> graph.files.values.firstOrNull { it.className == c }?.path }
+        return evaluate(srText, graph, projectRoot, seeds).filter { it.unread == 0 && it.read > 0 }.map { e ->
+            val f = toFinding(e)
+            if (e.inDomainCites.isNotEmpty()) FieldFact(f.label, found = true, cite = e.inDomainCites.first(), filesRead = e.read)
+            else FieldFact(f.label, found = false, otherCites = f.otherCites, filesRead = e.read, question = question(f))
+        }
+    }
+
+    /** Stage 0 대화에 보일 질문 한 개. 못 찾았다는 사실과 다른 업무 코드에서 발견된 위치(file:line, 테이블)를 근거로 붙이고, 정답 출처는 판정하지 않는다. */
+    fun question(f: Finding): String {
+        val where = if (f.otherCites.isEmpty()) "다른 업무 코드에서도 발견되지 않았습니다."
+        else "다른 업무 코드에서만 발견됩니다: ${f.otherCites.joinToString(", ")}" + (if (f.otherTables.isNotEmpty()) " (테이블 ${f.otherTables.joinToString("/")})" else "")
+        return "${f.label}${eulReul(f.label)} 저장하거나 조회하는 코드를 찾지 못했습니다 (후보 범위 파일 ${f.filesRead}개를 읽어 확인).\n$where\n어디서 가져올까요? (예: 다른 테이블 조인, 새로 저장, 잘 모르겠음)"
+    }
+
+    /** 요약 프롬프트에 사실로 넣을 한 줄(못 찾은 항목에는 후보 파일이 그 항목을 담고 있다고 쓰지 말라는 지시를 붙인다). */
+    fun promptLine(f: FieldFact): String =
+        if (f.found) "- ${f.label}: 업무 코드에서 확인됨(${f.cite})"
+        else "- ${f.label}: 후보 범위의 업무 코드/SQL(소스 ${f.filesRead}개 파일)에서 찾지 못함" +
+            (if (f.otherCites.isNotEmpty()) ". 다른 업무 코드에서만 발견: ${f.otherCites.joinToString(", ")}" else "") +
+            ". 어떤 후보 파일도 ${f.label}${eulReul(f.label)} 담고 있다고 쓰지 말 것."
 
     /** 결과 화면에 붙일 경고 한 줄. */
     fun render(f: Finding): String =

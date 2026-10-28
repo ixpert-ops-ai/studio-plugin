@@ -565,7 +565,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
               <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#fbbf24', marginBottom: '4px' }}>
                 ❓ 추가 확인 필요 (가이드 질문)
               </div>
-              <div style={{ fontSize: '12px', color: '#e5e7eb', lineHeight: '1.4' }}>
+              <div style={{ fontSize: '12px', color: '#e5e7eb', lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
                 {payload.openQuestion}
               </div>
               <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '6px' }}>

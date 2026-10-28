@@ -331,48 +331,53 @@ class AgenticSeedSelector(
         return fallbackSelection(srText, graph)
     }
 
-    private fun fallbackSelection(srText: String, graph: ProjectGraphQueryable): SeedSelectionResult {
-        val directEnglishTokens = Regex("[a-zA-Z]{3,}").findAll(srText).map { it.value }.toList()
-        val stopWords = setOf("추가", "생성", "신규", "삭제", "제거", "수정", "변경", "기능", "항목", "목록", "조회", "화면", "출력", "관련", "처리", "동작", "적용", "로직", "기반", "부분")
-        val koreanTokens = Regex("[가-힣]{2,}").findAll(srText)
-            .map { it.value }
-            .filter { it !in stopWords }
-            .toList()
-        val dict = DomainDictionary.load(graph)
-        // 범용 번역(info, data, manage 등)은 시드 근거에서 뺀다(GenericTranslationTokens)
-        val translatedTokens = koreanTokens.flatMap { dict.translate(it) }.filter { it.length >= 2 && !GenericTranslationTokens.isGeneric(it) }
-        val englishTokens = (directEnglishTokens + translatedTokens).distinct()
-        
-        val seeds = mutableSetOf<String>()
-        
-        for (node in graph.files.values) {
-            val className = node.className
-            if (englishTokens.isNotEmpty() && englishTokens.any { className.contains(it, ignoreCase = true) }) {
-                seeds.add(className)
-            }
-            if (koreanTokens.isNotEmpty()) {
-                val matchLocalName = node.localName?.let { ln -> koreanTokens.any { ln.contains(it) } } == true
-                val matchComments = node.koreanComments.any { c -> koreanTokens.any { c.contains(it) } }
-                if (matchLocalName || matchComments) {
+    private fun fallbackSelection(srText: String, graph: ProjectGraphQueryable): SeedSelectionResult = heuristicSeeds(srText, graph)
+
+    companion object {
+        /** LLM 없이 키워드로 시드를 고른다(탐색기 대체 경로와 같은 로직이다. Stage 0 소스 확인처럼 LLM을 더 부르지 않는 곳에서 쓴다). */
+        fun heuristicSeeds(srText: String, graph: ProjectGraphQueryable): SeedSelectionResult {
+            val directEnglishTokens = Regex("[a-zA-Z]{3,}").findAll(srText).map { it.value }.toList()
+            val stopWords = setOf("추가", "생성", "신규", "삭제", "제거", "수정", "변경", "기능", "항목", "목록", "조회", "화면", "출력", "관련", "처리", "동작", "적용", "로직", "기반", "부분")
+            val koreanTokens = Regex("[가-힣]{2,}").findAll(srText)
+                .map { it.value }
+                .filter { it !in stopWords }
+                .toList()
+            val dict = DomainDictionary.load(graph)
+            // 범용 번역(info, data, manage 등)은 시드 근거에서 뺀다(GenericTranslationTokens)
+            val translatedTokens = koreanTokens.flatMap { dict.translate(it) }.filter { it.length >= 2 && !GenericTranslationTokens.isGeneric(it) }
+            val englishTokens = (directEnglishTokens + translatedTokens).distinct()
+            
+            val seeds = mutableSetOf<String>()
+            
+            for (node in graph.files.values) {
+                val className = node.className
+                if (englishTokens.isNotEmpty() && englishTokens.any { className.contains(it, ignoreCase = true) }) {
                     seeds.add(className)
                 }
+                if (koreanTokens.isNotEmpty()) {
+                    val matchLocalName = node.localName?.let { ln -> koreanTokens.any { ln.contains(it) } } == true
+                    val matchComments = node.koreanComments.any { c -> koreanTokens.any { c.contains(it) } }
+                    if (matchLocalName || matchComments) {
+                        seeds.add(className)
+                    }
+                }
+                if (seeds.size >= 5) break
             }
-            if (seeds.size >= 5) break
+
+            val isCreate = srText.contains("추가") || srText.contains("생성") || srText.contains("신규")
+            val isDelete = srText.contains("삭제") || srText.contains("제거")
+            val isExplicitFrontend = FrontendKeywordRule.isExplicitFrontend(srText)
+            val isFrontend = !FrontendKeywordRule.mentionsBackend(srText) && (isExplicitFrontend || seeds.any { it.endsWith("Controller") || it.endsWith("View") })
+
+            return SeedSelectionResult(
+                seedClasses = seeds.toList(),
+                changeIntent = if (isCreate) ChangeIntent.CREATE else if (isDelete) ChangeIntent.DELETE else ChangeIntent.MODIFY,
+                layerHint = listOf("SERVICE", "PRESENTATION"),
+                frontendRelevant = isFrontend,
+                reasoning = "Fallback: Keyword matching due to LLM failure or timeout",
+                usedFallback = true
+            )
         }
-
-        val isCreate = srText.contains("추가") || srText.contains("생성") || srText.contains("신규")
-        val isDelete = srText.contains("삭제") || srText.contains("제거")
-        val isExplicitFrontend = FrontendKeywordRule.isExplicitFrontend(srText)
-        val isFrontend = !FrontendKeywordRule.mentionsBackend(srText) && (isExplicitFrontend || seeds.any { it.endsWith("Controller") || it.endsWith("View") })
-
-        return SeedSelectionResult(
-            seedClasses = seeds.toList(),
-            changeIntent = if (isCreate) ChangeIntent.CREATE else if (isDelete) ChangeIntent.DELETE else ChangeIntent.MODIFY,
-            layerHint = listOf("SERVICE", "PRESENTATION"),
-            frontendRelevant = isFrontend,
-            reasoning = "Fallback: Keyword matching due to LLM failure or timeout",
-            usedFallback = true
-        )
     }
 
     private fun extractDomainFromPath(path: String): String {

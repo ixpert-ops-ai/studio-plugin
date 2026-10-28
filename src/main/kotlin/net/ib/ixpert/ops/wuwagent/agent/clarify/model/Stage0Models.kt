@@ -164,6 +164,19 @@ data class DialogueHistoryItem(
 )
 
 /**
+ * 소스를 직접 읽어 확인한 데이터 항목(예: 응답자 이메일) 한 건의 사실(B-77). LLM 판단이 아니다.
+ * found=false면 업무 코드/SQL에서 찾지 못했다는 뜻이고 question은 사용자에게 보일 질문이다. 범위 파일을 다 읽지 못한 항목은 만들지 않는다.
+ */
+data class FieldFact(
+    val label: String,
+    val found: Boolean,
+    val cite: String? = null,               // found=true일 때 근거 줄(file:line)
+    val otherCites: List<String> = emptyList(), // found=false일 때 다른 업무 코드에서만 발견된 위치
+    val filesRead: Int = 0,
+    val question: String? = null
+)
+
+/**
  * 2.5 Stage0State (압축된 대화 상태)
  */
 data class Stage0State(
@@ -171,5 +184,7 @@ data class Stage0State(
     val items: List<RequirementItem> = emptyList(),       // 확정 + 미판정 단위 전체
     val seedSet: Set<SeedToken> = emptySet(),             // 누적 seed·개념 토큰 (2.6)
     val userStatements: List<String> = emptyList(),       // 사용자 추가 발화/답변 누적 목록
-    val dialogueHistory: List<DialogueHistoryItem> = emptyList() // 멀티턴 대화 히스토리
+    val dialogueHistory: List<DialogueHistoryItem> = emptyList(), // 멀티턴 대화 히스토리
+    val fieldFacts: List<FieldFact> = emptyList(),        // 첫 요약 단계의 소스 확인 사실(B-77)
+    val fieldAnswers: Map<String, String> = emptyMap()    // 항목 이름 -> 사용자가 질문에 한 답(제약으로 정제문까지 전달)
 )

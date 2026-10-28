@@ -19,14 +19,16 @@ class Stage0ClarificationEngine(
     private val graph: ProjectGraph,
     private val llmClient: net.ib.ixpert.ops.wuwagent.client.LLMClient? = null,
     // true면 턴 결과에 작업 요약을 넣지 않는다(taskSummary=null). 요약은 summaryScheduler로 턴 응답 밖에서 만든다.
-    private val deferTaskSummary: Boolean = false
+    private val deferTaskSummary: Boolean = false,
+    // 프로젝트 루트. 있으면 첫 요약 단계에서 SR의 데이터 항목(응답자 이메일 등)을 소스에서 확인한다(B-77). 없으면 확인하지 않는다.
+    private val projectRoot: java.io.File? = null
 ) {
     /** 화면 표시용 작업 요약을 턴 응답과 따로 만드는 도구(deferTaskSummary=true인 호출자가 쓴다). */
     val summaryScheduler = TaskSummaryScheduler { state -> buildTaskSummary(state) }
 
     /** 지금 상태로 작업 요약을 만든다(LLM 1회). 턴 안에서 만들던 것과 같은 입력이다. */
     fun buildTaskSummary(state: Stage0State): String? =
-        generateTaskSummary(state.originalRequirement, state.items, state.userStatements)
+        generateTaskSummary(state.originalRequirement, state.items, state.userStatements, state.fieldFacts)
 
     /**
      * 사용자 입력 데이터 구조
@@ -358,7 +360,15 @@ class Stage0ClarificationEngine(
             srOutcome = proposeExclusionsForUtterance(originalRequirement, initConstraints, exclusionWork, 1, emptyList())
         }
 
-        val openQ = userResolution.unconfirmedQuestion ?: srOutcome?.question ?: checkOpenQuestionTrigger(initialTokens, initialCandidates)
+        // B-77: SR의 데이터 항목을 소스에서 확인한다(LLM 호출 없음). 못 찾은 항목은 근거를 붙인 질문 1개로 묻는다.
+        val fieldFacts = try {
+            net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.stage0Facts(originalRequirement, graph, projectRoot)
+        } catch (e: Exception) {
+            emptyList()
+        }
+        val fieldQuestion = fieldFacts.firstOrNull { it.question != null }?.question
+
+        val openQ = userResolution.unconfirmedQuestion ?: srOutcome?.question ?: fieldQuestion ?: checkOpenQuestionTrigger(initialTokens, initialCandidates)
 
         // 미확인 식별자 확인 질문이 openQuestion으로 채택된 경우 lastQuestion 및 lastAskedTurn 기록
         val finalUserPendingItems = if (userResolution.unconfirmedQuestion != null && openQ == userResolution.unconfirmedQuestion) {
@@ -390,10 +400,11 @@ class Stage0ClarificationEngine(
             originalRequirement = originalRequirement,
             items = combinedItems,
             seedSet = initialTokens,
-            dialogueHistory = if (initEcho != null) listOf(DialogueHistoryItem(role = "assistant", content = initEcho)) else emptyList()
+            dialogueHistory = if (initEcho != null) listOf(DialogueHistoryItem(role = "assistant", content = initEcho)) else emptyList(),
+            fieldFacts = fieldFacts
         )
 
-        val taskSummary = if (deferTaskSummary) null else generateTaskSummary(originalRequirement, combinedItems)
+        val taskSummary = if (deferTaskSummary) null else generateTaskSummary(originalRequirement, combinedItems, fieldFacts = fieldFacts)
 
         return Stage0TurnResult(
             state = state,
@@ -1019,10 +1030,12 @@ class Stage0ClarificationEngine(
     private fun generateTaskSummary(
         originalRequirement: String,
         items: List<RequirementItem>,
-        userStatements: List<String> = emptyList()
+        userStatements: List<String> = emptyList(),
+        fieldFacts: List<FieldFact> = emptyList()
     ): String? {
         val client = llmClient ?: return null
         return try {
+            val factRule = if (fieldFacts.isEmpty()) "" else "\n4. [소스 확인 결과]는 코드를 직접 읽어 확인한 사실이다. 이 사실과 어긋나는 문장(찾지 못한 항목을 후보 파일이 담고 있다고 쓰는 것 등)을 쓰지 말 것."
             val systemPrompt = """
                 당신은 엔터프라이즈 시스템 분석 어시스턴트입니다.
                 사용자의 원 요구사항(SR), 대화로 추가된 지시/제약사항, 그리고 현재 유효한 후보 파일 목록을 바탕으로, 전체 작업의 핵심 목표와 각 컴포넌트의 변경 맥락을 간결한 한국어 자연어 문장(2~4줄)으로 요약하여 설명하세요.
@@ -1031,7 +1044,7 @@ class Stage0ClarificationEngine(
                 1. 주어진 후보 파일 목록을 절대로 재판단, 평가, 추가, 또는 삭제하지 마십시오.
                 2. 근거 문구에 없는 역할·기능을 만들지 말 것. 근거가 이름/토큰 일치뿐인 파일은 '이름이 비슷해 포함됨(확인 필요)'으로만 쓸 것. 사용자 제약(범위·대상 화면)과 맞지 않는 파일을 '핵심 변경 대상'이라 부르지 말 것.
                 3. 불필요한 인사말(예: 안녕하세요 등) 없이 요약 본문만 작성하십시오.
-            """.trimIndent()
+            """.trimIndent() + factRule
 
             val activeItems = items.filter { it.verdict != Verdict.REJECTED }
             // 후보 상한(B-61): 앞 120개와 항상 포함 항목만 프롬프트에 넣는다(120개 이하면 기존과 같다). 엔진 내부의 후보 집합은 그대로다.
@@ -1048,9 +1061,11 @@ class Stage0ClarificationEngine(
                 "\n\n[사용자 추가 지시 및 제약사항]\n" + userStatements.joinToString("\n") { "- $it" }
             } else ""
 
+            val factsSection = if (fieldFacts.isEmpty()) "" else "\n\n[소스 확인 결과(코드를 직접 읽어 확인한 사실)]\n" + fieldFacts.joinToString("\n") { net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.promptLine(it) }
+
             val userPrompt = """
                 [원 요구사항]
-                $originalRequirement$statementsSection
+                $originalRequirement$statementsSection$factsSection
 
                 [현재 유효 분석 대상 컴포넌트 목록]
                 $candidateDescriptions
@@ -1224,12 +1239,21 @@ class Stage0ClarificationEngine(
         } else {
             PendingAnswerOutcome(null, false)
         }
+        // 첫 요약 단계의 소스 확인 질문(B-77)에 아직 답이 없고 이 발화가 완료·제외 표현이 아니면 그 질문의 답으로 본다: 번역기를 거치지 않고 항목 이름과 함께 제약으로 기록한다.
+        val pendingField = state.fieldFacts.firstOrNull { it.question != null && it.label !in state.fieldAnswers }
+        val fieldAnswered = if (pendingField != null && !answer.handled && trimmed.isNotBlank() &&
+            !ClarifyUtteranceTranslator.isCompletionUtterance(trimmed) && !ExclusionWords.containsExclusionWord(trimmed)) pendingField else null
         val translated = if (answer.handled) {
             TranslatedAction(kind = UserActionKind.UNKNOWN, rawStatement = trimmed, clarificationMessage = answer.echo)
+        } else if (fieldAnswered != null) {
+            TranslatedAction(kind = UserActionKind.ADD_CONSTRAINT, rawStatement = trimmed, clarificationMessage = "${fieldAnswered.label} 출처에 대한 답을 제약으로 기록했습니다.")
         } else {
             ClarifyUtteranceTranslator.translate(trimmed, state.items, llmClient, state.originalRequirement)
         }
-        val updatedStatements = if (trimmed.isNotBlank()) state.userStatements + trimmed else state.userStatements
+        val updatedStatements = if (trimmed.isNotBlank()) {
+            state.userStatements + (if (fieldAnswered != null) "${fieldAnswered.label}의 출처: $trimmed" else trimmed)
+        } else state.userStatements
+        val updatedFieldAnswers = if (fieldAnswered != null) state.fieldAnswers + (fieldAnswered.label to trimmed) else state.fieldAnswers
 
         var updatedItems: List<RequirementItem> = if (answer.handled) answerItems else state.items
         var updatedSeedSet = state.seedSet
@@ -1314,12 +1338,14 @@ class Stage0ClarificationEngine(
             items = updatedItems,
             seedSet = updatedSeedSet,
             userStatements = updatedStatements,
-            dialogueHistory = newDialogueHistory
+            dialogueHistory = newDialogueHistory,
+            fieldAnswers = updatedFieldAnswers
         )
 
         val isExhausted = isReady || (translated.kind == UserActionKind.INCLUDE_TOKEN && updatedItems.none { it.verdict == Verdict.PENDING })
-        val openQ = if (isReady) null else (exclusionQuestion ?: checkOpenQuestionTrigger(updatedSeedSet, updatedItems))
-        val taskSummary = if (deferTaskSummary) null else generateTaskSummary(state.originalRequirement, updatedItems, updatedStatements)
+        val fieldQuestion = state.fieldFacts.firstOrNull { it.question != null && it.label !in updatedFieldAnswers }?.question
+        val openQ = if (isReady) null else (exclusionQuestion ?: fieldQuestion ?: checkOpenQuestionTrigger(updatedSeedSet, updatedItems))
+        val taskSummary = if (deferTaskSummary) null else generateTaskSummary(state.originalRequirement, updatedItems, updatedStatements, state.fieldFacts)
 
         return Stage0TurnResult(
             state = nextState,
@@ -1353,7 +1379,11 @@ class Stage0ClarificationEngine(
             null
         }
         val extraction = extractConstraintsChecked(state.userStatements)
-        val constraints = extraction.constraints
+        // 소스 확인 질문에 대한 사용자의 답은 추출 결과와 상관없이 제약으로 남긴다(B-77).
+        val fieldConstraints = state.fieldAnswers.map { (label, answer) ->
+            IntentConstraint(kind = ConstraintKind.OTHER, value = "$label 출처: $answer", rawStatement = answer, evidence = answer)
+        }
+        val constraints = extraction.constraints + fieldConstraints
         val rawRefined = try {
             refineFuture?.join()
         } catch (e: Exception) {

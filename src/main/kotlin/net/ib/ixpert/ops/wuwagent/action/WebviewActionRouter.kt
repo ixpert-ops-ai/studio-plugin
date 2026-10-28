@@ -153,7 +153,7 @@ class WebviewActionRouter(private val project: Project) {
                             } catch (e: Exception) {
                                 null
                             }
-                            val engine = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine(scanner, projectGraph, llmClient, deferTaskSummary = true)
+                            val engine = net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine(scanner, projectGraph, llmClient, deferTaskSummary = true, projectRoot = java.io.File(project.basePath ?: "").takeIf { it.isDirectory })
                             val turnResult = engine.initSession(initialRequirement, previousContract)
 
                             net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.saveSession(
