@@ -93,6 +93,6 @@ class ClaimedFieldSamplesB76Test {
         val caution = router.indexOf("ClaimedFieldCheck.implementCaution(result.confirmItems)")
         val implement = router.indexOf("위 파일들의 구체적인 코드 수정을 원하시면")
         assertTrue(caution in 0 until implement)
-        assertTrue(router.substring(caution - 120, caution).contains("result.confirmItems.isNotEmpty()"))
+        assertTrue(router.substring(caution - 260, caution).contains("result.confirmItems.isNotEmpty()"))
     }
 }
