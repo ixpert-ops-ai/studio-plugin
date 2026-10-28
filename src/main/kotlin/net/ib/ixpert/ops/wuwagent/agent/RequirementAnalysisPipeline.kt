@@ -468,6 +468,14 @@ class RequirementAnalysisPipeline(
                     appendLine(formattedReasoning)
                 }
             }
+            // 요약이 "기존 조회/전달된다"고 주장하는 데이터 필드(이메일 등)를 시드의 업무 코드에서 찾지 못하면 경고 한 줄(범위 파일을 모두 읽은 경우만, 실패해도 결과는 그대로)
+            try {
+                val seedPaths = projectGraph.files.values.filter { it.className in discoveryResult.metadata.seedClasses }.map { it.path }
+                val claimRoot = projectRoot ?: project?.basePath?.let { java.io.File(it) }
+                ClaimedFieldCheck.warnings(verificationOutput.reasoning, primaryReq, projectGraph, claimRoot, seedPaths).forEach { appendLine("> ⚠️ $it") }
+            } catch (e: Exception) {
+                logger.warn("ClaimedFieldCheck 실패(경고 없이 진행)", e)
+            }
             // Stage 3에서 제거된 후보와 판정 누락 후보(출력 축소 형식은 제거 사유를 받지 않는다)
             verificationOutput.noticeLines(validatedTargetFiles.map { it.path }.toSet()).takeIf { it.isNotEmpty() }?.let { lines ->
                 appendLine()
