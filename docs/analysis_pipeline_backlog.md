@@ -3302,3 +3302,131 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 - **하네스: 엄격 그룹 5종 중 3종 EXACT_MATCH, 2종 달라짐**(ISM Core, APC Transit Card, Ablation-b 일치 / survey_admin(LlmOff), Ablation-a 불일치), 제외 그룹 2종 MATCH_EXCLUDING 일치. 달라진 두 블록의 차이는 하나다: `Top-30 TargetFiles Count` 12 → 11, 빠진 파일은 **`AddressDaoImpl.java`(`[FP]`, Score 55, `SERVICE_TO_REPO_OR_BIZ`)**. 정답(`★[GT]` SurveyServiceImpl)은 그대로이고 나머지 순서만 한 칸씩 당겨졌다. 원인은 커밋 3(add/search 약한 일치 제외)이 의도한 효과(Address* 오탐 제거)다. 즉 기준 "엄격 5종 EXACT_MATCH"는 이번 변경으로 **깨졌고**, 하네스 기준 파일(`harness_58eb590_run1.xml`)을 새로 잡지는 않았다. 되돌리려면 커밋 3(a34c35a)을 되돌리면 된다.
 - 기존 테스트 기대값 변경(이유 포함): `ClaimedFieldSamplesB76Test.s3`(안내 문구가 `implementHint`로 이동), `FileRelevanceVerifierCitationTest.n5/n6`(번호 비노출), `ClarifyFieldQuestionB77Test.r4`(요약 프롬프트 문구), `cardWaitLogic.test.ts`·`refinedConfirmLogic.test.ts`(정제문 카드 안내 문구), ui-check #26.
 - 커밋별 관련 테스트 통과 수: 1 = CancelScope 3 + TransientRetryB76 6 + EmptyToolResponseB74 8 + OpenAIClient 비스트림 6·스트림 4, 2 = ClaimedFieldWarningB78 5 + ClaimedFieldPipelineB75 5 + ClaimedFieldSamplesB76 3 + ClarifyFieldQuestionB77 5, 3 = ActionTokenLossB78 4 + HeuristicRulesB75 6 + FrontendRuleRegressionB77 1, 4 = FileRelevanceVerifierCitation 8 + Compact 6 + Verifier 1, 5 = SummaryPromptEchoB78 4 + ClarifyFieldQuestionB77 5(+ 라이브 SummaryLeakB78 1), 6 = CollectIntentFrontendB78 1, 7 = 웹뷰 58 + ui-check 39. 실패 0.
+
+### [B-79] 설문 사전, 하네스 기준선, 결과 경고 표시, Stage 0 기록 표시, 표현 정리, 취소 발신 추적, 작은 수정, 읽기 전용 실험, Stage 3 번호 제거 (2026-10-29)
+
+시작 전 확인: `git status -s` 비어 있음, HEAD = origin = 15458ac. 처음 확인했을 때 샌드박스 IDE(PID 22564, 10:38:35 시작)가 떠 있어 작업하지 않고 멈췄고, 사용자가 닫은 뒤(로그 10:52:20 SHUTDOWN, 프로세스 없음) 시작했다. 예측은 실행 전에 `build/eval-reports/pred_b79.md`에 적었다. 로그 사본 `build/ide-logs/b78_ide_20261029.log`(두 번째 회차, 821줄), 채팅 `build/ide-logs/chat_1793237944908.json`.
+커밋(오래된 순): 71355b8(기준선 저장소 이동, 코드 변경 없음) → b2402bd(설문 사전, **전역 적용**) → be7daf1(그 기준선) → 2dbb248(3번) → 3ff2466(4번) → adaa182(**설문 사전을 점수기 전용으로 축소**, b2402bd가 깬 시험 수습) → 194b90e(기준선 재갱신, 코드 변경 없음) → dea15e2(5번) → 518c6d7(7번) → 2e7fe75(9번) → 실험 코드 커밋 → 문서.
+
+#### 0 오늘 두 번째 회차 로그(`idea.log` 2026-10-29 10:38:36~10:52:20)
+| 시각 | 사건 |
+|---|---|
+| 10:38:36 | IDE 시작 |
+| 10:39:11.2 | `/clarify`(50자 SR) · `[RefineGate]` 대기 카드 정리 · 10:39:22 첫 화면, 10:39:34 요약 |
+| 10:40:58 | `/clarify-utterance`(출처 답변 "…컬럼을 새로 추가해서 저장… 마스킹…") → 10:41:20 요약 갱신 |
+| 10:42:08 | `/analyze-confirm` → `[RefineGate]` 정제문 생성 완료 10:42:29(원문 50자, 정제문 97자, rid=180f0685) |
+| 10:42:29~10:43:18 | 정제문 확인 카드 요청 → 응답 "이대로 분석"(49초) |
+| 10:43:18 | `분석 시작 직전 SR(97자, clarify 경유)` · `Starting RequirementAnalysisPipeline` · 범위 카드 표시 → `scopeSelection/cancel` 10:43:21(약 3초) |
+| 10:43:21 | `=== TURN 1 ===` → 10:43:34 Tool Call `search_graph_nodes` ×2 → 힌트 카드 → `l1Clarification/cancel` 10:44:24(50초) |
+| 10:44:24 | `=== TURN 2 ===` → 10:44:44 `inspect_node_detail` ×3(카드 없음) |
+| 10:44:44 | `=== TURN 3 ===` → 10:44:59 `inspect_node_detail` ×2(카드 없음) |
+| 10:44:59 | `=== TURN 4 ===` → 10:45:40 `confirm_final_seeds` · **`SEEDS CONFIRMED! (4 classes): [SurveyServiceImpl, SurveyDaoImpl, SurveyDto, sql_survey.xml]`** · `[DEBUG-EXPANDER] frontendRelevant: false` |
+| 10:45:41 | Stage 3 카드(후보 **13개**) → `stage3Confirmation/cancel` 10:46:09(28초) |
+| 10:46:47~48 | 검증기 응답 → `WARN [GUARD-SHADOW] … SERVICE_INTERFACE가 REQUIRED 집합에 없습니다`(10:46:47) · **`WARN Stage 3 요약의 번호-이름 불일치 1건: [ClosingLinkDto(10,12,13) → SurveyQImgDto.java, ReviewDto.java, ClosingLinkDto.java]`**(10:46:48) → 결과 전송 |
+| 10:52:20 | IDE SHUTDOWN |
+- `[Cancelled]`, `[TransientRetry]`, `[EmptyStream]`, `/cancel` 수신, `UI was frozen`: **0건**. B-78의 취소 범위 수정 뒤 첫 IDE 확인이고 분석이 끝까지 갔다(취소 감지 없음).
+- 화면에 나간 결과(채팅 JSON): "⚠️ 확인 안 됨: 응답자 이메일을 조회하는 코드/SQL을 찾지 못했습니다 (시드 SurveyDaoImpl 등 3개 폴더의 소스·매퍼 26개를 읽어 확인) … 사용자 답변 "…" → 기존 데이터 없음 → 컬럼 추가·수집 경로 필요"(경고 줄이 남음), "ℹ️ 구현 범위에 새 컬럼 추가와 수집·저장 경로가 포함됩니다: 응답자 이메일"(정보 줄이 따로), Stage 0 "기록함: 응답자 이메일의 출처 — "발화 전체""(통째 인용), 요약 "근거가 **토큰 일치** 수준에 불과하므로"(내부 용어), 번호 `(10,12,13)`은 복원 실패 대신 화면에는 없었으나 WARN이 남았다. 최종 목록 5개(DaoImpl, xml, Dao, Dto, ServiceImpl)에 컨트롤러·화면이 없는데 사용자가 "수집하지 않는다, 새로 저장"이라 답했다.
+- **B-78 보고 "15→14"와 IDE "15→13"이 다른 이유**: IDE의 Stage 3 후보는 첫 회차 15개 → 두 번째 회차 13개(빠진 것 AddressDto, SearchHistRDto 둘). B-78의 고정 시드 파이프라인 시험은 14개였고 **추가 1개는 `NewFeatureService.java`(CREATE)** 다. 시험의 가짜 LLM이 신규 파일 판정 호출에 `{}`를 돌려줘 `NewFileDetector`가 대체 경로의 "기본 제안"을 붙였다(`NewFileDetector.kt:68`, `if (proposals.isEmpty())`). IDE에서는 실제 LLM이 정상 응답해 제안이 없었다(채팅 메타 "신규 제안 0개 포함", 로그 `NewFeature` 0건). 즉 13 + 1(시험 전용 대체 제안) = 14이고, 두 숫자를 같은 기준으로 맞춘 비교는 "15 → 13"이다(B-78 문서의 "15 → 14"는 기준이 달랐다).
+- **두 회차의 RelevanceScorer 점수 비교**(첫 회차 09:24 / 두 번째 10:45, 같은 SR·같은 시드):
+| 노드 | 첫 회차 | 두 번째 | 변화 | 이유 |
+|---|---|---|---|---|
+| AddressDto | 55 | **45** | −10 | `add` 약한 일치(10.7) 제거(a34c35a) → minScore 55 미만, Stage 3 후보에서 탈락 |
+| AddressDaoImpl | 50 | 40 | −10 | 같음(시드 직접 하향 의존 구제로 후보에는 남음) |
+| AddressDao | 50 | 40 | −10 | 같음(구제로 남음) |
+| SearchHistRDto | 60 | **45** | −15 | `search` 약한 일치(15) 제거 → 탈락 |
+| SurveyServiceImpl 75, SurveyDaoImpl 70, SurveyDto 75, ReviewDto 65, SurveyQImgDto 65, ClosingLinkDto 65, ItaTalkTranDto 45, IpsController 45, UserServiceImpl 65, sql_survey.xml 10, SurveyDao 40 | 같음 | 같음 | 0 | 동작어 번역과 무관 |
+- Stage 3 후보: 첫 회차 15개(…, SearchHistRDto, AddressDto 포함) → 두 번째 13개(둘 제외). 요약 문장도 첫 회차 "(10,12,13,14)" → 두 번째 "(10,12,13)"으로 번호 인용은 그대로였다(→ 9번).
+- **B-77 커밋 3(8525758)의 관련 테스트**는 B-78 문서에 기록됨(FrontendRuleRegressionB77Test 1, HeuristicRulesB75Test 6, FrontendRuleLossB76Test 1, ClarifyFieldQuestionB77Test 5, 실패 0).
+
+#### 1 "설문" 사전 등록 (b2402bd → adaa182)
+- **원인**: 실행 중 사전은 `BUILTIN_TERMS`뿐이고(`DomainDictionary.load`가 학습 사전과 `.meta/dictionary.json`을 끔) "설문"이 없었다(`DomainDictionaryBuilder.SEED_GLOSSARY`에는 있으나 실행 경로에 연결돼 있지 않다). 그래서 이 SR에서 도메인 영문 토큰이 하나도 없었다(B-78 탐침: `translatedEnglish = []`).
+- **1차 시도(b2402bd, 전역 적용)와 되돌린 이유**: "설문" → survey를 모든 호출자가 쓰는 `BUILTIN_TERMS`에 넣었다. 그때는 `SurveyDictB79Test`와 일부 관련 시험만 돌려 통과시킨 채 커밋했고, 전체 clarify 시험에서 **새 실패 3건**이 나왔다: ① `Stage0SurveyAdminSnapshotTest.testStage0OnSurveyAdmin` — Stage 0 스캐너(`Stage0GraphScanner.kt:24`)가 같은 사전으로 후보를 만들어 이름에 survey가 든 **배치 클래스(`SurveyPartExport*`)가 HIGH 후보**로 들어와 "HIGH에는 외부 배치/API가 없다"는 불변식을 깼다. ② `ExcludeComponentDialogueTest`(2건) — D1형 SR의 분석에서 **정답 재현율 7 → 4**(후보 수는 30개로 같음).
+- 원인 분리: 점수기(`RelevanceScorer.kt:515`)만 켜면 통과, **키워드 대체 시드**(`AgenticSeedSelector.kt` 347·522행의 사전)를 켜면 실패 → `heuristicSeeds`가 "그래프 순서 앞 5개"(`AgenticSeedSelector.kt:366` `if (seeds.size >= 5) break`)라, survey가 맞는 `SurveyPartExport*` 배치 클래스가 시드 자리를 차지해 survey 서비스·DAO 시드가 밀려난다.
+- **최종(adaa182)**: 항목을 별도 `DOMAIN_TERMS`(`DomainDictionary.kt:139`)로 빼고 `DomainDictionary.load(graph, domainNouns = true)`일 때만 더한다. **분석 점수기(`RelevanceScorer.kt:515`)만** 켠다. Stage 0 스캐너(`Stage0GraphScanner.kt:24`), 제외 후보 해석(`Stage0ClarificationEngine.kt:580`), 키워드 대체 시드는 이전 사전 그대로. 하네스 시험의 점수 분해 재계산(`Stage0EngineRoutedBaselineHarnessTest.kt:182, 935`)도 점수기와 같은 사전으로 맞췄다.
+- **오늘 SR 측정(최종 구성)**: `sql_survey.xml` 분석 점수 **10 → 15**(이름 일치 +5: 번역 토큰이 survey 하나뿐이라 IDF 가중치가 작다), SurveyServiceImpl 75 → 85, SurveyDaoImpl 70 → 80, SurveyDto 75 → 85, ReviewDto 65 → 65(`SurveyDictB79Test`). 여전히 minScore 55 미만이라 Judge Pick 보호가 필요하다.
+- **Stage 0 키워드 시드·질문 카드 읽기 범위가 survey 쪽으로 오는가**: 최종 구성에서는 **아니다**(시드 `[AlimtalkTemplateBatchRunner, AlimtalkTemplateBatchRepository, ReviewDto, SurveyServiceImpl]`, 질문 카드는 "설문 관련 코드를 읽어 확인"으로 말하지만 읽는 폴더는 이전과 같다). 전역 적용 때는 시드가 `[SurveyPartExportCli, SurveyPartExportJob, SurveyPartExportRunner, Alimtalk…]`로 바뀌어 읽는 폴더가 batch(20개)로 갔다 — survey 이름이지만 설문 업무 코드가 아니다. 즉 **사전만으로는 Stage 0 시드가 설문 서비스 쪽으로 오지 않는다**: "그래프 순서 앞 5개" 규칙이 먼저 바뀌어야 한다(제안, 적용 안 함).
+- **Stage 0 후보 목록과 사실 확인 범위가 같은 시드를 쓰도록 맞출 수 있는가(file:line)**: 지금은 서로 다른 두 경로다 — 후보 목록: `Stage0ClarificationEngine.kt:347`(`scanner.rescanUnverified(initialTokens…)`, 토큰은 `Stage0GraphScanner`), 사실 확인: `Stage0ClarificationEngine.kt:365`(`ClaimedFieldCheck.stage0Facts`) → `ClaimedFieldCheck.kt:170` → `AgenticSeedSelector.heuristicSeeds`(`AgenticSeedSelector.kt:340`). **후보 경로를 사실 확인 시드로 쓰는 것은 안 된다**: 오늘 SR에서 후보가 `[IpsController, UserDto, UserServiceImpl]`(관리자 사용자 계열)이라 이메일이 있어 질문이 0개가 된다(`SurveyDictB79Test.d2`: "후보 경로를 시드로 쓴 사실 확인 결과: [] (질문 없음)"). 맞추려면 반대로 **스캐너 후보 선정이 설문 서비스를 잡도록** 고쳐야 하며(스캐너 토큰·불변식 시험 다수가 걸려 있어 이번에 하지 않았다), 한 줄로 하려면 `heuristicSeeds`를 순서 대신 점수로 고르게 하는 방법이 있다(제안).
+- **기존 시나리오 required 손실 0건(조건 정정)**: 24개(SR/그래프 15쌍)의 Stage 1 후보 안 필수 적중이 이전과 같다(`SurveyDictB79Test.d3`, `b79_survey_dict_hits.txt`, 손실 0, D1 후보 10 → 12). **다만 이 오프라인 비교는 전역 적용에서 생긴 ExcludeComponentDialogueTest의 7 → 4를 잡지 못했다**(그 시험은 실제 분석 경로와 키워드 대체 시드를 쓴다). 최종 구성에서는 그 시험이 통과한다(재현율 7).
+
+#### 2 하네스 기준선 갱신 (코드 변경 없는 커밋 71355b8, 194b90e)
+- 기준 XML이 저장소 밖(`%TEMP%\bl`, 미커밋)에 있어 **`docs/baselines/`로 옮겼다**(71355b8: `harness_58eb590_run1.xml`(이전), `harness_a34c35a_m78.xml`(a34c35a 이후)와 README).
+- **a34c35a 효과**(survey_admin (LlmOff), Ablation-a의 Top-30 12 → 11, 정답 그대로): 빠진 파일은 `[FP] address/dao/AddressDaoImpl.java`(Score 55, `SERVICE_TO_REPO_OR_BIZ`) 하나. 전/후 Top-30:
+  - 전(12): #1 AlimtalkTemplateBatchRepository(70) #2 SurveyDaoImpl(70) #3 SurveyDao(40, Bypass) #4 ★sql_survey.xml(5) **#5 AddressDaoImpl(55)** #6 ReviewDto(75) #7 SurveyDto(75) #8 SurveyQImgDto(65) #9 ClosingLinkDto(65) #10 ★SurveyServiceImpl(65) #11 NewFeatureService(CREATE) #12 SurveyPartExportRunner(60)
+  - 후(11): 위에서 #5 AddressDaoImpl만 빠지고 순번이 당겨짐(★sql_survey.xml #4, ★SurveyServiceImpl #9).
+- **1번 이후 다시 갱신**: 194b90e — 최종 구성(점수기 전용 설문 사전)의 기준선 `harness_b79_scorer_dict.xml`로 교체. survey_admin 4개 블록에서 **후보 집합은 그대로이고 점수만** 오른다(LlmOff/Ablation-a: sql_survey.xml 5 → 15, SurveyServiceImpl 65 → 75, SurveyDaoImpl 70 → 80, SurveyDto 75 → 85, SurveyDao 40 → 50, SurveyPartExportRunner 60 → 70; Ablation-b/LlmOn: sql_survey.xml 0 → 10). 전역 적용 때(be7daf1의 기준선)는 후보가 11 → 13(SurveyPartExportCli·Job `[FP]` 추가)이었으나 그 변경을 되돌리며 그 기준선도 지웠다. 나머지 3개 블록(APC Transit Card, ISM Core, APC DEM Isolated)은 변함없다.
+
+#### 3 결과 경고 표시 (2dbb248)
+- **a** 사용자 답으로 해소된 항목은 "⚠️ 확인 안 됨" 줄 없이 ℹ️ 줄만(`RequirementAnalysisPipeline.kt:495` `renderResolved`): "응답자 이메일: 설문 관련 코드를 읽어 확인했으나 기존 데이터가 없습니다. 사용자 답변 "…" 에 따라 새 컬럼 추가와 수집·저장 경로가 구현 범위에 포함됩니다."(새로 저장), "… 기존 코드에는 없고, … 으로 출처가 지정되었습니다(조인 대상 확인 필요)."(그 밖). 라우터가 따로 붙이던 ℹ️ 줄(`newDataCaution`)은 중복이라 뺐다.
+- **b** 사용자 문구에서 시드 클래스명·폴더 수·파일 수 제거: Stage 0 질문과 결과 경고 둘 다 "(설문 관련 코드를 읽어 확인)"(`ClaimedFieldCheck.scopeArea/scopeNote`, 시드 클래스 이름 조각을 사전으로 되짚어 도메인 명사를 찾고, 없으면 "관련 코드"). 읽은 파일 수는 시험·로그에만 남는다(`b79_scope_numbers.txt`).
+- **c** 새로 저장인데 최종 목록에 컨트롤러·화면 파일이 없으면 한 줄 추가(`RequirementAnalysisPipeline.kt:497`, `ClaimedFieldCheck.entryPointNote`): "응답자가 이메일을 입력·전달하는 경로(컨트롤러·화면)는 분석 대상에 없습니다. 이 분석은 파일을 추가하지 않았습니다." 파일은 추가하지 않는다. 진입점 판정은 `Controller.java|kt` 또는 `.jsp|.html|.vue|.js|.jsx|.tsx`(`ClaimedFieldCheck.hasEntryPoint`).
+- 시험: `ClaimedFieldWarningB78Test` 7개(w2~w7).
+
+#### 4 Stage 0 기록 표시 (3ff2466)
+- `AnswerInterpreter`(새, LLM 없음): 답을 절(마침표·쉼표)로 나눠 마스킹 규칙 > 대상 화면 > 출처 순으로 분류한다. Stage 0 "기록함" 메시지는 발화 통째 인용 대신 항목별 줄: `기록함: 응답자 이메일의 출처 (제약으로 정제문에 전달됩니다)` / `- 출처: 응답자 이메일은 아직 수집하지 않아 / 설문 응답 테이블에 이메일 컬럼을 새로 추가해서 저장하는 방향으로` / `- 대상 화면: 관리자 설문 상세 화면용` / `- 마스킹 규칙: 이메일은 앞 2자리와 도메인만 보이게 마스킹`(오늘 실제 답으로 `AnswerInterpreterB79Test.i1~i2`). 제약으로 기록되는 값은 사용자 원문 그대로다.
+- **결과 경고에서 "출처 부분만 잘라 인용한 로직"을 재사용할 수 있는가**: 그 로직은 사실 **앞 60자 자르기**(`a.take(60)`)였고 출처 해석이 아니었다. 같은 해석(`AnswerInterpreter.sourceQuote`)을 결과 경고의 "사용자 답변" 인용에도 쓰도록 바꿨다(출처 절만 인용, `i3`). 해석이 못 나누면 두 곳 모두 원문 앞부분을 인용한다(`i4`).
+- 시험: `AnswerInterpreterB79Test` 4개.
+
+#### 5 표현 정리 (dea15e2)
+- `RationaleWording.cleanSummary`: 모델이 만든 "토큰 일치" → "이름 유사", 남은 "토큰" → "단어"(조사 "토큰과" → "단어와"), 근거 문구 규칙 포함. 모든 Stage 0 요약에 적용(`Stage0ClarificationEngine.kt:1086` 부근). 오늘 문장 "근거가 토큰 일치 수준에 불과하므로" → "근거가 이름 유사 수준에 불과하므로".
+- **지시문 필터(65d27ad)가 정상 문장을 지우는지**: 이전에는 정상 문장 보존을 확인하는 시험이 **없었다**(e3은 단순 문장 하나뿐). 추가: `SummaryWordingB79Test.w3`(오늘 IDE 요약과 B-78 라이브 요약 등 5개를 한 글자도 안 바꿈), `w4`(지시문 문장만 빠지고 옆 정상 문장은 남음). 점검에서 **표지가 너무 넓었다**: "어긋나" 한 단어만으로 "사용자 제약과 어긋나는 후보" 같은 정상 문장도 지울 수 있었다. 이를 "사실과 어긋나", 지시문 전용 표현, 구역 이름, 또는 "어긋나"+"취급해야" 동시 존재로 좁혔다(`SummaryPromptEcho`). 한계: "로만 취급해야"만 단독으로 쓴 정상 문장은 여전히 보존된다(지우지 않는다).
+- 시험: `SummaryWordingB79Test` 4개.
+
+#### 6 취소 발신 추적 (읽기만)
+- 10-28 14:51:59 분석 없는 `/cancel`: **정지 버튼 외 발신 경로는 코드에 없다**. `/cancel`을 보내는 곳은 `webview/src/App.tsx:2316` 하나(onClick). 그 버튼은 `messages.some(m => m.isLoading || m.isStreaming)`일 때만 렌더링된다(`App.tsx:2305`). `chat_loaded` 복원 경로(`App.tsx:1324~1342`)는 `setMessages(loadedMessages)`로 저장된 메시지를 그대로 넣을 뿐 `/cancel`을 보내지 않는다(복원 코드에 `sendToIde` 호출 없음). Escape 키 처리(`App.tsx:2039, 2064`)는 파일·명령 팝업만 닫는다. Kotlin에서 `TaskCancellationToken.cancel()`을 부르는 곳도 `/cancel` 분기(`WebviewActionRouter.kt:1368~1369`) 하나뿐이다.
+- 로그 근거: `/loadLastChat` 14:51:50.046(8431바이트 파일) → `chat_loaded` 14:51:50.941 → **9초 뒤 `/cancel` 14:51:59.919**, 그 사이 `OpenAI API Call` 0건(진행 중인 요청 없음).
+- 구분: **확인** — `chat_loaded`가 직접 `/cancel`을 보낼 수 없다. **확인** — `/cancel` 시점에 진행 중인 분석·요청이 없었다. **추정** — 복원된 채팅에 `isLoading`/`isStreaming: true`인 메시지가 남아 있어 정지 버튼이 보였고 사용자가 눌렀다(분석이 없는 상태에서 그 버튼이 렌더링될 수 있는 유일한 조건이 복원된 메시지의 플래그이기 때문). **판단 불가** — 복원 전 채팅 파일의 내용(14:52에 같은 파일이 정지 처리 뒤 다시 저장돼 덮어써졌다)과 사용자가 실제로 눌렀는지. 현재 저장된 채팅 3개에는 stale 플래그가 없다. 제안(적용 안 함): `chat_loaded`에서 로딩 플래그를 지운다.
+
+#### 7 작은 수정 (518c6d7)
+- **a** `RequirementAnalysisPipeline.kt:448`의 `\$srKeyHex`/`\$hasCreate` 이스케이프를 고쳐 값이 찍힌다(전: `invoked for $srKeyHex … (addsNewMethod=$hasCreate)` 글자 그대로).
+- **b** 카드를 기다리는 동안 "✓ 확인이 제출되었습니다." 줄이 "확인을 기다리고 있습니다..."를 되풀이하지 않는다(`cardWaitLogic.ts` `submittedStatusText`: 진행 말풍선 상단 문구와 카드 위 대기 줄이 이미 말한다). 카드가 내려가면 "✓ 확인이 제출되었습니다. 분석을 진행 중입니다..." 그대로. 웹뷰 시험 58/58, ui-check 39/39.
+
+#### 8 읽기 전용 실험 (`InspectAndWeakB79Test`, 운영 반영 없음)
+- **a inspect한 노드를 구제하면**: 15쌍, 시나리오당 3개 구제(대리값), 후보 수 **합계 +14(평균 +0.9, 최대 +3: S3, SR-02, SR-08, SR-12 각 +2~3)**, 필수 적중 **+1**(S3의 `KmcisController`, 3 → 4). 나머지 14쌍은 필수 적중 변화 없음(`b79_inspect_rescue.txt`). **한계**: 탐색기가 실제로 inspect한 노드는 시나리오별 기록이 없어(IDE 로그가 있는 건 오늘의 IpsController 하나) 결정적 검색 도구(`AgenticGraphTools.searchGraphNodes`, SR 원문을 질의로)의 시드 아닌 상위 3개를 대리값으로 썼다. 실제 inspect 선택과 다를 수 있다.
+- **b 남은 동사 번역의 약한 일치 오탐(16 시나리오 대신 15쌍)**: `insert`, `append`로 점수를 받은 노드는 **0건**. 후보에 남은 약한 일치 노드는 `regist`/`register`(SR-08의 SltlPdRegistRequest 등 5개, 정답 0), `list`(약한 일치 49개 중 후보에 남은 것 2개), `manage`(2개 모두 남음)이며 모두 정답이 아니다. 후보에 오탐이 남은 시나리오는 SR-08(5개), SR-05, S2뿐이다(`b79_weak_tokens.txt`). 이 동사 번역들은 `등록 → register, regist, …`처럼 CRUD 동사의 번역이 약한 일치로 들어가는 같은 경로(`RelevanceScorer.kt:560`)에서 온다.
+- **c WARN 한글 깨짐(`-Dstdout.encoding=UTF-8` 후보)**: 기록만. runIde JVM 인자에 `-Dstdout.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8`을 더하는 것이 후보이며(현재 IDE JVM 옵션에 없음, `JNU=MS949`, `file.encoding=UTF-8`), `build.gradle.kts`는 건드리지 않았다.
+
+#### 9 Stage 3 번호 참조 재발 (2e7fe75)
+- 재발: B-78의 프롬프트 지시 뒤에도 10:46:48 WARN `ClosingLinkDto(10,12,13)`(`RequirementAnalysisPipeline.kt` 번호-이름 불일치 로그). 후보에 `[n]`이 붙어 있는 한 모델이 번호를 쓴다.
+- **a** 후보 번호를 프롬프트에서 없앴다(`FileRelevanceVerifier.candidateNames`, 기본 켬): 후보를 `- 이름`과 `경로: path` 두 줄로 보여 주고(같은 파일명이 둘 이상일 때만 그 후보들에 앞 폴더가 붙음, `candidateKeys` `FileRelevanceVerifier.kt:99`), 응답 스키마는 `requiredFiles[{file, reason}]`, `removedFiles[이름]`. 응답은 정확한 키 → 유일한 파일명 → 유일한 경로 접미사 순으로 풀고(`resolveKey`, 118행) 모호하거나 모르는 이름은 추측하지 않고 판정 누락으로 유지한다. 정수 응답(이전 방식)도 그대로 받는다(`candidateNames=false`는 이전 프롬프트를 만든다).
+- **측정**(같은 후보 14개·같은 SR, 실서버 5회씩, `b79_stage3_names_20261029_115815.md`): 요약 **원문에 번호 인용 번호 방식 4/5 → 이름 방식 0/5**, 응답 해석 실패(대체 경로) 0 / 0, 서로 다른 남은 목록 1 / 1, 시간 38~42초 / 41~48초(이름 방식이 평균 약 5초 느림). 화면(복원 뒤)의 번호는 두 방식 모두 0/5(복원 단계가 처리).
+- **b** 복원이 성공하면 INFO: `CitationResult`에 `restored`(번호를 파일명으로 바꾼 수, 이름 불일치였지만 바꾼 것 포함)와 `unresolved`(범위 밖 번호라 그대로 둔 수)를 더했다. 복원 횟수는 INFO로 남고 복원하지 못한 번호가 있을 때만 WARN(`RequirementAnalysisPipeline.kt` 번호 로그).
+- 시험: `FileRelevanceVerifierNamesB79Test` 7개(키, 프롬프트에 번호 없음, 이름 응답 적용, 모호/미지 이름, 번호 응답 호환, 번호 방식 스위치, 복원 횟수).
+
+#### 기대값 변경 표(테스트명 / 전 / 후 / 사유)
+| 테스트 | 전 | 후 | 사유 |
+|---|---|---|---|
+| `ClaimedFieldWarningB78Test.w2` | 답이 있어도 `> ⚠️ 확인 안 됨:` 줄 1개에 "기존 데이터 없음 → 컬럼 추가·수집 경로 필요" | 경고 줄 0개, `> ℹ️ 응답자 이메일:` 줄에 "기존 데이터가 없습니다 … 구현 범위에 포함됩니다" | 3-a(해소된 항목은 ℹ️ 줄만) |
+| `ClaimedFieldWarningB78Test.w3` | 조인 답도 ⚠️ 줄에 "출처 지정됨(조인 대상 확인 필요)" | 경고 줄 0개, ℹ️ 줄에 "출처가 지정되었습니다(조인 대상 확인 필요)" | 3-a |
+| `ClaimedFieldWarningB78Test.w4` | `newDataCaution(...)`이 "새 컬럼 추가와 수집·저장 경로"를 포함 | 그 단언 삭제(함수 삭제) | 라우터의 중복 ℹ️ 줄 제거(3-a) |
+| `ClaimedFieldWarningB78Test.w5` | 정규식 "시드 \w+ 등 3개 폴더의 소스·매퍼 \d+개를 읽어 확인" | "관련 코드를 읽어 확인", 시드 이름·`\d+개`·"폴더" 없음, 탐색기 시드는 "설문 관련 코드" | 3-b(사용자 문구에서 시드·숫자 제거) |
+| `Stage0EngineRoutedBaselineHarnessTest`(점수 분해 3건: `testScoreBreakdown_SurveyServiceImpl`, `testAblationA…`, `testAblationB…`) | 재계산에 `DomainDictionary.load(graph)` | `load(graph, domainNouns = true)`(182, 935행) | 점수기가 설문 사전을 쓰게 되어 같은 사전으로 점수를 재계산해야 합계가 맞는다(1번). 시험의 기대 숫자는 그대로 |
+| `FileRelevanceVerifierCompactTest.c1` | 프롬프트에 `- [1] /src/F1.java`, `- [4] /src/F4.java` | `- F1.java\n경로: /src/F1.java`, 번호 표지 없음 | 9-a(후보 번호 제거). 응답의 번호 방식(n)은 그대로 통과 |
+| `webview/test/cardWaitLogic.test.ts` `submittedStatusText(true)` | `'✓ 확인이 제출되었습니다. 확인을 기다리고 있습니다...'` | `'✓ 확인이 제출되었습니다.'` | 7-b(중복 대기 문구 제거) |
+| ui-check #31 | 제출 줄이 `…확인을 기다리고 있습니다...` 포함 | 제출 줄은 `✓ 확인이 제출되었습니다.`이고 대기 문구는 포함하지 않음 | 7-b |
+| `ClarifyFieldQuestionB77Test.r1`, `SurveyDictB79Test` 등 신규·무변경 | — | — | 기대값 변경 없음 |
+| (기대값이 아닌 읽기 방식) `ClaimedFieldPipelineB75Test`, `ClaimedFieldWarningB78Test`, `IncompleteAnalysisB74Test`, `RetryIntentB75Test`, `RemovedCandidatesRestoreTest`, `ActionTokenLossB78Test`, `Stage3BodyExperimentB76/B77Test` | 스텁이 프롬프트의 `- [n] path` 줄을 정규식으로 읽음 | 공용 헬퍼 `Stage3Prompt.candidates`가 새 형식과 이전 형식을 모두 읽음 | 9-a(프롬프트 형식 변경) |
+| `DomainDictionaryTest.testPartialMatchLengthCheck` | 기준선 실패(42건 중 하나) | 같음 | 이번 변경과 무관, 그대로 |
+
+#### 예측과 결과의 차이(`pred_b79.md`)
+- 맞음: 0(NewFeatureService +1로 14), P1b(sql_survey.xml 점수가 오르고 minScore 미만 유지: 예측 16~25, 실제 15로 범위 바로 아래), P1d의 후보 경로 시드 위험(질문 0개), P2(기준선을 한 번 더 갱신해야 함), P8a(후보 +0~3, 필수 +0~1), P8b(필수 손실 없음), P9a의 이름 방식 0/5와 해석 실패 0~1(0).
+- 틀림: P1a(Survey* 클래스가 Stage 0 키워드 시드에 2개 이상 → 전역 적용에서는 3개가 들어왔지만 **엉뚱한 배치 클래스**였고 최종 구성에서는 시드가 그대로), P1c(필수 손실 0건: 오프라인 24개 비교는 0이었으나 **통합 시험에서 실제 손실**을 놓쳐 커밋 뒤에야 알았다), P9a의 번호 방식 번호 인용(예측 5회 중 1~2회, 실제 4/5).
+
+#### 확인하지 못한 것
+- Stage 0 후보 목록과 사실 확인 시드를 하나로 맞추는 실제 변경(스캐너 후보 선정 개선 또는 `heuristicSeeds`의 점수 기반 선정)은 시도하지 않았다. 키워드 대체 시드가 "그래프 순서 앞 5개"인 한 사전만으로는 설문 서비스 쪽 시드가 오지 않는다.
+- 새 경고·ℹ️ 줄, "기록함" 항목별 표시, 이름 방식 프롬프트, 대기 문구를 **실제 IDE 화면에서** 본 것이 아니다(시험·ui-check 기준). 이름 방식의 실서버 5회는 한 SR·한 후보 목록뿐이다.
+- 8-a의 inspect 구제는 대리값 기반이라 실제 효과를 말할 수 없다. 8-b는 15쌍의 대체 시드 후보 기준.
+- 6의 추정(복원된 채팅의 stale 로딩 플래그)은 확인하지 못했다.
+- `AnswerInterpreter`는 절 단위 키워드 분류라 문장 구조가 다른 답(한 문장에 출처·마스킹이 섞임)에서는 한 항목에 같이 들어갈 수 있다. 오늘의 한 답으로만 검증했다.
+
+#### IDE에서 확인할 것
+- 같은 SR로 `/clarify` → 출처 질문에 "새로 저장…" 답: "기록함" 메시지가 출처 / 대상 화면 / 마스킹 규칙 줄로 나오는지, 결과 화면에 "⚠️ 확인 안 됨" 없이 ℹ️ 줄만 있고 시드 이름·숫자가 없는지, 최종 목록에 컨트롤러·화면이 없으면 "입력·전달하는 경로는 분석 대상에 없습니다" 줄이 붙는지.
+- 결과 요약에 `(10,12,13)` 같은 번호가 없고 로그에 `후보 번호 N건을 파일명으로 복원했습니다`(INFO)나 번호 WARN 자체가 없는지.
+- 정제문 카드 대기 중 "✓ 확인이 제출되었습니다." 한 줄과 카드 대기 줄만 보이는지.
+- Stage 0 요약에 "토큰 일치"가 없는지.
+
+#### 최종 검증(HEAD b7be5ab, 태그 m79)
+- 전체 테스트 711개, 실패 42개(기준과 실패 메시지 diff 0, 실패 목록은 B-77·B-78과 같은 42개), 건너뜀 23개. clarify 패키지 304/1/3(실패 1개는 기준선의 `Stage0GraphScannerTest`). 웹뷰 58/58, ui-check 39/39(`node scripts/ui-check/run.mjs`).
+- **selftest(`scripts/compare-harness-blocks.selftest.js`)**: 검증 스크립트가 새 기준선을 넘긴 첫 실행은 **18/24 실패**였다. R1·R2 계열 6건은 도구 점검용으로 고정된 기준 쌍(58eb590 기준선과 2d_run1 비교 파일, 그 사이 RefinedReq 줄 차이를 전제)을 요구하는데 새 기준선에는 그 전제가 없다(T 17건과 R2d는 통과). 저장소에 보관한 이전 기준선으로 같은 도구 점검을 돌리면 **24/24**(`--real docs/baselines/harness_58eb590_run1.xml <2d_run1.xml>`). 즉 실패는 도구 오류가 아니라 인자 선택 문제이며, 검증 스크립트의 selftest 인자를 고정 쌍으로 고쳤다(임시 스크립트, 미커밋).
+- **하네스: 새 기준선(`docs/baselines/harness_b79_scorer_dict.xml`) 대비 엄격 그룹 5종 EXACT_MATCH, 제외 그룹 2종 MATCH_EXCLUDING.** B-78 기준선(`harness_a34c35a_m78.xml`) 대비로는 survey_admin 4개 블록의 점수가 달라진다(위 2번, 후보 집합 동일). 기준선 파일을 둘 다 저장소에 두었다.
+- 커밋별 관련 테스트 통과 수: 71355b8·194b90e = 코드 없음(기준선 XML과 README). b2402bd = SurveyDictB79Test 3 + HeuristicRulesB75 6 + ActionTokenLossB78 4 + ClarifyFieldQuestionB77 5 + Stage0EngineRoutedBaselineHarness 16(DomainDictionaryTest 1건은 기준선 실패). **2dbb248** = ClaimedFieldWarningB78 7 + ClaimedFieldPipelineB75 5 + ClaimedFieldSamplesB76 3 + ClaimedFieldWarningProbe 4 + ClarifyFieldQuestionB77 5 + SummaryPromptEchoB78 4 + SurveyDictB79 3. **3ff2466** = AnswerInterpreterB79 4 + ClaimedFieldWarningB78 7 + ClarifyFieldQuestionB77 5. **adaa182** = 위 전체 55개 중 실패는 기준선의 DomainDictionaryTest 1건뿐(SurveyDictB79 3, Stage0EngineRoutedBaselineHarness 16, ExcludeComponentDialogue 6, Stage0SurveyAdminSnapshot 7, Phase3ScoreMeasurement 3, SummaryWordingB79 4 포함). **dea15e2** = SummaryWordingB79 4 + SummaryPromptEchoB78 4 + RationaleWording 11 + clarify 패키지 전체. **518c6d7** = 웹뷰 58 + ui-check 39. **2e7fe75** = FileRelevanceVerifier 계열 22(Citation 8, Compact 6, NamesB79 7, Verifier 1) + ClaimedFieldPipelineB75 5 + ClaimedFieldWarningB78 7 + IncompleteAnalysisB74 8 + RetryIntentB75 3 + RemovedCandidatesRestore 9 + ActionTokenLossB78 4. 실험 커밋 = 시험 2개(보고용·라이브 전용). 실패 0(기준선 실패 제외).
+- **절차상 실수 기록**: b2402bd(전역 사전)는 관련 시험을 일부만 돌려 통과시킨 채 커밋했고, 이어 만든 기준선 커밋 be7daf1도 그 상태를 담았다. 전체 clarify 시험에서 새 실패 3건이 나와 adaa182로 수습하고 194b90e에서 기준선을 교체했다(be7daf1의 기준선은 삭제). 그 뒤부터 커밋 전에 clarify 패키지 전체 또는 해당 시험 묶음을 돌렸다.
