@@ -130,6 +130,10 @@ class DomainDictionary private constructor(
             "검색" to setOf("search", "find", "query", "look"),
             "전송" to setOf("send", "transmit", "transfer", "submit"),
             "취소" to setOf("cancel", "abort", "revoke", "undo"),
+
+            // 도메인 명사(B-79): translate는 포함 매칭이라 "설문조사", "설문지"도 이 항목에 걸린다.
+            // 전에는 이 항목이 없어(DomainDictionaryBuilder.SEED_GLOSSARY에는 있으나 실행 경로에 연결돼 있지 않다) "설문" SR에서 survey 이름 일치 근거가 하나도 없었다.
+            "설문" to setOf("survey"),
             
             // 인증/보안
             "로그인" to setOf("login", "signin", "auth", "authenticate", "logon"),
