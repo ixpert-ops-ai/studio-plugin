@@ -331,7 +331,9 @@ class FileRelevanceVerifier(
                 verifiedTopFiles.addAll(topFiles.filter { it.type != "CREATE" && it.type != "신규" })
             }
         } else {
-            if (response != null && response.content.isNullOrBlank() && response.toolCalls.isNullOrEmpty()) {
+            if (response != null && response.content.isNullOrBlank() && response.toolCalls.isNullOrEmpty() && TaskCancellationToken.isCancelled.get()) {
+                logger.info("FileRelevanceVerifier: 취소로 호출이 끊겨 응답이 비었습니다(서버 오류 아님), keeping all files as fallback.")
+            } else if (response != null && response.content.isNullOrBlank() && response.toolCalls.isNullOrEmpty()) {
                 logger.warn("[EmptyResponse] FileRelevanceVerifier: LLM 응답이 비어 있음(content·tool_calls 없음, 서버/스트림 오류로 분류), keeping all files as fallback.")
             } else {
                 logger.warn("No valid tool call found, keeping all files as fallback.")

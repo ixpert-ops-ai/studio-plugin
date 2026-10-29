@@ -43,6 +43,10 @@ class OpenAIClient(
         internal fun isTransientIo(e: java.io.IOException): Boolean =
             e !is java.net.SocketTimeoutException && (TRANSIENT_IO.containsMatchIn(e.message.orEmpty()) || TRANSIENT_IO.containsMatchIn(e.cause?.message.orEmpty()))
 
+        /** 빈 응답(chunks=0)을 일시 오류로 보고 다시 부를지: 이미 한 번 재시도했거나 취소로 끊긴 것이면 부르지 않는다(B-78). */
+        internal fun shouldRetryEmpty(transientRetried: Boolean, response: net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse?, cancelled: Boolean): Boolean =
+            !transientRetried && !cancelled && isEmptyToolResponse(response)
+
         /** 도구 호출 응답이 content와 tool_calls 모두 비었다(서버·스트림 오류로 본다. 모델이 "도구 없이 답을 끝낸" 것과 다르다). */
         internal fun isEmptyToolResponse(response: net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse?): Boolean {
             val message = response?.choices?.firstOrNull()?.message ?: return false
@@ -359,7 +363,7 @@ class OpenAIClient(
                 throw e2
             }
         }
-        if (!transientRetried && isEmptyToolResponse(first) && !TaskCancellationToken.isCancelled.get()) {
+        if (shouldRetryEmpty(transientRetried, first, TaskCancellationToken.isCancelled.get())) {
             logger.warn("[TransientRetry] [EmptyResponse] OpenAIClient (ToolCalling): content와 tool_calls가 모두 빈 응답(chunks=0) → 일시 오류로 분류, 경과 ${System.currentTimeMillis() - startedMs}ms, 1회 재시도")
             first = chatWithToolsOnce(systemPrompt, messages, maxTokens, tools, toolChoice, temperature)
             if (isEmptyToolResponse(first)) logger.warn("[TransientRetry] [EmptyResponse] OpenAIClient (ToolCalling): 재시도 후에도 빈 응답, 경과 ${System.currentTimeMillis() - startedMs}ms — 실패로 처리")
@@ -528,7 +532,12 @@ class OpenAIClient(
                     if (totalChunks == 0) {
                         // SSE 청크가 하나도 없었다: 서버가 스트림 대신 일반 JSON(응답 또는 오류)을 보냈거나 본문이 비었다. 버려지던 본문을 해석한다.
                         val dropped = droppedLines.toString().trim()
-                        logger.warn("[EmptyStream] OpenAIClient (ToolCalling): SSE 청크 0개, 서버 본문 앞부분(${dropped.length}자): ${dropped.take(300).replace('\n', ' ')}")
+                        if (TaskCancellationToken.isCancelled.get()) {
+                            // 취소로 스트림을 끊어 청크가 0개인 것이다. 서버 오류가 아니며 재시도하지 않는다(B-78).
+                            logger.info("[Cancelled] OpenAIClient (ToolCalling): 취소로 스트림을 끊어 SSE 청크 0개 (서버 오류 아님, 재시도 안 함)")
+                        } else {
+                            logger.warn("[EmptyStream] OpenAIClient (ToolCalling): SSE 청크 0개, 서버 본문 앞부분(${dropped.length}자): ${dropped.take(300).replace('\n', ' ')}")
+                        }
                         if (dropped.isNotEmpty()) {
                             try {
                                 val body = JsonParser.parseString(dropped).asJsonObject

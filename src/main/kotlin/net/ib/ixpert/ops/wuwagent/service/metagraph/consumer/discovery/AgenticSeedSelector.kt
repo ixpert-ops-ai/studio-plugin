@@ -8,6 +8,7 @@ import net.ib.ixpert.ops.wuwagent.model.FunctionDefinition
 import net.ib.ixpert.ops.wuwagent.model.FunctionParameters
 import net.ib.ixpert.ops.wuwagent.model.PropertyDefinition
 import net.ib.ixpert.ops.wuwagent.agent.L1ClarificationBridge
+import net.ib.ixpert.ops.wuwagent.agent.TaskCancellationToken
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraphQueryable
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode
 
@@ -114,7 +115,8 @@ class AgenticSeedSelector(
             if (toolCalls.isNullOrEmpty()) {
                 if (assistantMessage.content.isNullOrBlank()) {
                     // content와 tool_calls가 모두 빈 응답: 서버·스트림 오류로 분류한다(모델이 도구 없이 끝낸 것이 아니다)
-                    println("[AgenticGraphExplorer] Turn $turn: [EmptyResponse] LLM 응답이 비어 있음(content·tool_calls 없음, 서버/스트림 오류로 분류).")
+                    if (TaskCancellationToken.isCancelled.get()) println("[AgenticGraphExplorer] Turn $turn: 취소로 호출이 끊겨 응답이 비었습니다(서버 오류 아님).")
+                    else println("[AgenticGraphExplorer] Turn $turn: [EmptyResponse] LLM 응답이 비어 있음(content·tool_calls 없음, 서버/스트림 오류로 분류).")
                 } else {
                     println("[AgenticGraphExplorer] Turn $turn: LLM finished without tool calls.")
                 }

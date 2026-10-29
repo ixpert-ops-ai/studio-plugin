@@ -136,6 +136,7 @@ class WebviewActionRouter(private val project: Project) {
                     net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.supersedePending(project.locationHash)
                     println("[RefineGate] /clarify 수신 messageId=$messageId → 대기 중인 정제문 카드 정리를 호출했습니다(이전 분석은 시작하지 않음)")
 
+                    TaskCancellationToken.beginScope() // 새 /clarify 세션도 새 취소 범위(B-78)
                     bridge.sendMessage("analyze_start", "🔍 프로젝트 코드 구조를 바탕으로 요구사항을 구체화하고 있습니다...", messageId)
 
                     ApplicationManager.getApplication().executeOnPooledThread {
@@ -1637,6 +1638,8 @@ class WebviewActionRouter(private val project: Project) {
         // 최종 제약 추출 실패 안내(이 세션에서 아직 알리지 않았을 때만 있다). 분석 결과 맨 앞에 한 줄로 보인다.
         constraintNotice: String? = null
     ) {
+        // 분석마다 새 취소 범위를 쓴다: 앞선 /cancel(분석이 없을 때 눌린 정지 버튼 등)이 이 분석의 LLM 호출을 모두 끊지 않게 한다(B-78)
+        TaskCancellationToken.beginScope()
         bridge.sendMessage("analyze_start", "🔍 프로젝트 코드 구조를 바탕으로 영향받는 파일 분석을 시작합니다...", messageId)
         constraintNotice?.let { bridge.sendMessageChunk(messageId, it + "\n\n") }
 

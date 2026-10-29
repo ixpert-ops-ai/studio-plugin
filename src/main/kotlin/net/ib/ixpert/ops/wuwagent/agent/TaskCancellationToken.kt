@@ -18,7 +18,31 @@ import java.util.concurrent.atomic.AtomicBoolean
 object TaskCancellationToken {
     private val logger = Logger.getInstance(TaskCancellationToken::class.java)
 
-    val isCancelled = AtomicBoolean(false)
+    /** 한 번의 분석(또는 대화 세션)이 쓰는 취소 상태. 분석마다 새로 만들어 이전 분석의 취소가 다음 분석에 남지 않게 한다(B-78). */
+    class Scope {
+        val flag = AtomicBoolean(false)
+    }
+
+    @Volatile
+    private var scope = Scope()
+
+    /** 현재 분석의 취소 여부. 호출부가 `isCancelled.get()`으로 읽는 방식은 그대로다. */
+    val isCancelled: AtomicBoolean get() = scope.flag
+
+    /**
+     * 새 분석을 시작할 때 부른다: 새 취소 범위를 만들어 현재 범위로 삼는다(전역 플래그를 되돌리는 [reset]과 다르게, 이전 범위의 플래그 객체는 그대로 취소 상태로 남는다).
+     * 분석이 돌려받은 [Scope]를 쥐고 있으면 이후의 `/cancel`이 다른 분석에 번지지 않는지 확인할 수 있다.
+     */
+    fun beginScope(): Scope {
+        val next = Scope()
+        scope = next
+        cancelledIds.clear()
+        backgroundThread = null
+        activeInputStream = null
+        activeHttpConnection = null
+        activeMessageId = null
+        return next
+    }
 
     /** messageId별 취소 상태 — 다중 요청 취소 추적용 */
     private val cancelledIds = ConcurrentHashMap<String, Boolean>()
@@ -51,7 +75,7 @@ object TaskCancellationToken {
      */
     fun cancel(messageId: String? = null) {
         logger.info("TaskCancellationToken: 취소 요청 (messageId=$messageId)")
-        isCancelled.set(true)
+        scope.flag.set(true)
         if (messageId != null) cancelledIds[messageId] = true
         backgroundThread?.interrupt()
         try { activeInputStream?.close()      } catch (_: Exception) {}
@@ -67,7 +91,7 @@ object TaskCancellationToken {
      * messageId를 지정하면 해당 id의 취소 기록만 제거, null이면 전체 초기화.
      */
     fun reset(messageId: String? = null) {
-        isCancelled.set(false)
+        scope.flag.set(false)
         if (messageId != null) cancelledIds.remove(messageId) else cancelledIds.clear()
         backgroundThread = null
         activeInputStream = null
