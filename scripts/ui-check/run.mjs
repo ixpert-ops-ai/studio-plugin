@@ -433,7 +433,7 @@ try {
   const l1Payload = { projectId: 'p1', turn: 1, query: 'survey response email', topCandidates: [{ className: 'SurveyDao', fileType: 'INTERFACE', localName: '주석 없음' }, { className: 'ClosingLinkDto', fileType: 'DTO', localName: '설문클로징 혜택링크' }], domains: [], message: "'survey'로 메타그래프를 검색하겠습니다." };
   await post({ type: 'ai_message', subType: 'l1Clarification/request', messageId: 'system', content: JSON.stringify(l1Payload) });
   await sleep(500);
-  const s31a = await evaluate(`(()=>{const st=[...document.querySelectorAll('.status-text')].map(x=>x.innerText.trim()); const f=document.querySelector('[data-message-id="clarify_ok1"]'); return {status:st, submitted:f? f.innerText.includes('✓ 확인이 제출되었습니다. 확인을 기다리고 있습니다...') : null}})()`);
+  const s31a = await evaluate(`(()=>{const st=[...document.querySelectorAll('.status-text')].map(x=>x.innerText.trim()); const f=document.querySelector('[data-message-id="clarify_ok1"]'); return {status:st, submitted:f? (f.innerText.includes('✓ 확인이 제출되었습니다.') && !f.innerText.includes('확인이 제출되었습니다. 확인을 기다리고 있습니다')) : null}})()`);
   await shot('31-card-wait');
   const s32 = await evaluate(`(()=>{const t=document.body.innerText; return {meta:t.includes('메타그래프'), newWord:t.includes('프로젝트 코드 구조를 검색하겠습니다'), noComment:t.includes('주석 없음'), localName:t.includes('(설문클로징 혜택링크)')}})()`);
   record(32, '탐색 힌트 카드: 메타그래프 문구 없음, 프로젝트 코드 구조로 표시, 주석 없음 칸 비움, 있는 한글 이름은 그대로', s32.meta === false && s32.newWord === true && s32.noComment === false && s32.localName === true, JSON.stringify(s32));

@@ -27,7 +27,8 @@ export const cardPendingAfter = (pending: boolean, subType: string | undefined):
   isCardRequest(subType) ? true : isCardHide(subType) ? false : pending;
 
 /** 확인 제출 뒤 문구(ClarifyForm): 카드를 기다리는 중이면 대기 문구, 아니면 진행 문구. */
-export const submittedStatusText = (pending: boolean): string => `✓ 확인이 제출되었습니다. ${pending ? WAITING_TEXT : RUNNING_TEXT}...`;
+// B-79: 카드를 기다리는 동안에는 대기 문구를 여기서 되풀이하지 않는다(진행 말풍선 상단 문구와 카드 위 대기 줄이 이미 "확인을 기다리고 있습니다"를 말한다).
+export const submittedStatusText = (pending: boolean): string => pending ? '✓ 확인이 제출되었습니다.' : `✓ 확인이 제출되었습니다. ${RUNNING_TEXT}...`;
 
 /** 카드 종류별 대기 안내: 사용자가 응답하지 않을 때 백엔드가 몇 초 뒤 무엇으로 진행하는지(백엔드 타임아웃과 같은 값). */
 export const CARD_WAIT_INFO: Record<string, { timeoutSec: number; fallback: string }> = {

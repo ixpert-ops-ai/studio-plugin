@@ -32,7 +32,7 @@ test('대기 여부와 제출 뒤 문구', () => {
   assert.equal(cardPendingAfter(false, 'scopeSelection/showTree'), true);
   assert.equal(cardPendingAfter(true, 'scopeSelection/hideTree'), false);
   assert.equal(cardPendingAfter(true, 'chat'), true);
-  assert.equal(submittedStatusText(true), '✓ 확인이 제출되었습니다. 확인을 기다리고 있습니다...');
+  assert.equal(submittedStatusText(true), '✓ 확인이 제출되었습니다.'); // B-79: 대기 문구는 카드 대기 줄이 말한다(중복 제거)
   assert.equal(submittedStatusText(false), '✓ 확인이 제출되었습니다. 분석을 진행 중입니다...');
 });
 

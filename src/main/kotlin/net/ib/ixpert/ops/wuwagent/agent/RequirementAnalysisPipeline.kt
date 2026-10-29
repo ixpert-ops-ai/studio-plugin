@@ -445,7 +445,7 @@ class RequirementAnalysisPipeline(
                 srKey = srKeyHex,
                 srFactsSource = "heuristic-from-pipeline-output"
             )
-            logger.info("CompletenessGuardIntegration invoked for \$srKeyHex in SHADOW mode (addsNewMethod=\$hasCreate).")
+            logger.info("CompletenessGuardIntegration invoked for $srKeyHex in SHADOW mode (addsNewMethod=$hasCreate).")
         } catch (e: Exception) {
             logger.warn("Failed to execute CompletenessGuardIntegration", e)
         }
