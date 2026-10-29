@@ -54,7 +54,7 @@ class Stage3BodyExperimentB77Test {
             if (!systemPrompt.contains("당신은 코드 변경 범위 검증자입니다.")) return null
             val user = messages.mapNotNull { it.content }.joinToString("\n")
             stage3User = user
-            val cands = Regex("(?m)^- \\[(\\d+)] (\\S+)").findAll(user).map { it.groupValues[1].toInt() }.toList()
+            val cands = net.ib.ixpert.ops.wuwagent.agent.Stage3Prompt.candidates(user).map { it.first }
             return call("submit_verification", "{\"requiredFiles\":[{\"n\":${cands.first()},\"reason\":\"수정이 필요한 구체적인 사유\"}],\"removedFiles\":[],\"reasoning\":\"1) 실험 캡처\"}")
         }
         override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = emptyList()
@@ -122,7 +122,7 @@ class Stage3BodyExperimentB77Test {
             RequirementAnalysisPipeline(null, stub, true).analyze(primaryReq = sr, secondaryReq = "", projectGraph = g, projectRoot = surveyRoot) { }
         }
         val user = stub.stage3User ?: error("Stage 3 요청을 캡처하지 못했다")
-        return Regex("(?m)^- \\[\\d+] (\\S+)").findAll(user).map { it.groupValues[1] }.toList()
+        return net.ib.ixpert.ops.wuwagent.agent.Stage3Prompt.candidates(user).map { it.second }
     }
 
     data class RunOut(

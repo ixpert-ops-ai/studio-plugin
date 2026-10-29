@@ -57,7 +57,7 @@ class IncompleteAnalysisB74Test {
             if (!systemPrompt.contains("당신은 코드 변경 범위 검증자입니다.")) return null
             if (verifier == "none") return ChatCompletionResponse("x", listOf(ChatChoice(0, ChatMessage("assistant", "도구 호출 없음"), "stop")))
             val user = messages.mapNotNull { it.content }.joinToString("\n")
-            val cands = Regex("(?m)^- \\[(\\d+)] (\\S+)").findAll(user).map { it.groupValues[1].toInt() to it.groupValues[2] }.toList()
+            val cands = Stage3Prompt.candidates(user)
             val required = cands.filter { (_, p) -> requiredSuffixes.any { p.endsWith(it) } }.ifEmpty { cands.take(1) }
             val req = required.joinToString(",") { "{\"n\":${it.first},\"reason\":\"수정이 필요한 구체적인 사유\"}" }
             val removed = cands.map { it.first }.filter { n -> required.none { it.first == n } }.joinToString(",")

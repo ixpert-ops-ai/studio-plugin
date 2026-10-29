@@ -56,7 +56,7 @@ class RemovedCandidatesRestoreTest {
             calls++
             if (!systemPrompt.contains("당신은 코드 변경 범위 검증자입니다.")) return null
             val user = messages.mapNotNull { it.content }.joinToString("\n")
-            val paths = Regex("""(?m)^- \[(\d+)] (\S+)""").findAll(user).map { it.groupValues[2] }.toList()
+            val paths = net.ib.ixpert.ops.wuwagent.agent.Stage3Prompt.candidates(user).map { it.second }
             stage3Candidates.add(paths)
             stage3UserContents.add(user)
             val call = ToolCall("1", "function", ToolCallFunction("submit_verification", stage3(paths)))

@@ -13,7 +13,10 @@ import com.google.gson.JsonSyntaxException
 class FileRelevanceVerifier(
     private val llmClient: LLMClient,
     private val graph: ProjectGraph,
-    private val mdRoot: Path
+    private val mdRoot: Path,
+    // B-79: true면 프롬프트에 후보 번호([n])를 쓰지 않고 파일 이름만 보여 주며 응답도 파일 이름으로 받는다(모델이 요약에 "(10,12,13)"을 쓰던 원인 제거).
+    // false는 이전 번호 방식이며 전/후 비교용이다. 응답 해석은 두 방식(번호, 이름)을 모두 받는다.
+    private val candidateNames: Boolean = true
 ) {
     private val logger = Logger.getInstance(FileRelevanceVerifier::class.java)
     private val gson = Gson()
@@ -38,12 +41,14 @@ class FileRelevanceVerifier(
     /** 출력 축소 형식(V2): 후보 번호만 쓰고, 제거 대상은 사유를 쓰지 않는다. */
     private data class RequiredFile(
         val n: Int?,
+        val file: String?,   // B-79: 파일 이름 방식(candidateNames)에서 후보를 가리키는 이름. n이 있으면 번호 방식이다.
         val reason: String?
     )
 
+    // removedFiles의 원소는 번호(정수) 또는 파일 이름(문자열)이다.
     private data class CompactResponse(
         val requiredFiles: List<RequiredFile>?,
-        val removedFiles: List<Int>?,
+        val removedFiles: List<com.google.gson.JsonElement>?,
         val reasoning: String?
     )
     
@@ -87,7 +92,39 @@ class FileRelevanceVerifier(
         private val NUMBER_CITATION = Regex("""((?:[A-Za-z0-9_][A-Za-z0-9_.\-]*)?)\(\s*(\d+(?:[\s,]+\d+)*)\s*\)""")
         private val DIGITS = Regex("""\d+""")
 
-        data class CitationResult(val text: String, val mismatches: List<String>)
+        /** restored: 번호를 파일명으로 바꾼 인용 수(이름 불일치였지만 바꾼 것 포함), unresolved: 범위 밖 번호라 그대로 둔 인용 수(B-79). */
+        data class CitationResult(val text: String, val mismatches: List<String>, val restored: Int = 0, val unresolved: Int = 0)
+
+        /** 후보마다 응답에서 가리킬 이름(B-79): 파일명. 같은 파일명이 둘 이상이면 그 후보들에만 앞 폴더를 하나씩 더 붙여 구분한다. */
+        fun candidateKeys(paths: List<String>): List<String> {
+            val segs = paths.map { it.replace('\\', '/').split('/').filter { s -> s.isNotEmpty() } }
+            val depth = IntArray(paths.size) { 1 }
+            fun key(i: Int) = segs[i].takeLast(depth[i]).joinToString("/")
+            var changed = true
+            while (changed) {
+                changed = false
+                val groups = paths.indices.groupBy { key(it).lowercase() }
+                for ((_, idxs) in groups) {
+                    if (idxs.size > 1) for (i in idxs) if (depth[i] < segs[i].size) { depth[i]++; changed = true }
+                }
+            }
+            return paths.indices.map { key(it) }
+        }
+
+        /**
+         * 응답이 쓴 이름을 후보 번호(1부터)로 바꾼다. 후보 키와 정확히 같으면 그 후보, 아니면 파일명이 같은 후보가 하나뿐일 때 그 후보,
+         * 아니면 경로가 그 이름으로 끝나는 후보가 하나뿐일 때 그 후보. 어느 쪽도 아니거나 둘 이상이면 null(모호한 이름을 추측하지 않는다).
+         */
+        fun resolveKey(name: String, keys: List<String>, specs: List<TargetFileSpec>): Int? {
+            val clean = name.trim().replace('\\', '/')
+            if (clean.isEmpty()) return null
+            keys.indexOfFirst { it.equals(clean, ignoreCase = true) }.takeIf { it >= 0 }?.let { return it + 1 }
+            val base = clean.substringAfterLast('/')
+            val byBase = specs.indices.filter { specs[it].path.replace('\\', '/').substringAfterLast('/').equals(base, ignoreCase = true) }
+            if (byBase.size == 1) return byBase[0] + 1
+            val bySuffix = specs.indices.filter { specs[it].path.replace('\\', '/').endsWith("/$clean", ignoreCase = true) }
+            return if (bySuffix.size == 1) bySuffix[0] + 1 else null
+        }
 
         private fun joinCitedNames(names: List<String>): String =
             names.take(CITATION_NAME_LIMIT).joinToString(", ") + if (names.size > CITATION_NAME_LIMIT) " 외 ${names.size - CITATION_NAME_LIMIT}개" else ""
@@ -103,10 +140,13 @@ class FileRelevanceVerifier(
             if (paths.isEmpty() || text.isEmpty()) return CitationResult(text, emptyList())
             val files = paths.map { it.substringAfterLast('/').substringAfterLast('\\') }
             val mismatches = mutableListOf<String>()
+            var restored = 0
+            var unresolved = 0
             val out = NUMBER_CITATION.replace(text) { m ->
                 val prefix = m.groupValues[1]
                 val nums = DIGITS.findAll(m.groupValues[2]).map { it.value.toIntOrNull() ?: 0 }.distinct().toList()
-                if (nums.any { it < 1 || it > files.size }) return@replace m.value
+                if (nums.any { it < 1 || it > files.size }) { unresolved++; return@replace m.value }
+                restored++
                 val names = nums.map { files[it - 1] }
                 if (prefix.isEmpty()) {
                     "(" + joinCitedNames(names) + ")"
@@ -121,7 +161,7 @@ class FileRelevanceVerifier(
                     if (names.all { n -> text.contains(n.substringBeforeLast('.')) }) prefix else prefix + "(" + joinCitedNames(names) + ")"
                 }
             }
-            return CitationResult(out, mismatches)
+            return CitationResult(out, mismatches, restored, unresolved)
         }
     }
 
@@ -130,6 +170,19 @@ class FileRelevanceVerifier(
 
         // 신규 파일도 검증 대상에 포함
         val targetModifySpecs = candidates
+
+        // 후보를 가리키는 방식(B-79): 이름 방식은 번호를 아예 주지 않으므로 모델이 요약에 번호를 쓸 수 없다
+        val reasoningRule = if (candidateNames) "- reasoning(요약)에는 파일 이름만 쓰세요."
+        else "- reasoning(요약)에는 후보 번호(예: [10], (10,12))를 쓰지 말고 파일 이름만 쓰세요. 번호는 이 요청 안에서만 쓰는 표시이며 사용자에게 보이지 않습니다."
+        val outputRules = if (candidateNames) {
+            "- 후보 파일마다 `- 이름` 줄과 `경로:` 줄이 있습니다. requiredFiles의 file과 removedFiles에는 그 이름(예: SurveyServiceImpl.java)만 그대로 쓰세요. 번호는 없습니다.\n" +
+                "            - 제거할 후보는 removedFiles에 이름만 넣고 사유는 쓰지 마세요.\n" +
+                "            - 수정이 필요한 후보는 requiredFiles에 file(이름)과 구체적인 수정 내용(reason)을 쓰세요."
+        } else {
+            "- 후보 파일마다 [번호]가 붙어 있습니다. 경로를 다시 쓰지 말고 번호만 사용하세요.\n" +
+                "            - 제거할 후보는 removedFiles에 번호만 넣고 사유는 쓰지 마세요.\n" +
+                "            - 수정이 필요한 후보는 requiredFiles에 번호와 구체적인 수정 내용(reason)을 쓰세요."
+        }
 
         val systemMessage = """
             당신은 코드 변경 범위 검증자입니다.
@@ -144,7 +197,7 @@ class FileRelevanceVerifier(
             ## 판정 원칙
             - 새로운 필드, 상태값, 메서드를 추가해야 요구사항을 구현할 수 있다면, 현재 해당 코드가 없더라도 수정 대상입니다.
             - 제거할 확실한 근거가 없으면 유지하세요.
-            - reasoning(요약)에는 후보 번호(예: [10], (10,12))를 쓰지 말고 파일 이름만 쓰세요. 번호는 이 요청 안에서만 쓰는 표시이며 사용자에게 보이지 않습니다.
+            $reasoningRule
             - 요구사항의 데이터 흐름(입력 → 처리 → 저장)을 추적하여 판단하세요.
             - reason은 반드시 해당 파일에서 구체적으로 어떤 수정이 필요한지를 포함해야 합니다. 빈 문자열이나 '수정이 필요합니다' 같은 동어반복은 허용되지 않습니다.
             - 중요: JSON 응답 생성 시, reason이나 reasoning 필드 값 내부에 실제 줄바꿈 문자(\n)를 사용하지 마세요. 줄바꿈 대신 띄어쓰기나 마침표를 사용하세요.
@@ -159,9 +212,7 @@ class FileRelevanceVerifier(
             - 신규 파일이 REQUIRED가 되려면, 기존 파일에 해당 책임을 추가했을 때 단일 책임 원칙이 명백히 위반되는 경우여야 합니다.
 
             ## 출력 형식(중요)
-            - 후보 파일마다 [번호]가 붙어 있습니다. 경로를 다시 쓰지 말고 번호만 사용하세요.
-            - 제거할 후보는 removedFiles에 번호만 넣고 사유는 쓰지 마세요.
-            - 수정이 필요한 후보는 requiredFiles에 번호와 구체적인 수정 내용(reason)을 쓰세요.
+            $outputRules
             - JSON은 들여쓰기·줄바꿈 없이 한 줄로 출력하세요.
             - 각 reason은 40자 이내 한 문장으로 쓰고, reasoning은 '1) ...', '2) ...' 형식으로 두 항목 이내로 쓰세요.
         """.trimIndent()
@@ -180,22 +231,25 @@ class FileRelevanceVerifier(
                             items = net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
                                 type = "object",
                                 properties = mapOf(
-                                    "n" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                                    (if (candidateNames) "file" else "n") to (if (candidateNames) net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
+                                        type = "string",
+                                        description = "후보 파일 이름"
+                                    ) else net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
                                         type = "integer",
                                         description = "후보 번호"
-                                    ),
+                                    )),
                                     "reason" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
                                         type = "string",
                                         description = "구체적인 수정 내용(40자 이내)"
                                     )
                                 ),
-                                required = listOf("n", "reason")
+                                required = listOf(if (candidateNames) "file" else "n", "reason")
                             )
                         ),
                         "removedFiles" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
                             type = "array",
-                            description = "제거할 후보 번호 목록(사유 불필요)",
-                            items = net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(type = "integer")
+                            description = if (candidateNames) "제거할 후보 파일 이름 목록(사유 불필요)" else "제거할 후보 번호 목록(사유 불필요)",
+                            items = net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(type = if (candidateNames) "string" else "integer")
                         ),
                         "reasoning" to net.ib.ixpert.ops.wuwagent.model.PropertyDefinition(
                             type = "string",
@@ -215,7 +269,8 @@ class FileRelevanceVerifier(
             "$systemMessage\n\n$additionalSystemPrompt"
         } else systemMessage
 
-        val prompt = buildBatchPrompt(userQuery, topFiles, graph, mdRoot)
+        val keys = candidateKeys(topFiles.map { it.path })
+        val prompt = buildBatchPrompt(userQuery, topFiles, graph, mdRoot, keys)
         val messages = listOf(net.ib.ixpert.ops.wuwagent.model.ChatMessage(role = "user", content = prompt))
         
         val response = try {
@@ -255,7 +310,7 @@ class FileRelevanceVerifier(
             val compact = parseCompact(argsStr)
             if (compact != null) {
                 finalReasoning = compact.reasoning ?: ""
-                applyCompact(compact, topFiles, verifiedTopFiles, removedPaths, unjudgedPaths, removedReasons)
+                applyCompact(compact, topFiles, verifiedTopFiles, removedPaths, unjudgedPaths, removedReasons, keys)
                 compactHandled = true
             }
         }
@@ -389,15 +444,24 @@ class FileRelevanceVerifier(
         kept: MutableList<TargetFileSpec>,
         removed: MutableList<String>,
         unjudged: MutableList<String>,
-        removedReasons: MutableMap<String, String> = mutableMapOf()
+        removedReasons: MutableMap<String, String> = mutableMapOf(),
+        keys: List<String> = candidateKeys(topFiles.map { it.path })
     ) {
         val n = topFiles.size
         val required = LinkedHashMap<Int, String?>()
+        var unresolved = 0
         res.requiredFiles?.forEach { r ->
-            val idx = r.n
-            if (idx != null && idx in 1..n && !required.containsKey(idx)) required[idx] = r.reason
+            val idx = r.n ?: r.file?.let { resolveKey(it, keys, topFiles) }
+            if (idx != null && idx in 1..n && !required.containsKey(idx)) required[idx] = r.reason else if (idx == null && (r.n != null || r.file != null)) unresolved++
         }
-        val removedSet = res.removedFiles?.filter { it in 1..n }?.toSet() ?: emptySet()
+        val removedSet = LinkedHashSet<Int>()
+        res.removedFiles?.forEach { el ->
+            val idx = if (el.isJsonPrimitive && el.asJsonPrimitive.isNumber) el.asInt
+            else if (el.isJsonPrimitive) el.asString.trim().let { s -> s.toIntOrNull() ?: resolveKey(s, keys, topFiles) }
+            else null
+            if (idx != null && idx in 1..n) removedSet.add(idx) else unresolved++
+        }
+        if (unresolved > 0) logger.info("Stage 3: 응답에서 후보를 찾지 못한 항목 ${unresolved}건은 무시한다(이름이 후보와 맞지 않거나 같은 이름이 둘 이상이다).")
         if (required.isEmpty() && removedSet.isEmpty()) {
             logger.warn("Stage 3: 판정 목록이 비어 있어 모든 후보를 유지하고 판정 누락으로 기록합니다.")
         }
@@ -418,14 +482,20 @@ class FileRelevanceVerifier(
         }
     }
 
-    private fun buildBatchPrompt(userQuery: String, specs: List<TargetFileSpec>, graph: ProjectGraph, mdRoot: Path): String {
+    private fun buildBatchPrompt(userQuery: String, specs: List<TargetFileSpec>, graph: ProjectGraph, mdRoot: Path, keys: List<String>): String {
         return buildString {
             appendLine("## 요구사항")
             appendLine(userQuery)
             appendLine()
             appendLine("## 후보 파일 목록")
             specs.forEachIndexed { index, spec ->
-                appendLine("- [${index + 1}] ${spec.path}")
+                if (candidateNames) {
+                    // 번호 없이 이름만(B-79). 이름은 같은 이름이 둘 이상일 때만 앞 폴더가 붙는다.
+                    appendLine("- ${keys[index]}")
+                    appendLine("경로: ${spec.path}")
+                } else {
+                    appendLine("- [${index + 1}] ${spec.path}")
+                }
                 appendLine("--- 정보 ---")
                 if (spec.type == "CREATE" || spec.type == "신규") {
                     appendLine("- (신규 제안)")
@@ -438,7 +508,7 @@ class FileRelevanceVerifier(
             }
             appendLine()
             appendLine("## 지시사항")
-            appendLine("위 후보 파일 목록에서 수정이 필요한 후보는 requiredFiles에, 제거할 후보는 removedFiles(번호만)에 담고 reasoning을 작성하세요.")
+            appendLine("위 후보 파일 목록에서 수정이 필요한 후보는 requiredFiles에, 제거할 후보는 removedFiles(${if (candidateNames) "이름만" else "번호만"})에 담고 reasoning을 작성하세요.")
         }
     }
 

@@ -50,7 +50,7 @@ class RetryIntentB75Test {
             }
             if (!systemPrompt.contains("당신은 코드 변경 범위 검증자입니다.")) return null
             val user = messages.mapNotNull { it.content }.joinToString("\n")
-            val cands = Regex("(?m)^- \\[(\\d+)] (\\S+)").findAll(user).map { it.groupValues[1].toInt() to it.groupValues[2] }.toList()
+            val cands = Stage3Prompt.candidates(user)
             val req = cands.joinToString(",") { "{\"n\":${it.first},\"reason\":\"수정이 필요한 구체적인 사유\"}" }
             return call("submit_verification", "{\"requiredFiles\":[$req],\"removedFiles\":[],\"reasoning\":\"1) 테스트 검증\"}")
         }

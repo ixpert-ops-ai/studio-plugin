@@ -476,7 +476,9 @@ class RequirementAnalysisPipeline(
             // Stage 3(Batch)에서 판정한 전체 요약 근거가 있다면 우선적으로 보여줌
             if (verificationOutput.reasoning.isNotBlank()) {
                 val citation = verificationOutput.displayReasoning()
-                if (citation.mismatches.isNotEmpty()) logger.warn("Stage 3 요약의 번호-이름 불일치 ${citation.mismatches.size}건: ${citation.mismatches}")
+                // B-79: 번호를 파일명으로 복원했으면 INFO(복원 횟수와 이름 불일치 기록), 복원하지 못한 번호(범위 밖)가 남았을 때만 WARN
+                if (citation.unresolved > 0) logger.warn("Stage 3 요약의 후보 번호 ${citation.unresolved}건을 파일명으로 복원하지 못했습니다(범위 밖 번호). 복원 ${citation.restored}건, 이름 불일치 ${citation.mismatches.size}건: ${citation.mismatches}")
+                else if (citation.restored > 0) logger.info("Stage 3 요약의 후보 번호 ${citation.restored}건을 파일명으로 복원했습니다(이름 불일치였지만 바꾼 것 ${citation.mismatches.size}건: ${citation.mismatches}).")
                 appendLine(citation.text.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n"))
             } else {
                 appendLine("> ⚠️ **검증 단계 파싱 실패**: LLM 응답 포맷 오류로 인해 Stage 1/2 후보 결과를 모두 유지합니다. 결과를 직접 확인하세요.")

@@ -40,7 +40,7 @@ class ClaimedFieldPipelineB75Test {
                 return call("confirm_final_seeds", "{\"seed_classes\":[${seeds.joinToString(",") { "\"$it\"" }}],\"rationale\":\"테스트\"}")
             if (!systemPrompt.contains("당신은 코드 변경 범위 검증자입니다.")) return null
             val user = messages.mapNotNull { it.content }.joinToString("\n")
-            val cands = Regex("(?m)^- \\[(\\d+)] (\\S+)").findAll(user).map { it.groupValues[1].toInt() }.toList()
+            val cands = Stage3Prompt.candidates(user).map { it.first }
             val req = cands.take(2).joinToString(",") { "{\"n\":$it,\"reason\":\"수정이 필요한 구체적인 사유\"}" }
             val removed = cands.drop(2).joinToString(",")
             val reasoningJson = Gson().toJson(reasoning)

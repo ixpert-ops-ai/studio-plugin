@@ -11,6 +11,7 @@ import net.ib.ixpert.ops.wuwagent.model.ToolDefinition
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.GraphStatistics
 import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraph
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Paths
@@ -63,7 +64,9 @@ class FileRelevanceVerifierCompactTest {
         assertEquals(listOf("/src/F3.java"), out.removed)
         assertEquals(listOf("/src/F4.java"), out.unjudged)
         assertEquals("1) 가. 2) 나.", out.reasoning)
-        assertTrue("후보에 번호가 붙어야 함: ${client.userPrompt}", client.userPrompt!!.contains("- [1] /src/F1.java") && client.userPrompt!!.contains("- [4] /src/F4.java"))
+        // B-79: 프롬프트는 후보 번호 없이 이름과 경로를 준다(전: "- [1] /src/F1.java"). 응답의 번호 방식(n)은 그대로 받는다.
+        assertTrue("후보에 번호 없이 이름과 경로가 있어야 함: ${client.userPrompt}", client.userPrompt!!.contains("- F1.java\n경로: /src/F1.java") && client.userPrompt!!.contains("- F4.java\n경로: /src/F4.java"))
+        assertFalse("번호 표지가 없어야 함", Regex("(?m)^- \\[\\d+]").containsMatchIn(client.userPrompt!!))
         assertTrue(client.systemPrompt!!.contains("removedFiles"))
         assertEquals(listOf("submit_verification"), client.toolNames)
         assertEquals(setOf("requiredFiles", "removedFiles", "reasoning"), client.toolProperties)

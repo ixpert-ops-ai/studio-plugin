@@ -97,7 +97,7 @@ class ActionTokenLossB78Test {
             RequirementAnalysisPipeline(null, stub, true).analyze(primaryReq = refined, secondaryReq = "", projectGraph = g, projectRoot = root) { }
         }
         val user = stub.stage3User ?: error("Stage 3 요청을 캡처하지 못했다")
-        val names = Regex("(?m)^- \\[\\d+] (\\S+)").findAll(user).map { it.groupValues[1].substringAfterLast('/') }.toList()
+        val names = net.ib.ixpert.ops.wuwagent.agent.Stage3Prompt.candidates(user).map { it.second.substringAfterLast('/') }
         File("build/b78_action_tokens_stage3.txt").writeText("Stage 3 후보 ${names.size}개: $names\n", Charsets.UTF_8)
         println("Stage 3 후보: $names")
         assertFalse(names.toString(), "AddressDto.java" in names)
