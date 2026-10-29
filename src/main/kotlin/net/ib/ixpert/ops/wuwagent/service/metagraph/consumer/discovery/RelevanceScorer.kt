@@ -5,7 +5,9 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraphQueryable
 class RelevanceScorer(
     private val graph: ProjectGraphQueryable,
     private val fileLimit: Int = 30,
-    private val minScore: Int = 10
+    private val minScore: Int = 10,
+    // CRUD 동사(추가·조회)의 번역 add/search를 이름 일치에 쓰지 않는다(B-78). false는 전/후 비교용이다.
+    private val excludeActionTokens: Boolean = true
 ) {
 
     fun scoreAndFilter(
@@ -554,7 +556,8 @@ class RelevanceScorer(
             // 한글 명사에 대한 영문 번역(도메인 사전) 추가
             val translated = dictionary.translate(cleanWord).filterNot { stopWords.contains(it.lowercase()) }
             if (crudVerbs.any { cleanWord.contains(it) }) {
-                weakTranslatedEnglish.addAll(translated)
+                // B-78: add/search는 동작어다. 부분 문자열 일치로 Address*(add), SearchHist*(search)에 약한 점수를 주지 않는다.
+                weakTranslatedEnglish.addAll(if (excludeActionTokens) translated.filterNot { GenericTranslationTokens.isActionOnly(it) } else translated)
             } else {
                 // 범용 번역(info, data, manage 등)은 약한 일치(가중치 15)로만 쓴다(GenericTranslationTokens)
                 translatedEnglish.addAll(translated.filterNot { GenericTranslationTokens.isGeneric(it) })

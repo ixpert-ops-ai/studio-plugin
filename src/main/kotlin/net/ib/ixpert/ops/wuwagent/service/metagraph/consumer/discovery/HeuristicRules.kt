@@ -49,6 +49,11 @@ object GenericTranslationTokens {
     )
 
     fun isGeneric(token: String): Boolean = token.lowercase() in TOKENS
+
+    /** 도메인 이름이 아니라 동작을 가리키는 번역(추가 → add, 조회 → search). 이름 일치(약한 일치 포함)에 쓰지 않는다(B-78). */
+    private val ACTION_ONLY = setOf("add", "search")
+
+    fun isActionOnly(token: String): Boolean = token.lowercase() in ACTION_ONLY
 }
 
 object NameWordMatch {
