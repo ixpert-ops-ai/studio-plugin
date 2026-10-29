@@ -1726,7 +1726,10 @@ class WebviewActionRouter(private val project: Project) {
                         if (result.confirmItems.isNotEmpty()) {
                             extraText += "\n\n> ⚠️ **" + net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.implementCaution(result.confirmItems) + "**"
                         }
-                        extraText += "\n\n---\n**💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.**"
+                        if (result.newDataItems.isNotEmpty()) {
+                            extraText += "\n\n> ℹ️ **" + net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.newDataCaution(result.newDataItems) + "**"
+                        }
+                        extraText += "\n\n---\n**" + net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.implementHint(result.confirmItems) + "**"
                         bridge.sendMessageChunk(messageId, extraText)
                     }
                     bridge.sendMessage("chat", "", messageId) // 스트리밍 종료 신호

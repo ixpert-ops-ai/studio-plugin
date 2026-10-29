@@ -72,7 +72,9 @@ data class RequirementAnalysisResult(
     // incomplete일 때 다시 시도에 쓸 같은 요구사항(분석에 쓴 문장)
     val retryRequirement: String? = null,
     // 경고(확인 안 됨)가 붙은 항목 이름(예: "응답자 이메일"): 결과 화면이 /implement 안내 앞에 "구현 전에 확인이 필요합니다" 한 줄을 붙인다
-    val confirmItems: List<String> = emptyList()
+    val confirmItems: List<String> = emptyList(),
+    // 경고 항목 가운데 사용자가 "새로 저장"이라 답해 기존 데이터가 없다고 정해진 것(구현 범위에 컬럼 추가·수집 경로가 들어간다)
+    val newDataItems: List<String> = emptyList()
 )
 
 class RequirementAnalysisPipeline(
@@ -453,7 +455,11 @@ class RequirementAnalysisPipeline(
         val claimFindings = try {
             val seedPaths = projectGraph.files.values.filter { it.className in discoveryResult.metadata.seedClasses }.map { it.path }
             val claimRoot = projectRoot ?: project?.basePath?.let { java.io.File(it) }
-            ClaimedFieldCheck.check(primaryReq, projectGraph, claimRoot, seedPaths)
+            // 항목은 원문 SR에서 뽑는다(B-78): 정제문은 "테이블에 이메일"처럼 항목 앞말이 달라질 수 있다. 원문에 데이터 항목이 없으면 분석에 쓴 문장으로 본다.
+            val originalSr = clarifyIntent?.originalRequirement?.takeIf { it.isNotBlank() }
+            val source = if (originalSr != null && ClaimedFieldCheck.hasDataNoun(originalSr)) originalSr else primaryReq
+            val answers = ClaimedFieldCheck.answersOf(clarifyIntent?.constraints?.map { it.value }.orEmpty())
+            ClaimedFieldCheck.check(source, projectGraph, claimRoot, seedPaths).map { it.withAnswer(answers[it.label]) }
         } catch (e: Exception) {
             logger.warn("ClaimedFieldCheck 실패(경고 없이 진행)", e)
             emptyList()
@@ -562,7 +568,8 @@ class RequirementAnalysisPipeline(
             rawResponse = "그래프 탐색 결과 처리 완료",
             suggestedNewFiles = verifiedSuggestedNewFiles,
             removedCandidates = removedCandidates,
-            confirmItems = claimFindings.map { it.label }
+            confirmItems = claimFindings.filter { it.answer == null }.map { it.label },
+            newDataItems = claimFindings.filter { it.answer != null && ClaimedFieldCheck.isNewData(it.answer) }.map { it.label }
         )
 
         // --- ClarificationContract 생산 및 디스크 저장 (Analyze 산출물 계약 단독 생산) ---

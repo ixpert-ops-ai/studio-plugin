@@ -39,12 +39,23 @@ object ClaimedFieldCheck {
     private class OtherHit(val cite: String, val tables: Set<String>)
 
     /** 항목 하나의 확인 결과(찾았는지, 근거, 읽은 파일 수). */
-    private class Eval(val noun: DataNoun, val subject: String?, val read: Int, val unread: Int, val inDomainCites: List<String>, val other: List<OtherHit>)
+    private class Eval(val noun: DataNoun, val subject: String?, val read: Int, val unread: Int, val inDomainCites: List<String>, val other: List<OtherHit>, val seedNames: List<String> = emptyList())
 
-    class Finding(val noun: String, val subject: String?, val filesRead: Int, val otherCites: List<String>, val otherTables: List<String> = emptyList()) {
+    class Finding(
+        val noun: String, val subject: String?, val filesRead: Int, val otherCites: List<String>, val otherTables: List<String> = emptyList(),
+        /** 범위를 정한 시드 클래스 이름(읽은 파일 수가 무엇을 센 것인지 화면에 밝히는 데 쓴다). */
+        val seedNames: List<String> = emptyList(),
+        /** 사용자가 Stage 0 질문에 한 답(ClarifyIntent의 "<항목> 출처: <답>" 제약). 없으면 null. */
+        val answer: String? = null
+    ) {
         /** 화면에 보이는 항목 이름(예: "응답자 이메일"). */
         val label: String get() = (subject?.let { "$it " } ?: "") + noun
+
+        fun withAnswer(a: String?): Finding = Finding(noun, subject, filesRead, otherCites, otherTables, seedNames, a)
     }
+
+    /** 문장에 사전의 데이터 명사(이메일 등)가 있는가. */
+    fun hasDataNoun(srText: String): Boolean = requestedNouns(srText).isNotEmpty()
 
     /** SR에서 사전에 있는 데이터 명사를 찾는다. */
     private fun requestedNouns(srText: String): List<DataNoun> = LEXICON.filter { d -> d.korean.any { srText.contains(it) } }
@@ -110,7 +121,7 @@ object ClaimedFieldCheck {
 
     private fun toFinding(e: Eval) = Finding(
         e.noun.korean.first(), e.subject, e.read, e.other.map { it.cite }.take(3),
-        e.other.flatMap { it.tables }.distinct().take(3)
+        e.other.flatMap { it.tables }.distinct().take(3), e.seedNames
     )
 
     private fun evaluate(srText: String, graph: ProjectGraph, projectRoot: File?, seedPaths: List<String>): List<Eval> {
@@ -147,7 +158,7 @@ object ClaimedFieldCheck {
                     }
                 }
             }
-            results.add(Eval(noun, subjectOf(srText, noun), read, unread, inDomainCites, other))
+            results.add(Eval(noun, subjectOf(srText, noun), read, unread, inDomainCites, other, seedPaths.mapNotNull { graph.files[it]?.className }))
         }
         return results // 못 읽은 파일이 있으면 호출한 쪽이 침묵한다(오탐 방지)
     }
@@ -171,7 +182,16 @@ object ClaimedFieldCheck {
     fun question(f: Finding): String {
         val where = if (f.otherCites.isEmpty()) "다른 업무 코드에서도 발견되지 않았습니다."
         else "다른 업무 코드에서만 발견됩니다: ${f.otherCites.joinToString(", ")}" + (if (f.otherTables.isNotEmpty()) " (테이블 ${f.otherTables.joinToString("/")})" else "")
-        return "${f.label}${eulReul(f.label)} 저장하거나 조회하는 코드를 찾지 못했습니다 (후보 범위 파일 ${f.filesRead}개를 읽어 확인).\n$where\n어디서 가져올까요? (예: 다른 테이블 조인, 새로 저장, 잘 모르겠음)"
+        return "${f.label}${eulReul(f.label)} 저장하거나 조회하는 코드를 찾지 못했습니다 (${scopeNote(f.seedNames, f.filesRead)}).\n$where\n어디서 가져올까요? (예: 다른 테이블 조인, 새로 저장, 잘 모르겠음)"
+    }
+
+    /**
+     * 화면에 보이는 "읽은 파일 수"가 무엇을 센 것인지 밝히는 문구(B-78). 숫자는 [scopeOf]의 files 크기다:
+     * 시드 클래스가 있는 폴더의 자바 파일 + 시드 이름 토큰이 파일명에 있는 리소스(매퍼 등). Stage 0 카드는 키워드 시드(heuristicSeeds), 결과 화면은 탐색기가 확정한 시드를 쓰므로 시드가 다르면 숫자도 다르다.
+     */
+    fun scopeNote(seedNames: List<String>, count: Int): String {
+        val seeds = if (seedNames.isEmpty()) "시드" else "시드 ${seedNames.first()}" + (if (seedNames.size > 1) " 등 ${seedNames.size}개" else "")
+        return "$seeds 폴더의 소스·매퍼 ${count}개를 읽어 확인"
     }
 
     /** 요약 프롬프트에 사실로 넣을 한 줄(못 찾은 항목에는 후보 파일이 그 항목을 담고 있다고 쓰지 말라는 지시를 붙인다). */
@@ -183,12 +203,31 @@ object ClaimedFieldCheck {
 
     /** 결과 화면에 붙일 경고 한 줄. */
     fun render(f: Finding): String =
-        "확인 안 됨: ${f.label}${eulReul(f.label)} 조회하는 코드/SQL을 찾지 못했습니다 (범위 파일 ${f.filesRead}개를 읽어 확인)" +
-            (if (f.otherCites.isNotEmpty()) ". 다른 업무 코드에서만 발견: ${f.otherCites.joinToString(", ")}" else "")
+        "확인 안 됨: ${f.label}${eulReul(f.label)} 조회하는 코드/SQL을 찾지 못했습니다 (${scopeNote(f.seedNames, f.filesRead)})" +
+            (if (f.otherCites.isNotEmpty()) ". 다른 업무 코드에서만 발견: ${f.otherCites.joinToString(", ")}" else "") +
+            (f.answer?.let { a -> ". 사용자 답변 \"${a.take(60)}\" → " + (if (isNewData(a)) "기존 데이터 없음 → 컬럼 추가·수집 경로 필요" else "출처 지정됨(조인 대상 확인 필요)") } ?: "")
+
+    private val NEW_DATA = Regex("새로|신규|추가|수집|저장")
+
+    /** 사용자의 출처 답이 "기존에 없으니 새로 만든다"는 뜻인가(새로 저장, 컬럼 추가, 수집 등). */
+    fun isNewData(answer: String): Boolean = NEW_DATA.containsMatchIn(answer)
+
+    /** Stage 0 질문에 대한 답("<항목> 출처: <답>" 제약의 값)을 항목 이름별로 모은다. */
+    fun answersOf(constraintValues: List<String>): Map<String, String> =
+        constraintValues.mapNotNull { v -> v.indexOf(" 출처: ").takeIf { it > 0 }?.let { v.substring(0, it) to v.substring(it + " 출처: ".length) } }.toMap()
 
     /** 구현 전에 확인이 필요한 항목 한 줄(경고가 있을 때 /implement 안내 앞에 붙는다). */
     fun implementCaution(items: List<String>): String =
         "구현 전에 확인이 필요합니다: ${items.joinToString(", ")}의 출처를 정해 주세요"
+
+    /** 출처 답이 "새로 저장"이라 기존 데이터가 없다고 정해진 항목: 구현 범위에 컬럼 추가와 수집 경로가 들어간다는 안내. */
+    fun newDataCaution(items: List<String>): String =
+        "구현 범위에 새 컬럼 추가와 수집·저장 경로가 포함됩니다: ${items.joinToString(", ")}"
+
+    /** /implement 안내 문구. 아직 출처가 정해지지 않은 경고 항목이 있으면 그 사실을 먼저 알린다(B-78: 전에는 경고가 있어도 같은 문구였다). */
+    fun implementHint(unresolved: List<String>): String =
+        if (unresolved.isEmpty()) "💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요."
+        else "💡 ${unresolved.joinToString(", ")}의 출처가 정해지지 않았습니다. 정한 뒤 `/implement`를 입력하는 것을 권합니다(지금 입력하면 이 항목은 추정으로 구현됩니다)."
 
     fun warnings(srText: String, graph: ProjectGraph, projectRoot: File?, seedPaths: List<String>): List<String> =
         check(srText, graph, projectRoot, seedPaths).map { render(it) }

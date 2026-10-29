@@ -91,7 +91,8 @@ class ClaimedFieldSamplesB76Test {
     fun s3_경고가_있으면_implement_안내_앞에_확인_요청_한_줄이_붙고_implement를_막지_않는다() {
         val router = File("src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/WebviewActionRouter.kt").readText(Charsets.UTF_8)
         val caution = router.indexOf("ClaimedFieldCheck.implementCaution(result.confirmItems)")
-        val implement = router.indexOf("위 파일들의 구체적인 코드 수정을 원하시면")
+        // B-78: 안내 문구가 ClaimedFieldCheck.implementHint로 옮겨 갔다(미해결 경고가 있으면 문구가 바뀐다). 순서(확인 요청 줄 → /implement 안내)는 그대로다.
+        val implement = router.indexOf("ClaimedFieldCheck.implementHint(result.confirmItems)")
         assertTrue(caution in 0 until implement)
         assertTrue(router.substring(caution - 260, caution).contains("result.confirmItems.isNotEmpty()"))
     }
