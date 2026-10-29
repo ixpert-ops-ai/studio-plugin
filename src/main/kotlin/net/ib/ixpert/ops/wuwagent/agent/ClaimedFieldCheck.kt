@@ -216,7 +216,8 @@ object ClaimedFieldCheck {
      */
     fun renderResolved(f: Finding): String {
         val a = f.answer ?: return render(f)
-        val quote = "사용자 답변 \"${a.take(60)}\""
+        // 답에서 출처 부분만 인용한다(Stage 0 "기록함"과 같은 해석, 앞 60자 자르기 대신)
+        val quote = "사용자 답변 \"${net.ib.ixpert.ops.wuwagent.agent.clarify.AnswerInterpreter.sourceQuote(a)}\""
         return if (isNewData(a)) "${f.label}: ${scopeArea(f.seedNames)}를 읽어 확인했으나 기존 데이터가 없습니다. $quote 에 따라 새 컬럼 추가와 수집·저장 경로가 구현 범위에 포함됩니다."
         else "${f.label}: ${scopeArea(f.seedNames)}를 읽어 확인했으나 기존 코드에는 없고, $quote 으로 출처가 지정되었습니다(조인 대상 확인 필요)."
     }

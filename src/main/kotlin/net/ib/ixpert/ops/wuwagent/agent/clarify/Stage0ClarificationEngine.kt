@@ -1249,7 +1249,7 @@ class Stage0ClarificationEngine(
         val translated = if (answer.handled) {
             TranslatedAction(kind = UserActionKind.UNKNOWN, rawStatement = trimmed, clarificationMessage = answer.echo)
         } else if (fieldAnswered != null) {
-            TranslatedAction(kind = UserActionKind.ADD_CONSTRAINT, rawStatement = trimmed, clarificationMessage = "기록함: ${fieldAnswered.label}의 출처 — \"$trimmed\" (제약으로 정제문에 전달됩니다)")
+            TranslatedAction(kind = UserActionKind.ADD_CONSTRAINT, rawStatement = trimmed, clarificationMessage = AnswerInterpreter.echo(fieldAnswered.label, trimmed))
         } else {
             ClarifyUtteranceTranslator.translate(trimmed, state.items, llmClient, state.originalRequirement)
         }
