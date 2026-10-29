@@ -34,7 +34,7 @@ export const CARD_WAIT_INFO: Record<string, { timeoutSec: number; fallback: stri
   scope: { timeoutSec: 300, fallback: '전체 프로젝트로' },
   l1: { timeoutSec: 300, fallback: '힌트 없이' },
   stage3: { timeoutSec: 300, fallback: '전체 후보로' },
-  refined: { timeoutSec: 300, fallback: '원래 문장으로' },
+  refined: { timeoutSec: 300, fallback: '위 정제된 문장 그대로' },
 };
 
 /** 경과 시간 표시: 60초 미만은 "N초", 이상은 "M분 S초". */

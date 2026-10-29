@@ -59,7 +59,7 @@ test('카드 대기 줄: 대기 상태, 경과 시간, 응답이 없을 때의 �
   assert.equal(cardWaitLine('stage3', 12), '확인을 기다리고 있습니다 · 경과 12초 (5분 안에 응답이 없으면 전체 후보로 진행합니다)');
   assert.equal(cardWaitLine('scope', 0), '확인을 기다리고 있습니다 · 경과 0초 (5분 안에 응답이 없으면 전체 프로젝트로 진행합니다)');
   assert.equal(cardWaitLine('l1', 65), '확인을 기다리고 있습니다 · 경과 1분 5초 (5분 안에 응답이 없으면 힌트 없이 진행합니다)');
-  assert.equal(cardWaitLine('refined', 1), '확인을 기다리고 있습니다 · 경과 1초 (5분 안에 응답이 없으면 원래 문장으로 진행합니다)');
+  assert.equal(cardWaitLine('refined', 1), '확인을 기다리고 있습니다 · 경과 1초 (5분 안에 응답이 없으면 위 정제된 문장 그대로 진행합니다)');
   assert.equal(cardWaitLine('other', 3), '확인을 기다리고 있습니다 · 경과 3초');
 });
 

@@ -1,0 +1,73 @@
+[
+ {
+  "path": "src/main/java/sc/chn/aps/apc/mm/mm08/biz/APCMMTrcdIsBIZ.java",
+  "source": "USER_EXCLUDED",
+  "stageRank": 2
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/tr/tr01/biz/APCTRTrcdIsBIZ.java",
+  "source": "USER_EXCLUDED",
+  "stageRank": 4
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/tr/tr01/biz/APCTRTrcdExstBIZ.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 5,
+  "reason": "조회 로직만 추가하므로 상위 계층 수정 불필요"
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/zz/dqm/APCADBgdPrpMngtDQM.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 6
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADSspyDlngHistMngtBIZ.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 7
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/bf/bf02/biz/APCBFBconCnntHistBIZ.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 8
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/mm/mm08/biz/APCMMMbInfMngtBIZ.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 9
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/zz/dqm/APCSpacdBgdPrpMngtDQM.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 10
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/zz/dqm/APCSpacdPrvMngtDQM.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 11
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/zz/dqm/APCSpacdCstMngtDQM.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 12
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/sr/sr07/biz/APCSRMnChArtcListInqrBIZ.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 13
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/sr/sr13/biz/APCSRHvSpacdListAkBIZ.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 14
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/sr/sr06/biz/APCSRHvSpacdListAkBIZ.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 15
+ },
+ {
+  "path": "src/main/java/sc/chn/aps/apc/sr/sr03/biz/APCSRHvRltgCardListAkBIZ.java",
+  "source": "STAGE3_EXPLICIT",
+  "stageRank": 16
+ }
+]

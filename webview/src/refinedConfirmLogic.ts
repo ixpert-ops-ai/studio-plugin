@@ -43,8 +43,8 @@ export const evaluateEdit = (shown: string, edited: string): EditState => {
 
 export type ConfirmAction = 'asis' | 'edited';
 
-/** 응답 없이 대기 시간이 지나 백엔드가 원래 문장으로 분석을 진행했을 때 카드에 보이는 안내. */
-export const EXPIRED_TEXT = '응답이 없어 원래 문장으로 분석을 진행했습니다.';
+/** 응답 없이 대기 시간이 지나 백엔드가 카드에 보인 정제된 문장 그대로 분석을 진행했을 때 카드에 보이는 안내. */
+export const EXPIRED_TEXT = '응답이 없어 위 정제된 문장 그대로 분석을 진행했습니다.';
 
 /** 확인 카드 메시지에 만료 표시를 단다(다른 메시지와 이미 만료된 카드는 그대로). 카드는 지우지 않고 비활성으로 남긴다. */
 export const markExpired = <T extends { subType?: string; expired?: boolean }>(messages: T[]): T[] =>

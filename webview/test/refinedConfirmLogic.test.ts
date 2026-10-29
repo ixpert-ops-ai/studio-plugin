@@ -79,7 +79,7 @@ test('만료 표시: 확인 카드에만 달리고 다른 메시지는 그대로
   assert.deepEqual(out[1], { id: 'b', subType: 'refinedConfirmation/request', expired: true });
   assert.deepEqual(out[2], list[2]);
   assert.equal(list[1].expired, undefined); // 입력을 바꾸지 않는다
-  assert.equal(EXPIRED_TEXT, '응답이 없어 원래 문장으로 분석을 진행했습니다.');
+  assert.equal(EXPIRED_TEXT, '응답이 없어 위 정제된 문장 그대로 분석을 진행했습니다.');
   // 이미 만료된 카드는 같은 값으로 남는다
   assert.deepEqual(markExpired(out)[1], out[1]);
 });
