@@ -115,8 +115,10 @@ class FileRelevanceVerifier(
                 } else if (names.all { n -> n.endsWith(prefix, ignoreCase = true) || n.substringBeforeLast('.').endsWith(prefix, ignoreCase = true) }) {
                     prefix + "(" + joinCitedNames(names) + ")"
                 } else {
+                    // 앞말이 가리키는 파일 가운데 일부만 맞는다(예: "A/B/C/D(10,12,13,14)"에서 D만 앞말). 로그에는 남기되(WARN: RequirementAnalysisPipeline의 번호-이름 불일치) 번호는 화면에 내보내지 않는다(B-78).
                     mismatches.add(m.value + " → " + names.joinToString(", "))
-                    m.value
+                    // 가리키는 파일 이름이 이미 앞에 나열돼 있으면 번호 괄호만 지우고, 아니면 번호 자리에 파일명을 넣는다.
+                    if (names.all { n -> text.contains(n.substringBeforeLast('.')) }) prefix else prefix + "(" + joinCitedNames(names) + ")"
                 }
             }
             return CitationResult(out, mismatches)
@@ -142,6 +144,7 @@ class FileRelevanceVerifier(
             ## 판정 원칙
             - 새로운 필드, 상태값, 메서드를 추가해야 요구사항을 구현할 수 있다면, 현재 해당 코드가 없더라도 수정 대상입니다.
             - 제거할 확실한 근거가 없으면 유지하세요.
+            - reasoning(요약)에는 후보 번호(예: [10], (10,12))를 쓰지 말고 파일 이름만 쓰세요. 번호는 이 요청 안에서만 쓰는 표시이며 사용자에게 보이지 않습니다.
             - 요구사항의 데이터 흐름(입력 → 처리 → 저장)을 추적하여 판단하세요.
             - reason은 반드시 해당 파일에서 구체적으로 어떤 수정이 필요한지를 포함해야 합니다. 빈 문자열이나 '수정이 필요합니다' 같은 동어반복은 허용되지 않습니다.
             - 중요: JSON 응답 생성 시, reason이나 reasoning 필드 값 내부에 실제 줄바꿈 문자(\n)를 사용하지 마세요. 줄바꿈 대신 띄어쓰기나 마침표를 사용하세요.

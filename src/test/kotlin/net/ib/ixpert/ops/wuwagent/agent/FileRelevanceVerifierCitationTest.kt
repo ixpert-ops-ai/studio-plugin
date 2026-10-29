@@ -3,6 +3,7 @@ package net.ib.ixpert.ops.wuwagent.agent
 import com.google.gson.JsonParser
 import net.ib.ixpert.ops.wuwagent.agent.FileRelevanceVerifier.Companion.substituteCandidateNumbers
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume
 import org.junit.Test
@@ -54,15 +55,15 @@ class FileRelevanceVerifierCitationTest {
         assertTrue(s.mismatches.isEmpty())
     }
 
-    // N5 이름과 번호가 가리키는 후보가 다르면 원문을 두고 불일치로 기록한다.
+    // N5 이름과 번호가 가리키는 후보가 다르면 불일치로 기록한다. B-78: 번호는 화면에 내보내지 않는다(가리키는 파일 이름이 이미 앞에 있으면 괄호만 지운다).
     @Test
     fun n5_nameNumberMismatchIsKeptAndRecorded() {
         val r = substituteCandidateNumbers("BDao(5)는 수정, C(5)는 유지", paths)
-        assertEquals("BDao(5)는 수정, C는 유지", r.text)
+        assertEquals("BDao는 수정, C는 유지", r.text)
         assertEquals(listOf("BDao(5) → C.java"), r.mismatches)
     }
 
-    // N6 이름 뒤에 번호가 여러 개이면 가리키는 후보가 모두 그 이름으로 끝날 때만 파일명 목록으로 바꾼다. 하나라도 다르면 원문과 불일치 기록.
+    // N6 이름 뒤에 번호가 여러 개이면 가리키는 후보가 모두 그 이름으로 끝날 때만 이름 일치로 본다. 하나라도 다르면 불일치로 기록하되(B-78) 번호 자리에는 파일명을 넣는다.
     @Test
     fun n6_multiNumberAfterNameReplacesParenthesesWhenOneMatches() {
         val own = listOf("/a/ECMTrxMapper.java", "/a/ECMTrxMapper.xml", "/a/Other.java")
@@ -70,12 +71,25 @@ class FileRelevanceVerifierCitationTest {
         assertEquals("TrxMapper(ECMTrxMapper.java, ECMTrxMapper.xml)는 조회 전용", ok.text)
         assertTrue(ok.mismatches.isEmpty())
         val r = substituteCandidateNumbers("TrxMapper(1,3) 그리고 AService(1,2)", own + "/a/AService.java")
-        assertEquals("TrxMapper(1,3) 그리고 AService(1,2)", r.text)
+        assertEquals("TrxMapper(ECMTrxMapper.java, Other.java) 그리고 AService(ECMTrxMapper.java, ECMTrxMapper.xml)", r.text)
         assertEquals(2, r.mismatches.size)
         val impl = substituteCandidateNumbers("AService(1,2)", paths)
-        assertEquals("AService(1,2)", impl.text)
+        assertEquals("AService(AService.java, AServiceImpl.java)", impl.text)
         assertEquals(listOf("AService(1,2) → AService.java, AServiceImpl.java"), impl.mismatches)
     }
+
+    // N7 2026-10-29 IDE: 앞에 이름이 모두 나열돼 있고 마지막 이름에만 번호가 붙은 문장. 번호 괄호는 지워지고 불일치는 기록된다(번호는 그날 Stage 3 표 순서).
+    @Test
+    fun n7_todaysSummaryNumbersAreNotShown() {
+        val names = listOf("SurveyServiceImpl.java", "SurveyDto.java", "SurveyDaoImpl.java", "sql_survey.xml", "AddressDaoImpl.java", "AddressDao.java", "SurveyService.java", "SurveyDao.java", "sql_address.xml", "SurveyQImgDto.java", "UserServiceImpl.java", "ReviewDto.java", "ClosingLinkDto.java", "SearchHistRDto.java", "AddressDto.java")
+        val table = names.map { "/a/$it" }
+        val text = "2) SurveyQImgDto/ReviewDto/ClosingLinkDto/SearchHistRDto(10,12,13,14)는 이메일과 무관, UserServiceImpl은 제거."
+        val r = substituteCandidateNumbers(text, table)
+        assertFalse(r.text, Regex("\\(\\s*\\d+(?:[\\s,]+\\d+)*\\s*\\)").containsMatchIn(r.text))
+        assertEquals("2) SurveyQImgDto/ReviewDto/ClosingLinkDto/SearchHistRDto는 이메일과 무관, UserServiceImpl은 제거.", r.text)
+        assertEquals(1, r.mismatches.size)
+    }
+
 
     // 저장된 덤프 응답에 치환을 적용한 결과를 출력한다(LLM 호출 없음). -Deval.numcite=true 일 때만 실행.
     @Test
