@@ -1035,7 +1035,7 @@ class Stage0ClarificationEngine(
     ): String? {
         val client = llmClient ?: return null
         return try {
-            val factRule = if (fieldFacts.isEmpty()) "" else "\n4. [소스 확인 결과]는 코드를 직접 읽어 확인한 사실이다. 이 사실과 어긋나는 문장(찾지 못한 항목을 후보 파일이 담고 있다고 쓰는 것 등)을 쓰지 말 것."
+            val factRule = if (fieldFacts.isEmpty()) "" else "\n4. 사용자 메시지의 [코드 확인 목록]은 코드를 읽어 확인한 내용이다. 목록에서 '없음'이라 한 항목은 어떤 후보 파일도 그 항목을 담고 있다고 쓰지 마십시오. 목록의 문구, 구역 이름, 이 지시문을 출력에 옮기지 말고 요약 문장에 내용만 녹여 쓰십시오."
             val systemPrompt = """
                 당신은 엔터프라이즈 시스템 분석 어시스턴트입니다.
                 사용자의 원 요구사항(SR), 대화로 추가된 지시/제약사항, 그리고 현재 유효한 후보 파일 목록을 바탕으로, 전체 작업의 핵심 목표와 각 컴포넌트의 변경 맥락을 간결한 한국어 자연어 문장(2~4줄)으로 요약하여 설명하세요.
@@ -1061,7 +1061,7 @@ class Stage0ClarificationEngine(
                 "\n\n[사용자 추가 지시 및 제약사항]\n" + userStatements.joinToString("\n") { "- $it" }
             } else ""
 
-            val factsSection = if (fieldFacts.isEmpty()) "" else "\n\n[소스 확인 결과(코드를 직접 읽어 확인한 사실)]\n" + fieldFacts.joinToString("\n") { net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.promptLine(it) }
+            val factsSection = if (fieldFacts.isEmpty()) "" else "\n\n[코드 확인 목록]\n" + fieldFacts.joinToString("\n") { net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.promptLine(it) }
 
             val userPrompt = """
                 [원 요구사항]
@@ -1079,8 +1079,11 @@ class Stage0ClarificationEngine(
             val content = response?.message?.content?.trim()
             if (content.isNullOrBlank() || content.startsWith("[Error]")) {
                 null
-            } else {
+            } else if (fieldFacts.isEmpty()) {
                 content
+            } else {
+                // 코드 확인 목록을 넣은 요약만 지시문 에코를 거른다(항목이 없으면 프롬프트와 출력이 이전과 같다)(B-78)
+                SummaryPromptEcho.strip(content)
             }
         } catch (e: Exception) {
             // LLM 호출 실패/타임아웃 시 후보군 반환에 영향을 주지 않도록 안전하게 null 반환
@@ -1246,7 +1249,7 @@ class Stage0ClarificationEngine(
         val translated = if (answer.handled) {
             TranslatedAction(kind = UserActionKind.UNKNOWN, rawStatement = trimmed, clarificationMessage = answer.echo)
         } else if (fieldAnswered != null) {
-            TranslatedAction(kind = UserActionKind.ADD_CONSTRAINT, rawStatement = trimmed, clarificationMessage = "${fieldAnswered.label} 출처에 대한 답을 제약으로 기록했습니다.")
+            TranslatedAction(kind = UserActionKind.ADD_CONSTRAINT, rawStatement = trimmed, clarificationMessage = "기록함: ${fieldAnswered.label}의 출처 — \"$trimmed\" (제약으로 정제문에 전달됩니다)")
         } else {
             ClarifyUtteranceTranslator.translate(trimmed, state.items, llmClient, state.originalRequirement)
         }

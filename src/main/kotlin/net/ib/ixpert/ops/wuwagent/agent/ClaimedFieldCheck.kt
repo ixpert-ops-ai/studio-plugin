@@ -194,12 +194,13 @@ object ClaimedFieldCheck {
         return "$seeds 폴더의 소스·매퍼 ${count}개를 읽어 확인"
     }
 
-    /** 요약 프롬프트에 사실로 넣을 한 줄(못 찾은 항목에는 후보 파일이 그 항목을 담고 있다고 쓰지 말라는 지시를 붙인다). */
+    /**
+     * 요약 프롬프트의 [코드 확인 목록]에 넣을 한 줄(B-78: 평서문 사실만 둔다. 금지 지시는 시스템 프롬프트에만 있다. 전에는 줄 끝의 "…쓰지 말 것" 명령문이 요약에 그대로 나왔다).
+     */
     fun promptLine(f: FieldFact): String =
-        if (f.found) "- ${f.label}: 업무 코드에서 확인됨(${f.cite})"
-        else "- ${f.label}: 후보 범위의 업무 코드/SQL(소스 ${f.filesRead}개 파일)에서 찾지 못함" +
-            (if (f.otherCites.isNotEmpty()) ". 다른 업무 코드에서만 발견: ${f.otherCites.joinToString(", ")}" else "") +
-            ". 어떤 후보 파일도 ${f.label}${eulReul(f.label)} 담고 있다고 쓰지 말 것."
+        if (f.found) "- ${f.label}: ${f.cite}에 있음"
+        else "- ${f.label}: 없음(후보 폴더의 소스·매퍼 ${f.filesRead}개를 읽음)" +
+            (if (f.otherCites.isNotEmpty()) ", 다른 업무의 쿼리에만 있음(${f.otherCites.joinToString(", ")})" else "")
 
     /** 결과 화면에 붙일 경고 한 줄. */
     fun render(f: Finding): String =

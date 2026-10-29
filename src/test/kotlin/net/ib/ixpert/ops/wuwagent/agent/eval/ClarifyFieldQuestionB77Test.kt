@@ -142,18 +142,18 @@ class ClarifyFieldQuestionB77Test {
         val st = eng.initSession(srToday).state
         eng.buildTaskSummary(st)
         val (sys, user) = client.calls.last()
-        assertTrue("사실 구역: $user", user.contains("[소스 확인 결과(코드를 직접 읽어 확인한 사실)]"))
-        assertTrue(user.contains("- 응답자 이메일: 후보 범위의 업무 코드/SQL") && user.contains("찾지 못함"))
-        assertTrue("지시: $user", user.contains("어떤 후보 파일도 응답자 이메일을 담고 있다고 쓰지 말 것"))
-        assertTrue("시스템 규칙", sys.contains("[소스 확인 결과]는 코드를 직접 읽어 확인한 사실이다"))
+        assertTrue("사실 구역: $user", user.contains("[코드 확인 목록]")) // B-78: 구역 이름과 사실 줄을 평서문으로 바꿨다(전: [소스 확인 결과(…)])
+        assertTrue(user.contains("- 응답자 이메일: 없음(후보 폴더의 소스·매퍼") && user.contains("다른 업무의 쿼리에만 있음"))
+        assertFalse("사실 줄에는 명령문이 없다: $user", user.contains("쓰지 말 것")) // 금지 지시는 시스템 프롬프트에만 둔다
+        assertTrue("시스템 규칙", sys.contains("목록에서 '없음'이라 한 항목은 어떤 후보 파일도 그 항목을 담고 있다고 쓰지 마십시오"))
 
         val clean = RecordingClient()
         val eng2 = engine(sg, surveyRoot, clean)
         val st2 = eng2.initSession("설문 목록 화면의 정렬 기준을 변경한다").state
         eng2.buildTaskSummary(st2)
         val (sys2, user2) = clean.calls.last()
-        assertFalse("항목이 없으면 사실 구역이 없다", user2.contains("[소스 확인 결과"))
-        assertFalse(sys2.contains("[소스 확인 결과]"))
+        assertFalse("항목이 없으면 사실 구역이 없다", user2.contains("[코드 확인 목록]"))
+        assertFalse(sys2.contains("[코드 확인 목록]"))
     }
 
     @Test
