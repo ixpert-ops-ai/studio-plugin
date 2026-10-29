@@ -182,17 +182,20 @@ object ClaimedFieldCheck {
     fun question(f: Finding): String {
         val where = if (f.otherCites.isEmpty()) "다른 업무 코드에서도 발견되지 않았습니다."
         else "다른 업무 코드에서만 발견됩니다: ${f.otherCites.joinToString(", ")}" + (if (f.otherTables.isNotEmpty()) " (테이블 ${f.otherTables.joinToString("/")})" else "")
-        return "${f.label}${eulReul(f.label)} 저장하거나 조회하는 코드를 찾지 못했습니다 (${scopeNote(f.seedNames, f.filesRead)}).\n$where\n어디서 가져올까요? (예: 다른 테이블 조인, 새로 저장, 잘 모르겠음)"
+        return "${f.label}${eulReul(f.label)} 저장하거나 조회하는 코드를 찾지 못했습니다 (${scopeNote(f.seedNames)}).\n$where\n어디서 가져올까요? (예: 다른 테이블 조인, 새로 저장, 잘 모르겠음)"
     }
 
     /**
-     * 화면에 보이는 "읽은 파일 수"가 무엇을 센 것인지 밝히는 문구(B-78). 숫자는 [scopeOf]의 files 크기다:
-     * 시드 클래스가 있는 폴더의 자바 파일 + 시드 이름 토큰이 파일명에 있는 리소스(매퍼 등). Stage 0 카드는 키워드 시드(heuristicSeeds), 결과 화면은 탐색기가 확정한 시드를 쓰므로 시드가 다르면 숫자도 다르다.
+     * 화면에 보이는 범위 문구(B-79): 시드 클래스 이름, 폴더 수, 파일 수를 사용자 문구에서 뺀다. 시드 클래스가 가리키는 도메인 명사를 사전에서 찾아 "설문 관련 코드"로 말한다(사전에 없으면 "관련 코드").
+     * 실제로 읽은 범위는 [scopeOf]의 files(시드 클래스가 있는 폴더의 자바 파일 + 시드 이름 토큰이 파일명에 있는 리소스)이며 숫자는 로그와 시험에서만 쓴다.
+     * Stage 0 카드는 키워드 시드(heuristicSeeds), 결과 화면은 탐색기가 확정한 시드를 쓰므로 시드가 다르면 읽은 범위도 다르다.
      */
-    fun scopeNote(seedNames: List<String>, count: Int): String {
-        val seeds = if (seedNames.isEmpty()) "시드" else "시드 ${seedNames.first()}" + (if (seedNames.size > 1) " 등 ${seedNames.size}개" else "")
-        return "$seeds 폴더의 소스·매퍼 ${count}개를 읽어 확인"
+    fun scopeArea(seedNames: List<String>): String {
+        val word = DomainDictionary.domainWordFor(seedNames.flatMap { camelTokens(it) })
+        return if (word != null) "$word 관련 코드" else "관련 코드"
     }
+
+    fun scopeNote(seedNames: List<String>): String = "${scopeArea(seedNames)}를 읽어 확인"
 
     /**
      * 요약 프롬프트의 [코드 확인 목록]에 넣을 한 줄(B-78: 평서문 사실만 둔다. 금지 지시는 시스템 프롬프트에만 있다. 전에는 줄 끝의 "…쓰지 말 것" 명령문이 요약에 그대로 나왔다).
@@ -204,9 +207,28 @@ object ClaimedFieldCheck {
 
     /** 결과 화면에 붙일 경고 한 줄. */
     fun render(f: Finding): String =
-        "확인 안 됨: ${f.label}${eulReul(f.label)} 조회하는 코드/SQL을 찾지 못했습니다 (${scopeNote(f.seedNames, f.filesRead)})" +
-            (if (f.otherCites.isNotEmpty()) ". 다른 업무 코드에서만 발견: ${f.otherCites.joinToString(", ")}" else "") +
-            (f.answer?.let { a -> ". 사용자 답변 \"${a.take(60)}\" → " + (if (isNewData(a)) "기존 데이터 없음 → 컬럼 추가·수집 경로 필요" else "출처 지정됨(조인 대상 확인 필요)") } ?: "")
+        "확인 안 됨: ${f.label}${eulReul(f.label)} 조회하는 코드/SQL을 찾지 못했습니다 (${scopeNote(f.seedNames)})" +
+            (if (f.otherCites.isNotEmpty()) ". 다른 업무 코드에서만 발견: ${f.otherCites.joinToString(", ")}" else "")
+
+    /**
+     * 사용자가 Stage 0 질문에 답해 해소된 항목의 안내 한 줄(B-79: "확인 안 됨" 경고 대신 이 줄만 보인다).
+     * 답이 "새로 저장"이면 기존 데이터가 없어 컬럼 추가·수집 경로가 구현 범위에 들어간다는 뜻이고, 그 밖의 답이면 출처가 지정됐다는 뜻이다.
+     */
+    fun renderResolved(f: Finding): String {
+        val a = f.answer ?: return render(f)
+        val quote = "사용자 답변 \"${a.take(60)}\""
+        return if (isNewData(a)) "${f.label}: ${scopeArea(f.seedNames)}를 읽어 확인했으나 기존 데이터가 없습니다. $quote 에 따라 새 컬럼 추가와 수집·저장 경로가 구현 범위에 포함됩니다."
+        else "${f.label}: ${scopeArea(f.seedNames)}를 읽어 확인했으나 기존 코드에는 없고, $quote 으로 출처가 지정되었습니다(조인 대상 확인 필요)."
+    }
+
+    private val ENTRY_POINT = Regex("Controller\\.(java|kt)$|\\.(jsp|html|vue|js|jsx|tsx)$")
+
+    /** 최종 목록에 요청 진입점(컨트롤러 또는 화면 파일)이 하나라도 있는가. */
+    fun hasEntryPoint(paths: List<String>): Boolean = paths.any { ENTRY_POINT.containsMatchIn(it) }
+
+    /** 새로 저장하기로 했는데 요청 진입점이 최종 목록에 없을 때의 안내 한 줄(파일은 추가하지 않는다). */
+    fun entryPointNote(f: Finding): String =
+        "${f.subject ?: "사용자"}가 ${f.noun}${eulReul(f.noun)} 입력·전달하는 경로(컨트롤러·화면)는 분석 대상에 없습니다. 이 분석은 파일을 추가하지 않았습니다."
 
     private val NEW_DATA = Regex("새로|신규|추가|수집|저장")
 
@@ -220,10 +242,6 @@ object ClaimedFieldCheck {
     /** 구현 전에 확인이 필요한 항목 한 줄(경고가 있을 때 /implement 안내 앞에 붙는다). */
     fun implementCaution(items: List<String>): String =
         "구현 전에 확인이 필요합니다: ${items.joinToString(", ")}의 출처를 정해 주세요"
-
-    /** 출처 답이 "새로 저장"이라 기존 데이터가 없다고 정해진 항목: 구현 범위에 컬럼 추가와 수집 경로가 들어간다는 안내. */
-    fun newDataCaution(items: List<String>): String =
-        "구현 범위에 새 컬럼 추가와 수집·저장 경로가 포함됩니다: ${items.joinToString(", ")}"
 
     /** /implement 안내 문구. 아직 출처가 정해지지 않은 경고 항목이 있으면 그 사실을 먼저 알린다(B-78: 전에는 경고가 있어도 같은 문구였다). */
     fun implementHint(unresolved: List<String>): String =

@@ -487,7 +487,15 @@ class RequirementAnalysisPipeline(
                 }
             }
             // SR의 데이터 항목을 업무 코드에서 찾지 못하면 경고 한 줄
-            claimFindings.forEach { appendLine("> ⚠️ ${ClaimedFieldCheck.render(it)}") }
+            // 사용자가 Stage 0 질문에 답해 해소된 항목은 경고 대신 ℹ️ 안내만 보인다(B-79)
+            claimFindings.filter { it.answer == null }.forEach { appendLine("> ⚠️ ${ClaimedFieldCheck.render(it)}") }
+            claimFindings.filter { it.answer != null }.forEach { f ->
+                appendLine("> ℹ️ ${ClaimedFieldCheck.renderResolved(f)}")
+                // 새로 저장하기로 했는데 요청 진입점(컨트롤러·화면)이 최종 목록에 없으면 한 줄 안내(파일은 추가하지 않는다)
+                if (ClaimedFieldCheck.isNewData(f.answer!!) && !ClaimedFieldCheck.hasEntryPoint(validatedTargetFiles.map { it.path })) {
+                    appendLine("> ℹ️ ${ClaimedFieldCheck.entryPointNote(f)}")
+                }
+            }
             // Stage 3에서 제거된 후보와 판정 누락 후보(출력 축소 형식은 제거 사유를 받지 않는다)
             verificationOutput.noticeLines(validatedTargetFiles.map { it.path }.toSet()).takeIf { it.isNotEmpty() }?.let { lines ->
                 appendLine()

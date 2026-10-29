@@ -88,6 +88,23 @@ class DomainDictionary private constructor(
             return DomainDictionary(merged)
         }
 
+        /**
+         * 영문 토큰들(클래스 이름 조각)이 가리키는 도메인 한글 명사를 돌려준다(B-79: "설문 관련 코드" 같은 사용자 문구용).
+         * 동작어·범용 토큰(GenericTranslationTokens)만 가진 항목은 건너뛰고, 가장 많이 맞은 항목(같으면 사전 순서)을 고른다. 없으면 null.
+         */
+        fun domainWordFor(englishTokens: List<String>): String? {
+            val lower = englishTokens.map { it.lowercase() }
+            var best: String? = null
+            var bestCount = 0
+            for ((k, v) in BUILTIN_TERMS) {
+                val domain = v.filterNot { GenericTranslationTokens.isGeneric(it) }
+                if (domain.isEmpty()) continue
+                val c = lower.count { it in domain }
+                if (c > bestCount) { best = k; bestCount = c }
+            }
+            return best
+        }
+
         private val CAMEL_CASE_REGEX = Regex("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
         /**

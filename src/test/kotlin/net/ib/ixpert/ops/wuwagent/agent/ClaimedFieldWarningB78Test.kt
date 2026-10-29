@@ -91,22 +91,26 @@ class ClaimedFieldWarningB78Test {
         assertFalse(line, line.contains("테이블에 이메일"))
     }
 
+    // B-79 3a: 답으로 해소된 항목은 "⚠️ 확인 안 됨" 줄 없이 ℹ️ 줄만 보인다(B-78 w2에서 바뀐 기대값)
     @Test
-    fun w2_새로_저장_답변이_있으면_기존_데이터_없음으로_바뀌고_출처를_정해_달라는_말은_빠진다() {
+    fun w2_새로_저장_답변이_있으면_경고_줄_없이_정보_줄만_보이고_출처를_정해_달라는_말은_빠진다() {
         val (out, result) = run(intent("응답자 이메일 출처: 설문 응답 테이블에 이메일 컬럼을 새로 추가해서 저장하는 방향으로 해줘"), refined)
-        val line = out.lines().single { it.startsWith("> ⚠️ 확인 안 됨:") }
-        assertTrue(line, line.contains("기존 데이터 없음 → 컬럼 추가·수집 경로 필요"))
+        assertEquals("경고 줄은 없다", 0, out.lines().count { it.startsWith("> ⚠️ 확인 안 됨:") })
+        val line = out.lines().single { it.startsWith("> ℹ️ 응답자 이메일:") }
+        assertTrue(line, line.contains("기존 데이터가 없습니다") && line.contains("새 컬럼 추가와 수집·저장 경로가 구현 범위에 포함됩니다"))
         assertTrue(line, line.contains("사용자 답변"))
         assertEquals("출처를 정해 달라는 항목은 없다", emptyList<String>(), result.confirmItems)
         assertEquals(listOf("응답자 이메일"), result.newDataItems)
     }
 
+    // B-78 w3에서 바뀐 기대값: 다른 테이블 조인 답도 경고 줄 없이 ℹ️ 줄
     @Test
-    fun w3_다른_테이블_조인_답변은_출처_지정됨으로_보인다() {
+    fun w3_다른_테이블_조인_답변은_경고_줄_없이_출처_지정됨_정보_줄로_보인다() {
         val (out, result) = run(intent("응답자 이메일 출처: 다른 테이블에서 조인해서 가져오세요"), refined)
-        val line = out.lines().single { it.startsWith("> ⚠️ 확인 안 됨:") }
-        assertTrue(line, line.contains("출처 지정됨(조인 대상 확인 필요)"))
-        assertFalse(line, line.contains("기존 데이터 없음"))
+        assertEquals(0, out.lines().count { it.startsWith("> ⚠️ 확인 안 됨:") })
+        val line = out.lines().single { it.startsWith("> ℹ️ 응답자 이메일:") }
+        assertTrue(line, line.contains("출처가 지정되었습니다(조인 대상 확인 필요)"))
+        assertFalse(line, line.contains("기존 데이터가 없습니다"))
         assertEquals(emptyList<String>(), result.newDataItems)
     }
 
@@ -118,20 +122,42 @@ class ClaimedFieldWarningB78Test {
         assertTrue(hint, hint.contains("응답자 이메일의 출처가 정해지지 않았습니다") && hint.contains("/implement"))
         assertNotEquals("미해결 경고가 있으면 기본 문구와 다르다", ClaimedFieldCheck.implementHint(emptyList()), hint)
         assertEquals("💡 위 파일들의 구체적인 코드 수정을 원하시면 `/implement`를 입력하세요.", ClaimedFieldCheck.implementHint(emptyList()))
-        assertTrue(ClaimedFieldCheck.newDataCaution(listOf("응답자 이메일")).contains("새 컬럼 추가와 수집·저장 경로"))
+    }
+
+    // B-79 3b: 사용자 문구에서 시드 클래스 이름, 폴더 수, 파일 수를 뺀다(B-78 w5에서 바뀐 기대값). Stage 0 질문과 결과 경고 둘 다.
+    @Test
+    fun w5_사용자_문구에는_시드_이름과_숫자_없이_설문_관련_코드를_읽어_확인으로만_나온다() {
+        val g = survey()
+        val q = ClaimedFieldCheck.stage0Facts(original, g, surveyRoot).single().question!!
+        val (out, _) = run(intent(), refined)
+        val warn = out.lines().single { it.startsWith("> ⚠️ 확인 안 됨:") }
+        for (t in listOf(q, warn)) {
+            assertTrue(t, t.contains("관련 코드를 읽어 확인"))
+            assertFalse("시드 이름이 없다: $t", Regex("Survey\\w*|Alimtalk\\w*|시드").containsMatchIn(t.replace("sql_survey.xml", "")))
+            assertFalse("폴더 수·파일 수가 없다: $t", Regex("\\d+개").containsMatchIn(t) || t.contains("폴더"))
+        }
+        assertTrue("탐색기 시드(Survey*)는 설문으로 말한다: $warn", warn.contains("설문 관련 코드를 읽어 확인"))
+        // 읽은 파일 수는 로그·시험에만 남긴다
+        File("build/b79_scope_numbers.txt").writeText("Stage 0 질문: $q\n결과 경고: $warn\n", Charsets.UTF_8)
+    }
+
+    // B-79 3c: 새로 저장인데 최종 목록에 요청 진입점(컨트롤러·화면)이 없으면 한 줄 안내, 파일은 추가하지 않는다
+    @Test
+    fun w6_새로_저장인데_진입점이_없으면_안내_한_줄이_붙고_파일은_늘지_않는다() {
+        val (out, result) = run(intent("응답자 이메일 출처: 새 컬럼을 추가해서 저장"), refined)
+        val note = out.lines().single { it.startsWith("> ℹ️ 응답자가 이메일을 입력·전달하는 경로") }
+        assertTrue(note, note.contains("분석 대상에 없습니다") && note.contains("파일을 추가하지 않았습니다"))
+        assertFalse("목록에 컨트롤러·화면이 들어오지 않았다", ClaimedFieldCheck.hasEntryPoint(result.targetFiles.map { it.path }))
+        // 답이 없으면(경고 줄만) 이 안내는 붙지 않는다
+        val (out2, _) = run(intent(), refined)
+        assertEquals(0, out2.lines().count { it.contains("입력·전달하는 경로") })
     }
 
     @Test
-    fun w5_읽은_파일_수는_무엇을_센_것인지_밝히고_Stage0와_결과의_숫자가_다른_이유가_시드_차이다() {
-        val g = survey()
-        val facts = ClaimedFieldCheck.stage0Facts(original, g, surveyRoot)
-        val q = facts.single().question!!
-        assertTrue(q, q.contains("폴더의 소스·매퍼") && q.contains("개를 읽어 확인"))
-        val (out, _) = run(intent(), refined)
-        val line = out.lines().single { it.startsWith("> ⚠️ 확인 안 됨:") }
-        assertTrue(line, Regex("시드 \\w+ 등 3개 폴더의 소스·매퍼 \\d+개를 읽어 확인").containsMatchIn(line))
-        val n0 = Regex("매퍼 (\\d+)개").find(q)!!.groupValues[1]
-        val n1 = Regex("매퍼 (\\d+)개").find(line)!!.groupValues[1]
-        File("build/b78_scope_numbers.txt").writeText("Stage 0 질문: $n0 (키워드 시드 ${q.substringAfter("(").substringBefore(" 폴더")})\n결과 경고: $n1 (탐색기 시드 ${seeds.size}개 중 자바 클래스 3개)\n", Charsets.UTF_8)
+    fun w7_진입점_판정은_컨트롤러와_화면_파일만_본다() {
+        assertTrue(ClaimedFieldCheck.hasEntryPoint(listOf("src/main/java/a/IpsController.java")))
+        assertTrue(ClaimedFieldCheck.hasEntryPoint(listOf("a/survey_result.jsp", "b/SurveyDao.java")))
+        assertTrue(ClaimedFieldCheck.hasEntryPoint(listOf("src/main/webapp/js/survey.result.js")))
+        assertFalse(ClaimedFieldCheck.hasEntryPoint(listOf("a/SurveyServiceImpl.java", "a/SurveyDto.java", "sql/sql_survey.xml")))
     }
 }

@@ -1726,9 +1726,7 @@ class WebviewActionRouter(private val project: Project) {
                         if (result.confirmItems.isNotEmpty()) {
                             extraText += "\n\n> ⚠️ **" + net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.implementCaution(result.confirmItems) + "**"
                         }
-                        if (result.newDataItems.isNotEmpty()) {
-                            extraText += "\n\n> ℹ️ **" + net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.newDataCaution(result.newDataItems) + "**"
-                        }
+                        // 답으로 해소된 항목의 ℹ️ 안내는 분석 요약의 경고 자리(RequirementAnalysisPipeline)에서 한 번만 보인다(B-79)
                         extraText += "\n\n---\n**" + net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.implementHint(result.confirmItems) + "**"
                         bridge.sendMessageChunk(messageId, extraText)
                     }
