@@ -512,7 +512,7 @@ class RelevanceScorer(
         else -> 4  // Tier 4: 일반 탐색
     }
 
-    private val dictionary by lazy { DomainDictionary.load(graph) }
+    private val dictionary by lazy { DomainDictionary.load(graph, domainNouns = true) }
 
     private fun extractKeywords(text: String): ExtractedKeywords {
         // 순수 아키텍처/레이어 접미사 (도메인 매칭에서 완전히 배제할 단어들)

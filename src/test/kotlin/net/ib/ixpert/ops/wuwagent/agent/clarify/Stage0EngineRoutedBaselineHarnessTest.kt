@@ -179,7 +179,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
             .toMutableList()
         directEnglish.removeAll { stopWords.contains(it.lowercase()) }
 
-        val dictionary = DomainDictionary.load(graph)
+        val dictionary = DomainDictionary.load(graph, domainNouns = true) // B-79: 점수기(RelevanceScorer)와 같은 사전으로 점수 분해를 재계산한다
         val words = text.split(Regex("\\s+"))
         val nouns = mutableListOf<String>()
         val translatedEnglish = mutableListOf<String>()
@@ -932,7 +932,7 @@ class Stage0EngineRoutedBaselineHarnessTest {
             .filterNot { stopWords.contains(it.lowercase()) }
             .toList()
 
-        val dict = DomainDictionary.load(graph)
+        val dict = DomainDictionary.load(graph, domainNouns = true) // B-79: 점수기와 같은 사전
         val words = text.split(Regex("\\s+"))
         val nouns = mutableListOf<String>()
         val verbs = mutableListOf<String>()

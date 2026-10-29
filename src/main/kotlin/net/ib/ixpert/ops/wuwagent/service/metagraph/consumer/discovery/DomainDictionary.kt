@@ -51,8 +51,9 @@ class DomainDictionary private constructor(
         /**
          * ProjectGraph로부터 도메인 사전을 생성합니다.
          * 내장 사전 + 그래프의 한글 메타데이터에서 학습한 항목을 합산합니다.
+         * domainNouns=true면 도메인 명사 항목(DOMAIN_TERMS, 예: 설문 → survey)을 더한다(분석 점수·시드 선택용, B-79).
          */
-        fun load(graph: ProjectGraphQueryable): DomainDictionary {
+        fun load(graph: ProjectGraphQueryable, domainNouns: Boolean = false): DomainDictionary {
             val learned = mutableMapOf<String, MutableMap<String, Int>>()
 
             val structuralStopwords = setOf("response", "request", "service", "impl", "vo", "dto", "controller", "repository", "mapper")
@@ -77,7 +78,7 @@ class DomainDictionary private constructor(
 
             // 내장 사전 합산 (자동 사전 및 외부 dictionary.json 비활성화: 다대다 오염 노이즈 방지)
             val merged = mutableMapOf<String, MutableMap<String, Int>>()
-            BUILTIN_TERMS.forEach { (k, v) -> 
+            (if (domainNouns) BUILTIN_TERMS + DOMAIN_TERMS else BUILTIN_TERMS).forEach { (k, v) -> 
                 val map = merged.getOrPut(k) { mutableMapOf() }
                 v.forEach { t -> map[t] = 10 }
             }
@@ -96,7 +97,7 @@ class DomainDictionary private constructor(
             val lower = englishTokens.map { it.lowercase() }
             var best: String? = null
             var bestCount = 0
-            for ((k, v) in BUILTIN_TERMS) {
+            for ((k, v) in BUILTIN_TERMS + DOMAIN_TERMS) {
                 val domain = v.filterNot { GenericTranslationTokens.isGeneric(it) }
                 if (domain.isEmpty()) continue
                 val c = lower.count { it in domain }
@@ -129,6 +130,16 @@ class DomainDictionary private constructor(
          * 내장 한글→영어 용어 사전.
          * 기존 RelevanceFilter.COMMON_TERMS를 확장한 버전입니다.
          */
+        /**
+         * 도메인 명사(B-79): translate는 포함 매칭이라 "설문조사", "설문지"도 "설문" 항목에 걸린다.
+         * 전에는 이 항목이 없어(DomainDictionaryBuilder.SEED_GLOSSARY에는 있으나 실행 경로에 연결돼 있지 않다) "설문" SR에서 survey 이름 일치 근거가 하나도 없었다.
+         * 분석 점수(RelevanceScorer)와 시드 선택(AgenticSeedSelector)에서만 쓴다: Stage 0 스캐너와 제외 후보 해석에 넣으면 survey 이름의 배치 클래스가
+         * HIGH 후보로 들어와 "외부 배치는 HIGH가 아니다" 불변식(Stage0SurveyAdminSnapshotTest, ExcludeComponentDialogueTest)을 깬다(b2402bd에서 확인).
+         */
+        private val DOMAIN_TERMS = mapOf(
+            "설문" to setOf("survey")
+        )
+
         private val BUILTIN_TERMS = mapOf(
             // CRUD & Action 용어
             "등록" to setOf("register", "write", "regist", "create", "insert", "add", "new", "save"),
@@ -148,10 +159,6 @@ class DomainDictionary private constructor(
             "전송" to setOf("send", "transmit", "transfer", "submit"),
             "취소" to setOf("cancel", "abort", "revoke", "undo"),
 
-            // 도메인 명사(B-79): translate는 포함 매칭이라 "설문조사", "설문지"도 이 항목에 걸린다.
-            // 전에는 이 항목이 없어(DomainDictionaryBuilder.SEED_GLOSSARY에는 있으나 실행 경로에 연결돼 있지 않다) "설문" SR에서 survey 이름 일치 근거가 하나도 없었다.
-            "설문" to setOf("survey"),
-            
             // 인증/보안
             "로그인" to setOf("login", "signin", "auth", "authenticate", "logon"),
             "로그아웃" to setOf("logout", "signout", "logoff"),

@@ -41,9 +41,12 @@ class SurveyDictB79Test {
 
     @Test
     fun d1_설문이_survey로_번역된다() {
-        val dict = DomainDictionary.load(load())
+        val g = load()
+        // 분석 점수·시드 선택용 사전(domainNouns = true)에만 있다. Stage 0 스캐너·제외 후보 해석이 쓰는 기본 사전에는 넣지 않는다(불변식 보호)
+        val dict = DomainDictionary.load(g, domainNouns = true)
         assertEquals(setOf("survey"), dict.translate("설문"))
         assertTrue(dict.translate("설문조사").contains("survey"))
+        assertTrue(DomainDictionary.load(g).translate("설문").isEmpty())
     }
 
     @Test
