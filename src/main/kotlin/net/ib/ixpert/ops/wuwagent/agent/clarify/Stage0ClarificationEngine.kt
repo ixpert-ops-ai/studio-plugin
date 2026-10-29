@@ -1080,10 +1080,10 @@ class Stage0ClarificationEngine(
             if (content.isNullOrBlank() || content.startsWith("[Error]")) {
                 null
             } else if (fieldFacts.isEmpty()) {
-                content
+                RationaleWording.cleanSummary(content)
             } else {
-                // 코드 확인 목록을 넣은 요약만 지시문 에코를 거른다(항목이 없으면 프롬프트와 출력이 이전과 같다)(B-78)
-                SummaryPromptEcho.strip(content)
+                // 코드 확인 목록을 넣은 요약만 지시문 에코를 거른다(B-78). 내부 용어("토큰 일치" 등)는 모든 요약에서 사용자 문구로 바꾼다(B-79).
+                SummaryPromptEcho.strip(content)?.let { RationaleWording.cleanSummary(it) }
             }
         } catch (e: Exception) {
             // LLM 호출 실패/타임아웃 시 후보군 반환에 영향을 주지 않도록 안전하게 null 반환

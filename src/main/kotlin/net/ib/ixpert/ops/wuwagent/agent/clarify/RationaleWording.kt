@@ -19,4 +19,19 @@ object RationaleWording {
     )
 
     fun toUserWording(raw: String): String = RULES.fold(raw) { acc, (re, to) -> re.replace(acc, to) }
+
+    /**
+     * 모델이 쓴 요약 문장에서 내부 용어를 사용자 문구로 바꾼다(B-79). 프롬프트의 근거는 [toUserWording]으로 바꿔 넣어도 모델이
+     * "근거가 토큰 일치 수준에 불과하므로"처럼 내부 말을 다시 만들어 쓴다.
+     * - `토큰 일치`, `토큰이 일치` → `이름 유사`, `이름이 비슷`
+     * - 남은 `토큰` → `단어`
+     * 근거 문구용 규칙([toUserWording])도 함께 적용한다. 등록되지 않은 표현은 그대로 둔다.
+     */
+    private val SUMMARY_RULES: List<Pair<Regex, String>> = listOf(
+        Regex("""토큰\s*(?:이|과|와)?\s*일치""") to "이름 유사",
+        Regex("""토큰(?:과|와)""") to "단어와", // "단어"는 받침이 없어 조사는 "와"
+        Regex("""토큰""") to "단어"
+    )
+
+    fun cleanSummary(text: String): String = SUMMARY_RULES.fold(toUserWording(text)) { acc, (re, to) -> re.replace(acc, to) }
 }
