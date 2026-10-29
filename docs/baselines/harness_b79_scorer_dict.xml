@@ -1,22 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-10-29T01:57:26.628Z" hostname="DESKTOP-93QIMCP" time="216.71">
+<testsuite name="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-10-29T02:38:52.748Z" hostname="DESKTOP-93QIMCP" time="206.015">
   <properties/>
-  <testcase name="testMeasureBaselineTopNGtSurvival_ApcTransitCard_LlmOff" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="47.591"/>
-  <testcase name="testMeasureBaselineTopNGtSurvival_SurveyAdmin_LlmOff" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.192"/>
-  <testcase name="testClassificationAndKeywordDiff_Apc_DemIsolatedSimulation_LlmOnMissingDem" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="37.524"/>
-  <testcase name="testClassificationAndKeywordDiff_SurveyAdmin_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.286"/>
-  <testcase name="testAblationA_SurveyAdmin_LlmOff_PlusFiveIdentifierLines" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.132"/>
-  <testcase name="testClassificationAndKeywordDiff_Scenario4_Apc" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="41.282"/>
+  <testcase name="testMeasureBaselineTopNGtSurvival_ApcTransitCard_LlmOff" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="41.647"/>
+  <testcase name="testMeasureBaselineTopNGtSurvival_SurveyAdmin_LlmOff" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.16"/>
+  <testcase name="testClassificationAndKeywordDiff_Apc_DemIsolatedSimulation_LlmOnMissingDem" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="37.55"/>
+  <testcase name="testClassificationAndKeywordDiff_SurveyAdmin_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.263"/>
+  <testcase name="testAblationA_SurveyAdmin_LlmOff_PlusFiveIdentifierLines" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.107"/>
+  <testcase name="testClassificationAndKeywordDiff_Scenario4_Apc" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="40.191"/>
   <testcase name="testClassificationAndKeywordDiff_4Conditions" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.028"/>
-  <testcase name="testScoreBreakdown_SurveyServiceImpl" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.032"/>
-  <testcase name="testMeasureBaselineTopNGtSurvival_IsmCore" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="13.511"/>
-  <testcase name="testMeasureBaselineTopNGtSurvival_SurveyAdmin_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.322"/>
-  <testcase name="testClassificationAndKeywordDiff_SurveyAdmin_LlmOff" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.23"/>
-  <testcase name="testResolvedInputMatchesSimulated2bSrText_SurveyAdmin_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.309"/>
-  <testcase name="testAblationB_SurveyAdmin_LlmOn_RefinedOnly" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.311"/>
-  <testcase name="testSimulateCommit2b_Apc_DemIsolated_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="36.874"/>
-  <testcase name="testSimulateCommit2b_SurveyAdmin_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.308"/>
-  <testcase name="testMeasureBaselineTopNGtSurvival_Apc_DemIsolated_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="37.775"/>
+  <testcase name="testScoreBreakdown_SurveyServiceImpl" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.036"/>
+  <testcase name="testMeasureBaselineTopNGtSurvival_IsmCore" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="13.389"/>
+  <testcase name="testMeasureBaselineTopNGtSurvival_SurveyAdmin_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.301"/>
+  <testcase name="testClassificationAndKeywordDiff_SurveyAdmin_LlmOff" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.244"/>
+  <testcase name="testResolvedInputMatchesSimulated2bSrText_SurveyAdmin_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.269"/>
+  <testcase name="testAblationB_SurveyAdmin_LlmOn_RefinedOnly" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.342"/>
+  <testcase name="testSimulateCommit2b_Apc_DemIsolated_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="35.531"/>
+  <testcase name="testSimulateCommit2b_SurveyAdmin_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="0.27"/>
+  <testcase name="testMeasureBaselineTopNGtSurvival_Apc_DemIsolated_LlmOn" classname="net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0EngineRoutedBaselineHarnessTest" time="35.683"/>
   <system-out><![CDATA[
 ================================================================
    [AgenticGraphExplorer] Starting Autonomous Graph Search Loop
@@ -592,74 +592,76 @@ SR: 설문 발송 채널에 브랜드메시지 추가
 [AgenticGraphExplorer] Turn 1: No response from LLM.
 [AgenticGraphExplorer] Fallback: No final seeds confirmed, applying heuristic fallback.
 [DEBUG-EXPANDER] frontendRelevant: false
-[NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportCli, Score: 50
-[RelevanceScorer] VETTED BYPASS: SurveyPartExportCli (Score: 50 < 55) rescued by Seed Class!
-[NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportJob, Score: 50
-[RelevanceScorer] VETTED BYPASS: SurveyPartExportJob (Score: 50 < 55) rescued by Seed Class!
 [NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyPartExportRunner, Score: 70
+[NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportCli, Score: 40
+[NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportJob, Score: 40
 [RelevanceScorer] Node: AlimtalkTemplateBatchJob, Score: 30
 [RelevanceScorer] Node: AlimtalkTemplateBatchRunner, Score: 50
 [RelevanceScorer] Node: AlimtalkTemplateBatchRepository, Score: 70
-[NAMEMATCH-DIAG] File: SurveyDao | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDao, Score: 60
-[RelevanceScorer] Node: IpsController, Score: 45
-[RelevanceScorer] Node: AlimtalkTmplDto, Score: 45
-[RelevanceScorer] Node: AlimtalkChnlDto, Score: 45
 [NAMEMATCH-DIAG] File: SurveyDaoImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDaoImpl, Score: 70
-[NAMEMATCH-DIAG] File: SurveyServiceImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyServiceImpl, Score: 75
+[RelevanceScorer] Node: SurveyDaoImpl, Score: 80
+[RelevanceScorer] Node: ReviewDto, Score: 75
 [NAMEMATCH-DIAG] File: SurveyDto | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDto, Score: 75
-[RelevanceScorer] Node: ReviewDto, Score: 65
-[RelevanceScorer] Node: ClosingLinkDto, Score: 65
-[RelevanceScorer] Node: SearchHistRDto, Score: 45
+[RelevanceScorer] Node: SurveyDto, Score: 85
 [NAMEMATCH-DIAG] File: SurveyQImgDto | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyQImgDto, Score: 75
-[RelevanceScorer] Node: UserServiceImpl, Score: 30
+[RelevanceScorer] Node: ClosingLinkDto, Score: 65
+[RelevanceScorer] Node: ItaTalkTranDto, Score: 45
+[RelevanceScorer] Node: SearchHistRDto, Score: 45
+[RelevanceScorer] Node: AlimtalkChnlDto, Score: 45
+[RelevanceScorer] Node: AlimtalkTmplDto, Score: 45
+[RelevanceScorer] Node: UserServiceImpl, Score: 45
+[NAMEMATCH-DIAG] File: SurveyServiceImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyServiceImpl, Score: 75
+[NAMEMATCH-DIAG] File: SurveyDao | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyDao, Score: 50
+[RelevanceScorer] VETTED BYPASS: SurveyDao (Score: 50 < 55) rescued by Seed Direct Dependency!
+[RelevanceScorer] Node: IpsController, Score: 30
+[RelevanceScorer] Node: UserDaoImpl, Score: 45
 [RelevanceScorer] Node: AddressDaoImpl, Score: 45
-[RelevanceScorer] Node: UserDaoImpl, Score: 30
-[RelevanceScorer] Node: sql_survey.xml, Score: 20
-[RelevanceScorer-RESOURCE] Node: sql_survey.xml, Score: 20, via: RESOURCE_REVERSE_LINK, isCommon: false, hasLiving: true, isLinkedReverse: true
-[RelevanceScorer] VETTED BYPASS: sql_survey.xml (Score: 20 < 55) rescued by Resource Reverse Link!
+[RelevanceScorer] Node: AuthDto, Score: 15
+[RelevanceScorer] Node: CompanyDto, Score: 15
+[RelevanceScorer] Node: DeptDto, Score: 15
+[RelevanceScorer] Node: LoginUserDto, Score: 15
+[RelevanceScorer] Node: ApiServiceImpl, Score: 15
+[RelevanceScorer] Node: KmcisServiceImpl, Score: 35
+[RelevanceScorer] Node: sql_survey.xml, Score: 15
+[RelevanceScorer-RESOURCE] Node: sql_survey.xml, Score: 15, via: RESOURCE_REVERSE_LINK, isCommon: false, hasLiving: true, isLinkedReverse: true
+[RelevanceScorer] VETTED BYPASS: sql_survey.xml (Score: 15 < 55) rescued by Resource Reverse Link!
 === Stage 3 Candidates ===
+src/main/java/net/infobank/iss/survey/dto/SurveyDto.java
+src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
+src/main/java/net/infobank/iss/survey/dto/ReviewDto.java
 src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java
 src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRepository.java
 src/main/java/net/infobank/iss/survey/dao/SurveyDao.java
-src/main/java/net/infobank/iss/batch/SurveyPartExportCli.java
-src/main/java/net/infobank/iss/batch/SurveyPartExportJob.java
-src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
 src/main/java/net/infobank/iss/sql/mysql/sql_survey.xml
 src/main/java/net/infobank/iss/survey/dto/SurveyQImgDto.java
-src/main/java/net/infobank/iss/survey/dto/SurveyDto.java
 src/main/java/net/infobank/iss/survey/service/SurveyServiceImpl.java
-src/main/java/net/infobank/iss/survey/dto/ReviewDto.java
 src/main/java/net/infobank/iss/survey/dto/ClosingLinkDto.java
 src/main/java/com/membermarket/domain/NewFeatureService.java
 ==========================
 [GT Baseline: survey_admin (Intent=LlmOff)] RefinedReq: "설문 발송 채널에 브랜드메시지 추가"
-[GT Baseline: survey_admin (Intent=LlmOff)] Top-30 TargetFiles Count: 13
+[GT Baseline: survey_admin (Intent=LlmOff)] Top-30 TargetFiles Count: 11
 [GT Baseline: survey_admin (Intent=LlmOff)] GT Survived: 2/8 (SurveyServiceImpl.java, sql_survey.xml)
 [GT Baseline: survey_admin (Intent=LlmOff)] GT Missing: [survey_list.jsp, survey_write.jsp, survey.list.js, survey.write.js, AlimtalkChnlDto.java, AlimtalkTmplDto.java]
 [GT Baseline: survey_admin (Intent=LlmOff)] Top-30 List:
-    [FP] #1. [MODIFY] src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRepository.java (Score: 70, Via: SEED)
-    [FP] #2. [MODIFY] src/main/java/net/infobank/iss/survey/dao/SurveyDao.java (Score: 60, Via: SEED)
-    [FP] #3. [MODIFY] src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java (Score: 70, Via: DEPENDED_BY)
-  ★[GT] #4. [MODIFY] src/main/java/net/infobank/iss/sql/mysql/sql_survey.xml (Score: 20, Via: RESOURCE_REVERSE_LINK [Bypass: Resource Reverse Link])
-    [FP] #5. [MODIFY] src/main/java/net/infobank/iss/survey/dto/SurveyQImgDto.java (Score: 75, Via: USES_TYPE)
-    [FP] #6. [MODIFY] src/main/java/net/infobank/iss/survey/dto/SurveyDto.java (Score: 75, Via: USES_TYPE)
-    [FP] #7. [MODIFY] src/main/java/net/infobank/iss/survey/dto/ReviewDto.java (Score: 65, Via: USES_TYPE)
-    [FP] #8. [MODIFY] src/main/java/net/infobank/iss/survey/dto/ClosingLinkDto.java (Score: 65, Via: USES_TYPE)
+    [FP] #1. [MODIFY] src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java (Score: 80, Via: SEED)
+    [FP] #2. [MODIFY] src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRepository.java (Score: 70, Via: SEED)
+    [FP] #3. [MODIFY] src/main/java/net/infobank/iss/survey/dao/SurveyDao.java (Score: 50, Via: DEPENDS_ON [Bypass: Seed Direct Dependency])
+  ★[GT] #4. [MODIFY] src/main/java/net/infobank/iss/sql/mysql/sql_survey.xml (Score: 15, Via: RESOURCE_REVERSE_LINK [Bypass: Resource Reverse Link])
+    [FP] #5. [MODIFY] src/main/java/net/infobank/iss/survey/dto/SurveyDto.java (Score: 85, Via: SEED)
+    [FP] #6. [MODIFY] src/main/java/net/infobank/iss/survey/dto/ReviewDto.java (Score: 75, Via: SEED)
+    [FP] #7. [MODIFY] src/main/java/net/infobank/iss/survey/dto/SurveyQImgDto.java (Score: 75, Via: SAME_PACKAGE)
+    [FP] #8. [MODIFY] src/main/java/net/infobank/iss/survey/dto/ClosingLinkDto.java (Score: 65, Via: SAME_PACKAGE)
   ★[GT] #9. [MODIFY] src/main/java/net/infobank/iss/survey/service/SurveyServiceImpl.java (Score: 75, Via: DEPENDED_BY)
     [FP] #10. [CREATE] src/main/java/com/membermarket/domain/NewFeatureService.java (- suggestedFileType: SERVICE
 - reason: 신규 비즈니스 로직 클래스 생성
 - referencePattern: 기존 Service 계층 구현 패턴 참조)
     [FP] #11. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java (Score: 70, Via: SEED)
-    [FP] #12. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportCli.java (Score: 50, Via: SEED [Bypass: Seed Class])
-    [FP] #13. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportJob.java (Score: 50, Via: SEED [Bypass: Seed Class])
 [MockTelemetry: SurveyAdmin_LlmOff] BranchCalls={BranchA_NewFileDetector_chatWithTools=1, BranchB_Stage3Verifier_chatWithTools=1, BranchC_AgenticSeedSelector_chatWithTools=1}, unmatched=0
 [ExtractSchema] 구조화 출력 응답 없음 → 기존 호출로 대체
 [ExtractSchema] 구조화 출력 응답 없음 → 기존 호출로 대체
@@ -695,36 +697,43 @@ BrandMessageTmplDto
 [AgenticGraphExplorer] Turn 1: No response from LLM.
 [AgenticGraphExplorer] Fallback: No final seeds confirmed, applying heuristic fallback.
 [DEBUG-EXPANDER] frontendRelevant: false
-[NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportCli, Score: 50
-[NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportJob, Score: 50
 [NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyPartExportRunner, Score: 70
+[NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportCli, Score: 40
+[NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportJob, Score: 40
 [RelevanceScorer] Node: AlimtalkTemplateBatchJob, Score: 30
 [RelevanceScorer] Node: AlimtalkTemplateBatchRunner, Score: 50
 [RelevanceScorer] Node: AlimtalkTemplateBatchRepository, Score: 70
-[NAMEMATCH-DIAG] File: SurveyDao | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDao, Score: 60
-[RelevanceScorer] Node: IpsController, Score: 45
-[RelevanceScorer] Node: AlimtalkTmplDto, Score: 45
-[RelevanceScorer] Node: AlimtalkChnlDto, Score: 45
 [NAMEMATCH-DIAG] File: SurveyDaoImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDaoImpl, Score: 70
-[NAMEMATCH-DIAG] File: SurveyServiceImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyServiceImpl, Score: 75
+[RelevanceScorer] Node: SurveyDaoImpl, Score: 80
+[RelevanceScorer] Node: ReviewDto, Score: 75
 [NAMEMATCH-DIAG] File: SurveyDto | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDto, Score: 75
-[RelevanceScorer] Node: ReviewDto, Score: 65
-[RelevanceScorer] Node: ClosingLinkDto, Score: 65
-[RelevanceScorer] Node: SearchHistRDto, Score: 45
+[RelevanceScorer] Node: SurveyDto, Score: 85
 [NAMEMATCH-DIAG] File: SurveyQImgDto | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyQImgDto, Score: 75
-[RelevanceScorer] Node: UserServiceImpl, Score: 30
+[RelevanceScorer] Node: ClosingLinkDto, Score: 65
+[RelevanceScorer] Node: ItaTalkTranDto, Score: 45
+[RelevanceScorer] Node: SearchHistRDto, Score: 45
+[RelevanceScorer] Node: AlimtalkChnlDto, Score: 45
+[RelevanceScorer] Node: AlimtalkTmplDto, Score: 45
+[RelevanceScorer] Node: UserServiceImpl, Score: 45
+[NAMEMATCH-DIAG] File: SurveyServiceImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyServiceImpl, Score: 75
+[NAMEMATCH-DIAG] File: SurveyDao | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyDao, Score: 50
+[RelevanceScorer] Node: IpsController, Score: 30
+[RelevanceScorer] Node: UserDaoImpl, Score: 45
 [RelevanceScorer] Node: AddressDaoImpl, Score: 45
-[RelevanceScorer] Node: UserDaoImpl, Score: 30
-[RelevanceScorer] Node: sql_survey.xml, Score: 20
-[RelevanceScorer-RESOURCE] Node: sql_survey.xml, Score: 20, via: RESOURCE_REVERSE_LINK, isCommon: false, hasLiving: true, isLinkedReverse: true
+[RelevanceScorer] Node: AuthDto, Score: 15
+[RelevanceScorer] Node: CompanyDto, Score: 15
+[RelevanceScorer] Node: DeptDto, Score: 15
+[RelevanceScorer] Node: LoginUserDto, Score: 15
+[RelevanceScorer] Node: ApiServiceImpl, Score: 15
+[RelevanceScorer] Node: KmcisServiceImpl, Score: 35
+[RelevanceScorer] Node: sql_survey.xml, Score: 15
+[RelevanceScorer-RESOURCE] Node: sql_survey.xml, Score: 15, via: RESOURCE_REVERSE_LINK, isCommon: false, hasLiving: true, isLinkedReverse: true
 
 ================================================================
    [AgenticGraphExplorer] Starting Autonomous Graph Search Loop
@@ -741,51 +750,55 @@ BrandMessageTmplDto
 [AgenticGraphExplorer] Turn 1: No response from LLM.
 [AgenticGraphExplorer] Fallback: No final seeds confirmed, applying heuristic fallback.
 [DEBUG-EXPANDER] frontendRelevant: false
-[NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportCli, Score: 50
-[RelevanceScorer] VETTED BYPASS: SurveyPartExportCli (Score: 50 < 55) rescued by Seed Class!
-[NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportJob, Score: 50
-[RelevanceScorer] VETTED BYPASS: SurveyPartExportJob (Score: 50 < 55) rescued by Seed Class!
 [NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyPartExportRunner, Score: 70
+[NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportCli, Score: 40
+[NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportJob, Score: 40
 [RelevanceScorer] Node: AlimtalkTemplateBatchJob, Score: 30
 [RelevanceScorer] Node: AlimtalkTemplateBatchRunner, Score: 50
 [RelevanceScorer] Node: AlimtalkTemplateBatchRepository, Score: 70
-[NAMEMATCH-DIAG] File: SurveyDao | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDao, Score: 60
-[RelevanceScorer] Node: IpsController, Score: 45
-[RelevanceScorer] Node: AlimtalkTmplDto, Score: 45
-[RelevanceScorer] Node: AlimtalkChnlDto, Score: 45
 [NAMEMATCH-DIAG] File: SurveyDaoImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDaoImpl, Score: 70
-[NAMEMATCH-DIAG] File: SurveyServiceImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyServiceImpl, Score: 75
+[RelevanceScorer] Node: SurveyDaoImpl, Score: 80
+[RelevanceScorer] Node: ReviewDto, Score: 75
 [NAMEMATCH-DIAG] File: SurveyDto | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDto, Score: 75
-[RelevanceScorer] Node: ReviewDto, Score: 65
-[RelevanceScorer] Node: ClosingLinkDto, Score: 65
-[RelevanceScorer] Node: SearchHistRDto, Score: 45
+[RelevanceScorer] Node: SurveyDto, Score: 85
 [NAMEMATCH-DIAG] File: SurveyQImgDto | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyQImgDto, Score: 75
-[RelevanceScorer] Node: UserServiceImpl, Score: 30
+[RelevanceScorer] Node: ClosingLinkDto, Score: 65
+[RelevanceScorer] Node: ItaTalkTranDto, Score: 45
+[RelevanceScorer] Node: SearchHistRDto, Score: 45
+[RelevanceScorer] Node: AlimtalkChnlDto, Score: 45
+[RelevanceScorer] Node: AlimtalkTmplDto, Score: 45
+[RelevanceScorer] Node: UserServiceImpl, Score: 45
+[NAMEMATCH-DIAG] File: SurveyServiceImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyServiceImpl, Score: 75
+[NAMEMATCH-DIAG] File: SurveyDao | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyDao, Score: 50
+[RelevanceScorer] VETTED BYPASS: SurveyDao (Score: 50 < 55) rescued by Seed Direct Dependency!
+[RelevanceScorer] Node: IpsController, Score: 30
+[RelevanceScorer] Node: UserDaoImpl, Score: 45
 [RelevanceScorer] Node: AddressDaoImpl, Score: 45
-[RelevanceScorer] Node: UserDaoImpl, Score: 30
-[RelevanceScorer] Node: sql_survey.xml, Score: 20
-[RelevanceScorer-RESOURCE] Node: sql_survey.xml, Score: 20, via: RESOURCE_REVERSE_LINK, isCommon: false, hasLiving: true, isLinkedReverse: true
-[RelevanceScorer] VETTED BYPASS: sql_survey.xml (Score: 20 < 55) rescued by Resource Reverse Link!
+[RelevanceScorer] Node: AuthDto, Score: 15
+[RelevanceScorer] Node: CompanyDto, Score: 15
+[RelevanceScorer] Node: DeptDto, Score: 15
+[RelevanceScorer] Node: LoginUserDto, Score: 15
+[RelevanceScorer] Node: ApiServiceImpl, Score: 15
+[RelevanceScorer] Node: KmcisServiceImpl, Score: 35
+[RelevanceScorer] Node: sql_survey.xml, Score: 15
+[RelevanceScorer-RESOURCE] Node: sql_survey.xml, Score: 15, via: RESOURCE_REVERSE_LINK, isCommon: false, hasLiving: true, isLinkedReverse: true
+[RelevanceScorer] VETTED BYPASS: sql_survey.xml (Score: 15 < 55) rescued by Resource Reverse Link!
 === Stage 3 Candidates ===
+src/main/java/net/infobank/iss/survey/dto/SurveyDto.java
+src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
+src/main/java/net/infobank/iss/survey/dto/ReviewDto.java
 src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java
 src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRepository.java
 src/main/java/net/infobank/iss/survey/dao/SurveyDao.java
-src/main/java/net/infobank/iss/batch/SurveyPartExportCli.java
-src/main/java/net/infobank/iss/batch/SurveyPartExportJob.java
-src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
 src/main/java/net/infobank/iss/sql/mysql/sql_survey.xml
 src/main/java/net/infobank/iss/survey/dto/SurveyQImgDto.java
-src/main/java/net/infobank/iss/survey/dto/SurveyDto.java
 src/main/java/net/infobank/iss/survey/service/SurveyServiceImpl.java
-src/main/java/net/infobank/iss/survey/dto/ReviewDto.java
 src/main/java/net/infobank/iss/survey/dto/ClosingLinkDto.java
 src/main/java/com/membermarket/domain/NewFeatureService.java
 ==========================
@@ -798,11 +811,11 @@ BrandMessageTemplateBatchJob
 BrandMessageTemplateBatchRepository
 BrandMessageTmplDto
 """
-[GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)] SeedClasses: [SurveyPartExportCli, SurveyPartExportJob, SurveyPartExportRunner, AlimtalkTemplateBatchRepository, SurveyDao]
+[GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)] SeedClasses: [SurveyPartExportRunner, AlimtalkTemplateBatchRepository, SurveyDaoImpl, ReviewDto, SurveyDto]
 [GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)] SurveyServiceImpl Score Breakdown:
-[GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)]   - SeedClasses: [SurveyPartExportCli, SurveyPartExportJob, SurveyPartExportRunner, AlimtalkTemplateBatchRepository, SurveyDao]
+[GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)]   - SeedClasses: [SurveyPartExportRunner, AlimtalkTemplateBatchRepository, SurveyDaoImpl, ReviewDto, SurveyDto]
 [GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)]   - LayerHint: [SERVICE, PRESENTATION]
-[GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)]   - ExpansionStep for SurveyServiceImpl: hop=1, via=DEPENDED_BY, from=src/main/java/net/infobank/iss/survey/dao/SurveyDao.java
+[GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)]   - ExpansionStep for SurveyServiceImpl: hop=1, via=DEPENDED_BY, from=src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
 [GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)]   - RelevanceScorer.scoreAndFilter Actual Output:
 [GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)]     * Actual Total Score: 75
 [GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)]     * Discovery Reason: DEPENDED_BY
@@ -810,25 +823,23 @@ BrandMessageTmplDto
 [GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)]     * Protected: false (Reason: null)
 [GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)]     * Score Components: HopScore=30 + NameMatch=10.7 + LayerAlign=15 + CommentMatch=20.0 = 75
 [GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)]     * Assert: recomputed(75) == Actual Total Score(75)
-[GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)] Top-30 TargetFiles Count: 13
+[GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)] Top-30 TargetFiles Count: 11
 [GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)] GT Survived: 2/8 (SurveyServiceImpl.java, sql_survey.xml)
 [GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)] GT Missing: [survey_list.jsp, survey_write.jsp, survey.list.js, survey.write.js, AlimtalkChnlDto.java, AlimtalkTmplDto.java]
 [GT Baseline: Ablation-a (survey_admin LlmOff refined + 5 identifier lines)] Top-30 List:
-    [FP] #1. [MODIFY] src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRepository.java (Score: 70, Via: SEED)
-    [FP] #2. [MODIFY] src/main/java/net/infobank/iss/survey/dao/SurveyDao.java (Score: 60, Via: SEED)
-    [FP] #3. [MODIFY] src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java (Score: 70, Via: DEPENDED_BY)
-  ★[GT] #4. [MODIFY] src/main/java/net/infobank/iss/sql/mysql/sql_survey.xml (Score: 20, Via: RESOURCE_REVERSE_LINK [Bypass: Resource Reverse Link])
-    [FP] #5. [MODIFY] src/main/java/net/infobank/iss/survey/dto/SurveyQImgDto.java (Score: 75, Via: USES_TYPE)
-    [FP] #6. [MODIFY] src/main/java/net/infobank/iss/survey/dto/SurveyDto.java (Score: 75, Via: USES_TYPE)
-    [FP] #7. [MODIFY] src/main/java/net/infobank/iss/survey/dto/ReviewDto.java (Score: 65, Via: USES_TYPE)
-    [FP] #8. [MODIFY] src/main/java/net/infobank/iss/survey/dto/ClosingLinkDto.java (Score: 65, Via: USES_TYPE)
+    [FP] #1. [MODIFY] src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java (Score: 80, Via: SEED)
+    [FP] #2. [MODIFY] src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRepository.java (Score: 70, Via: SEED)
+    [FP] #3. [MODIFY] src/main/java/net/infobank/iss/survey/dao/SurveyDao.java (Score: 50, Via: DEPENDS_ON [Bypass: Seed Direct Dependency])
+  ★[GT] #4. [MODIFY] src/main/java/net/infobank/iss/sql/mysql/sql_survey.xml (Score: 15, Via: RESOURCE_REVERSE_LINK [Bypass: Resource Reverse Link])
+    [FP] #5. [MODIFY] src/main/java/net/infobank/iss/survey/dto/SurveyDto.java (Score: 85, Via: SEED)
+    [FP] #6. [MODIFY] src/main/java/net/infobank/iss/survey/dto/ReviewDto.java (Score: 75, Via: SEED)
+    [FP] #7. [MODIFY] src/main/java/net/infobank/iss/survey/dto/SurveyQImgDto.java (Score: 75, Via: SAME_PACKAGE)
+    [FP] #8. [MODIFY] src/main/java/net/infobank/iss/survey/dto/ClosingLinkDto.java (Score: 65, Via: SAME_PACKAGE)
   ★[GT] #9. [MODIFY] src/main/java/net/infobank/iss/survey/service/SurveyServiceImpl.java (Score: 75, Via: DEPENDED_BY)
     [FP] #10. [CREATE] src/main/java/com/membermarket/domain/NewFeatureService.java (- suggestedFileType: SERVICE
 - reason: 신규 비즈니스 로직 클래스 생성
 - referencePattern: 기존 Service 계층 구현 패턴 참조)
     [FP] #11. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java (Score: 70, Via: SEED)
-    [FP] #12. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportCli.java (Score: 50, Via: SEED [Bypass: Seed Class])
-    [FP] #13. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportJob.java (Score: 50, Via: SEED [Bypass: Seed Class])
 [MockTelemetry: Ablation_a_SurveyAdmin_LlmOff_Plus5IdLines] PipelineCalls={BranchA_NewFileDetector_chatWithTools=1, BranchB_Stage3Verifier_chatWithTools=1, BranchC_AgenticSeedSelector_chatWithTools=1}, unmatched=0
 [Scenario4_APC] refinedRequirement="교통카드 발급업체 변경 후, 이전 모바일교통카드 이용회원 체크 및 재발급 안내를 위한 신규서비스 개발 건. 교통카드 구 발급정보 조회 신규서비스 개발 (SAPACMM0802S01 기존서비스 참고). APCMMTrcdIsInfSVO 수정, APCMMTrcdIsSVC.java 신규서비스 추가, aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회"
 [Scenario4_APC] rawRefinedRequirement="교통카드 발급업체 변경 후, 이전 모바일교통카드 이용회원 체크 및 재발급 안내를 위한 신규서비스 개발 건. 교통카드 구 발급정보 조회 신규서비스 개발 (SAPACMM0802S01 기존서비스 참고). APCMMTrcdIsInfSVO 수정, APCMMTrcdIsSVC.java 신규서비스 추가, aCMBTBAPC024DEM.selTrcdIsInf 참조하여 앱카드회원ID 및 모니모페이회원ID 최근이력 1건 조회"
@@ -868,40 +879,47 @@ SR: 설문 발송 채널에 브랜드메시지 추가
 [AgenticGraphExplorer] Turn 1: No response from LLM.
 [AgenticGraphExplorer] Fallback: No final seeds confirmed, applying heuristic fallback.
 [DEBUG-EXPANDER] frontendRelevant: false
-[NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportCli, Score: 50
-[NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportJob, Score: 50
 [NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyPartExportRunner, Score: 70
+[NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportCli, Score: 40
+[NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportJob, Score: 40
 [RelevanceScorer] Node: AlimtalkTemplateBatchJob, Score: 30
 [RelevanceScorer] Node: AlimtalkTemplateBatchRunner, Score: 50
 [RelevanceScorer] Node: AlimtalkTemplateBatchRepository, Score: 70
-[NAMEMATCH-DIAG] File: SurveyDao | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDao, Score: 60
-[RelevanceScorer] Node: IpsController, Score: 45
-[RelevanceScorer] Node: AlimtalkTmplDto, Score: 45
-[RelevanceScorer] Node: AlimtalkChnlDto, Score: 45
 [NAMEMATCH-DIAG] File: SurveyDaoImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDaoImpl, Score: 70
-[NAMEMATCH-DIAG] File: SurveyServiceImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyServiceImpl, Score: 75
+[RelevanceScorer] Node: SurveyDaoImpl, Score: 80
+[RelevanceScorer] Node: ReviewDto, Score: 75
 [NAMEMATCH-DIAG] File: SurveyDto | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyDto, Score: 75
-[RelevanceScorer] Node: ReviewDto, Score: 65
-[RelevanceScorer] Node: ClosingLinkDto, Score: 65
-[RelevanceScorer] Node: SearchHistRDto, Score: 45
+[RelevanceScorer] Node: SurveyDto, Score: 85
 [NAMEMATCH-DIAG] File: SurveyQImgDto | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyQImgDto, Score: 75
-[RelevanceScorer] Node: UserServiceImpl, Score: 30
+[RelevanceScorer] Node: ClosingLinkDto, Score: 65
+[RelevanceScorer] Node: ItaTalkTranDto, Score: 45
+[RelevanceScorer] Node: SearchHistRDto, Score: 45
+[RelevanceScorer] Node: AlimtalkChnlDto, Score: 45
+[RelevanceScorer] Node: AlimtalkTmplDto, Score: 45
+[RelevanceScorer] Node: UserServiceImpl, Score: 45
+[NAMEMATCH-DIAG] File: SurveyServiceImpl | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyServiceImpl, Score: 75
+[NAMEMATCH-DIAG] File: SurveyDao | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyDao, Score: 50
+[RelevanceScorer] Node: IpsController, Score: 30
+[RelevanceScorer] Node: UserDaoImpl, Score: 45
 [RelevanceScorer] Node: AddressDaoImpl, Score: 45
-[RelevanceScorer] Node: UserDaoImpl, Score: 30
-[RelevanceScorer] Node: sql_survey.xml, Score: 20
-[RelevanceScorer-RESOURCE] Node: sql_survey.xml, Score: 20, via: RESOURCE_REVERSE_LINK, isCommon: false, hasLiving: true, isLinkedReverse: true
+[RelevanceScorer] Node: AuthDto, Score: 15
+[RelevanceScorer] Node: CompanyDto, Score: 15
+[RelevanceScorer] Node: DeptDto, Score: 15
+[RelevanceScorer] Node: LoginUserDto, Score: 15
+[RelevanceScorer] Node: ApiServiceImpl, Score: 15
+[RelevanceScorer] Node: KmcisServiceImpl, Score: 35
+[RelevanceScorer] Node: sql_survey.xml, Score: 15
+[RelevanceScorer-RESOURCE] Node: sql_survey.xml, Score: 15, via: RESOURCE_REVERSE_LINK, isCommon: false, hasLiving: true, isLinkedReverse: true
 [LlmOff] InputText: "설문 발송 채널에 브랜드메시지 추가"
-  - SeedClasses: [SurveyPartExportCli, SurveyPartExportJob, SurveyPartExportRunner, AlimtalkTemplateBatchRepository, SurveyDao]
+  - SeedClasses: [SurveyPartExportRunner, AlimtalkTemplateBatchRepository, SurveyDaoImpl, ReviewDto, SurveyDto]
   - LayerHint: [SERVICE, PRESENTATION]
-  - ExpansionStep for SurveyServiceImpl: hop=1, via=DEPENDED_BY, from=src/main/java/net/infobank/iss/survey/dao/SurveyDao.java
+  - ExpansionStep for SurveyServiceImpl: hop=1, via=DEPENDED_BY, from=src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
   - RelevanceScorer.scoreAndFilter Actual Output:
     * Actual Total Score: 75
     * Discovery Reason: DEPENDED_BY
@@ -923,12 +941,12 @@ SR: 설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신�
 [RelevanceScorer] Node: ApiServiceImpl, Score: 55
 [RelevanceScorer] Node: IbCenterApiService, Score: 40
 [RelevanceScorer] Node: IbCenterApiServiceImpl, Score: 55
+[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportRunner, Score: 70
 [NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportCli, Score: 50
+[RelevanceScorer] Node: SurveyPartExportCli, Score: 40
 [NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyPartExportJob, Score: 40
-[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportRunner, Score: 60
 [RelevanceScorer] Node: AlimtalkTemplateBatchJob, Score: 30
 [RelevanceScorer] Node: AlimtalkTemplateBatchRunner, Score: 50
 [RelevanceScorer] Node: AlimtalkTemplateBatchRepository, Score: 60
@@ -968,7 +986,7 @@ SR: 설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신�
 [RelevanceScorer] VETTED BYPASS: sql_user.xml (Score: 0 < 10) rescued by Resource Reverse Link!
 [RelevanceScorer] CONTRACT PAIR: Promoted interface UserDao to Tier 2 for protected impl UserDaoImpl
 [LlmOn (Tagged)] InputText: "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발 (명시된 식별자: BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto)"
-  - SeedClasses: [ApiService, ApiServiceImpl, IbCenterApiService, IbCenterApiServiceImpl, SurveyPartExportCli]
+  - SeedClasses: [ApiService, ApiServiceImpl, IbCenterApiService, IbCenterApiServiceImpl, SurveyPartExportRunner]
   - LayerHint: [SERVICE, PRESENTATION]
   - ExpansionStep for SurveyServiceImpl: hop=3, via=REPO_TO_SERVICE, from=src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
   - RelevanceScorer.scoreAndFilter Actual Output:
@@ -997,12 +1015,12 @@ BrandMessageTmplDto
 [RelevanceScorer] Node: ApiServiceImpl, Score: 55
 [RelevanceScorer] Node: IbCenterApiService, Score: 40
 [RelevanceScorer] Node: IbCenterApiServiceImpl, Score: 55
+[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportRunner, Score: 70
 [NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportCli, Score: 50
+[RelevanceScorer] Node: SurveyPartExportCli, Score: 40
 [NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyPartExportJob, Score: 40
-[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportRunner, Score: 60
 [RelevanceScorer] Node: AlimtalkTemplateBatchJob, Score: 30
 [RelevanceScorer] Node: AlimtalkTemplateBatchRunner, Score: 50
 [RelevanceScorer] Node: AlimtalkTemplateBatchRepository, Score: 60
@@ -1047,7 +1065,7 @@ BrandMessageTemplateBatchJob
 BrandMessageTemplateBatchRepository
 BrandMessageTemplateBatchRunner
 BrandMessageTmplDto"
-  - SeedClasses: [ApiService, ApiServiceImpl, IbCenterApiService, IbCenterApiServiceImpl, SurveyPartExportCli]
+  - SeedClasses: [ApiService, ApiServiceImpl, IbCenterApiService, IbCenterApiServiceImpl, SurveyPartExportRunner]
   - LayerHint: [SERVICE, PRESENTATION]
   - ExpansionStep for SurveyServiceImpl: hop=3, via=REPO_TO_SERVICE, from=src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
   - RelevanceScorer.scoreAndFilter Actual Output:
@@ -1855,13 +1873,12 @@ BrandMessageTmplDto
 [RelevanceScorer] Node: IbCenterApiService, Score: 40
 [RelevanceScorer] VETTED BYPASS: IbCenterApiService (Score: 40 < 55) rescued by Seed Class!
 [RelevanceScorer] Node: IbCenterApiServiceImpl, Score: 55
+[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportRunner, Score: 70
 [NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportCli, Score: 50
-[RelevanceScorer] VETTED BYPASS: SurveyPartExportCli (Score: 50 < 55) rescued by Seed Class!
+[RelevanceScorer] Node: SurveyPartExportCli, Score: 40
 [NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyPartExportJob, Score: 40
-[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportRunner, Score: 60
 [RelevanceScorer] Node: AlimtalkTemplateBatchJob, Score: 30
 [RelevanceScorer] Node: AlimtalkTemplateBatchRunner, Score: 50
 [RelevanceScorer] Node: AlimtalkTemplateBatchRepository, Score: 60
@@ -1903,9 +1920,9 @@ BrandMessageTmplDto
 [RelevanceScorer] VETTED BYPASS: sql_user.xml (Score: 0 < 55) rescued by Resource Reverse Link!
 [RelevanceScorer] CONTRACT PAIR: Added interface UserDao for protected impl UserDaoImpl
 === Stage 3 Candidates ===
+src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java
 src/main/java/net/infobank/iss/api/service/IbCenterApiServiceImpl.java
 src/main/java/net/infobank/iss/api/service/ApiServiceImpl.java
-src/main/java/net/infobank/iss/batch/SurveyPartExportCli.java
 src/main/java/net/infobank/iss/api/service/IbCenterApiService.java
 src/main/java/net/infobank/iss/api/service/ApiService.java
 src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRepository.java
@@ -1916,11 +1933,10 @@ src/main/java/net/infobank/iss/sql/mssql/sql_user.xml
 src/main/java/net/infobank/iss/sql/mysql/sql_user.xml
 src/main/java/net/infobank/iss/sql/oracle/sql_user.xml
 src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
-src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java
 src/main/java/com/membermarket/api/NewFeatureController.java
 ==========================
 [GT Baseline: survey_admin (Intent=LlmOn)] RefinedReq: "설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발"
-[GT Baseline: survey_admin (Intent=LlmOn)] Top-30 TargetFiles Count: 15
+[GT Baseline: survey_admin (Intent=LlmOn)] Top-30 TargetFiles Count: 14
 [GT Baseline: survey_admin (Intent=LlmOn)] GT Survived: 1/8 (sql_survey.xml)
 [GT Baseline: survey_admin (Intent=LlmOn)] GT Missing: [survey_list.jsp, survey_write.jsp, survey.list.js, survey.write.js, SurveyServiceImpl.java, AlimtalkChnlDto.java, AlimtalkTmplDto.java]
 [GT Baseline: survey_admin (Intent=LlmOn)] Top-30 List:
@@ -1939,8 +1955,7 @@ src/main/java/com/membermarket/api/NewFeatureController.java
     [FP] #13. [CREATE] src/main/java/com/membermarket/api/NewFeatureController.java (- suggestedFileType: REST_CONTROLLER
 - reason: 신규 API 컨트롤러 생성 요구사항 감지
 - referencePattern: 기존 @RestController 패턴 참조)
-    [FP] #14. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportCli.java (Score: 50, Via: SEED [Bypass: Seed Class])
-    [FP] #15. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java (Score: 60, Via: SAME_PACKAGE)
+    [FP] #14. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java (Score: 70, Via: SEED)
 [MockTelemetry: SurveyAdmin_LlmOn] ClarifyCalls={Clarify_Constraints=3, Clarify_Refinement=1}, PipelineCalls={BranchA_NewFileDetector_chatWithTools=1, BranchB_Stage3Verifier_chatWithTools=1, BranchC_AgenticSeedSelector_chatWithTools=1}, unmatched=0
 [SurveyAdmin_LlmOff] refinedRequirement="외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
 [SurveyAdmin_LlmOff] rawRefinedRequirement="외부 Bizgo 연동 API(BizgoApiService)를 신규 생성하고, 알림톡 배치 구조와 동일하게 브랜드메시지 배치 3종(BrandMessageTemplateBatchRunner, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository) 및 DTO(BrandMessageTmplDto)를 신규 개발합니다."
@@ -1966,12 +1981,12 @@ SR: 설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신�
 [RelevanceScorer] Node: ApiServiceImpl, Score: 55
 [RelevanceScorer] Node: IbCenterApiService, Score: 40
 [RelevanceScorer] Node: IbCenterApiServiceImpl, Score: 55
+[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportRunner, Score: 70
 [NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportCli, Score: 50
+[RelevanceScorer] Node: SurveyPartExportCli, Score: 40
 [NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyPartExportJob, Score: 40
-[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportRunner, Score: 60
 [RelevanceScorer] Node: AlimtalkTemplateBatchJob, Score: 30
 [RelevanceScorer] Node: AlimtalkTemplateBatchRunner, Score: 50
 [RelevanceScorer] Node: AlimtalkTemplateBatchRepository, Score: 60
@@ -2027,13 +2042,12 @@ SR: 설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신�
 [RelevanceScorer] Node: IbCenterApiService, Score: 40
 [RelevanceScorer] VETTED BYPASS: IbCenterApiService (Score: 40 < 55) rescued by Seed Class!
 [RelevanceScorer] Node: IbCenterApiServiceImpl, Score: 55
+[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportRunner, Score: 70
 [NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportCli, Score: 50
-[RelevanceScorer] VETTED BYPASS: SurveyPartExportCli (Score: 50 < 55) rescued by Seed Class!
+[RelevanceScorer] Node: SurveyPartExportCli, Score: 40
 [NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyPartExportJob, Score: 40
-[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportRunner, Score: 60
 [RelevanceScorer] Node: AlimtalkTemplateBatchJob, Score: 30
 [RelevanceScorer] Node: AlimtalkTemplateBatchRunner, Score: 50
 [RelevanceScorer] Node: AlimtalkTemplateBatchRepository, Score: 60
@@ -2075,9 +2089,9 @@ SR: 설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신�
 [RelevanceScorer] VETTED BYPASS: sql_user.xml (Score: 0 < 55) rescued by Resource Reverse Link!
 [RelevanceScorer] CONTRACT PAIR: Added interface UserDao for protected impl UserDaoImpl
 === Stage 3 Candidates ===
+src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java
 src/main/java/net/infobank/iss/api/service/IbCenterApiServiceImpl.java
 src/main/java/net/infobank/iss/api/service/ApiServiceImpl.java
-src/main/java/net/infobank/iss/batch/SurveyPartExportCli.java
 src/main/java/net/infobank/iss/api/service/IbCenterApiService.java
 src/main/java/net/infobank/iss/api/service/ApiService.java
 src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRepository.java
@@ -2088,16 +2102,15 @@ src/main/java/net/infobank/iss/sql/mssql/sql_user.xml
 src/main/java/net/infobank/iss/sql/mysql/sql_user.xml
 src/main/java/net/infobank/iss/sql/oracle/sql_user.xml
 src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
-src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java
 src/main/java/com/membermarket/api/NewFeatureController.java
 ==========================
 [GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)] InputText:
 """
 설문 발송 채널에 브랜드메시지 추가 및 Bizgo 연동 API 신규 개발
 """
-[GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)] SeedClasses: [ApiService, ApiServiceImpl, IbCenterApiService, IbCenterApiServiceImpl, SurveyPartExportCli]
+[GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)] SeedClasses: [ApiService, ApiServiceImpl, IbCenterApiService, IbCenterApiServiceImpl, SurveyPartExportRunner]
 [GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)] SurveyServiceImpl Score Breakdown:
-[GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)]   - SeedClasses: [ApiService, ApiServiceImpl, IbCenterApiService, IbCenterApiServiceImpl, SurveyPartExportCli]
+[GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)]   - SeedClasses: [ApiService, ApiServiceImpl, IbCenterApiService, IbCenterApiServiceImpl, SurveyPartExportRunner]
 [GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)]   - LayerHint: [SERVICE, PRESENTATION]
 [GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)]   - ExpansionStep for SurveyServiceImpl: hop=3, via=REPO_TO_SERVICE, from=src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
 [GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)]   - RelevanceScorer.scoreAndFilter Actual Output:
@@ -2107,7 +2120,7 @@ src/main/java/com/membermarket/api/NewFeatureController.java
 [GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)]     * Protected: false (Reason: null)
 [GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)]     * Score Components: HopScore=0 + NameMatch=10.7 + LayerAlign=15 + CommentMatch=20.0 = 45
 [GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)]     * Assert: recomputed(45) == Actual Total Score(45)
-[GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)] Top-30 TargetFiles Count: 15
+[GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)] Top-30 TargetFiles Count: 14
 [GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)] GT Survived: 1/8 (sql_survey.xml)
 [GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)] GT Missing: [survey_list.jsp, survey_write.jsp, survey.list.js, survey.write.js, SurveyServiceImpl.java, AlimtalkChnlDto.java, AlimtalkTmplDto.java]
 [GT Baseline: Ablation-b (survey_admin LlmOn refined only - no identifiers)] Top-30 List:
@@ -2126,8 +2139,7 @@ src/main/java/com/membermarket/api/NewFeatureController.java
     [FP] #13. [CREATE] src/main/java/com/membermarket/api/NewFeatureController.java (- suggestedFileType: REST_CONTROLLER
 - reason: 신규 API 컨트롤러 생성 요구사항 감지
 - referencePattern: 기존 @RestController 패턴 참조)
-    [FP] #14. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportCli.java (Score: 50, Via: SEED [Bypass: Seed Class])
-    [FP] #15. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java (Score: 60, Via: SAME_PACKAGE)
+    [FP] #14. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java (Score: 70, Via: SEED)
 [MockTelemetry: Ablation_b_SurveyAdmin_LlmOn_RefinedOnly] ClarifyCalls={Clarify_Constraints=3, Clarify_Refinement=1}, PipelineCalls={BranchA_NewFileDetector_chatWithTools=1, BranchB_Stage3Verifier_chatWithTools=1, BranchC_AgenticSeedSelector_chatWithTools=1}, unmatched=0
 [ExtractSchema] 구조화 출력 응답 없음 → 기존 호출로 대체
 [ExtractSchema] 구조화 출력 응답 없음 → 기존 호출로 대체
@@ -2553,13 +2565,12 @@ BrandMessageTmplDto
 [RelevanceScorer] Node: IbCenterApiService, Score: 40
 [RelevanceScorer] VETTED BYPASS: IbCenterApiService (Score: 40 < 55) rescued by Seed Class!
 [RelevanceScorer] Node: IbCenterApiServiceImpl, Score: 55
+[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
+[RelevanceScorer] Node: SurveyPartExportRunner, Score: 70
 [NAMEMATCH-DIAG] File: SurveyPartExportCli | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportCli, Score: 50
-[RelevanceScorer] VETTED BYPASS: SurveyPartExportCli (Score: 50 < 55) rescued by Seed Class!
+[RelevanceScorer] Node: SurveyPartExportCli, Score: 40
 [NAMEMATCH-DIAG] File: SurveyPartExportJob | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
 [RelevanceScorer] Node: SurveyPartExportJob, Score: 40
-[NAMEMATCH-DIAG] File: SurveyPartExportRunner | Direct: [], Trans: [survey], Weak: [] | Score: 10.7
-[RelevanceScorer] Node: SurveyPartExportRunner, Score: 60
 [RelevanceScorer] Node: AlimtalkTemplateBatchJob, Score: 30
 [RelevanceScorer] Node: AlimtalkTemplateBatchRunner, Score: 50
 [RelevanceScorer] Node: AlimtalkTemplateBatchRepository, Score: 60
@@ -2601,9 +2612,9 @@ BrandMessageTmplDto
 [RelevanceScorer] VETTED BYPASS: sql_user.xml (Score: 0 < 55) rescued by Resource Reverse Link!
 [RelevanceScorer] CONTRACT PAIR: Added interface UserDao for protected impl UserDaoImpl
 === Stage 3 Candidates ===
+src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java
 src/main/java/net/infobank/iss/api/service/IbCenterApiServiceImpl.java
 src/main/java/net/infobank/iss/api/service/ApiServiceImpl.java
-src/main/java/net/infobank/iss/batch/SurveyPartExportCli.java
 src/main/java/net/infobank/iss/api/service/IbCenterApiService.java
 src/main/java/net/infobank/iss/api/service/ApiService.java
 src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRepository.java
@@ -2614,7 +2625,6 @@ src/main/java/net/infobank/iss/sql/mssql/sql_user.xml
 src/main/java/net/infobank/iss/sql/mysql/sql_user.xml
 src/main/java/net/infobank/iss/sql/oracle/sql_user.xml
 src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java
-src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java
 src/main/java/com/membermarket/api/NewFeatureController.java
 ==========================
 [Simulated 2b: survey_admin (Intent=LlmOn)] SimulatedSrText:
@@ -2627,7 +2637,7 @@ BrandMessageTemplateBatchRepository
 BrandMessageTemplateBatchRunner
 BrandMessageTmplDto
 """
-[Simulated 2b: survey_admin (Intent=LlmOn)] Top-30 TargetFiles Count: 15
+[Simulated 2b: survey_admin (Intent=LlmOn)] Top-30 TargetFiles Count: 14
 [Simulated 2b: survey_admin (Intent=LlmOn)] GT Survived: 1/8 (sql_survey.xml)
 [Simulated 2b: survey_admin (Intent=LlmOn)] GT Missing: [survey_list.jsp, survey_write.jsp, survey.list.js, survey.write.js, SurveyServiceImpl.java, AlimtalkChnlDto.java, AlimtalkTmplDto.java]
 [Simulated 2b: survey_admin (Intent=LlmOn)] Top-30 List:
@@ -2646,8 +2656,7 @@ BrandMessageTmplDto
     [FP] #13. [CREATE] src/main/java/com/membermarket/api/NewFeatureController.java (- suggestedFileType: REST_CONTROLLER
 - reason: 신규 API 컨트롤러 생성 요구사항 감지
 - referencePattern: 기존 @RestController 패턴 참조)
-    [FP] #14. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportCli.java (Score: 50, Via: SEED [Bypass: Seed Class])
-    [FP] #15. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java (Score: 60, Via: SAME_PACKAGE)
+    [FP] #14. [MODIFY] src/main/java/net/infobank/iss/batch/SurveyPartExportRunner.java (Score: 70, Via: SEED)
 [MockTelemetry: SurveyAdmin_LlmOn_Simulated2b] ClarifyCalls={Clarify_Constraints=3, Clarify_Refinement=1}, PipelineCalls={BranchA_NewFileDetector_chatWithTools=1, BranchB_Stage3Verifier_chatWithTools=1, BranchC_AgenticSeedSelector_chatWithTools=1}, unmatched=0
 [ExtractSchema] 구조화 출력 응답 없음 → 기존 호출로 대체
 [ExtractSchema] 구조화 출력 응답 없음 → 기존 호출로 대체
@@ -3042,26 +3051,26 @@ src/main/java/sc/chn/aps/apc/zz/dem/ACAOTBAPC005DEM.java
     [FP] #17. [MODIFY] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADSspyDlngHistMngtBIZ.java (Score: 68, Via: SAME_PACKAGE)
 [MockTelemetry: Apc_DemIsolated_LlmOn] ClarifyCalls={Clarify_Constraints=3, Clarify_Refinement=1}, PipelineCalls={BranchB_Stage3Verifier_chatWithTools=1, BranchC_AgenticSeedSelector_chatWithTools=1}, unmatched=0
 ]]></system-out>
-  <system-err><![CDATA[[  46997]   WARN - #net.ib.ixpert.ops.wuwagent.agent.FileRelevanceVerifier - No valid tool call found, keeping all files as fallback.
-[  47686]   WARN - #net.ib.ixpert.ops.wuwagent.agent.completeness.CompletenessGuardIntegration - [GUARD-SHADOW] 차단 대상이었으나 shadow 모드라 통과시킴: [필수 동반 누락] src/main/java/com/membermarket/domain/NewFeatureService.java 의 SERVICE_IMPL 를 신규 생성 대상으로 REQUIRED에 추가하세요. (앵커 노드 없음); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/svc/impl/APCADSbodrMngtSVCImpl.java 의 SVO 를 신규 생성 대상으로 REQUIRED에 추가하세요. (APCADSbodrMngtSVO 미발견 (생성 필요)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADPrvMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACMBTBAPC004DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADPrvMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (APCSpacdPrvMngtDVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADCstJMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACAOTBAPC015DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADCstJMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (APCSpacdCstMngtDVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADSbodrMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACMBTBAPC026DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADUpdtVerMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACAOTBAPC003DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADPaycoCstIntlzBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACMBTBAPC006DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADMaiBgdColoMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACAOTBAPC109DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADMaiBgdColoMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (APCADBgdPrpMngtDVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADSspyDlngHistMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACMBTBAPC006DVO))
-[  47926]   WARN - #net.ib.ixpert.ops.wuwagent.agent.FileRelevanceVerifier - No valid tool call found, keeping all files as fallback.
-[  47977]   WARN - #net.ib.ixpert.ops.wuwagent.agent.completeness.CompletenessGuardIntegration - [GUARD-SHADOW] 차단 대상이었으나 shadow 모드라 통과시킴: [필수 동반 누락] src/main/java/com/membermarket/domain/NewFeatureService.java 의 SERVICE_IMPL 를 신규 생성 대상으로 REQUIRED에 추가하세요. (NewFeatureServiceImpl 미발견 (생성 필요))
-[  85494]   WARN - #net.ib.ixpert.ops.wuwagent.agent.clarify.IdentifierRetentionChecker - IdentifierRetentionChecker: 식별자 누락 감지 (2건: [aCMBTBAPC024DEM, selTrcdIsInf]). 정제문에 안전판 병기 수행.
-[  85779]   WARN - #net.ib.ixpert.ops.wuwagent.agent.clarify.IdentifierRetentionChecker - IdentifierRetentionChecker: 식별자 누락 감지 (5건: [BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto]). 정제문에 안전판 병기 수행.
-[  85906]   WARN - #net.ib.ixpert.ops.wuwagent.agent.FileRelevanceVerifier - No valid tool call found, keeping all files as fallback.
-[  85914]   WARN - #net.ib.ixpert.ops.wuwagent.agent.completeness.CompletenessGuardIntegration - [GUARD-SHADOW] 차단 대상이었으나 shadow 모드라 통과시킴: [필수 동반 누락] src/main/java/com/membermarket/domain/NewFeatureService.java 의 SERVICE_IMPL 를 신규 생성 대상으로 REQUIRED에 추가하세요. (NewFeatureServiceImpl 미발견 (생성 필요))
-[ 139641]   WARN - #net.ib.ixpert.ops.wuwagent.agent.FileRelevanceVerifier - No valid tool call found, keeping all files as fallback.
-[ 140740]   WARN - #net.ib.ixpert.ops.wuwagent.agent.completeness.CompletenessGuardIntegration - [GUARD-SHADOW] 차단 대상이었으나 shadow 모드라 통과시킴: [역할 누락/BUSINESS] 비즈니스 가공/변환 로직 필요 → SERVICE_INTERFACE 가 REQUIRED 집합에 없습니다. 해당 역할 파일을 포함하세요.
-[ 141072]   WARN - #net.ib.ixpert.ops.wuwagent.agent.clarify.IdentifierRetentionChecker - IdentifierRetentionChecker: 식별자 누락 감지 (5건: [BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto]). 정제문에 안전판 병기 수행.
-[ 141087]   WARN - #net.ib.ixpert.ops.wuwagent.agent.FileRelevanceVerifier - No valid tool call found, keeping all files as fallback.
-[ 141625]   WARN - #net.ib.ixpert.ops.wuwagent.agent.clarify.IdentifierRetentionChecker - IdentifierRetentionChecker: 식별자 누락 감지 (5건: [BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto]). 정제문에 안전판 병기 수행.
-[ 141922]   WARN - #net.ib.ixpert.ops.wuwagent.agent.clarify.IdentifierRetentionChecker - IdentifierRetentionChecker: 식별자 누락 감지 (5건: [BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto]). 정제문에 안전판 병기 수행.
-[ 141937]   WARN - #net.ib.ixpert.ops.wuwagent.agent.FileRelevanceVerifier - No valid tool call found, keeping all files as fallback.
-[ 178096]   WARN - #net.ib.ixpert.ops.wuwagent.agent.clarify.IdentifierRetentionChecker - IdentifierRetentionChecker: 식별자 누락 감지 (2건: [aCMBTBAPC024DEM, selTrcdIsInf]). 정제문에 안전판 병기 수행.
-[ 178168]   WARN - #net.ib.ixpert.ops.wuwagent.agent.FileRelevanceVerifier - No valid tool call found, keeping all files as fallback.
-[ 179113]   WARN - #net.ib.ixpert.ops.wuwagent.agent.clarify.IdentifierRetentionChecker - IdentifierRetentionChecker: 식별자 누락 감지 (5건: [BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto]). 정제문에 안전판 병기 수행.
-[ 179122]   WARN - #net.ib.ixpert.ops.wuwagent.agent.FileRelevanceVerifier - No valid tool call found, keeping all files as fallback.
-[ 216187]   WARN - #net.ib.ixpert.ops.wuwagent.agent.clarify.IdentifierRetentionChecker - IdentifierRetentionChecker: 식별자 누락 감지 (2건: [aCMBTBAPC024DEM, selTrcdIsInf]). 정제문에 안전판 병기 수행.
-[ 216268]   WARN - #net.ib.ixpert.ops.wuwagent.agent.FileRelevanceVerifier - No valid tool call found, keeping all files as fallback.
+  <system-err><![CDATA[WARN: No valid tool call found, keeping all files as fallback.
+WARN: [GUARD-SHADOW] 차단 대상이었으나 shadow 모드라 통과시킴: [필수 동반 누락] src/main/java/com/membermarket/domain/NewFeatureService.java 의 SERVICE_IMPL 를 신규 생성 대상으로 REQUIRED에 추가하세요. (앵커 노드 없음); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/svc/impl/APCADSbodrMngtSVCImpl.java 의 SVO 를 신규 생성 대상으로 REQUIRED에 추가하세요. (APCADSbodrMngtSVO 미발견 (생성 필요)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADPrvMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACMBTBAPC004DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADPrvMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (APCSpacdPrvMngtDVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADCstJMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACAOTBAPC015DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADCstJMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (APCSpacdCstMngtDVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADSbodrMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACMBTBAPC026DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADUpdtVerMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACAOTBAPC003DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADPaycoCstIntlzBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACMBTBAPC006DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADMaiBgdColoMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACAOTBAPC109DVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADMaiBgdColoMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (APCADBgdPrpMngtDVO)); [필수 동반 누락] src/main/java/sc/chn/aps/apc/ad/ad03/biz/APCADSspyDlngHistMngtBIZ.java 의 DVO 를 기존 파일을 REQUIRED에 추가하세요. (도메인 프리픽스 매칭 (ACMBTBAPC006DVO))
+WARN: No valid tool call found, keeping all files as fallback.
+WARN: [GUARD-SHADOW] 차단 대상이었으나 shadow 모드라 통과시킴: [필수 동반 누락] src/main/java/com/membermarket/domain/NewFeatureService.java 의 SERVICE_IMPL 를 신규 생성 대상으로 REQUIRED에 추가하세요. (NewFeatureServiceImpl 미발견 (생성 필요))
+WARN: IdentifierRetentionChecker: 식별자 누락 감지 (2건: [aCMBTBAPC024DEM, selTrcdIsInf]). 정제문에 안전판 병기 수행.
+WARN: IdentifierRetentionChecker: 식별자 누락 감지 (5건: [BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto]). 정제문에 안전판 병기 수행.
+WARN: No valid tool call found, keeping all files as fallback.
+WARN: [GUARD-SHADOW] 차단 대상이었으나 shadow 모드라 통과시킴: [필수 동반 누락] src/main/java/com/membermarket/domain/NewFeatureService.java 의 SERVICE_IMPL 를 신규 생성 대상으로 REQUIRED에 추가하세요. (NewFeatureServiceImpl 미발견 (생성 필요))
+WARN: No valid tool call found, keeping all files as fallback.
+WARN: [GUARD-SHADOW] 차단 대상이었으나 shadow 모드라 통과시킴: [역할 누락/BUSINESS] 비즈니스 가공/변환 로직 필요 → SERVICE_INTERFACE 가 REQUIRED 집합에 없습니다. 해당 역할 파일을 포함하세요.
+WARN: IdentifierRetentionChecker: 식별자 누락 감지 (5건: [BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto]). 정제문에 안전판 병기 수행.
+WARN: No valid tool call found, keeping all files as fallback.
+WARN: IdentifierRetentionChecker: 식별자 누락 감지 (5건: [BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto]). 정제문에 안전판 병기 수행.
+WARN: IdentifierRetentionChecker: 식별자 누락 감지 (5건: [BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto]). 정제문에 안전판 병기 수행.
+WARN: No valid tool call found, keeping all files as fallback.
+WARN: IdentifierRetentionChecker: 식별자 누락 감지 (2건: [aCMBTBAPC024DEM, selTrcdIsInf]). 정제문에 안전판 병기 수행.
+WARN: No valid tool call found, keeping all files as fallback.
+WARN: IdentifierRetentionChecker: 식별자 누락 감지 (5건: [BizgoApiService, BrandMessageTemplateBatchJob, BrandMessageTemplateBatchRepository, BrandMessageTemplateBatchRunner, BrandMessageTmplDto]). 정제문에 안전판 병기 수행.
+WARN: No valid tool call found, keeping all files as fallback.
+WARN: IdentifierRetentionChecker: 식별자 누락 감지 (2건: [aCMBTBAPC024DEM, selTrcdIsInf]). 정제문에 안전판 병기 수행.
+WARN: No valid tool call found, keeping all files as fallback.
 ]]></system-err>
 </testsuite>
