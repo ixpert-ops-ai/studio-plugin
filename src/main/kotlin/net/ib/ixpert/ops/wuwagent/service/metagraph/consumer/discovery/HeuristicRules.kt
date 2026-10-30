@@ -45,7 +45,8 @@ object GenericTranslationTokens {
         "controller", "service", "impl", "dao", "mapper", "dto", "vo", "response", "request", "entity", "repository", "base", "util", "helper",
         "common", "config", "job", "batch", "list", "get", "set", "save", "update", "delete", "insert", "select", "find", "search", "read",
         "view", "page", "screen", "manage", "management", "mgr", "mgmt", "admin", "main", "detail", "info", "data", "handle", "process",
-        "execute", "deal", "query", "information", "edit", "modify", "change", "add", "remove", "show", "display"
+        "execute", "deal", "query", "information", "edit", "modify", "change", "add", "remove", "show", "display",
+        "regist", "register" // B-80: 등록 → regist/register는 동작어다(B-79 8번: SR-08의 약한 일치 오탐 근거)
     )
 
     fun isGeneric(token: String): Boolean = token.lowercase() in TOKENS
