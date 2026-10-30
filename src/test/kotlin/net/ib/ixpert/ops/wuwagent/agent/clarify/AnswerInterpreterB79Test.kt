@@ -24,7 +24,8 @@ class AnswerInterpreterB79Test {
     fun i2_기록함_메시지는_발화_통째_인용_대신_항목별_줄이다() {
         val echo = AnswerInterpreter.echo("응답자 이메일", answer)
         val lines = echo.lines()
-        assertEquals("기록함: 응답자 이메일의 출처 (제약으로 정제문에 전달됩니다)", lines[0])
+        // B-80: 머리줄이 기록된 항목 전체(출처, 대상 화면, 마스킹 규칙)를 말한다. 전: "기록함: 응답자 이메일의 출처 (…)"
+        assertEquals("기록함: 응답자 이메일 관련 답변 — 출처, 대상 화면, 마스킹 규칙 (제약으로 정제문에 전달됩니다)", lines[0])
         assertEquals(listOf("- 출처: ", "- 대상 화면: ", "- 마스킹 규칙: "), lines.drop(1).map { it.substringBefore(":") + ": " })
         assertFalse("발화 전체를 그대로 싣지 않는다: $echo", echo.contains(answer))
         assertTrue(echo, echo.contains("- 대상 화면: 관리자 설문 상세 화면용") && echo.contains("- 마스킹 규칙: 이메일은 앞 2자리와 도메인만 보이게 마스킹"))
@@ -41,7 +42,7 @@ class AnswerInterpreterB79Test {
     fun i4_나눌_수_없으면_원문_앞부분을_인용한다() {
         // B-80: "모르겠다"는 출처 답으로 나뉘므로 원문 인용 대신 출처 줄이 된다. 항목에 하나도 안 맞는 말로 바꿔 같은 경로를 확인한다.
         val e = AnswerInterpreter.echo("응답자 이메일", "음 그건 좀 그렇네요")
-        assertTrue(e, e.startsWith("기록함: 응답자 이메일의 출처 — \"음 그건 좀 그렇네요\""))
+        assertTrue(e, e.startsWith("기록함: 응답자 이메일 관련 답변 — \"음 그건 좀 그렇네요\""))
         assertEquals("음 그건 좀 그렇네요", AnswerInterpreter.sourceQuote("음 그건 좀 그렇네요"))
     }
 }

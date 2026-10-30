@@ -342,6 +342,8 @@ class RequirementAnalysisPipeline(
         val confirmationBridge = JcefStage3ConfirmationBridge(project)
         val selectedPaths = confirmationBridge.requestConfirmation(stage3Candidates)
 
+        // 결과 메타데이터의 "검증 후보" 수: Stage 3에 실제로 보낸 파일 수(카드에서 고른 만큼)
+        var stage3VerifyCount = stage3Candidates.size
         val (validatedTargetFiles, verificationOutput) = try {
             val userSelection: List<TargetFileSpec>? = if (!selectedPaths.isNullOrEmpty()) {
                 val pathSet = selectedPaths.toSet()
@@ -351,6 +353,7 @@ class RequirementAnalysisPipeline(
             }
 
             val filesToVerify = userSelection ?: stage3Candidates
+            stage3VerifyCount = filesToVerify.size
             val verifier = FileRelevanceVerifier(client, projectGraph, mdRoot)
             
             // 앵커 형제(anchorSiblingRefs)는 Stage 1 위상 시드 확장 풀에 섞지 않고 (노이즈 원천 차단),
@@ -495,8 +498,11 @@ class RequirementAnalysisPipeline(
                 appendLine("> ℹ️ ${ClaimedFieldCheck.renderResolved(f)}")
                 // 새로 저장하기로 했는데 요청 진입점(컨트롤러·화면)이 최종 목록에 없으면 한 줄 안내(파일은 추가하지 않는다)
                 if (ClaimedFieldCheck.isNewData(f.answer!!) && !ClaimedFieldCheck.hasEntryPoint(validatedTargetFiles.map { it.path })) {
-                    appendLine("> ℹ️ ${ClaimedFieldCheck.entryPointNote(f)}")
+                    val finalPaths = validatedTargetFiles.map { it.path }
+                    appendLine("> ℹ️ ${ClaimedFieldCheck.entryPointNote(f, ClaimedFieldCheck.suggestedEntryController(discoveryResult.relevantFiles.map { it.path }, finalPaths))}")
                 }
+                // 새 컬럼이면 DB 스키마 변경이 먼저 필요하다는 한 줄(B-80 6)
+                ClaimedFieldCheck.ddlNote(f)?.let { appendLine("> ℹ️ $it") }
             }
             // Stage 3에서 제거된 후보와 판정 누락 후보(출력 축소 형식은 제거 사유를 받지 않는다)
             verificationOutput.noticeLines(validatedTargetFiles.map { it.path }.toSet()).takeIf { it.isNotEmpty() }?.let { lines ->
@@ -524,7 +530,10 @@ class RequirementAnalysisPipeline(
                         "DELETE" -> "삭제"
                         else -> it.type
                     }
-                    val descForTable = AnalysisResultWording.description(it.description).replace("\n", "<br>")
+                    // B-80 6: 답변으로 수집·저장이 범위에 들어갔으면 ℹ️ 줄이 말하는 저장 경로가 첫 Service의 사유에도 보인다
+                    val wordedDesc = AnalysisResultWording.description(it.description)
+                    val savePath = ClaimedFieldCheck.savePathReason(claimFindings, it.path, validatedTargetFiles.map { v -> v.path }, wordedDesc)
+                    val descForTable = (if (savePath != null) "$wordedDesc / $savePath" else wordedDesc).replace("\n", "<br>")
                     appendLine("| ${it.order} | ${it.path} | $koreanType | $descForTable |")
                 }
             } else {
@@ -533,8 +542,8 @@ class RequirementAnalysisPipeline(
             appendLine()
             appendLine("### 📊 탐색 메타데이터")
             appendLine("- **선정된 초기 파일(Seed)**: ${discoveryResult.metadata.seedClasses.joinToString()}")
-            val totalCandidates = discoveryResult.metadata.totalCandidates + discoveryResult.suggestedNewFiles.size
-            appendLine("- **파일 필터링 결과**: 총 ${totalCandidates}개 대상(신규 제안 ${discoveryResult.suggestedNewFiles.size}개 포함) 중 ${validatedTargetFiles.size}개 최종 선정")
+            // B-80 10: 단계별로 보인다(평가 = Stage 1 확장 후보, 검증 후보 = Stage 3에 보낸 파일, 최종 = 결과 표)
+            appendLine("- **파일 필터링 결과**: ${AnalysisResultWording.stageCounts(discoveryResult.metadata.totalCandidates, stage3VerifyCount, validatedTargetFiles.size, discoveryResult.suggestedNewFiles.size)}")
         }
         onChunk?.invoke("\n" + formattedOutput + "\n")
         

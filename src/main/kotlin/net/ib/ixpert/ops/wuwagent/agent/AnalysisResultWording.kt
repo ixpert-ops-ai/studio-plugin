@@ -15,6 +15,10 @@ object AnalysisResultWording {
         return BYPASS.replace(text, "")
     }
 
+    /** 결과 메타데이터의 "파일 필터링 결과" 한 줄(B-80): 단계마다 몇 개였는지 "평가 30개 → 검증 후보 13개 → 최종 4개"로 보인다. 신규 제안은 따로 센다. */
+    fun stageCounts(evaluated: Int, verifyCandidates: Int, finalCount: Int, suggestedNew: Int): String =
+        "평가 ${evaluated}개 → 검증 후보 ${verifyCandidates}개 → 최종 ${finalCount}개" + (if (suggestedNew > 0) " (신규 제안 ${suggestedNew}개는 별도)" else "")
+
     /** 탐색 요약 문장. 대체 경로 사유 문구는 보이지 않게 비운다. */
     fun reasoning(text: String): String {
         if (text.trim().startsWith("Fallback:")) return ""

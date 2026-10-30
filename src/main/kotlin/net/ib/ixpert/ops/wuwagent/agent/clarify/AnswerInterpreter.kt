@@ -69,9 +69,14 @@ object AnswerInterpreter {
     /** Stage 0 대화에 보일 "기록함" 메시지: 발화 통째 인용 대신 해석한 항목을 줄마다 보인다. 하나도 못 나눴으면 원문 앞부분을 인용한다. */
     fun echo(label: String, answer: String): String {
         val r = interpret(answer)
-        if (r.isEmpty) return "기록함: ${label}의 출처 — \"${answer.trim().take(80)}\" (제약으로 정제문에 전달됩니다)"
+        // B-80: 머리줄은 출처만이 아니라 실제로 기록된 항목 전체를 말한다(출처, 대상 화면, 마스킹 규칙, 그 밖)
+        if (r.isEmpty) return "기록함: ${label} 관련 답변 — \"${answer.trim().take(80)}\" (제약으로 정제문에 전달됩니다)"
+        val recorded = listOfNotNull(
+            "출처".takeIf { r.source.isNotEmpty() }, "대상 화면".takeIf { r.screen.isNotEmpty() },
+            "마스킹 규칙".takeIf { r.mask.isNotEmpty() }, "그 밖".takeIf { r.other.isNotEmpty() }
+        )
         return buildString {
-            append("기록함: ${label}의 출처 (제약으로 정제문에 전달됩니다)")
+            append("기록함: ${label} 관련 답변 — ${recorded.joinToString(", ")} (제약으로 정제문에 전달됩니다)")
             if (r.source.isNotEmpty()) append("\n- 출처: ").append(sourceLine(r.source))
             if (r.screen.isNotEmpty()) append("\n- 대상 화면: ").append(r.screen.joinToString(" / "))
             if (r.mask.isNotEmpty()) append("\n- 마스킹 규칙: ").append(r.mask.joinToString(" / "))
