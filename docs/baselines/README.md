@@ -6,7 +6,8 @@
 |---|---|
 | `harness_58eb590_run1.xml` | 이전 기준선(58eb590, 2026-10 초). 엄격 그룹 5종 EXACT_MATCH 기준이었다. |
 | `harness_a34c35a_m78.xml` | 직전 기준선: a34c35a(add/search 동작어를 이름 일치에서 제외) 이후, B-78 검증 `m78`(HEAD 248cd97)의 XML. |
-| `harness_b79_scorer_dict.xml` | **현재 기준선**: 사전의 "설문" → survey 항목을 분석 점수기에만 적용한 뒤(B-79). 처음 올린 b2402bd 기준선(전역 적용)은 그 변경이 시험 5건을 깨서 되돌리며 지웠다. |
+| `harness_b80_seed_score.xml` | **현재 기준선**: heuristicSeeds를 점수 기반 선정으로 바꾼 뒤(B-80, dd09019). LlmOff 블록의 대체 시드가 바뀌어 survey_admin 후보 11→17, APC Transit Card 21→31, ISM Core GT 0/4→4/4. LlmOn 2종은 후보 수만 14→15, 17→25로 달라졌다(RefinedReq 줄은 같음). |
+| `harness_b79_scorer_dict.xml` | 직전 기준선: 사전의 "설문" → survey 항목을 분석 점수기에만 적용한 뒤(B-79). 처음 올린 b2402bd 기준선(전역 적용)은 그 변경이 시험 5건을 깨서 되돌리며 지웠다. |
 
 ## a34c35a 기준선에서 달라진 블록(2026-10-29, B-79)
 `survey_admin (Intent=LlmOff)`와 `Ablation-a (survey_admin LlmOff refined + 5 identifier lines)` 두 블록의 Top-30이 12개 → 11개이고, 차이는 한 파일뿐이다.
