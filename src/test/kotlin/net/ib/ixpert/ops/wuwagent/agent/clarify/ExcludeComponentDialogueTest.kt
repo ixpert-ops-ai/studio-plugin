@@ -227,7 +227,8 @@ class ExcludeComponentDialogueTest {
 
         assertEquals(30, baselineFiles.size)
         assertEquals(27, filteredFiles.size)
-        assertEquals(7, filteredGtRecall.size)
+        // B-80: 시드를 점수 기반으로 바꿔 survey 패키지가 시드에 들어오면서 정답 재현이 7에서 8로 늘었다
+        assertEquals(8, filteredGtRecall.size)
         assertEquals(baselineGtRecall.toSet(), filteredGtRecall.toSet())
     }
 
@@ -385,7 +386,8 @@ class ExcludeComponentDialogueTest {
 
         assertEquals(30, baselineFiles.size)
         assertEquals(28, filteredFiles.size)
-        assertEquals(7, filteredGtRecall.size)
+        // B-80: 위와 같은 이유(7 → 8)
+        assertEquals(8, filteredGtRecall.size)
         assertEquals(baselineGtRecall.toSet(), filteredGtRecall.toSet())
     }
 

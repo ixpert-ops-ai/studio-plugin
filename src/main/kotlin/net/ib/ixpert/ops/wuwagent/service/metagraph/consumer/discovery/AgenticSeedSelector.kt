@@ -336,7 +336,15 @@ class AgenticSeedSelector(
     private fun fallbackSelection(srText: String, graph: ProjectGraphQueryable): SeedSelectionResult = heuristicSeeds(srText, graph)
 
     companion object {
-        /** LLM 없이 키워드로 시드를 고른다(탐색기 대체 경로와 같은 로직이다. Stage 0 소스 확인처럼 LLM을 더 부르지 않는 곳에서 쓴다). */
+        /** 같은 점수일 때의 업무 계층 순서: 서비스(0) → DAO·매퍼·리포지터리·컨트롤러(1) → DTO·VO·엔티티(2) → 그 밖(3). 배치(Job, Runner, Cli)는 그 밖이다. */
+        internal fun seedLayerRank(className: String): Int = when {
+            Regex("Service(Impl)?$|SVC(Impl)?$").containsMatchIn(className) -> 0
+            Regex("(Dao|DaoImpl|Mapper|Repository|Controller)$").containsMatchIn(className) -> 1
+            Regex("(Dto|VO|Vo|Entity|Request|Response)$").containsMatchIn(className) -> 2
+            else -> 3
+        }
+
+        /** LLM 없이 키워드로 시드를 고른다(탐색기 대체 경로와 같은 로직이다. Stage 0 소스 확인처럼 LLM을 더 부르지 않는 곳에서 쓴다). 점수 순으로 최대 5개. */
         fun heuristicSeeds(srText: String, graph: ProjectGraphQueryable): SeedSelectionResult {
             val directEnglishTokens = Regex("[a-zA-Z]{3,}").findAll(srText).map { it.value }.toList()
             val stopWords = setOf("추가", "생성", "신규", "삭제", "제거", "수정", "변경", "기능", "항목", "목록", "조회", "화면", "출력", "관련", "처리", "동작", "적용", "로직", "기반", "부분")
@@ -344,27 +352,31 @@ class AgenticSeedSelector(
                 .map { it.value }
                 .filter { it !in stopWords }
                 .toList()
-            val dict = DomainDictionary.load(graph)
+            // B-80: 시드 선택은 도메인 명사 사전(설문 → survey)도 쓴다. 이전에는 그래프 순서의 앞 5개를 시드로 잡아 배치 클래스가 자리를 차지했다.
+            val dict = DomainDictionary.load(graph, domainNouns = true)
             // 범용 번역(info, data, manage 등)은 시드 근거에서 뺀다(GenericTranslationTokens)
             val translatedTokens = koreanTokens.flatMap { dict.translate(it) }.filter { it.length >= 2 && !GenericTranslationTokens.isGeneric(it) }
             val englishTokens = (directEnglishTokens + translatedTokens).distinct()
-            
-            val seeds = mutableSetOf<String>()
-            
-            for (node in graph.files.values) {
-                val className = node.className
-                if (englishTokens.isNotEmpty() && englishTokens.any { className.contains(it, ignoreCase = true) }) {
-                    seeds.add(className)
-                }
-                if (koreanTokens.isNotEmpty()) {
-                    val matchLocalName = node.localName?.let { ln -> koreanTokens.any { ln.contains(it) } } == true
-                    val matchComments = node.koreanComments.any { c -> koreanTokens.any { c.contains(it) } }
-                    if (matchLocalName || matchComments) {
-                        seeds.add(className)
-                    }
-                }
-                if (seeds.size >= 5) break
+            // 번역 토큰은 짧은 조각(del, hist 등)이 이름 곳곳에 부분 일치하므로 4글자 이상만 쓰고, 사용자가 직접 쓴 영문 식별자보다 낮게 친다.
+            val translatedOnly = translatedTokens.filter { it.length >= 4 && it !in directEnglishTokens }.distinct()
+
+            // 노드마다 근거 점수를 매긴다: 사용자가 직접 쓴 영문 식별자가 이름과 맞으면 토큰당 4점, 한글 이름(localName)이 SR 단어를 품으면 단어당 3점,
+            // 번역 토큰이 이름과 맞으면 토큰당 2점, 한글 주석이 SR 단어를 품으면 단어당 1점(한글 이름이 그 코드를 가장 직접 설명한다).
+            // 점수가 같으면 업무 계층 순서(서비스 → DAO·컨트롤러 → DTO → 그 밖), 그다음 그래프 순서. 근거가 하나도 없는 노드는 시드가 아니다.
+            class Scored(val className: String, val score: Int, val layerRank: Int, val order: Int)
+            val scored = graph.files.values.mapIndexedNotNull { order, node ->
+                val directScore = 4 * directEnglishTokens.distinct().count { node.className.contains(it, ignoreCase = true) }
+                val translatedScore = 2 * translatedOnly.count { node.className.contains(it, ignoreCase = true) }
+                val localScore = 3 * koreanTokens.distinct().count { t -> node.localName?.contains(t) == true }
+                val commentScore = koreanTokens.distinct().count { t -> node.koreanComments.any { it.contains(t) } }
+                val total = directScore + translatedScore + localScore + commentScore
+                if (total > 0) Scored(node.className, total, seedLayerRank(node.className), order) else null
             }
+            // 점수 상위 3개 + 그래프 순서 앞 5개(겹치면 한 번만): 점수만으로 고르면 한 이름 묶음이 자리를 모두 차지해 한글 근거(주석·한글명)로만 닿던 정답이 사라진다
+            val byScore = scored.sortedWith(compareByDescending<Scored> { it.score }.thenBy { it.layerRank }.thenBy { it.order })
+                .map { it.className }.distinct().take(3)
+            val byOrder = scored.sortedBy { it.order }.map { it.className }.distinct().take(5)
+            val seeds = (byScore + byOrder).distinct()
 
             val isCreate = srText.contains("추가") || srText.contains("생성") || srText.contains("신규")
             val isDelete = srText.contains("삭제") || srText.contains("제거")
