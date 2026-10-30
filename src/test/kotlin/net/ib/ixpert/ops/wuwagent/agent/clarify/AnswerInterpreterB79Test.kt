@@ -39,8 +39,9 @@ class AnswerInterpreterB79Test {
 
     @Test
     fun i4_나눌_수_없으면_원문_앞부분을_인용한다() {
-        val e = AnswerInterpreter.echo("응답자 이메일", "잘 모르겠어요")
-        assertTrue(e, e.startsWith("기록함: 응답자 이메일의 출처 — \"잘 모르겠어요\""))
-        assertEquals("잘 모르겠어요", AnswerInterpreter.sourceQuote("잘 모르겠어요"))
+        // B-80: "모르겠다"는 출처 답으로 나뉘므로 원문 인용 대신 출처 줄이 된다. 항목에 하나도 안 맞는 말로 바꿔 같은 경로를 확인한다.
+        val e = AnswerInterpreter.echo("응답자 이메일", "음 그건 좀 그렇네요")
+        assertTrue(e, e.startsWith("기록함: 응답자 이메일의 출처 — \"음 그건 좀 그렇네요\""))
+        assertEquals("음 그건 좀 그렇네요", AnswerInterpreter.sourceQuote("음 그건 좀 그렇네요"))
     }
 }
