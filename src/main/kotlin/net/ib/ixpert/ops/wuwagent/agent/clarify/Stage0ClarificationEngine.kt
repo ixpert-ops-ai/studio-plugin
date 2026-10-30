@@ -1330,6 +1330,11 @@ class Stage0ClarificationEngine(
             .joinToString("\n").ifBlank { null }
 
         val newDialogueHistory = state.dialogueHistory.toMutableList()
+        // B-80 11b: 사용자가 답하는 시점에 열려 있던 소스 확인 질문(필드 질문)을 어시스턴트 발화로 남긴다. 그래야 카드가 갱신되거나 복원된 뒤에도 무엇에 대한 답인지 보인다.
+        val answeredFieldQuestion = state.fieldFacts.firstOrNull { it.question != null && it.label !in state.fieldAnswers }?.question
+        if (trimmed.isNotBlank() && answeredFieldQuestion != null && newDialogueHistory.none { it.role == "assistant" && it.content == answeredFieldQuestion }) {
+            newDialogueHistory.add(DialogueHistoryItem(role = "assistant", content = answeredFieldQuestion))
+        }
         if (trimmed.isNotBlank()) {
             newDialogueHistory.add(DialogueHistoryItem(role = "user", content = trimmed))
         }

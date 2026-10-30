@@ -10,13 +10,14 @@ import { ScopeSelectionTree } from './ScopeSelectionTree';
 import { L1ClarificationForm } from './L1ClarificationForm';
 import { Stage3ConfirmationForm } from './Stage3ConfirmationForm';
 import { RefinedConfirmationForm } from './RefinedConfirmationForm';
-import { buildCancelText, makeNoticeBubble, markExpired } from './refinedConfirmLogic';
+import { buildCancelText, makeNoticeBubble, markExpired, parsePayload } from './refinedConfirmLogic';
 import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
 import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
+import { finalRefinedText, hintRecord, historyWithOpenQuestion, refinedRecord, restoreMessages, scopeRecord, stage3Record } from './chatRestoreLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
@@ -56,6 +57,8 @@ interface Message {
   isError?: boolean;
   isStreaming?: boolean;
   currentStatus?: string;
+  // 복원한 채팅에서 확정 뒤 분석이 이어진 Stage 0 카드(읽기 전용 "완료됨"으로 보인다)
+  clarifyCompleted?: boolean;
   stepNotiStatus?: 'started' | 'completed' | 'failed';
   toolNotiText?: string;
   clarifyData?: {
@@ -354,6 +357,9 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
   // 확정 뒤 오류(세션 만료 아님)로 분석을 시작하지 못함: 같은 정제문으로 "다시 시도"할 수 있다(발화는 다시 보내지 않는다)
   const [confirmFailed, setConfirmFailed] = useState(false);
   const isInterpreting = wait.phase === 'interpreting';
+  // 복원한 채팅에서 확정 뒤 분석이 이어진 카드: 읽기 전용 "완료됨"(확정 버튼·지시 입력·만료 복구 화면 없음). 답을 받지 못한 마지막 질문은 대화 기록에 어시스턴트 발화로 보인다.
+  const completed = (msg as any).clarifyCompleted === true;
+  const shownHistory = completed ? historyWithOpenQuestion(payload.dialogueHistory, payload.openQuestion) : (payload.dialogueHistory ?? []);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -469,7 +475,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
           )}
 
           {/* 대화 타임라인 (사용자 발화 ↔ 어시스턴트 피드백 히스토리) */}
-          {payload.dialogueHistory && payload.dialogueHistory.length > 0 ? (
+          {shownHistory.length > 0 ? (
             <div style={{
               display: 'flex',
               flexDirection: 'column',
@@ -483,7 +489,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
               <div style={{ fontSize: '11px', fontWeight: 600, color: '#9ca3af', marginBottom: '2px' }}>
                 💬 대화 기록
               </div>
-              {payload.dialogueHistory.map((turn, idx) => {
+              {shownHistory.map((turn, idx) => {
                 const isUser = turn.role === 'user';
                 return (
                   <div
@@ -560,7 +566,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
           )}
 
           {/* 1. 추가 확인 가이드 (개방형 질문) */}
-          {payload.openQuestion && (
+          {payload.openQuestion && !completed && (
             <div style={{ marginTop: '14px', padding: '10px 12px', background: 'rgba(245, 158, 11, 0.08)', borderLeft: '3px solid #f59e0b', borderRadius: '4px' }}>
               <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#fbbf24', marginBottom: '4px' }}>
                 ❓ 추가 확인 필요 (가이드 질문)
@@ -575,7 +581,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
           )}
 
           {/* 2. 단일 통합 자연어 대화 입력란 (/clarify-utterance) */}
-          {!isSubmitted && !sessionExpired && (
+          {!isSubmitted && !sessionExpired && !completed && (
             <div style={{
               marginTop: '14px',
               padding: '10px 12px',
@@ -638,7 +644,7 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
           )}
 
           {/* 3. 단일 분석 시작 버튼 */}
-          {sessionExpired && (
+          {sessionExpired && !completed && (
             <div data-session-expired="true" style={{
               marginTop: '14px',
               padding: '10px 12px',
@@ -686,7 +692,12 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
           )}
 
           <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-            {!isSubmitted && !sessionExpired && (
+            {completed && (
+              <span data-clarify-completed="true" style={{ fontSize: '12px', color: '#10b981', fontWeight: 'bold' }}>
+                ✔ 완료됨 (확인을 마치고 분석이 이어졌습니다)
+              </span>
+            )}
+            {!isSubmitted && !sessionExpired && !completed && (
               <button
                 type="button"
                 onClick={() => handleSendResponse(true)}
@@ -738,6 +749,19 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
     return <ClarifyForm msg={msg} />;
   }
 
+  // 0.55 카드에서 고른 내용의 한 줄 기록
+  if (msg.subType === 'choice_record') {
+    return (
+      <div className="msg-tool" data-choice-record="true">
+        <div className="dot" />
+        {msg.content}
+      </div>
+    );
+  }
+
+  // 카드에서 고른 내용을 채팅에 한 줄로 남긴다(App의 choice_record 처리로 이어진다)
+  const record = (text: string) => window.postMessage({ type: 'ai_message', subType: 'choice_record', id: `rec_${Date.now()}`, content: text }, '*');
+
   // 0.6 Scope Selection
   if (msg.subType === 'scopeSelection/showTree') {
     return (
@@ -757,6 +781,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
               text: JSON.stringify({ selectedPaths })
             }));
           }
+          record(scopeRecord(selectedPaths));
           window.postMessage({ type: 'ai_message', subType: 'scopeSelection/hideTree', id: 'system' }, '*');
         }}
       />
@@ -786,6 +811,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
               text: JSON.stringify({ projectId, userHint })
             }));
           }
+          record(hintRecord(userHint));
         }}
       />
       </CardWaitFrame>
@@ -814,6 +840,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
               text: JSON.stringify({ projectId, selectedPaths })
             }));
           }
+          record(stage3Record(selectedPaths));
         }}
       />
       </CardWaitFrame>
@@ -843,6 +870,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
               text
             }));
           }
+          record(refinedRecord(finalRefinedText(text, parsePayload(msg.content)?.refinedRequirement ?? '')));
         }}
       />
       </CardWaitFrame>
@@ -1332,12 +1360,22 @@ function App() {
           isLoadingChat.current = true;
           setChatId(chatData.id);
           setChatTitle(chatData.title || 'New Chat');
-          setMessages(loadedMessages);
+          // 저장 시점에 진행 중이던 표시를 끄고(정지 버튼이 켜져 진행 중인 분석이 없는데 /cancel이 나가는 것을 막는다) 완료된 Stage 0 카드를 표시한다
+          setMessages(restoreMessages(loadedMessages));
           setTimeout(() => { isLoadingChat.current = false; }, 100);
         } catch (err) {
           console.log('[chat_loaded] 파싱 실패:', err);
         }
         setShowChatListPopup(false);
+        return;
+      }
+
+      // 카드에서 고른 내용을 채팅에 한 줄로 남긴다(카드는 제출하면 사라지므로 복원 뒤에도 무엇을 골랐는지 보이게 한다)
+      if (data.subType === 'choice_record') {
+        if (typeof data.content === 'string' && data.content.trim() !== '') {
+          const recId = data.id || `rec_${Date.now()}`;
+          setMessages(prev => [...prev, { id: recId, role: 'ai', subType: 'choice_record', content: data.content, isLoading: false }]);
+        }
         return;
       }
 

@@ -536,6 +536,55 @@ try {
   await shot('39-answer-in-refined');
   record(39, '답이 정제문에 반영됨: 답이 /clarify-utterance로 1회 그대로 전송되고 질문은 사라지며, 정제문 확인 카드에 답이 들어간 정제문이 보인다(백엔드 응답은 모의)', s39.utterances === 1 && s39.answerSent && s39.questionGone && s39.refinedHasAnswer, JSON.stringify(s39));
 
+  // 40) 복원 뒤 정지 버튼(B-80 3): 저장 시점에 진행 중이던 메시지를 복원해도 정지 버튼이 켜지지 않고 /cancel이 나가지 않는다
+  const loadChat = (id, messages) => post({ type: 'ai_message', subType: 'chat_loaded', content: JSON.stringify({ id, title: '복원 시험', messages }) });
+  const sentBefore40 = await evaluate('window.__sent.length');
+  await loadChat('chat_r1', [
+    { id: 'u40', role: 'user', content: '이 코드를 분석해줘' },
+    { id: 'a40', role: 'ai', content: '분석 중입니다', isLoading: true, isStreaming: true, currentStatus: '분석 중' },
+  ]);
+  await sleep(500);
+  const s40 = await evaluate(`(()=>{const stop=document.querySelectorAll('button.btn-icon.stop').length; const send=document.querySelectorAll('button.btn-icon.send').length; const cancels=window.__sent.slice(${sentBefore40}).map(x=>JSON.parse(x)).filter(o=>o.command==='/cancel').length; return {stop, send, cancels}})()`);
+  record(40, '복원 뒤 정지 버튼 없음: 진행 중이던 메시지를 복원해도 정지 버튼 0개, 전송 버튼 1개, /cancel 전송 0건', s40.stop === 0 && s40.send === 1 && s40.cancels === 0, JSON.stringify(s40));
+
+  // 41) 복원한 완료 카드(B-80 11a, 11b): 확정 뒤 분석이 이어진 Stage 0 카드는 "완료됨" 읽기 전용이고, 답을 받지 못한 질문은 대화 기록에 어시스턴트 발화로 보인다
+  const Q41 = '응답자 이메일을 저장하거나 조회하는 코드를 찾지 못했습니다 (설문 관련 코드를 읽어 확인).\n어디서 가져올까요?';
+  const doneCard = { originalRequirement: '기존 설문조사 상세 조회에 응답자 이메일을 추가', summaryTurn: 1, items: [], openQuestion: Q41, isExhausted: false, isReadyForStage1: false, taskSummary: null, echoBackMessage: null, dialogueHistory: [{ role: 'user', content: '분석 시작해줘' }] };
+  await loadChat('chat_r2', [
+    { id: 'u41', role: 'user', content: '/clarify 기존 설문조사 상세 조회에 응답자 이메일을 추가' },
+    { id: 'cd41', role: 'ai', subType: 'analyze_clarify', content: '', clarifyData: doneCard },
+    { id: 'as41', role: 'ai', subType: 'analyze_start', content: '분석을 시작합니다' },
+  ]);
+  await sleep(500);
+  const s41 = await evaluate(`(()=>{const c=document.querySelector('[data-message-id="cd41"]'); if(!c) return {card:false}; const t=c.innerText; return {card:true, completed:!!c.querySelector('[data-clarify-completed="true"]'), confirmBtn:[...c.querySelectorAll('button')].some(b=>b.textContent.includes('확인 완료')), input:c.querySelectorAll('input[type="text"]').length, guide:t.includes('추가 확인 필요'), qCount:t.split('어디서 가져올까요?').length-1, assistantTurn:t.includes('어시스턴트'), expired:c.querySelectorAll('[data-session-expired]').length}})()`);
+  await shot('41-restored-completed-card');
+  record(41, '복원한 완료 카드: "완료됨" 표시, 확정 버튼·지시 입력·가이드 질문 영역·만료 복구 없음, 질문은 대화 기록에 1번만 보임', s41.card && s41.completed && !s41.confirmBtn && s41.input === 0 && !s41.guide && s41.qCount === 1 && s41.assistantTurn && s41.expired === 0, JSON.stringify(s41));
+
+  // 42) 복원한 미확정 카드(B-80 11a): 뒤따른 분석이 없으면 확정 버튼과 입력이 살아 있고, 확정하면 세션 만료 복구 화면이 나온다
+  await loadChat('chat_r3', [
+    { id: 'u42', role: 'user', content: '/clarify 기존 설문조사 상세 조회에 응답자 이메일을 추가' },
+    { id: 'cd42', role: 'ai', subType: 'analyze_clarify', content: '', clarifyData: doneCard },
+  ]);
+  await sleep(500);
+  await evaluate(`window.__confirmMode = 'expired', true`);
+  const s42a = await evaluate(`(()=>{const c=document.querySelector('[data-message-id="cd42"]'); if(!c) return {card:false}; return {card:true, completed:!!c.querySelector('[data-clarify-completed="true"]'), confirmBtn:[...c.querySelectorAll('button')].some(b=>b.textContent.includes('확인 완료')), input:c.querySelectorAll('input[type="text"]').length, guide:c.innerText.includes('추가 확인 필요')}})()`);
+  await click(`[...document.querySelector('[data-message-id="cd42"]').querySelectorAll('button')].find(b=>b.textContent.includes('확인 완료'))`, '복원한 미확정 카드의 확정');
+  await sleep(500);
+  const s42b = await evaluate(`(()=>{const c=document.querySelector('[data-message-id="cd42"]'); return {expired:c.querySelectorAll('[data-session-expired]').length, restartBtn:c.querySelectorAll('[data-clarify-restart]').length, completed:!!c.querySelector('[data-clarify-completed="true"]')}})()`);
+  await shot('42-restored-unconfirmed-card');
+  record(42, '복원한 미확정 카드: 완료됨 표시 없음, 확정 버튼·입력·가이드 질문 있음, 확정하면 만료 복구 화면(다시 시작 버튼 1개)', s42a.card && !s42a.completed && s42a.confirmBtn && s42a.input === 1 && s42a.guide && s42b.expired === 1 && s42b.restartBtn === 1 && !s42b.completed, JSON.stringify({ s42a, s42b }));
+
+  // 43) 카드 선택 기록(B-80 11c): 정제문 카드에서 "이대로 분석"을 누르면 확정한 정제문이 한 줄 기록으로 채팅에 남는다
+  await evaluate(`window.__confirmMode = null, true`);
+  await loadChat('chat_r4', []);
+  await sleep(300);
+  await rcRequest();
+  await sleep(300);
+  await click(ACT('asis'), '이대로 분석(기록 확인)');
+  await sleep(400);
+  const s43 = await evaluate(`(()=>{const r=[...document.querySelectorAll('[data-choice-record="true"]')].map(e=>e.innerText.trim()); return {records:r}})()`);
+  record(43, '선택 기록: "이대로 분석" 뒤 "확정한 정제문: <정제문>" 한 줄 기록이 1개 남는다', s43.records.length === 1 && s43.records[0].includes('확정한 정제문: ' + RC_REFINED) && !s43.records[0].includes('\n'), JSON.stringify(s43));
+
   const errors = await evaluate(`window.__errors || null`);
   fs.writeFileSync(OUT + '/results.json', JSON.stringify({ results, observations, shots, clicks, errors }, null, 1));
   const md = ['| # | 항목 | 결과 | 근거 |', '|---|---|---|---|', ...results.map(r => `| ${r.id} | ${r.item} | ${r.ok ? '됨' : '**안 됨**'} | ${String(r.evidence).replace(/\|/g, '\\|').slice(0, 300)} |`)].join('\n');
