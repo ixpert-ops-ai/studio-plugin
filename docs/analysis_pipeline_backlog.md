@@ -3539,4 +3539,83 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 #### 미확인 항목
 - **확인**: 위 0c 표, 3번 코드 경로, 24시나리오 손실 0, 전체 테스트 실패 집합 불변, ui-check 43/43(재실행 기준), 웹뷰 노드 시험 67/67.
 - **추정**: B-78 14:51:59 `/cancel`이 복원된 로딩 메시지 때문이었다는 것, ui-check 9번 간헐 실패 원인, 9번 측정과 IDE 결과 차이의 원인.
-- **판단 불가**: 점수 기반 시드가 배치 클래스를 줄이는 근본 해결의 효과(임시 방편 상태), IpsController 구제의 실제 효과(대리값 측정뿐), Stage 3 정제문 전체 문장(로그에 앞 80자만 있음), 오늘 SR의 Stage 0 카드를 실제 IDE에서 본 모습(재현은 코드 수준, IDE 재실행 안 함).
+- **판단 불가**: 점수 기반 시드가 배치 클래스를 줄이는 근본 해결의 효과(임시 방편 상태), IpsController 구제의 실제 효과(대리값 측정뿐), Stage 3 정제문
+
+### B-81 (2026-11-02)
+
+#### 0. B-80 IDE 로그(`build/ide-logs/b80_ide_20261102.log`, 채팅 chat_1793596397928) 시각순
+| 시각 | 사건 |
+|---|---|
+| 14:13:24 | `/clarify` 수신, 요약 LLM 호출 2회(12초, 12초) |
+| 14:15:24 | `/clarify-utterance`(사용자 답) |
+| 14:16:57.9 | `/analyze-confirm`(확정). LLM 2회 동시 시작 |
+| 14:17:04.9 | 첫 응답(7초) |
+| 14:17:28.2 | 정제문 104자 완료(확정부터 30.3초, 첫 응답 뒤 23.3초 = 사용자가 본 "24초"). 같은 순간 카드 요청, 렌더 0.05초 |
+| 14:18:42.7 | 정제문 제출 → 패키지 카드 |
+| 14:18:45.1 | 패키지 "취소 (전체 선택)" → `scopeSelection/cancel` → 탐색기 시작 |
+| 14:21:10 | 시드 4개 확정(SurveyServiceImpl, SurveyDaoImpl, SurveyDto, sql_survey.xml). 평가 30, 후보 13 |
+| 14:19:49 | 힌트 "건너뛰기"(`l1Clarification/cancel`) |
+| 14:22:02.8 | Stage 3 "건너뛰기" → 14:22:43.6 결과(41초, 최종 5개에 SurveyDao 포함) |
+| 14:25:52 | 재시작 |
+- `[Cancelled]` 0, `[TransientRetry]` 0, `/cancel` 0, `UI was frozen` 0. 카드별 cancel 명령 3개(scope, l1, stage3)뿐이고 전역 `/cancel`은 없다.
+- **B-80 보고 정정**: "Stage 1 후보 14→16"은 하네스(대체 시드) 대리 숫자였다. IDE의 Stage 1은 탐색기가 확정한 시드 4개 → 평가 30 → 후보 13이다(시드는 `AgenticGraphExplorer`가 확정하고 `heuristicSeeds`는 쓰이지 않는다).
+- IDE 확인(기록): 복원 뒤 정지 버튼 없음, Stage 0 "완료됨" 읽기 전용, 질문 카드·정제문 줄 복원 → 3796bb5 IDE 동작 확인.
+
+#### 1. Stage 0 카드 후보 경로(파일:줄)
+- 후보는 `heuristicSeeds`가 아니라 `Stage0GraphScanner`가 만든다: 토큰 `Stage0GraphScanner.kt:59-136`(`extractTokens`), 후보 `:141-634`(`rescanUnverified`; 엔진 호출 `Stage0ClarificationEngine.kt:347, :520, :1291`).
+  - survey_list.jsp·survey_result.jsp: 엣지 1 화면 필드 공유(`:261-349`) + 엣지 2 URL 짝(`:352-402`). survey.*.js: 엣지 2. IpsController: 엣지 2 컨트롤러 바인딩(`:386-400`).
+  - UserDto: 엣지 0-B 요구사항 토큰 edit·modify(`:216-256`, "수정"의 번역). sql_user.xml: 엣지 4 매퍼(`:490-509`). UserServiceImpl: 엣지 3 CALLS/INJECTS(`:405-457`).
+- `heuristicSeeds`는 `ClaimedFieldCheck.stage0Facts:177`(읽기 범위)과 `AgenticSeedSelector.fallbackSelection:336`에서만 쓰인다(`grep` 2건).
+- 원인(코드 사실, 측정 확인): 스캐너 사전이 `DomainDictionary.load(graph)`(도메인 명사 끔, `:24`)라 "설문 → survey" 번역이 없다. 스캐너 토큰: 구조 0개, 개념 22개.
+- 측정(`SeedDesignB81Test`, 오늘 SR): 사전을 켜면(`domainNouns=true`) 후보 8 → 16개. 그러나 설문 백엔드(SurveyServiceImpl·Dao)는 여전히 후보에 없고 sql_survey.xml, survey_write.jsp/js가 늘었으며 배치(AlimtalkTemplateBatch*, SurveyPartExportCli)와 잡음(IbCenterApiService, Alimtalk DTO)이 들어오고 형제 유추 문장 하나가 후보 이름으로 새는 현상이 보인다. 사전 한 줄로는 목표(후보에 설문 백엔드)가 달성되지 않는다.
+- **판단 요청(구현 안 함)**: 후보 경로 변경안 = (a) 사전 켜기 + (b) 클래스명 엣지(0-B)가 번역 토큰 하나로 맞은 Service·Dao·Dto를 층별 최대 2개 보장 + (c) 배치 이름 제외 유지. 영향은 Stage 0 카드 후보 수와 하네스 Stage 0 블록 전부가 바뀌는 것. 24시나리오 필수 손실은 구현 뒤 하네스로 측정해야 한다.
+
+#### 1. 시드 대체안(측정, 15쌍 필수 정답 손실 / 배치 시드 수)
+| 안 | 규칙 | 필수 손실 | 배치 시드(합계) | 오늘 SR 시드 |
+|---|---|---|---|---|
+| 현재 | 점수 3 + 그래프 순서 5 | - | 5 | SurveyServiceImpl, SurveyService, SurveyDao, SurveyPartExportCli/Job/Runner, AlimtalkTemplateBatchRunner/Repository |
+| A | 점수 상위 5 | 1(SR-12 ACAOTBAPC003DEM) | 1 | SurveyServiceImpl, SurveyService, SurveyDao, SurveyDaoImpl, SurveyDto |
+| B | 점수 3 + 같은 폴더 한글 근거 2 | 3 | 0 | 설문 3개뿐 |
+| **C** | 배치 이름 제외 점수 상위 5 + 이름 근거 없는 한글 근거 노드 2개(그래프 순서) | **0** | **0** | SurveyServiceImpl, SurveyService, SurveyDao, SurveyDaoImpl, SurveyDto, ReviewDto (폴더 service·dao·dto) |
+- SR-12는 한글 주석만으로 닿는 정답이라 이름 근거 점수에서는 잡히지 않고, C의 "한글 근거 전용 2개" 자리가 그것을 지킨다. 한글 근거 상한은 2개 자리(한글명 3점·주석 1점은 점수에 이미 있음)이고 오늘 "설문 응답" 검색에서 ClosingLinkDto가 1위(한글 근거 4)로 오르는 노이즈는 점수 상위 5에는 들어오지 않아(정제문 기준 한글 근거 상위 ClosingLinkDto 4, 점수 상위 8에 포함) 한글 근거 전용 자리는 이름 근거가 0인 노드에만 준다.
+- **C를 적용해 전체 수용 테스트(m81b)를 돌린 결과 커밋하지 않았다**: 전체 735 중 실패 44(기준 42 + 2), clarify 311 중 3 실패. 새 실패는 `ExcludeComponentDialogueTest#testScenario2_...`(기대 28, 실제 30)과 `#testCaseB_...`(기대 27, 실제 30)이다. 하네스 7블록은 전부 달라진다(LlmOff 4블록은 대체 시드가 달라지고 LlmOn 3블록도 대체 경로를 탄다).
+- **ExcludeComponentDialogueTest가 배치 시드에 기대는 이유**: 두 테스트는 LLM 없는 대체 시드로 Stage 1 후보 30개를 얻은 뒤, Stage 0에서 제외 확정한 AlimtalkTemplateBatchJob/Runner/Repository가 그 30개 안에 있어 "30 → 27(-3) / 28(-2)"로 빠지는지를 단언한다. 이 전제(제외 대상이 후보에 있음)는 배치 클래스가 시드여서 후보에 들어온 덕분에만 성립한다. 시드에서 배치를 빼면 제외 대상이 후보에 없어 30 → 30이 되어 "제외가 후보를 줄인다"는 검증 자체가 사라진다. 단언을 30→30으로 맞추거나 느슨하게 하면 검증이 약해지므로 그렇게 하지 않았다. 해법 후보: 두 테스트가 대체 시드가 아니라 배치 클래스를 포함하는 고정 시드(모의 탐색기)로 분석하게 바꾸는 것(조건 변경이므로 승인 필요).
+- C와 SeedDesignB81Test(측정 전용, `build/b81_seed_design_probe.txt`)는 보존했다. 시드 코드는 B-80 상태 그대로다.
+
+#### 2. 4글자 미만 번역 토큰(15쌍 읽기 전용)
+- 빠진 토큰: log(2쌍: D2, D3), svc(D3), biz(D3), ok(SR-02), del(SR-11). 나머지 10쌍은 빠진 토큰 없음.
+- 필수 정답 이름에 든 빠진 토큰: D3의 svc, biz(예: ...SVC, ...BIZ 클래스). 단 이 정답들은 현재 적중이 1 → 그대로이고(시드 A/B/C 비교와 무관) 4글자 규칙으로 손실은 없다(B-80 a3 손실 0).
+- 업무 약어(sms/mms/faq/kmc/rcs/otp 등): 15쌍에서 빠진 것 0. 사전 번역에서 3글자 이하를 내는 한글 단어는 "결제 → pay"뿐이다(확인한 15개 단어 중). 예외 목록은 지금은 필요 없다(근거: 빠진 업무 약어 0). 다만 svc/biz는 Anyframe 층 약어라 번역으로 시드가 되면 오히려 잡음이므로 제외가 맞다.
+- `NAMEMATCH Trans: [survey, survey]` 중복: 이중 가산이 **아니다**. SR에 "설문"이 두 번 있어 번역어가 두 번 들어간 것이고(`RelevanceScorer.kt:563`), 점수는 `maxOf` 한 값(`:79`)과 맵(`associateWith`)으로 한 번만 센다. 표시만 중복이라 수정하지 않았다.
+
+#### 3. "모름" 답변: ⚠️ 유지(구현, 시험 ClaimedFieldB81Test u1·u2, ClaimedFieldWarningB78Test w3b).
+
+#### 4. Stage 3 측정(오늘 정제문 104자 전문, 후보 13개, 5회, 수정 없음)
+- SurveyDao 포함 **2/5**(B-80 9의 97자 기준 5/5). 남은 목록 2종: [ServiceImpl, SurveyDto, SurveyDaoImpl, sql_survey.xml](3회), 같은 4개 + SurveyDao(2회). 대체 경로 0회, 38~44초.
+- 같은 후보로 IDE는 SurveyDao를 포함했다(최종 5개). 결과는 회차마다 갈린다(비결정). 문장 차이(97자 vs 104자 "백엔드 API 응답에 포함하도록 수정한다")가 원인일 수 있으나 5회로는 **추정**이다.
+
+#### 5. ui-check 9번
+- 원인(코드 확인): `RemovedCandidatesPanel`이 되살리기 후 300ms에 선택과 대기 상태를 비운다. 그 안에 고른 항목은 지워지고, 부하가 크면 좌표 클릭이 빗나가기도 한다(재현 실패 사례: 부하 중 6회 중 1회, 시나리오 9 "패널 있음=true, 안내=null").
+- 수정: 고정 sleep을 조건 대기로 바꾸고, 응답 뒤 300ms 정착을 기다리고, 전체 체크는 체크 수를 직접 확인해 빠진 항목만 다시 클릭한다. 확인: 전체 수용 테스트(9분)와 겹친 8회 연속 48/48.
+
+#### 6. sql_survey.xml 20점 분해(코드 + 하네스 재현)
+- 20 = 홉 10(시드 직접, `RelevanceScorer.kt:211-215`) + 번역 이름 일치 30×idf(survey)=10.7(idf=ln(132/23)/ln(132)=0.358) + 층 일치 0. 리소스 노드에는 메서드·주석 점수가 없다.
+- 보호 없이 55를 넘으려면: 최댓값이 홉 10 + 직접 50×0.358=17.9 + 층 15 = 42.9이므로 이 도메인에서는 **불가능**하다. 통과 조건은 (1) 대체 탐색 경로(FALLBACK, 홉 30점) + 층 일치, (2) idf가 큰 희귀 파일명, (3) 보호(Judge Pick, Seed Class, 시드 직접 의존). 이번에는 Seed Class 보호로 구제됐다(IDE 로그는 Judge Pick, 하네스 재현은 Seed Class 표기).
+
+#### 7. 11c 기록 줄(B-80 결함)
+- 가설 확인(**확인**, 코드): `record()`가 제출 콜백에만 있었고 취소 콜백(scope, l1, stage3, refined)에는 없었다. 시간 초과는 `CardTimeoutNotice` 안내 말풍선만 있고 기록 줄은 없었다.
+- 수정: 취소 4경로와 시간 초과 3경로에 기록 줄. 취소의 부작용 점검(**확인**): `scopeSelection/cancel`은 `ScopeSelectionBridge.cancelScopeSelection`만 호출하고 `TaskCancellationToken`, `/cancel`, `[Cancelled]`와 무관하다. 로그에서도 `/cancel`·`[Cancelled]` 0건.
+- ui-check 44~48이 제출/건너뛰기/취소/시간 초과/완료를 실제 메시지 흐름으로 재현한다.
+
+#### 8~10
+- 8: 결과 경고는 실제 읽은 폴더 이름(`Finding.readFolders`)으로, 출처는 `AnswerInterpreter.sourceLine`(Stage 0 "기록함"과 같은 함수)으로 만든다. ℹ️는 빈 인용 줄로 갈라진다.
+- 9: 경로 = Stage 3 카드가 뜨면 제출 줄이 짧은 문구(`submittedStatusText(pending=true)`), 카드가 내려가면(`*/hide` → `cardPendingAfter` false) 긴 문구 "분석을 진행 중입니다..."로 바뀌고, 결과 메시지가 와도 아무도 이 줄을 바꾸지 않았다. 수정: `analyze_removed`/`analyze_incomplete`에서 앞의 Stage 0 카드를 완료됨으로 바꾸고 제출 줄을 숨긴다.
+- 10: 요약 프롬프트 사실 줄 테이블 기준, 칩에서 계층 이름 제외.
+
+#### 11. IpsController(보류) 대리 측정
+- 오늘 IDE 45점, 하네스 재현(오늘 정제문 + IDE 시드 4개)도 45점으로 일치. 점수 구성은 B-79 기록과 같다. 4회 연속 45점 탈락. 구제는 구현하지 않았다.
+
+#### 테스트 / 예측 대비
+- 커밋 161068a: 전체 735 중 실패 42(기준과 동일, 차이 0), clarify 311 중 1 실패(기준)·3 건너뜀, 하네스 7블록 EXACT_MATCH, 웹뷰 72/72, ui-check 48/48 x8.
+- 예측 대비 어긋남: (a) 4번 5/5 예측 → 2/5, (b) 후보 경로 원인이 `heuristicSeeds` 일부일 거라는 예측 → 스캐너 사전, (c) 사전만 켜면 설문 백엔드가 후보에 오를 거라는 예측 → 오르지 않음, (d) 업무 약어 손실 가능성 예측 → 0, (e) ui-check 9번 원인을 대기 부족으로 예측 → 부분적으로 맞음(300ms 선택 초기화 + 클릭 빗나감).
+- 확인/추정/판단 불가: 확인 = 로그 표, 후보 경로, 사전 원인, 점수 분해, 기록 누락 원인, 시드 안 A/B/C 손실 수. 추정 = Stage 3 5/5 → 2/5의 원인, 사전 확장의 구체 효과. 판단 불가 = 후보 경로 변경안의 24시나리오 효과, C 적용 시 ExcludeComponentDialogueTest 대체 방식. 전체 문장(로그에 앞 80자만 있음), 오늘 SR의 Stage 0 카드를 실제 IDE에서 본 모습(재현은 코드 수준, IDE 재실행 안 함).

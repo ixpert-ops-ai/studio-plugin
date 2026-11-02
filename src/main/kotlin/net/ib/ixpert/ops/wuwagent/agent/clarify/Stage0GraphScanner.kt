@@ -19,9 +19,11 @@ class Stage0GraphScanner(
     private val proposalBudget: Int = 8,
     private val localDomainOverrides: Map<String, Set<String>> = emptyMap(),
     private val maxBridgeDegree: Int = 15,
-    private val maxExternalShared: Int = 3
+    private val maxExternalShared: Int = 3,
+    // B-81 1: 도메인 명사 사전(설문 → survey)을 후보 탐색에도 쓸지. 기본 false는 종전 동작이다(측정용 선택지).
+    domainNouns: Boolean = false
 ) {
-    private val domainDictionary = DomainDictionary.load(graph)
+    private val domainDictionary = DomainDictionary.load(graph, domainNouns)
     private val keywordDecomposer = KeywordDecomposer(graph, domainDictionary)
     private val brotherAnalogyScanner = BrotherAnalogyScanner(graph, maxBridgeDegree, maxExternalShared)
 
