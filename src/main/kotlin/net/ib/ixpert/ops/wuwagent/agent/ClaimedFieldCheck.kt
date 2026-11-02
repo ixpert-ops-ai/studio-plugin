@@ -1,5 +1,6 @@
 package net.ib.ixpert.ops.wuwagent.agent
 
+import net.ib.ixpert.ops.wuwagent.agent.clarify.AnswerInterpreter
 import net.ib.ixpert.ops.wuwagent.agent.clarify.model.FieldFact
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.AgenticSeedSelector
 import net.ib.ixpert.ops.wuwagent.service.metagraph.consumer.discovery.DomainDictionary
@@ -39,7 +40,7 @@ object ClaimedFieldCheck {
     private class OtherHit(val cite: String, val tables: Set<String>)
 
     /** 항목 하나의 확인 결과(찾았는지, 근거, 읽은 파일 수). */
-    private class Eval(val noun: DataNoun, val subject: String?, val read: Int, val unread: Int, val inDomainCites: List<String>, val other: List<OtherHit>, val seedNames: List<String> = emptyList(), val domainScope: Boolean = true)
+    private class Eval(val noun: DataNoun, val subject: String?, val read: Int, val unread: Int, val inDomainCites: List<String>, val other: List<OtherHit>, val seedNames: List<String> = emptyList(), val domainScope: Boolean = true, val readFolders: List<String> = emptyList())
 
     class Finding(
         val noun: String, val subject: String?, val filesRead: Int, val otherCites: List<String>, val otherTables: List<String> = emptyList(),
@@ -48,12 +49,29 @@ object ClaimedFieldCheck {
         /** 사용자가 Stage 0 질문에 한 답(ClarifyIntent의 "<항목> 출처: <답>" 제약). 없으면 null. */
         val answer: String? = null,
         /** 실제로 읽은 자바 폴더가 모두 시드가 가리키는 도메인(설문 등)의 패키지인가. 아니면 화면 문구는 도메인 이름을 쓰지 않는다(B-80). */
-        val domainScope: Boolean = true
+        val domainScope: Boolean = true,
+        /** 실제로 읽은 자바 폴더의 마지막 이름(batch, service 등, 중복 없이 읽은 순서). 화면의 범위 문구가 이것으로 만들어진다(B-81 8). */
+        val readFolders: List<String> = emptyList()
     ) {
         /** 화면에 보이는 항목 이름(예: "응답자 이메일"). */
         val label: String get() = (subject?.let { "$it " } ?: "") + noun
 
-        fun withAnswer(a: String?): Finding = Finding(noun, subject, filesRead, otherCites, otherTables, seedNames, a, domainScope)
+        /** 출처가 정해지지 않았는가: 답이 없거나 "모름"이다(B-81 3). 이 항목은 결과에서 ⚠️로 남고 /implement 전에 확인이 필요한 항목으로 센다. */
+        val unresolved: Boolean get() = answer == null || isUnknownAnswer(answer)
+
+        fun withAnswer(a: String?): Finding = Finding(noun, subject, filesRead, otherCites, otherTables, seedNames, a, domainScope, readFolders)
+    }
+
+    private val UNKNOWN_LOOSE = Regex("모르|몰라|모릅")
+
+    /**
+     * 사용자의 답이 "출처 모름"인가(B-81 3). 출처로 나뉜 절이 모두 "출처 미정"으로 정리되거나, 모른다는 말만 있고 새로 저장·조인 같은 출처를 말하지 않은 경우다.
+     * "잘 모르겠지만 새로 저장해줘"처럼 출처를 함께 말했으면 모름이 아니다.
+     */
+    fun isUnknownAnswer(answer: String): Boolean {
+        val r = AnswerInterpreter.interpret(answer)
+        if (r.source.isNotEmpty() && r.source.all { AnswerInterpreter.refineSourceClause(it) == "출처 미정(사용자도 모름)" }) return true
+        return UNKNOWN_LOOSE.containsMatchIn(answer) && !NEW_DATA.containsMatchIn(answer) && !answer.contains("조인")
     }
 
     /** 문장에 사전의 데이터 명사(이메일 등)가 있는가. */
@@ -123,7 +141,7 @@ object ClaimedFieldCheck {
 
     private fun toFinding(e: Eval) = Finding(
         e.noun.korean.first(), e.subject, e.read, e.other.map { it.cite }.take(3),
-        e.other.flatMap { it.tables }.distinct().take(3), e.seedNames, domainScope = e.domainScope
+        e.other.flatMap { it.tables }.distinct().take(3), e.seedNames, domainScope = e.domainScope, readFolders = e.readFolders
     )
 
     private fun evaluate(srText: String, graph: ProjectGraph, projectRoot: File?, seedPaths: List<String>): List<Eval> {
@@ -135,6 +153,8 @@ object ClaimedFieldCheck {
         // 읽은 자바 폴더가 모두 시드 이름 토큰(survey 등)이 든 패키지일 때만 화면에서 도메인 이름("설문 관련 코드")으로 말한다(B-80 8)
         val javaDirs = files.filter { it.endsWith(".java") || it.endsWith(".kt") }.map { it.substringBeforeLast('/').lowercase() }.distinct()
         val domainScope = javaDirs.isNotEmpty() && javaDirs.all { d -> tokens.any { it in d } }
+        // 화면 문구가 실제 읽은 폴더 이름으로 만들어진다(B-81 8): 자바 폴더의 마지막 이름을 읽은 순서대로, 중복 없이
+        val readFolders = files.filter { it.endsWith(".java") || it.endsWith(".kt") }.map { it.substringBeforeLast('/').substringAfterLast('/') }.distinct()
         val results = mutableListOf<Eval>()
         for (noun in nouns) {
             var read = 0
@@ -163,7 +183,7 @@ object ClaimedFieldCheck {
                     }
                 }
             }
-            results.add(Eval(noun, subjectOf(srText, noun), read, unread, inDomainCites, other, seedPaths.mapNotNull { graph.files[it]?.className }, domainScope))
+            results.add(Eval(noun, subjectOf(srText, noun), read, unread, inDomainCites, other, seedPaths.mapNotNull { graph.files[it]?.className }, domainScope, readFolders))
         }
         return results // 못 읽은 파일이 있으면 호출한 쪽이 침묵한다(오탐 방지)
     }
@@ -174,12 +194,15 @@ object ClaimedFieldCheck {
      */
     fun stage0Facts(srText: String, graph: ProjectGraph, projectRoot: File?): List<FieldFact> {
         if (projectRoot == null || requestedNouns(srText).isEmpty()) return emptyList()
-        val seeds = AgenticSeedSelector.heuristicSeeds(srText, graph).seedClasses
-            .mapNotNull { c -> graph.files.values.firstOrNull { it.className == c }?.path }
-        return evaluate(srText, graph, projectRoot, seeds).filter { it.unread == 0 && it.read > 0 }.map { e ->
+        val seedNames = AgenticSeedSelector.heuristicSeeds(srText, graph).seedClasses
+        val seeds = seedNames.mapNotNull { c -> graph.files.values.firstOrNull { it.className == c }?.path }
+        val evals = evaluate(srText, graph, projectRoot, seeds)
+        // B-81 1-1: Stage 0이 고른 시드와 실제로 읽은 폴더(소스 본문·개인정보는 남기지 않는다)
+        evals.firstOrNull()?.let { println("[Stage0Seeds] 시드 ${seedNames.size}개: $seedNames | 읽은 폴더: ${it.readFolders} | 읽은 파일 ${it.read}개, 못 읽은 파일 ${it.unread}개 | 도메인 패키지만 읽음=${it.domainScope}") }
+        return evals.filter { it.unread == 0 && it.read > 0 }.map { e ->
             val f = toFinding(e)
             if (e.inDomainCites.isNotEmpty()) FieldFact(f.label, found = true, cite = e.inDomainCites.first(), filesRead = e.read)
-            else FieldFact(f.label, found = false, otherCites = f.otherCites, filesRead = e.read, question = question(f))
+            else FieldFact(f.label, found = false, otherCites = f.otherCites, filesRead = e.read, question = question(f), otherTables = f.otherTables)
         }
     }
 
@@ -187,7 +210,7 @@ object ClaimedFieldCheck {
     fun question(f: Finding): String {
         val where = if (f.otherCites.isEmpty()) "다른 업무 코드에서도 발견되지 않았습니다."
         else "${foundOnlyIn(f)}: ${f.otherCites.joinToString(", ")}"
-        return "${f.label}${eulReul(f.label)} 저장하거나 조회하는 코드를 찾지 못했습니다 (${scopeNote(f.seedNames, f.domainScope)}).\n$where\n어디서 가져올까요? (예: 다른 테이블 조인, 새로 저장, 잘 모르겠음)"
+        return "${f.label}${eulReul(f.label)} 저장하거나 조회하는 코드를 찾지 못했습니다 (${scopeNote(f)}).\n$where\n어디서 가져올까요? (예: 다른 테이블 조인, 새로 저장, 잘 모르겠음)"
     }
 
     /**
@@ -202,18 +225,16 @@ object ClaimedFieldCheck {
     }
 
     /**
-     * 화면에 보이는 범위 문구(B-79): 시드 클래스 이름, 폴더 수, 파일 수를 사용자 문구에서 뺀다. 시드 클래스가 가리키는 도메인 명사를 사전에서 찾아 "설문 관련 코드"로 말한다(사전에 없으면 "관련 코드").
-     * 실제로 읽은 범위는 [scopeOf]의 files(시드 클래스가 있는 폴더의 자바 파일 + 시드 이름 토큰이 파일명에 있는 리소스)이며 숫자는 로그와 시험에서만 쓴다.
-     * Stage 0 카드는 키워드 시드(heuristicSeeds), 결과 화면은 탐색기가 확정한 시드를 쓰므로 시드가 다르면 읽은 범위도 다르다.
+     * 화면에 보이는 범위 문구(B-81 8): 고정 문구("설문 관련 코드")가 아니라 실제로 읽은 자바 폴더 이름([Finding.readFolders])으로 만든다.
+     * 읽은 폴더가 모두 시드가 가리키는 도메인(설문 등)의 패키지일 때만 도메인 이름을 앞에 붙이고, 배치 등 다른 폴더가 섞였으면 폴더 이름만 말한다.
+     * Stage 0 질문과 결과 경고가 같은 이 함수를 쓴다(시드가 다르면 읽은 폴더도 달라 문구가 다를 수 있다: Stage 0은 키워드 시드, 결과는 탐색기가 확정한 시드).
      */
-    fun scopeArea(seedNames: List<String>, domainScope: Boolean = true): String {
-        // B-80: "설문 관련 코드"는 실제로 읽은 폴더가 모두 그 도메인 패키지일 때만 쓴다. 배치 등 다른 폴더가 섞였으면 중립 문구를 쓴다.
-        if (!domainScope) return "관련 코드"
-        val word = DomainDictionary.domainWordFor(seedNames.flatMap { camelTokens(it) })
-        return if (word != null) "$word 관련 코드" else "관련 코드"
+    fun scopeNote(f: Finding): String {
+        if (f.readFolders.isEmpty()) return "관련 코드를 읽어 확인"
+        val folders = f.readFolders.take(4).joinToString("·") + if (f.readFolders.size > 4) " 등" else ""
+        val word = if (f.domainScope) DomainDictionary.domainWordFor(f.seedNames.flatMap { camelTokens(it) }) else null
+        return if (word != null) "$word 패키지의 $folders 폴더를 읽어 확인" else "$folders 폴더를 읽어 확인"
     }
-
-    fun scopeNote(seedNames: List<String>, domainScope: Boolean = true): String = "${scopeArea(seedNames, domainScope)}를 읽어 확인"
 
     /**
      * 요약 프롬프트의 [코드 확인 목록]에 넣을 한 줄(B-78: 평서문 사실만 둔다. 금지 지시는 시스템 프롬프트에만 있다. 전에는 줄 끝의 "…쓰지 말 것" 명령문이 요약에 그대로 나왔다).
@@ -221,12 +242,18 @@ object ClaimedFieldCheck {
     fun promptLine(f: FieldFact): String =
         if (f.found) "- ${f.label}: ${f.cite}에 있음"
         else "- ${f.label}: 없음(후보 폴더의 소스·매퍼 ${f.filesRead}개를 읽음)" +
-            (if (f.otherCites.isNotEmpty()) ", 다른 업무의 쿼리에만 있음(${f.otherCites.joinToString(", ")})" else "")
+            // B-81 10: 테이블 기준 표현(다른 업무의 쿼리라고 단정하지 않는다)
+            (if (f.otherCites.isNotEmpty()) {
+                val where = if (f.otherTables.isNotEmpty()) "읽은 범위 안의 ${f.otherTables.joinToString("/")} 테이블 쿼리에만 있음" else "읽은 범위 안의 다른 코드에만 있음"
+                ", $where(${f.otherCites.joinToString(", ")})"
+            } else "")
 
     /** 결과 화면에 붙일 경고 한 줄. */
     fun render(f: Finding): String =
-        "확인 안 됨: ${f.label}${eulReul(f.label)} 조회하는 코드/SQL을 찾지 못했습니다 (${scopeNote(f.seedNames, f.domainScope)})" +
-            (if (f.otherCites.isNotEmpty()) ". ${foundOnlyIn(f)}: ${f.otherCites.joinToString(", ")}" else "")
+        "확인 안 됨: ${f.label}${eulReul(f.label)} 조회하는 코드/SQL을 찾지 못했습니다 (${scopeNote(f)})" +
+            (if (f.otherCites.isNotEmpty()) ". ${foundOnlyIn(f)}: ${f.otherCites.joinToString(", ")}" else "") +
+            // B-81 3: "모름" 답은 출처가 정해진 것이 아니므로 경고를 유지하고 그 사실을 덧붙인다
+            (if (f.answer != null && isUnknownAnswer(f.answer)) ". 사용자 답변: 출처 미정(사용자도 모름)" else "")
 
     /**
      * 사용자가 Stage 0 질문에 답해 해소된 항목의 안내 한 줄(B-79: "확인 안 됨" 경고 대신 이 줄만 보인다).
@@ -234,10 +261,17 @@ object ClaimedFieldCheck {
      */
     fun renderResolved(f: Finding): String {
         val a = f.answer ?: return render(f)
-        // 답에서 출처 부분만 인용한다(Stage 0 "기록함"과 같은 해석, 앞 60자 자르기 대신)
-        val quote = "사용자 답변 \"${net.ib.ixpert.ops.wuwagent.agent.clarify.AnswerInterpreter.sourceQuote(a)}\""
-        return if (isNewData(a)) "${f.label}: ${scopeArea(f.seedNames, f.domainScope)}를 읽어 확인했으나 기존 데이터가 없습니다. $quote 에 따라 새 컬럼 추가와 수집·저장 경로가 구현 범위에 포함됩니다."
-        else "${f.label}: ${scopeArea(f.seedNames, f.domainScope)}를 읽어 확인했으나 기존 코드에는 없고, $quote 으로 출처가 지정되었습니다(조인 대상 확인 필요)."
+        if (isUnknownAnswer(a)) return render(f)
+        // B-81 8: 사용자 발화를 통째로 인용하지 않고 Stage 0 "기록함"의 출처 줄과 같은 함수(AnswerInterpreter.sourceLine)가 만든 정리된 출처 문장을 쓴다
+        val src = sourceSentence(a)
+        return if (isNewData(a)) "${f.label}: ${scopeNote(f)}했으나 기존 데이터가 없습니다. 사용자 답변(출처: $src)에 따라 새 컬럼 추가와 수집·저장 경로가 구현 범위에 포함됩니다."
+        else "${f.label}: ${scopeNote(f)}했으나 기존 코드에는 없고, 사용자 답변(출처: $src)으로 출처가 지정되었습니다(조인 대상 확인 필요)."
+    }
+
+    /** 답의 출처 부분을 정리한 문장. 출처로 나눠진 절이 없으면 답 앞부분을 그대로 쓴다. Stage 0 "기록함"의 출처 줄과 같은 함수다. */
+    fun sourceSentence(answer: String): String {
+        val r = AnswerInterpreter.interpret(answer)
+        return if (r.source.isNotEmpty()) AnswerInterpreter.sourceLine(r.source) else answer.trim().take(80)
     }
 
     private val SERVICE_FILE = Regex("(Service(Impl)?|SVC(Impl)?)\\.(java|kt)$")

@@ -4,6 +4,22 @@
 /** 사용자에게 보이는 문장에서 내부 용어 "메타그래프"를 "프로젝트 코드 구조"로 바꾼다. */
 export const toUserWording = (text: string | undefined): string => (text ?? '').split('메타그래프').join('프로젝트 코드 구조');
 
+/** 업무 영역이 아니라 계층 이름이라 힌트로 쓸 수 없는 폴더 이름. */
+const LAYER_NAMES = ['service', 'services', 'dao', 'dto', 'vo', 'controller', 'controllers', 'impl', 'mapper', 'repository', 'entity', 'model', 'util', 'common'];
+
+/** 감지된 패키지/도메인 칩 목록에서 계층 이름(service/dao/dto/controller/impl 등)을 빼고, 마지막 단어가 같은 칩은 하나만 둔다(B-81 10). */
+export const visibleDomainChips = (domains: string[] | undefined): string[] => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of domains ?? []) {
+    const last = (d.split('.').pop() ?? d).trim().toLowerCase();
+    if (last === '' || LAYER_NAMES.includes(last) || seen.has(last)) continue;
+    seen.add(last);
+    out.push(d);
+  }
+  return out;
+};
+
 /** 후보 옆 한글 이름 칸: 값이 없거나 "주석 없음"(주석이 없다는 내부 표시)이면 칸을 비운다. */
 export const localNameLabel = (localName: string | undefined): string => {
   const v = (localName ?? '').trim();

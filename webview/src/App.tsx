@@ -17,7 +17,7 @@ import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
-import { finalRefinedText, hintRecord, historyWithOpenQuestion, refinedRecord, restoreMessages, scopeRecord, stage3Record } from './chatRestoreLogic';
+import { completeClarifyCards, finalRefinedText, hintRecord, hintSkipRecord, historyWithOpenQuestion, refinedCancelRecord, refinedRecord, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
@@ -80,6 +80,9 @@ const sendUiLog = (text: string) => {
 };
 
 // 사용자 응답을 기다리는 확인 카드의 틀: 대기 상태와 경과 시간을 보이고, 카드가 도착하면 하단 근접 여부와 무관하게 화면 안으로 스크롤하며, 렌더 결과(뷰포트 안인지)를 진단 로그로 남긴다.
+// 가장 최근 Stage 3 카드의 후보 수(시간 초과 안내가 카드를 내린 뒤에 와도 "전체 N개 진행" 기록을 만들 수 있게 한다)
+let lastStage3Total = 0;
+
 const CardWaitFrame: React.FC<{ kind: string; msgId: string; children: React.ReactNode }> = ({ kind, msgId, children }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [seconds, setSeconds] = useState(0);
@@ -717,8 +720,8 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
                 {confirmButtonLabel(confirmFailed)}
               </button>
             )}
-            {isSubmitted && (
-              <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            {isSubmitted && !completed && (
+              <span data-clarify-submitted="true" style={{ fontSize: '12px', color: '#10b981', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                 {submittedStatusText(cardPending)}
                 {wait.phase === 'confirming' && (
                   <span className="clarify-wait" role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 'normal', color: '#94a3b8' }}>
@@ -772,6 +775,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
           if (window.sendToIde) {
             window.sendToIde(JSON.stringify({ command: 'scopeSelection/cancel' }));
           }
+          record(scopeSkipRecord());
           window.postMessage({ type: 'ai_message', subType: 'scopeSelection/hideTree', id: 'system' }, '*');
         }}
         onSubmit={(selectedPaths) => {
@@ -803,6 +807,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
               text: JSON.stringify({ projectId })
             }));
           }
+          record(hintSkipRecord());
         }}
         onSubmit={(projectId, userHint) => {
           if (window.sendToIde) {
@@ -832,6 +837,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
               text: JSON.stringify({ projectId })
             }));
           }
+          record(stage3SkipRecord(stage3CandidateCount(msg.content)));
         }}
         onSubmit={(projectId, selectedPaths) => {
           if (window.sendToIde) {
@@ -862,6 +868,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
               text: buildCancelText(projectId)
             }));
           }
+          record(refinedCancelRecord());
         }}
         onSubmit={(_projectId, text) => {
           if (window.sendToIde) {
@@ -1381,6 +1388,12 @@ function App() {
 
       const messageId = data.messageId || data.id; // messageId 또는 id 필드 확인
 
+      // B-81 9: 결과(또는 결과 없이 끝남)가 나오면 그 앞의 Stage 0 카드를 "완료됨"으로 바꾼다. 전에는 복원할 때만 완료됨이 되고 실행 중인 화면은
+      // 결과 뒤에도 "확인이 제출되었습니다. 분석을 진행 중입니다..."가 남았다(카드를 내리는 hide 메시지가 제출 줄의 짧은 문구를 긴 문구로 바꾸기만 했다).
+      if (data.subType === 'analyze_removed' || data.subType === 'analyze_incomplete') {
+        setMessages(prev => completeClarifyCards(prev, messageId));
+      }
+
       if (data.subType === 'analyze_incomplete') {
         // 결과 표 없이 끝난 분석: 같은 메시지에 다시 시도 버튼용 요구사항만 붙인다
         const detail = messageId ? parseIncompleteDetail(data.content) : null;
@@ -1500,6 +1513,7 @@ function App() {
       }
 
       if (data.subType === 'stage3Confirmation/request') {
+        lastStage3Total = stage3CandidateCount(data.content);
         const uniqueId = `s3_${Date.now()}`;
         setMessages(prev => {
           const filtered = prev.filter(m => m.subType !== 'stage3Confirmation/request');
@@ -1548,7 +1562,12 @@ function App() {
       // 오류가 아닌 안내(예: 분석 취소). messageId와 짝 없이도 안내 말풍선으로 보인다.
       if (data.subType === 'analyze_notice') {
         if (typeof data.content === 'string' && data.content.trim() !== '') {
-          setMessages(prev => [...prev, makeNoticeBubble(data.content, Date.now(), Math.random().toString(36).substring(2, 7)) as Message]);
+          // B-81 7: 5분 시간 초과로 자동 진행한 경우 제출·건너뛰기와 같은 모양의 기록 줄도 남긴다(안내 말풍선은 그대로)
+          const rec = timeoutRecord(data.content, lastStage3Total);
+          setMessages(prev => {
+            const next = [...prev, makeNoticeBubble(data.content, Date.now(), Math.random().toString(36).substring(2, 7)) as Message];
+            return rec ? [...next, { id: `rec_${Date.now()}`, role: 'ai', subType: 'choice_record', content: rec, isLoading: false } as Message] : next;
+          });
         }
         return;
       }

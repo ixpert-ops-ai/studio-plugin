@@ -18,7 +18,12 @@ class SummaryPromptEchoB78Test {
         val found = FieldFact("관리자 계정 이메일", found = true, cite = "UserDto.java:12", filesRead = 4)
         val l1 = ClaimedFieldCheck.promptLine(notFound)
         val l2 = ClaimedFieldCheck.promptLine(found)
-        assertEquals("- 응답자 이메일: 없음(후보 폴더의 소스·매퍼 30개를 읽음), 다른 업무의 쿼리에만 있음(sql_survey.xml:670)", l1)
+        // B-81 10: 테이블을 모를 때도 "다른 업무의 쿼리"라고 단정하지 않는다(전: "다른 업무의 쿼리에만 있음")
+        assertEquals("- 응답자 이메일: 없음(후보 폴더의 소스·매퍼 30개를 읽음), 읽은 범위 안의 다른 코드에만 있음(sql_survey.xml:670)", l1)
+        // 테이블을 알면 테이블 기준으로 쓴다
+        val withTables = FieldFact("응답자 이메일", found = false, otherCites = listOf("sql_survey.xml:670"), filesRead = 30, question = "q", otherTables = listOf("ISSW_ADMIN_USER", "ISSW_COMPANY"))
+        assertEquals("- 응답자 이메일: 없음(후보 폴더의 소스·매퍼 30개를 읽음), 읽은 범위 안의 ISSW_ADMIN_USER/ISSW_COMPANY 테이블 쿼리에만 있음(sql_survey.xml:670)", ClaimedFieldCheck.promptLine(withTables))
+        assertFalse(ClaimedFieldCheck.promptLine(withTables).contains("다른 업무"))
         assertEquals("- 관리자 계정 이메일: UserDto.java:12에 있음", l2)
         assertFalse(l1, SummaryPromptEcho.leaks(l1))
         assertFalse(l2, SummaryPromptEcho.leaks(l2))

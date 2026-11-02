@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Compass, Check, SkipForward, Layers, FileCode, Tag } from 'lucide-react';
-import { localNameLabel, toUserWording } from './explorerDisplayLogic';
+import { localNameLabel, toUserWording, visibleDomainChips } from './explorerDisplayLogic';
 
 export interface L1Candidate {
   className?: string;
@@ -57,7 +57,8 @@ export const L1ClarificationForm: React.FC<L1ClarificationFormProps> = ({ payloa
     );
   }
 
-  const { projectId, turn, query, topCandidates = [], domains = [], explanation, message } = data;
+  const { projectId, turn, query, topCandidates = [], explanation, message } = data;
+  const domains = visibleDomainChips(data.domains);
 
   const handleCandidateClick = (candPath?: string) => {
     if (!candPath) return;

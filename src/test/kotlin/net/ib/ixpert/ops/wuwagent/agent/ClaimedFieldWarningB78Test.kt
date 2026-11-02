@@ -114,6 +114,33 @@ class ClaimedFieldWarningB78Test {
         assertEquals(emptyList<String>(), result.newDataItems)
     }
 
+    // B-81 3: "모름" 답은 출처가 정해진 것이 아니므로 ⚠️ 경고가 남고, 출처를 정해 달라는 항목으로 센다(ℹ️로 내려가지 않는다)
+    @Test
+    fun w3b_모름_답변은_경고를_유지하고_정해_달라는_항목으로_센다() {
+        for (a in listOf("잘 모르겠음", "잘 모르겠어요", "모르겠습니다", "몰라요")) {
+            val (out, result) = run(intent("응답자 이메일 출처: $a"), refined)
+            val warn = out.lines().single { it.startsWith("> ⚠️ 확인 안 됨:") }
+            assertTrue("$a: $warn", warn.contains("사용자 답변: 출처 미정(사용자도 모름)"))
+            assertEquals("$a: ℹ️ 줄은 없다", 0, out.lines().count { it.startsWith("> ℹ️ 응답자 이메일:") })
+            assertEquals("$a: 정해 달라는 항목", listOf("응답자 이메일"), result.confirmItems)
+            assertEquals("$a: 새 데이터 항목 아님", emptyList<String>(), result.newDataItems)
+        }
+    }
+
+    // B-81 8: ℹ️ 줄(출처·수집 경로·DDL)은 줄마다 나눠 보인다(인용문 안에서 줄바꿈만 두면 한 문단으로 이어 붙는다), 출처는 Stage 0 "기록함"과 같은 정리 문장
+    @Test
+    fun w3c_정보_줄은_빈_인용_줄로_갈라지고_출처는_정리된_문장이다() {
+        val answer = "설문 응답 테이블에 이메일 컬럼을 새로 추가해서 저장하는 방향으로 해줘"
+        val (out, _) = run(intent("응답자 이메일 출처: $answer"), refined)
+        val infos = out.lines().filter { it.startsWith("> ℹ️") }
+        assertTrue("출처·수집 경로·DDL 3줄: $infos", infos.size >= 3)
+        val lines = out.lines()
+        for (l in infos.drop(1)) assertEquals("ℹ️ 줄 앞은 빈 인용 줄이다: $l", ">", lines[lines.indexOf(l) - 1])
+        val first = infos.first()
+        assertTrue(first, first.contains("사용자 답변(출처: 설문 응답 테이블에 이메일 컬럼 신설·저장)"))
+        assertFalse("발화를 통째로 인용하지 않는다: $first", first.contains("해줘") || first.contains("하는 방향으로"))
+    }
+
     @Test
     fun w4_답변이_없으면_출처를_정해_달라는_항목이고_implement_안내가_바뀐다() {
         val (_, result) = run(intent(), refined)
@@ -126,17 +153,18 @@ class ClaimedFieldWarningB78Test {
 
     // B-79 3b: 사용자 문구에서 시드 클래스 이름, 폴더 수, 파일 수를 뺀다(B-78 w5에서 바뀐 기대값). Stage 0 질문과 결과 경고 둘 다.
     @Test
-    fun w5_사용자_문구에는_시드_이름과_숫자_없이_설문_관련_코드를_읽어_확인으로만_나온다() {
+    // B-81 8에서 바뀐 기대값: 고정 문구("설문 관련 코드를 읽어 확인") 대신 실제로 읽은 폴더 이름으로 말한다(시드 이름·개수는 여전히 없다)
+    fun w5_사용자_문구에는_시드_이름과_숫자_없이_실제_읽은_폴더_이름으로만_나온다() {
         val g = survey()
         val q = ClaimedFieldCheck.stage0Facts(original, g, surveyRoot).single().question!!
         val (out, _) = run(intent(), refined)
         val warn = out.lines().single { it.startsWith("> ⚠️ 확인 안 됨:") }
         for (t in listOf(q, warn)) {
-            assertTrue(t, t.contains("관련 코드를 읽어 확인"))
+            assertTrue(t, t.contains("폴더를 읽어 확인"))
             assertFalse("시드 이름이 없다: $t", Regex("Survey\\w*|Alimtalk\\w*|시드").containsMatchIn(t.replace("sql_survey.xml", "")))
-            assertFalse("폴더 수·파일 수가 없다: $t", Regex("\\d+개").containsMatchIn(t) || t.contains("폴더"))
+            assertFalse("파일 수가 없다: $t", Regex("\\d+개").containsMatchIn(t))
         }
-        assertTrue("탐색기 시드(Survey*)는 설문으로 말한다: $warn", warn.contains("설문 관련 코드를 읽어 확인"))
+        assertTrue("탐색기 시드(Survey*)는 설문 패키지로 말한다: $warn", warn.contains("설문 패키지의") && warn.contains("폴더를 읽어 확인"))
         // 읽은 파일 수는 로그·시험에만 남긴다
         File("build/b79_scope_numbers.txt").writeText("Stage 0 질문: $q\n결과 경고: $warn\n", Charsets.UTF_8)
     }

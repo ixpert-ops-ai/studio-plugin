@@ -493,17 +493,21 @@ class RequirementAnalysisPipeline(
             }
             // SR의 데이터 항목을 업무 코드에서 찾지 못하면 경고 한 줄
             // 사용자가 Stage 0 질문에 답해 해소된 항목은 경고 대신 ℹ️ 안내만 보인다(B-79)
-            claimFindings.filter { it.answer == null }.forEach { appendLine("> ⚠️ ${ClaimedFieldCheck.render(it)}") }
-            claimFindings.filter { it.answer != null }.forEach { f ->
-                appendLine("> ℹ️ ${ClaimedFieldCheck.renderResolved(f)}")
+            // B-81 3: 답이 "모름"인 항목은 출처가 정해지지 않은 것이므로 답이 없는 항목과 같이 ⚠️로 남긴다(ℹ️로 내리지 않는다)
+            val claimLines = mutableListOf<String>()
+            claimFindings.filter { it.unresolved }.forEach { claimLines.add("> ⚠️ ${ClaimedFieldCheck.render(it)}") }
+            claimFindings.filter { !it.unresolved }.forEach { f ->
+                claimLines.add("> ℹ️ ${ClaimedFieldCheck.renderResolved(f)}")
                 // 새로 저장하기로 했는데 요청 진입점(컨트롤러·화면)이 최종 목록에 없으면 한 줄 안내(파일은 추가하지 않는다)
                 if (ClaimedFieldCheck.isNewData(f.answer!!) && !ClaimedFieldCheck.hasEntryPoint(validatedTargetFiles.map { it.path })) {
                     val finalPaths = validatedTargetFiles.map { it.path }
-                    appendLine("> ℹ️ ${ClaimedFieldCheck.entryPointNote(f, ClaimedFieldCheck.suggestedEntryController(discoveryResult.relevantFiles.map { it.path }, finalPaths))}")
+                    claimLines.add("> ℹ️ ${ClaimedFieldCheck.entryPointNote(f, ClaimedFieldCheck.suggestedEntryController(discoveryResult.relevantFiles.map { it.path }, finalPaths))}")
                 }
                 // 새 컬럼이면 DB 스키마 변경이 먼저 필요하다는 한 줄(B-80 6)
-                ClaimedFieldCheck.ddlNote(f)?.let { appendLine("> ℹ️ $it") }
+                ClaimedFieldCheck.ddlNote(f)?.let { claimLines.add("> ℹ️ $it") }
             }
+            // B-81 8: 줄마다 나눠 보인다. 인용문 안에서 줄바꿈만 두면 마크다운이 한 문단으로 이어 붙이므로 빈 인용 줄(">")로 문단을 가른다
+            if (claimLines.isNotEmpty()) appendLine(claimLines.joinToString("\n>\n"))
             // Stage 3에서 제거된 후보와 판정 누락 후보(출력 축소 형식은 제거 사유를 받지 않는다)
             verificationOutput.noticeLines(validatedTargetFiles.map { it.path }.toSet()).takeIf { it.isNotEmpty() }?.let { lines ->
                 appendLine()
@@ -587,8 +591,8 @@ class RequirementAnalysisPipeline(
             rawResponse = "그래프 탐색 결과 처리 완료",
             suggestedNewFiles = verifiedSuggestedNewFiles,
             removedCandidates = removedCandidates,
-            confirmItems = claimFindings.filter { it.answer == null }.map { it.label },
-            newDataItems = claimFindings.filter { it.answer != null && ClaimedFieldCheck.isNewData(it.answer) }.map { it.label }
+            confirmItems = claimFindings.filter { it.unresolved }.map { it.label },
+            newDataItems = claimFindings.filter { !it.unresolved && ClaimedFieldCheck.isNewData(it.answer!!) }.map { it.label }
         )
 
         // --- ClarificationContract 생산 및 디스크 저장 (Analyze 산출물 계약 단독 생산) ---

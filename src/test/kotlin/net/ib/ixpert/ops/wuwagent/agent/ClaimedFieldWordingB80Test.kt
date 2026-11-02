@@ -10,9 +10,12 @@ import org.junit.Test
 /** B-80 6, 7, 8, 10: 결과 표 사유와 ℹ️ 줄의 일치, 다음 행동 문구, 범위·테이블 기준 문구, 단계별 메타데이터. */
 class ClaimedFieldWordingB80Test {
 
-    private fun finding(answer: String?, domainScope: Boolean = true, tables: List<String> = listOf("ISSW_ADMIN_USER", "ISSW_COMPANY")) = ClaimedFieldCheck.Finding(
+    private fun finding(
+        answer: String?, domainScope: Boolean = true, tables: List<String> = listOf("ISSW_ADMIN_USER", "ISSW_COMPANY"),
+        folders: List<String> = listOf("service", "dao")
+    ) = ClaimedFieldCheck.Finding(
         noun = "이메일", subject = "응답자", filesRead = 24, otherCites = listOf("sql_survey.xml:670", "sql_survey.xml:841"),
-        otherTables = tables, seedNames = listOf("SurveyServiceImpl", "SurveyDao"), answer = answer, domainScope = domainScope
+        otherTables = tables, seedNames = listOf("SurveyServiceImpl", "SurveyDao"), answer = answer, domainScope = domainScope, readFolders = folders
     )
 
     private val saved = "응답 테이블에 이메일 컬럼을 새로 추가해서 저장"
@@ -52,15 +55,18 @@ class ClaimedFieldWordingB80Test {
     }
 
     @Test
+    // B-81 8에서 바뀐 기대값: 고정 문구("설문 관련 코드를 읽어 확인") 대신 실제로 읽은 폴더 이름으로 말한다
     fun w4_읽은_폴더가_도메인_패키지가_아니면_도메인_이름을_쓰지_않는다() {
-        assertEquals("설문 관련 코드를 읽어 확인", ClaimedFieldCheck.scopeNote(listOf("SurveyServiceImpl"), true))
-        assertEquals("관련 코드를 읽어 확인", ClaimedFieldCheck.scopeNote(listOf("SurveyServiceImpl"), false))
-        val mixed = ClaimedFieldCheck.render(finding(null, domainScope = false))
-        assertTrue(mixed, mixed.contains("(관련 코드를 읽어 확인)") && !mixed.contains("설문 관련 코드"))
+        assertEquals("설문 패키지의 service·dao 폴더를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null, domainScope = true)))
+        assertEquals("batch·service 폴더를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null, domainScope = false, folders = listOf("batch", "service"))))
+        assertEquals("관련 코드를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null, folders = emptyList())))
+        assertEquals("설문 패키지의 a·b·c·d 등 폴더를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null, folders = listOf("a", "b", "c", "d", "e"))))
+        val mixed = ClaimedFieldCheck.render(finding(null, domainScope = false, folders = listOf("batch", "service")))
+        assertTrue(mixed, mixed.contains("(batch·service 폴더를 읽어 확인)") && !mixed.contains("설문 패키지"))
         val domain = ClaimedFieldCheck.render(finding(null, domainScope = true))
-        assertTrue(domain, domain.contains("설문 관련 코드를 읽어 확인"))
-        val resolvedMixed = ClaimedFieldCheck.renderResolved(finding(saved, domainScope = false))
-        assertTrue(resolvedMixed, resolvedMixed.contains(": 관련 코드를 읽어 확인했으나") && !resolvedMixed.contains("설문 관련 코드"))
+        assertTrue(domain, domain.contains("설문 패키지의 service·dao 폴더를 읽어 확인") && !domain.contains("설문 관련 코드"))
+        val resolvedMixed = ClaimedFieldCheck.renderResolved(finding(saved, domainScope = false, folders = listOf("batch", "service")))
+        assertTrue(resolvedMixed, resolvedMixed.contains(": batch·service 폴더를 읽어 확인했으나") && !resolvedMixed.contains("설문 패키지"))
     }
 
     @Test

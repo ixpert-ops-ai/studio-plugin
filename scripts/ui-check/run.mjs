@@ -61,6 +61,14 @@ try {
     await sleep(120);
   };
   const post = obj => evaluate(`window.postMessage(${JSON.stringify(obj)}, '*'), true`);
+  // 제외 후보 패널은 되살리기를 보낸 뒤 300ms 안에 선택과 대기 상태를 비운다(RemovedCandidatesPanel). 그 안에 고른 항목은 지워지므로 응답을 본 뒤 이 시간만큼 더 기다린다.
+  const SETTLE = 350;
+  // B-81 5: 고정 sleep 뒤에 화면 상태를 가정하면 부하가 있을 때 다음 클릭이 비활성 버튼에 가거나 응답 반영 전에 읽는다(시나리오 9가 가끔 실패했다). 조건이 참이 될 때까지 기다린다.
+  const waitFor = async (expr, ms = 5000) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) { try { if (await evaluate(`!!(${expr})`)) return true; } catch {} await sleep(40); }
+    return false;
+  };
   const record = (id, item, ok, evidence) => { results.push({ id, item, ok, evidence }); console.log(ok ? '됨  ' : '안 됨', id, item, '|', evidence); };
 
   // 3) 모의 브리지(페이지 로드 전 주입): 웹뷰가 보낸 요청을 기록하고 /restore에는 백엔드와 같은 형식으로 응답한다.
@@ -151,7 +159,8 @@ try {
 
   // 시나리오 5: 확정 -> /restore 요청 내용
   await click(restoreBtn, '확정');
-  await sleep(500);
+  await waitFor(`${panel}?.innerText.includes('1개를 되살렸습니다')`);
+  await sleep(SETTLE);
   await shot('04-restored-1');
   const sent = await evaluate(`window.__sent.filter(s=>s.includes('/restore')).map(s=>JSON.parse(s))`);
   const req = sent[sent.length - 1];
@@ -168,8 +177,10 @@ try {
   // 시나리오 8: 무시된 경로 안내
   await evaluate(`window.__extraIgnored = ['src/gone/Old.java'], true`);
   await click(`${items}[3]`, '체크2');
+  await waitFor(`!${restoreBtn}.disabled`);
   await click(restoreBtn, '확정2');
-  await sleep(500);
+  await waitFor(`${panel}?.innerText.includes('되살릴 수 없었습니다')`);
+  await sleep(SETTLE);
   await shot('05-ignored-notice');
   const s8 = await textOf(panel);
   record(8, '"<파일명>은(는) 되살릴 수 없었습니다" 안내', !!s8 && s8.includes('Old.java은(는) 되살릴 수 없었습니다') && s8.includes('1개를 되살렸습니다'), JSON.stringify(s8?.split('\n').slice(-3)));
@@ -177,10 +188,18 @@ try {
 
   // 시나리오 9: 모두 되살리면 패널이 사라지고 안내만 남음
   const remaining = await evaluate(`${items}.length`);
-  for (let i = 0; i < remaining; i++) await click(`${items}[${i}]`, '전체 체크 ' + i);
+  // 부하가 크면 좌표로 보낸 클릭이 빗나가 체크가 빠질 수 있다(버튼은 1개만 체크해도 켜지므로 버튼 상태로는 알 수 없다): 모두 체크될 때까지 빠진 항목만 다시 클릭하고, 체크 수를 직접 확인한다.
+  const checkedN = `${items}.filter(d=>d.querySelector('svg')?.getAttribute('class')?.includes('check-square')).length`;
+  for (let attempt = 0; attempt < 4 && (await evaluate(checkedN)) < remaining; attempt++) {
+    for (let i = 0; i < remaining; i++) {
+      const on = await evaluate(`!!${items}[${i}]?.querySelector('svg')?.getAttribute('class')?.includes('check-square')`);
+      if (!on) await click(`${items}[${i}]`, '전체 체크 ' + i);
+    }
+  }
+  await waitFor(`${checkedN} === ${remaining}`);
   await shot('06-all-checked');
   await click(restoreBtn, '전체 확정');
-  await sleep(600);
+  await waitFor(`!document.querySelector('[data-message-id="${ID}"] .removed-candidates') && document.querySelector('[data-message-id="${ID}"] .removed-candidates-notice')`);
   await shot('07-all-restored');
   const s9 = await evaluate(`(()=>{const m=document.querySelector('[data-message-id="${ID}"]'); return {panel:!!m.querySelector('.removed-candidates'), notice:m.querySelector('.removed-candidates-notice')?.innerText ?? null};})()`);
   record(9, '모두 되살리면 패널이 사라지고 안내 줄만 남음', !s9.panel && !!s9.notice && s9.notice.includes(`${remaining}개를 되살렸습니다`), `패널 있음=${s9.panel}, 안내=${JSON.stringify(s9.notice)} (마지막 되살림 ${remaining}개)`);
@@ -584,6 +603,104 @@ try {
   await sleep(400);
   const s43 = await evaluate(`(()=>{const r=[...document.querySelectorAll('[data-choice-record="true"]')].map(e=>e.innerText.trim()); return {records:r}})()`);
   record(43, '선택 기록: "이대로 분석" 뒤 "확정한 정제문: <정제문>" 한 줄 기록이 1개 남는다', s43.records.length === 1 && s43.records[0].includes('확정한 정제문: ' + RC_REFINED) && !s43.records[0].includes('\n'), JSON.stringify(s43));
+
+  // 44~48) 카드 응답 기록(B-81 7): 실제 메시지 흐름(카드 요청 → 사용자 응답 → 백엔드가 카드를 내림 → 다음 카드)으로 제출·건너뛰기·취소·시간 초과를 각각 재현한다.
+  // B-80 IDE 확인: 정제문 제출만 기록이 남고 패키지 "취소 (전체 선택)", 힌트 "건너뛰기 (자율 탐색)", Stage 3 "건너뛰기" 세 카드는 기록이 없었다.
+  const RECS = `[...document.querySelectorAll('[data-choice-record="true"]')].map(e=>e.innerText.trim())`;
+  const BTN = (t, notText) => `[...document.querySelectorAll('button')].filter(b=>!b.disabled && b.textContent.includes(${JSON.stringify(t)})${notText ? ` && !b.textContent.includes(${JSON.stringify(notText)})` : ''}).pop()`;
+  const sentCmds = from => evaluate(`window.__sent.slice(${from}).map(x=>JSON.parse(x).command).filter(c=>c!=='/saveChat'&&c!=='/uiLog')`);
+  const scopePayload = { projectName: 'p', tree: [{ path: 'src/main/java/a/survey', displayName: 'survey', fileCount: 12, children: [], depth: 1 }, { path: 'src/main/java/a/batch', displayName: 'batch', fileCount: 5, children: [], depth: 1 }], config: { minFilesPerNode: 1, maxDepth: 3, maxSelections: 10, maxFiles: 500, warningThreshold: 300 } };
+  const l1Req = () => post({ type: 'ai_message', subType: 'l1Clarification/request', messageId: 'system', content: JSON.stringify({ projectId: 'p1', turn: 1, query: 'survey email', topCandidates: [], domains: ['a.survey', 'a.survey.service', 'a.survey.dao'], message: '힌트를 입력해 주세요' }) });
+  const s3Req = () => post({ type: 'ai_message', subType: 'stage3Confirmation/request', messageId: 'system', content: JSON.stringify({ projectId: 'p1', candidates: Array.from({ length: 13 }, (_, i) => ({ order: i + 1, path: `src/main/java/a/C${i + 1}.java`, type: 'MODIFY', description: 'x' })), message: 'Stage 3 후보 확인' }) });
+
+  // 44) 건너뛰기·취소 3경로를 한 흐름으로: 범위 "취소 (전체 선택)" → 힌트 "건너뛰기 (자율 탐색)" → Stage 3 "건너뛰기 (전체 13개 진행)". 각 응답마다 기록 1줄, /cancel(전역 취소) 0건.
+  await loadChat('chat_s1', []);
+  await sleep(300);
+  const from44 = await evaluate('window.__sent.length');
+  await post({ type: 'ai_message', subType: 'scopeSelection/showTree', messageId: 'system', content: JSON.stringify(scopePayload) });
+  await waitFor(BTN('취소 (전체 선택)'));
+  await click(BTN('취소 (전체 선택)'), '범위 취소(전체 선택)');
+  await l1Req();
+  await waitFor(BTN('건너뛰기 (자율 탐색)'));
+  await click(BTN('건너뛰기 (자율 탐색)'), '힌트 건너뛰기');
+  await post({ type: 'ai_message', subType: 'l1Clarification/hide', messageId: 'system', content: '' });
+  await s3Req();
+  await waitFor(BTN('건너뛰기 (전체 13개 진행)'));
+  await click(BTN('건너뛰기 (전체 13개 진행)'), 'Stage 3 건너뛰기');
+  await post({ type: 'ai_message', subType: 'stage3Confirmation/hide', messageId: 'system', content: '' });
+  await waitFor(`${RECS}.length>=3`);
+  const s44 = { recs: await evaluate(RECS), cmds: await sentCmds(from44) };
+  await shot('44-skip-records');
+  record(44, '건너뛰기·취소 3경로에 기록 줄: "범위: 전체(선택 안 함)", "힌트: 건너뜀", "Stage 3: 전체 13개 진행" 각 1줄, 전송된 명령은 카드별 cancel 3개뿐이고 /cancel(전역 취소)은 0건',
+    JSON.stringify(s44.recs) === JSON.stringify(['✔ 읽을 범위 선택: 전체(선택 안 함)', '✔ 탐색 힌트: 건너뜀(자율 탐색)', '✔ 최종 검증 대상 선택: 건너뜀(전체 13개 진행)'])
+      && JSON.stringify(s44.cmds) === JSON.stringify(['scopeSelection/cancel', 'l1Clarification/cancel', 'stage3Confirmation/cancel']), JSON.stringify(s44));
+
+  // 45) 제출 경로: 힌트 제출·Stage 3 제출에도 기록(전에 있던 동작이 그대로인지). 칩에는 계층 이름(service, dao)이 없다(B-81 10).
+  await loadChat('chat_s2', []);
+  await sleep(300);
+  await l1Req();
+  await waitFor(BTN('도메인 힌트 제출'));
+  const chips = await evaluate(`[...document.querySelectorAll('.l1-clarification-card button')].filter(b=>b.textContent.trim().startsWith('+')).map(b=>b.textContent.trim())`);
+  await evaluate(`(()=>{const i=document.querySelector('.l1-clarification-card input[type="text"]'); const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set; set.call(i,'survey'); i.dispatchEvent(new Event('input',{bubbles:true})); return true})()`);
+  await waitFor(`!${BTN('도메인 힌트 제출')}.disabled`);
+  await click(BTN('도메인 힌트 제출'), '힌트 제출');
+  await post({ type: 'ai_message', subType: 'l1Clarification/hide', messageId: 'system', content: '' });
+  await s3Req();
+  await waitFor(BTN('로 검증 진행'));
+  await click(BTN('로 검증 진행'), 'Stage 3 제출');
+  await post({ type: 'ai_message', subType: 'stage3Confirmation/hide', messageId: 'system', content: '' });
+  await waitFor(`${RECS}.length>=2`);
+  const s45 = { recs: await evaluate(RECS), chips };
+  record(45, '제출 경로 기록 유지 + 칩에서 계층 이름 제외: 힌트 제출·Stage 3 제출 기록 각 1줄, 칩은 "+ a.survey"만(service·dao 없음)',
+    s45.recs.length === 2 && s45.recs[0] === '✔ 탐색 힌트: survey' && s45.recs[1].startsWith('✔ 최종 검증 대상 선택: 13개(') && JSON.stringify(chips) === JSON.stringify(['+ a.survey']), JSON.stringify(s45));
+
+  // 46) 5분 시간 초과: 응답 없이 백엔드가 보낸 안내(analyze_notice)와 함께 같은 모양의 기록 줄이 남는다(사용자 클릭 없음)
+  await loadChat('chat_s3', []);
+  await sleep(300);
+  const from46 = await evaluate('window.__sent.length');
+  await s3Req();
+  await sleep(300);
+  await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_s3', content: '응답이 없어 전체 후보로 진행했습니다.' });
+  await post({ type: 'ai_message', subType: 'stage3Confirmation/hide', messageId: 'system', content: '' });
+  await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_l1', content: '응답이 없어 힌트 없이 진행했습니다.' });
+  await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_sc', content: '응답이 없어 전체 프로젝트로 진행했습니다.' });
+  await waitFor(`${RECS}.length>=3`);
+  const s46 = { recs: await evaluate(RECS), cmds: await sentCmds(from46) };
+  await shot('46-timeout-records');
+  record(46, '시간 초과 3경로에도 기록 줄(전체 13개 진행·힌트 없음·전체 범위, 모두 "5분 응답 없음"), 사용자 응답 명령은 0건',
+    JSON.stringify(s46.recs) === JSON.stringify(['✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음, 자동 진행)', '✔ 탐색 힌트: 없음(5분 응답 없음, 자동 진행)', '✔ 읽을 범위 선택: 전체(5분 응답 없음, 자동 진행)']) && s46.cmds.length === 0, JSON.stringify(s46));
+
+  // 47) 정제문 카드 취소: 취소 기록 1줄, 전송은 refinedConfirmation/cancel 1건뿐(/cancel 0건)
+  await loadChat('chat_s4', []);
+  await sleep(300);
+  const from47 = await evaluate('window.__sent.length');
+  await rcRequest();
+  await waitFor(ACT('cancel'));
+  await click(ACT('cancel'), '정제문 취소');
+  await waitFor(`${RECS}.length>=1`);
+  const s47 = { recs: await evaluate(RECS), cmds: await sentCmds(from47) };
+  record(47, '정제문 취소: "취소(분석을 진행하지 않음)" 기록 1줄, 전송은 refinedConfirmation/cancel 1건뿐', JSON.stringify(s47.recs) === JSON.stringify(['✖ 정제문 확인: 취소(분석을 진행하지 않음)']) && JSON.stringify(s47.cmds) === JSON.stringify(['refinedConfirmation/cancel']), JSON.stringify(s47));
+
+  // 48) 결과가 나온 뒤 Stage 0 카드(B-81 9): 실행 중인 화면에서 결과(analyze_removed)가 도착하면 제출 줄이 "완료됨"으로 바뀐다(전: "분석을 진행 중입니다..." 유지)
+  await loadChat('chat_s5', []);
+  await sleep(300);
+  await evaluate(`window.__confirmMode = null, true`);
+  const done48 = { ...okPayload, originalRequirement: '기존 설문조사 상세 조회에 응답자 이메일을 추가' };
+  await post({ type: 'ai_message', subType: 'analyze_clarify', messageId: 'clarify_r48', content: JSON.stringify(done48) });
+  await waitFor(`document.querySelector('[data-message-id="clarify_r48"]')`);
+  const F48 = `document.querySelector('[data-message-id="clarify_r48"]')`;
+  await click(`[...${F48}.querySelectorAll('button')].find(b=>b.textContent.includes('확인 완료'))`, '확인 완료(48)');
+  await waitFor(`${F48}.innerText.includes('확인이 제출되었습니다')`);
+  await post({ type: 'ai_message', subType: 'analyze_start', messageId: 'analyze_R48', content: '분석을 시작합니다' });
+  await post({ type: 'ai_message', subType: 'task_chunk', messageId: 'analyze_R48', content: '### 요구사항 분석 요약\n\n결과\n', isFirst: true });
+  await sleep(300);
+  const mid48 = await evaluate(`(()=>{const f=${F48}; return {submitted:!!f.querySelector('[data-clarify-submitted="true"]'), completed:!!f.querySelector('[data-clarify-completed="true"]')}})()`);
+  await post({ type: 'ai_message', subType: 'chat', messageId: 'analyze_R48', content: '' });
+  await post({ type: 'ai_message', subType: 'analyze_removed', messageId: 'analyze_R48', content: JSON.stringify({ candidates: [] }) });
+  await waitFor(`${F48}.querySelector('[data-clarify-completed="true"]')`);
+  const s48 = await evaluate(`(()=>{const f=${F48}; return {submitted:!!f.querySelector('[data-clarify-submitted="true"]'), completed:!!f.querySelector('[data-clarify-completed="true"]'), staleText:f.innerText.includes('분석을 진행 중입니다')}})()`);
+  await shot('48-result-completed');
+  record(48, '결과 뒤 완료 처리: 결과 스트리밍 중에는 제출 줄이 남고, 결과(analyze_removed)가 도착하면 제출 줄은 사라지고 "완료됨"만 보인다(진행 중 문구 없음)', mid48.submitted && !mid48.completed && !s48.submitted && s48.completed && !s48.staleText, JSON.stringify({ mid48, s48 }));
 
   const errors = await evaluate(`window.__errors || null`);
   fs.writeFileSync(OUT + '/results.json', JSON.stringify({ results, observations, shots, clicks, errors }, null, 1));

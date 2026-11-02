@@ -631,7 +631,33 @@ class Stage0GraphScanner(
             }
         }
 
+        // B-81 1-1: 카드 후보와 근거 종류(소스 본문·사용자 문장은 남기지 않는다)
+        println("[Stage0Candidates] 후보 ${items.size}개 (토큰 구조 ${structuralTokens.size}개, 개념 ${conceptualTokens.size}개): " +
+            items.joinToString(" | ") { "${((it.hint as? LinkHint.ExistingRef)?.filePath ?: it.statement).substringAfterLast('/')}=${evidenceKinds((it.hint as? LinkHint.ExistingRef)?.symbols.orEmpty(), it.provenanceSignals)}" })
         return items
+    }
+
+    /**
+     * 후보가 카드에 오른 근거 종류(B-81 1-1): URL(엔드포인트·URL 짝), 변수(화면 필드·JS 변수), 이름(클래스명·한글 이름·요구사항 토큰), 호출(클래스 관계·매퍼 연결).
+     * 심볼 접두어로 가르고, 심볼이 없으면 출처 신호로 가른다.
+     */
+    internal fun evidenceKinds(symbols: List<String>, signals: Set<ProvenanceSignal>): List<String> {
+        val kinds = linkedSetOf<String>()
+        for (s in symbols) {
+            when {
+                s.startsWith("url:") || s.startsWith("pairUrl:") -> kinds.add("URL")
+                s.startsWith("token:") || s.startsWith("localName:") || s.startsWith("fileName:") -> kinds.add("이름")
+                s.startsWith("relation:") || s.startsWith("mapper:") || s.startsWith("dto:") -> kinds.add("호출")
+                else -> kinds.add("변수")
+            }
+        }
+        if (kinds.isEmpty()) {
+            if (ProvenanceSignal.VIEW_SCRIPT_PAIR in signals) kinds.add("URL")
+            if (ProvenanceSignal.MAPPER_CHAIN in signals) kinds.add("호출")
+            if (ProvenanceSignal.LOCAL_NAME_MATCH in signals) kinds.add("이름")
+            if (ProvenanceSignal.SIBLING_ANALOGY in signals) kinds.add("이름")
+        }
+        return kinds.toList()
     }
 
     private fun extractKoreanStems(input: String): List<String> {

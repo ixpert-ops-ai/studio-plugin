@@ -143,7 +143,7 @@ class ClarifyFieldQuestionB77Test {
         eng.buildTaskSummary(st)
         val (sys, user) = client.calls.last()
         assertTrue("사실 구역: $user", user.contains("[코드 확인 목록]")) // B-78: 구역 이름과 사실 줄을 평서문으로 바꿨다(전: [소스 확인 결과(…)])
-        assertTrue(user.contains("- 응답자 이메일: 없음(후보 폴더의 소스·매퍼") && user.contains("다른 업무의 쿼리에만 있음"))
+        assertTrue(user.contains("- 응답자 이메일: 없음(후보 폴더의 소스·매퍼") && user.contains("테이블 쿼리에만 있음") && !user.contains("다른 업무"))
         assertFalse("사실 줄에는 명령문이 없다: $user", user.contains("쓰지 말 것")) // 금지 지시는 시스템 프롬프트에만 둔다
         assertTrue("시스템 규칙", sys.contains("목록에서 '없음'이라 한 항목은 어떤 후보 파일도 그 항목을 담고 있다고 쓰지 마십시오"))
 

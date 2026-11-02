@@ -173,7 +173,8 @@ data class FieldFact(
     val cite: String? = null,               // found=true일 때 근거 줄(file:line)
     val otherCites: List<String> = emptyList(), // found=false일 때 다른 업무 코드에서만 발견된 위치
     val filesRead: Int = 0,
-    val question: String? = null
+    val question: String? = null,
+    val otherTables: List<String> = emptyList() // found=false일 때 그 발견이 읽는 테이블(요약 프롬프트의 사실 줄을 테이블 기준으로 쓴다)
 )
 
 /**

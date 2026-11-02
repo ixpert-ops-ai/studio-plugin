@@ -39,6 +39,16 @@ export const restoreMessages = <T extends RestorableMessage>(messages: T[]): T[]
     return next;
   });
 
+/**
+ * 실행 중인 화면에서 분석 결과(resultId)가 나오면 그 앞에 있는 Stage 0 카드를 "완료됨"으로 바꾼다(B-81 9: 복원할 때의 [restoreMessages]와 같은 결과).
+ * 결과 메시지가 아직 없으면 아무것도 바꾸지 않는다.
+ */
+export const completeClarifyCards = <T extends RestorableMessage>(messages: T[], resultId: string | undefined): T[] => {
+  const idx = resultId === undefined ? -1 : messages.findIndex(m => m.id === resultId);
+  if (idx < 0) return messages;
+  return messages.map((m, i) => (m.subType === 'analyze_clarify' && i < idx && !m.clarifyCompleted ? { ...m, clarifyCompleted: true } : m));
+};
+
 /** 완료된 카드의 대화 기록: 답을 받지 못한 마지막 질문도 어시스턴트 발화로 남긴다(이미 기록에 있으면 더하지 않는다). */
 export const historyWithOpenQuestion = (
   history: Array<{ role: string; content: string }> | null | undefined,
@@ -78,6 +88,36 @@ export const hintRecord = (userHint: string | null | undefined): string => {
 /** 읽을 범위(폴더·파일) 선택 카드에서 고른 경로. */
 export const scopeRecord = (selectedPaths: string[]): string =>
   selectedPaths.length === 0 ? '✔ 읽을 범위 선택: 없음' : `✔ 읽을 범위 선택: ${selectedPaths.length}개(${names(selectedPaths, 4)})`;
+
+/** 읽을 범위 카드에서 "취소 (전체 선택)"으로 넘긴 경우(B-81 7: 제출뿐 아니라 건너뛰기도 기록한다). */
+export const scopeSkipRecord = (): string => '✔ 읽을 범위 선택: 전체(선택 안 함)';
+
+/** 탐색 힌트 카드에서 "건너뛰기 (자율 탐색)"으로 넘긴 경우. */
+export const hintSkipRecord = (): string => '✔ 탐색 힌트: 건너뜀(자율 탐색)';
+
+/** Stage 3 카드에서 "건너뛰기 (전체 N개 진행)"으로 넘긴 경우. */
+export const stage3SkipRecord = (total: number): string =>
+  total > 0 ? `✔ 최종 검증 대상 선택: 건너뜀(전체 ${total}개 진행)` : '✔ 최종 검증 대상 선택: 건너뜀(전체 진행)';
+
+/** 정제문 확인 카드에서 취소한 경우(분석을 시작하지 않는다). */
+export const refinedCancelRecord = (): string => '✖ 정제문 확인: 취소(분석을 진행하지 않음)';
+
+/** 백엔드가 5분 시간 초과로 보낸 안내(CardTimeoutNotice)를 같은 모양의 기록 줄로 바꾼다. 해당 안내가 아니면 null. */
+export const timeoutRecord = (noticeText: string | null | undefined, stage3Total: number): string | null => {
+  const t = (noticeText ?? '').trim();
+  if (t === '응답이 없어 전체 프로젝트로 진행했습니다.') return '✔ 읽을 범위 선택: 전체(5분 응답 없음, 자동 진행)';
+  if (t === '응답이 없어 힌트 없이 진행했습니다.') return '✔ 탐색 힌트: 없음(5분 응답 없음, 자동 진행)';
+  if (t === '응답이 없어 전체 후보로 진행했습니다.') return stage3Total > 0 ? `✔ 최종 검증 대상 선택: 전체 ${stage3Total}개 진행(5분 응답 없음, 자동 진행)` : '✔ 최종 검증 대상 선택: 전체 진행(5분 응답 없음, 자동 진행)';
+  return null;
+};
+
+/** Stage 3 카드 payload(JSON 문자열)의 후보 수. 읽을 수 없으면 0. */
+export const stage3CandidateCount = (payload: string | null | undefined): number => {
+  try {
+    const d = JSON.parse(payload ?? '');
+    return Array.isArray(d?.candidates) ? d.candidates.length : 0;
+  } catch { return 0; }
+};
 
 /** Stage 3 최종 검증 대상 선택 카드에서 고른 파일. */
 export const stage3Record = (selectedPaths: string[]): string =>
