@@ -174,7 +174,8 @@ data class FieldFact(
     val otherCites: List<String> = emptyList(), // found=false일 때 다른 업무 코드에서만 발견된 위치
     val filesRead: Int = 0,
     val question: String? = null,
-    val otherTables: List<String> = emptyList() // found=false일 때 그 발견이 읽는 테이블(요약 프롬프트의 사실 줄을 테이블 기준으로 쓴다)
+    val otherTables: List<String> = emptyList(), // found=false일 때 그 발견이 읽는 테이블(요약 프롬프트의 사실 줄을 테이블 기준으로 쓴다)
+    val writeNotice: String? = null // found=false이고 읽은 범위에 응답 저장 경로(파라미터를 받아 쓰는 INSERT/UPDATE)가 없을 때의 한 문장(B-83 4). 사용자가 "새로 저장"이라 답하면 바로 안내한다.
 )
 
 /**

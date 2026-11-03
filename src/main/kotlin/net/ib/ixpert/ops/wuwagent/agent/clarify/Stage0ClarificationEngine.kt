@@ -270,6 +270,7 @@ class Stage0ClarificationEngine(
         originalRequirement: String,
         previousContract: Stage0TransitionContract? = null
     ): Stage0TurnResult {
+        cacheOriginal = originalRequirement
         val initialTokens = scanner.extractTokens(originalRequirement)
 
         // 이전 계약의 거부 항목을 frozen 리스트로 구성
@@ -420,6 +421,7 @@ class Stage0ClarificationEngine(
      * 3절: 대화 턴 처리 (증분 seed 확장 + 미판정 영역 재탐색 + 확정분 동결)
      */
     fun processTurn(state: Stage0State, userInput: UserInput): Stage0TurnResult {
+        cacheOriginal = state.originalRequirement
         val currentTurn = state.userStatements.size + 2
 
         // 1. 기존 items에 사용자 판정(CONFIRMED/REJECTED) 및 거부 사유 반영
@@ -1249,7 +1251,10 @@ class Stage0ClarificationEngine(
         val translated = if (answer.handled) {
             TranslatedAction(kind = UserActionKind.UNKNOWN, rawStatement = trimmed, clarificationMessage = answer.echo)
         } else if (fieldAnswered != null) {
-            TranslatedAction(kind = UserActionKind.ADD_CONSTRAINT, rawStatement = trimmed, clarificationMessage = AnswerInterpreter.echo(fieldAnswered.label, trimmed))
+            // B-83 4: "새로 저장"이라고 답했는데 읽은 범위에 응답을 저장하는 경로가 없으면 바로 안내한다(확인 범위 안에서 발견되지 않음으로 한정)
+            val writeNote = fieldAnswered.writeNotice?.takeIf { net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.isNewData(trimmed) }
+            TranslatedAction(kind = UserActionKind.ADD_CONSTRAINT, rawStatement = trimmed,
+                clarificationMessage = AnswerInterpreter.echo(fieldAnswered.label, trimmed) + (writeNote?.let { "\nℹ️ $it" } ?: ""))
         } else {
             ClarifyUtteranceTranslator.translate(trimmed, state.items, llmClient, state.originalRequirement)
         }
@@ -1377,6 +1382,7 @@ class Stage0ClarificationEngine(
     data class ClarifyIntentBuild(val intent: ClarifyIntent, val constraintNotice: String?)
 
     fun buildClarifyIntentChecked(state: Stage0State): ClarifyIntentBuild {
+        cacheOriginal = state.originalRequirement
         val graphHash = ClarificationContractStore.calculateGraphHash(graph)
         val anchorTokens = state.seedSet.map { it.value }.distinct()
         // 정제문 호출은 제약 추출의 결과를 쓰지 않으므로(프롬프트가 SR과 발화만 쓴다) 두 호출을 동시에 시작하고 둘 다 끝나면 합친다.
@@ -1541,7 +1547,7 @@ class Stage0ClarificationEngine(
             )
             val content = response?.message?.content?.trim()
             // B-82 9: 확정 뒤 대기 시간 분해용(두 호출이 동시에 나가므로 느린 쪽이 대기 시간이다). 본문은 남기지 않고 길이만 남긴다.
-            println("[LlmCall] label=정제문 프롬프트 ${systemPrompt.length}+${userPrompt.length}자, 최대 출력 300토큰, 응답 ${content?.length ?: 0}자, ${System.currentTimeMillis() - t0}ms")
+            println("[LlmCall] thread=${Thread.currentThread().name} label=정제문 프롬프트 ${systemPrompt.length}+${userPrompt.length}자, 최대 출력 300토큰, 응답 ${content?.length ?: 0}자, ${System.currentTimeMillis() - t0}ms")
             if (content.isNullOrBlank() || content.startsWith("[Error]")) {
                 original
             } else {
@@ -1598,9 +1604,26 @@ class Stage0ClarificationEngine(
 
     private fun extractConstraints(userStatements: List<String>): List<IntentConstraint> = extractConstraintsChecked(userStatements).constraints
 
+    /**
+     * 제약 추출 결과 캐시(B-83 1). 확정할 때(buildClarifyIntentChecked)의 추출은 답변 직후(processTurn)의 추출과 입력이 같을 때가 많아 같은 LLM 호출을 한 번 더 했다
+     * (실서버 측정: 발화가 하나이면 프롬프트가 같고 각 약 31초). 키 = 원문 SR + 발화 목록 + 프롬프트 버전(시스템 프롬프트 해시)이라서 발화가 추가·수정되면 키가 달라져 자연히 무효화된다.
+     * 실패한 추출(기본 제약으로 대체된 경우)은 캐시하지 않는다. 두 호출 모두 결과를 쓰므로(답변 직후는 제외 제안, 확정은 인텐트 제약) 호출을 없애지 않고 재사용한다.
+     */
+    private val CONSTRAINT_PROMPT_VERSION = "v1" // 제약 추출 프롬프트·스키마를 바꾸면 올린다(캐시 키에 들어간다)
+    private val extractionCache = java.util.concurrent.ConcurrentHashMap<String, ConstraintExtraction>()
+    @Volatile private var cacheOriginal: String = ""
+    internal var extractionCacheHits: Int = 0
+
     private fun extractConstraintsChecked(userStatements: List<String>): ConstraintExtraction {
         if (userStatements.isEmpty()) return ConstraintExtraction(emptyList(), false)
+        val key = "${CONSTRAINT_PROMPT_VERSION}\u0000$cacheOriginal\u0000${userStatements.joinToString("\u0001")}"
+        extractionCache[key]?.let { extractionCacheHits++; println("[LlmCall] label=제약 추출 캐시 재사용 (발화 ${userStatements.size}개)"); return it }
+        val result = extractConstraintsUncached(userStatements)
+        if (!result.failed) extractionCache[key] = result
+        return result
+    }
 
+    private fun extractConstraintsUncached(userStatements: List<String>): ConstraintExtraction {
         val defaultConstraints = userStatements.map { stmt ->
             IntentConstraint(
                 kind = ConstraintKind.OTHER,
@@ -1658,7 +1681,7 @@ class Stage0ClarificationEngine(
             )
             val content = response?.message?.content?.trim()
             // B-82 9: 호출 분해용 길이·시간 로그(구조화 출력 사용 여부 포함, 본문 없음)
-            println("[LlmCall] label=제약 추출 프롬프트 ${systemPrompt.length}+${userPrompt.length}자, 최대 출력 500토큰, 구조화 출력=${structured != null}, 응답 ${content?.length ?: 0}자, ${System.currentTimeMillis() - t0}ms")
+            println("[LlmCall] thread=${Thread.currentThread().name} label=제약 추출 프롬프트 ${systemPrompt.length}+${userPrompt.length}자, 최대 출력 500토큰, 구조화 출력=${structured != null}, 응답 ${content?.length ?: 0}자, ${System.currentTimeMillis() - t0}ms")
             if (content.isNullOrBlank()) {
                 println(extractFailLogLine("응답 없음", response?.message?.content))
                 return ConstraintExtraction(defaultConstraints, true)
