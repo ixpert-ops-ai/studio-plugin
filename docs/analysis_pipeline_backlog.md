@@ -3672,4 +3672,49 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 
 #### 이번 작업 중 규칙 위반(보고)
 - 빈 heredoc 2건(`node - <<'EOF'`, `cat >> /dev/null <<'X'`): 파일을 쓰거나 실행하지 않았다.
-- `sed -i`로 ExcludeComponentDialogueTest의 `FailingLlmClient()` → `FixedSeedClient(batchSeeds)` 치환 1건(파일 수정은 Edit/Write만이라는 규칙 위반). 이후 주석은 Edit로 바로잡았다. 전체 문장(로그에 앞 80자만 있음), 오늘 SR의 Stage 0 카드를 실제 IDE에서 본 모습(재현은 코드 수준, IDE 재실행 안 함).
+- `sed -i`로 ExcludeComponentDialogueTest의 `FailingLlmClient()` → `FixedSeedClient(batchSeeds)` 치환 1건(파일 수정은 Edit/Write만이라는 규칙 위반). 이후 주석은 Edit로 바로잡았다.
+
+### B-83 (2026-11-03)
+
+#### 사후 검증과 누락 보고
+- B-82 push 뒤: `ls-remote` = 로컬 HEAD = f9cb4be, `git status` 비어 있음, `merge-base --is-ancestor` f9cb4be→HEAD, c0277c4→f9cb4be 통과.
+- 0a(worktree 검증): 0ca7020 시점 코드에 새 `ExcludeComponentDialogueTest`를 넣어 실행하면 6개 통과, 30→28, 30→27(시험이 시드와 무관).
+- 0b(시드 C 출력): 오늘 SR의 시드 6개(SurveyServiceImpl, SurveyService, SurveyDao, SurveyDaoImpl, SurveyDto, ReviewDto). 한글 근거 전용 노드는 ReviewDto 하나(근거: 주석의 "상세" 1점)이고 두 번째 자리는 비었다(나머지 한글 근거 노드는 배치 클래스). "그래프 순서 앞 5개"는 코드에서 제거됨(`byOrder` 없음).
+  새 시드 시험은 B-82에는 **없었다**(측정 코드뿐). 이번에 `SeedRuleB83Test` 3개와 배치 예외(SR이 배치 클래스 이름을 쓰거나 배치를 말하면 시드)를 추가했다.
+- 0c: `[LlmUsage]` 로그는 별도 커밋(5d7c4b0, worktree 전체 시험 741개·실패 42 동일·diff 0). `MeasureB83Test`는 실서버 시험(a, c)이 `-DrunLiveLlmTests=true`일 때만 돌고 그 밖은 로컬 그래프만 쓴다.
+
+#### C 제약 추출(구현)
+- 확정 때 재추출은 답변 직후 추출과 입력이 같을 때 불필요(둘 다 결과를 썼다: 답변 직후는 제외 제안, 확정은 인텐트 제약). 키 = 원문 SR + 발화 목록 + 프롬프트 버전, 실패 결과는 캐시하지 않는다. 발화가 둘 이상이면 키가 달라 재호출.
+- 실서버: 확정 대기 30.9초 → 6.1초(정제문만 남음). 호출: 초기 추출 11.2초(91토큰), 답변 직후 추출 31.3초(264토큰), 정제문 6.6초(51토큰), 확정 추출 30.9초(259토큰), 추론 토큰 없음, 출력 약 8 tok/s. vLLM `/metrics`: 확정 직전·직후 `num_requests_running` 0, `num_requests_waiting` 0(대기열 없음).
+- 스키마 축소: 측정만 보류(구현 안 함).
+
+#### A 매퍼
+- 계약 쌍에 매퍼 추가(보호된 Dao/DaoImpl의 인터페이스가 linkedTo에 있는 매퍼만, 공통 리소스 제외). 긍정·부정 시험 `MapperPairB83Test` 4개. 15쌍: 더한 매퍼 0, 필수 적중 0, 밀려난 후보 0(기존 하네스는 영향 없음, 안전망).
+- 탐색기 10회(정렬된 하네스, 아래 3번)에서 매퍼 처리: 정렬 전(하네스, 줄바꿈 없음) 시드 [SurveyServiceImpl, SurveyDaoImpl, SurveyDto, IpsController] 10/10, 정렬 후(IDE와 같은 줄바꿈) [SurveyServiceImpl, SurveyDto, SurveyDao, SurveyDaoImpl] 10/10, 두 경우 모두 Stage 1 후보에 sql_survey.xml 포함(10/10).
+
+#### 3 하네스 경로 정합
+- 원인 확정: `AdaptiveFileDiscovery`가 `srText = "$primaryReq\n$secondaryReq"`로 만들어 IDE의 탐색기 메시지는 SR 끝에 줄바꿈이 하나 더 있다. 하네스에 같은 줄바꿈을 넣으면 IDE(11-03 13:34)와 같은 결과가 10/10으로 재현된다(시드, 3턴, 매퍼 20점 Resource Reverse Link). 범위 카드·힌트 건너뛰기는 입력에 영향 없음(힌트가 비면 대화에 아무것도 추가하지 않는다, `AgenticSeedSelector.kt:248`).
+- 탐색기 temperature: 0.0(`AgenticSeedSelector.kt:90`). `[ExplorerInput]` 로그가 다음 IDE 실행부터 입력 전문과 해시를 남긴다.
+
+#### 4(5-1) → B
+- `ResponseWritePath`: 응답 테이블 = SELECT에서 ANSWER_n을 읽는 별칭의 테이블, 쓰기 = 그 테이블에 `#{}` 파라미터를 받는 INSERT/UPDATE(파라미터 없는 집계 UPDATE, 주석 처리된 문장 제외). survey_admin: 응답 테이블 ISSW_SURVEY_R, 파라미터 쓰기 없음 → "읽은 범위에서 발견되지 않음". 결과 ℹ️ 줄·SurveyServiceImpl 사유·Stage 0 즉시 안내가 같은 판정을 쓴다.
+- 사실 블록(SR 뒤): 항목별 확인 결과(읽은 폴더), 응답 저장 판정, 사용자 답변 문장. 탐색기 10회 전/후(정렬된 하네스):
+
+| | 이메일 단정 줄 | 시드 | 턴 | 시간 |
+|---|---|---|---|---|
+| 전 | 10(회차당 1줄, Turn 3) | [SurveyServiceImpl, SurveyDto, SurveyDao, SurveyDaoImpl], 매퍼는 20점 구제 | 3 | 69초 |
+| 후 | 0 | [SurveyServiceImpl, SurveyDaoImpl, SurveyDto, sql_survey.xml], 매퍼가 시드(Judge Pick), 10/10 | 4 | 102초 |
+- 남은 문제: "SurveyServiceImpl/SurveyDaoImpl이 응답을 조회/저장한다"는 단정은 줄지 않았다(전: 0으로 세지 않았음 → 후: 회차당 2줄 이상). 금지 문장을 더한 2차 문구는 효과가 없어(이메일 줄 오탐만 늘고 단정 유지) 되돌렸다. 비용: 턴 +1, 시간 +48%.
+
+#### 5 F 필수/선택 표시
+- `PathRoles`: 필수 = 매퍼 resultType/parameterType이 최종 목록의 DTO인 매퍼와 그 DTO, SR이 값을 가공(마스킹)하면 ServiceImpl / 선택(경로 통과) = 기존 Dao 메서드가 DTO를 그대로 받거나 반환하는 Dao·DaoImpl. SR이 새 조회·저장 메서드를 요구하면 선택을 적용하지 않는다. 표시와 결정적 사유가 먼저, LLM 사유는 "/ LLM 사유:" 뒤.
+- 기준(같은 SR에서 필수 3개 고정): 최종 목록 구성 4가지에서 sql_survey.xml, SurveyDto, SurveyServiceImpl이 항상 필수이고 SurveyDao·SurveyDaoImpl이 선택(`PathRolesB83Test`). B-81의 Stage 3 5회(104자)도 세 필수 파일을 모두 유지했다. 이 실행에서는 Stage 3을 새로 3회 돌리지 않았다.
+
+#### 6 E: runIde jvmArgs에 UTF-8 3개 추가(별도 커밋 58d3b2c). 깨진 곳은 runIde 콘솔(idea.log는 UTF-8).
+
+#### 7 D 측정(구현 보류, 스위치만): 15쌍 필수 적중/잡음 후보 — 기준 28/245, idf만 31/235, 조사만 29/246, 둘 다 32/236(어떤 시나리오도 필수 적중을 잃지 않음). 오늘 SR(탐색기 시드): ReviewDto 65 → 59, ClosingLinkDto 65 → 55(idf).
+- 한 줄: 검색 결과의 "주석 없음"은 클래스의 한글명(localName, `AgenticSeedSelector.kt:607` `node.localName ?: "주석 없음"`) 기준이고, 채점의 comment 20점은 클래스 안의 모든 한글 주석(`koreanComments`: 클래스·메서드·필드, `RelevanceScorer.kt:111-117`) 기준이다. 둘은 다른 값이라 "주석 없음"인 클래스도 주석 점수를 받을 수 있다.
+
+#### 이후 시험·커밋
+- 전체 시험 `m83a`(누적 트리): 764개, 실패 42 동일(diff 0), clarify 313 중 1 실패(기준)·3 건너뜀. 커밋은 파일이 겹치지 않게 나눴고 각 커밋의 트리가 아니라 누적 트리에서 시험했다(5d7c4b0만 단독 worktree 시험).
+- 커밋: 5d7c4b0 로그, 58d3b2c E, 8e19b43 A·D, beb7ea4 시드·탐색기 입력, b12f086 C·Stage 0, 56bf977 저장 경로·사실 블록·필수/선택, 8bb142e 기준선. 전체 문장(로그에 앞 80자만 있음), 오늘 SR의 Stage 0 카드를 실제 IDE에서 본 모습(재현은 코드 수준, IDE 재실행 안 함).

@@ -12,7 +12,7 @@
 | `harness_b79_scorer_dict.xml` | 직전 기준선: 사전의 "설문" → survey 항목을 분석 점수기에만 적용한 뒤(B-79). 처음 올린 b2402bd 기준선(전역 적용)은 그 변경이 시험 5건을 깨서 되돌리며 지웠다. |
 
 ## B-82 → B-83에서 달라진 블록(2026-11-03)
-7블록 중 4블록(APC Transit Card, survey_admin LlmOff, ISM Core)은 EXACT_MATCH이고 3~4블록이 달라졌다(정답 손실 없음).
+7블록 중 3블록(APC Transit Card, survey_admin LlmOff, ISM Core)은 EXACT_MATCH이고 4블록(Ablation-a, survey_admin LlmOn, Ablation-b, APC DEM Isolated)이 달라졌다(정답 손실 없음).
 
 | 블록 | 변화 | 원인 |
 |---|---|---|
