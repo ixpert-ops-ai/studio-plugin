@@ -53,15 +53,18 @@ object ClaimedFieldCheck {
         /** 실제로 읽은 자바 폴더의 마지막 이름(batch, service 등, 중복 없이 읽은 순서). 화면의 범위 문구가 이것으로 만들어진다(B-81 8). */
         val readFolders: List<String> = emptyList(),
         /** 이 문장을 만든 단계: 구체화(/clarify 질문) 또는 분석(결과). 단계마다 시드가 달라 읽은 폴더가 다를 수 있어 문장에 밝힌다(B-82 3-2). */
-        val stage: String = "분석"
+        val stage: String = "분석",
+        /** 읽은 범위에 응답 저장 경로가 없다는 한 문장(B-83 4). 없으면 null(판정 불가이거나 저장 경로가 있음). */
+        val writeNotice: String? = null
     ) {
+        fun withWriteNotice(n: String?): Finding = Finding(noun, subject, filesRead, otherCites, otherTables, seedNames, answer, domainScope, readFolders, stage, n)
         /** 화면에 보이는 항목 이름(예: "응답자 이메일"). */
         val label: String get() = (subject?.let { "$it " } ?: "") + noun
 
         /** 출처가 정해지지 않았는가: 답이 없거나 "모름"이다(B-81 3). 이 항목은 결과에서 ⚠️로 남고 /implement 전에 확인이 필요한 항목으로 센다. */
         val unresolved: Boolean get() = answer == null || isUnknownAnswer(answer)
 
-        fun withAnswer(a: String?): Finding = Finding(noun, subject, filesRead, otherCites, otherTables, seedNames, a, domainScope, readFolders, stage)
+        fun withAnswer(a: String?): Finding = Finding(noun, subject, filesRead, otherCites, otherTables, seedNames, a, domainScope, readFolders, stage, writeNotice)
     }
 
     private val UNKNOWN_LOOSE = Regex("모르|몰라|모릅")
@@ -122,6 +125,14 @@ object ClaimedFieldCheck {
             i++
         }
         return out
+    }
+
+    /** 읽은 범위의 매퍼(scopeOf가 고른 XML)에서 응답 저장 경로를 판정한다(B-83 4). 읽을 수 없으면 null. */
+    fun writePath(graph: ProjectGraph, projectRoot: File?, seedPaths: List<String>): ResponseWritePath.Judgement? {
+        if (projectRoot == null || seedPaths.isEmpty()) return null
+        val xml = scopeOf(graph, seedPaths).first.filter { it.endsWith(".xml") }
+        val mappers = xml.mapNotNull { rel -> File(projectRoot, rel).takeIf { it.isFile }?.let { rel.substringAfterLast('/') to it.readLines(Charsets.UTF_8) } }.toMap()
+        return if (mappers.isEmpty()) null else ResponseWritePath.judge(mappers)
     }
 
     /** 모든 자바 폴더가 공유하는 앞쪽 경로(예: src/main/java/net/infobank/iss). 화면에는 이 아래의 패키지 경로(survey/service)만 보인다. */
@@ -222,13 +233,38 @@ object ClaimedFieldCheck {
         val seedNames = AgenticSeedSelector.heuristicSeeds(srText, graph).seedClasses
         val seeds = seedNames.mapNotNull { c -> graph.files.values.firstOrNull { it.className == c }?.path }
         val evals = evaluate(srText, graph, projectRoot, seeds)
+        val writeNotice = ResponseWritePath.notFoundSentence(writePath(graph, projectRoot, seeds))
         // B-81 1-1: Stage 0이 고른 시드와 실제로 읽은 폴더(소스 본문·개인정보는 남기지 않는다)
         evals.firstOrNull()?.let { println("[Stage0Seeds] 시드 ${seedNames.size}개: $seedNames | 읽은 폴더: ${it.readFolders} | 읽은 파일 ${it.read}개, 못 읽은 파일 ${it.unread}개 | 도메인 패키지만 읽음=${it.domainScope}") }
         return evals.filter { it.unread == 0 && it.read > 0 }.map { e ->
             val f = toFinding(e, "구체화")
             if (e.inDomainCites.isNotEmpty()) FieldFact(f.label, found = true, cite = e.inDomainCites.first(), filesRead = e.read)
-            else FieldFact(f.label, found = false, otherCites = f.otherCites, filesRead = e.read, question = question(f), otherTables = f.otherTables)
+            else FieldFact(f.label, found = false, otherCites = f.otherCites, filesRead = e.read, question = question(f), otherTables = f.otherTables, writeNotice = writeNotice)
         }
+    }
+
+    /**
+     * 탐색기(시드 선정)에 SR과 함께 전달하는 사실 블록(B-83 4). Stage 0이 확인한 사실만 담는다: 항목별 확인 결과(읽은 범위 포함), 응답 저장 경로 판정(같은 [ResponseWritePath]), 사용자 답변의 정리된 출처 문장.
+     * 문구는 "읽은 범위 안에서 발견되지 않음"으로 한정하고(없다는 단정이 아니다), 이 사실과 어긋나는 "이미 포함" 같은 단정을 하지 말라고 덧붙인다. 항목이 없으면 null.
+     */
+    fun explorerFacts(srText: String, graph: ProjectGraph, projectRoot: File?, answers: Map<String, String>): String? {
+        if (projectRoot == null || requestedNouns(srText).isEmpty()) return null
+        val seeds = AgenticSeedSelector.heuristicSeeds(srText, graph).seedClasses.mapNotNull { c -> graph.files.values.firstOrNull { it.className == c }?.path }
+        val evals = evaluate(srText, graph, projectRoot, seeds).filter { it.unread == 0 && it.read > 0 }
+        if (evals.isEmpty()) return null
+        val lines = mutableListOf<String>()
+        for (e in evals) {
+            val f = toFinding(e, "구체화")
+            if (e.inDomainCites.isNotEmpty()) lines.add("- ${f.label}: ${scopeNote(f)}했고 ${e.inDomainCites.first()}에서 발견됨")
+            else lines.add("- ${f.label}: ${scopeNote(f)}했으나 이 항목을 저장하거나 조회하는 코드는 발견되지 않았습니다" +
+                (if (f.otherTables.isNotEmpty()) "(읽은 범위 안의 ${f.otherTables.joinToString("/")} 테이블 쿼리에서만 발견)" else ""))
+        }
+        val writeSentence = ResponseWritePath.notFoundSentence(writePath(graph, projectRoot, seeds))
+        writeSentence?.let { lines.add("- 응답 저장: $it") }
+        for ((label, a) in answers) if (!isUnknownAnswer(a)) lines.add("- 사용자 답변($label): ${sourceSentence(a)}")
+        return "[Stage 0에서 확인한 사실]\n" + lines.joinToString("\n") +
+            "\n위는 읽은 범위 안에서 확인한 사실이며 다른 곳에 없다는 뜻은 아닙니다. 이 사실과 어긋나게 \"이미 포함되어 있다\", \"이미 존재한다\"고 단정하지 말고, 확인하지 못한 것은 추정이라고 말하세요."
+            // 측정(B-83): "응답을 저장한다고 쓰지 마세요" 같은 추가 금지 문장은 효과가 없었다(10회 모두 "응답 저장" 단정이 남고 이메일 줄 오탐만 늘었다). 이 사실 블록은 이메일 단정(10→0)과 매퍼 시드 포함(10/10)까지만 보증한다.
     }
 
     /** Stage 0 대화에 보일 질문 한 개. 못 찾았다는 사실과 다른 업무 코드에서 발견된 위치(file:line, 테이블)를 근거로 붙이고, 정답 출처는 판정하지 않는다. */
@@ -288,7 +324,9 @@ object ClaimedFieldCheck {
         if (isUnknownAnswer(a)) return render(f)
         // B-81 8: 사용자 발화를 통째로 인용하지 않고 Stage 0 "기록함"의 출처 줄과 같은 함수(AnswerInterpreter.sourceLine)가 만든 정리된 출처 문장을 쓴다
         val src = sourceSentence(a)
-        return if (isNewData(a)) "${f.label}: ${scopeNote(f)}했으나 기존 데이터가 없습니다. 사용자 답변(출처: $src)에 따라 새 컬럼 추가와 수집·저장 경로가 구현 범위에 포함됩니다."
+        // B-83 4: 읽은 범위에 응답 저장 경로가 없으면 "수집·저장 경로 추가가 구현 범위"라고 말하지 않고 확인 범위 안에서 발견되지 않았음을 밝힌다
+        return if (isNewData(a) && f.writeNotice != null) "${f.label}: ${scopeNote(f)}했으나 기존 데이터가 없습니다. 사용자 답변(출처: $src)에 따라 새 컬럼 추가는 구현 범위에 포함됩니다. 다만 ${f.writeNotice}"
+        else if (isNewData(a)) "${f.label}: ${scopeNote(f)}했으나 기존 데이터가 없습니다. 사용자 답변(출처: $src)에 따라 새 컬럼 추가와 수집·저장 경로가 구현 범위에 포함됩니다."
         else "${f.label}: ${scopeNote(f)}했으나 기존 코드에는 없고, 사용자 답변(출처: $src)으로 출처가 지정되었습니다(조인 대상 확인 필요)."
     }
 
@@ -307,7 +345,8 @@ object ClaimedFieldCheck {
     fun savePathReason(findings: List<Finding>, path: String, finalPaths: List<String>, description: String): String? {
         if (!SERVICE_FILE.containsMatchIn(path) || finalPaths.firstOrNull { SERVICE_FILE.containsMatchIn(it) } != path) return null
         if (description.contains("저장") || description.contains("수집")) return null
-        val labels = findings.filter { it.answer != null && isNewData(it.answer) }.map { it.label }
+        // B-83 4: 읽은 범위에 응답 저장 경로가 없다고 확인된 항목은 "수집·저장 경로 추가"를 수정 사유에 쓰지 않는다
+        val labels = findings.filter { it.answer != null && isNewData(it.answer) && it.writeNotice == null }.map { it.label }
         if (labels.isEmpty()) return null
         return "${labels.joinToString(", ")} 수집·저장 경로 추가(저장 쿼리·프로시저 호출 등)"
     }

@@ -97,8 +97,12 @@ class ClaimedFieldWarningB78Test {
         val (out, result) = run(intent("응답자 이메일 출처: 설문 응답 테이블에 이메일 컬럼을 새로 추가해서 저장하는 방향으로 해줘"), refined)
         assertEquals("경고 줄은 없다", 0, out.lines().count { it.startsWith("> ⚠️ 확인 안 됨:") })
         val line = out.lines().single { it.startsWith("> ℹ️ 응답자 이메일:") }
-        assertTrue(line, line.contains("기존 데이터가 없습니다") && line.contains("새 컬럼 추가와 수집·저장 경로가 구현 범위에 포함됩니다"))
+        // B-83 4에서 바뀐 기대값: 읽은 범위에 응답 저장 경로가 없으면 "수집·저장 경로가 구현 범위에 포함됩니다" 대신 확인 범위 안에서 발견되지 않았음을 밝힌다
+        assertTrue(line, line.contains("기존 데이터가 없습니다") && line.contains("새 컬럼 추가는 구현 범위에 포함됩니다") && line.contains("INSERT/UPDATE는 발견되지 않았습니다"))
+        assertFalse(line, line.contains("수집·저장 경로가 구현 범위에 포함됩니다"))
         assertTrue(line, line.contains("사용자 답변"))
+        // 수정 사유: SurveyServiceImpl 사유에 "수집·저장 경로 추가"가 붙지 않는다
+        assertFalse(out, out.lines().any { it.startsWith("|") && it.contains("수집·저장 경로 추가") })
         assertEquals("출처를 정해 달라는 항목은 없다", emptyList<String>(), result.confirmItems)
         assertEquals(listOf("응답자 이메일"), result.newDataItems)
     }

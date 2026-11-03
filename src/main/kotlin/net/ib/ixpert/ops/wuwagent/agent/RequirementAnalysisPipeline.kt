@@ -238,6 +238,18 @@ class RequirementAnalysisPipeline(
             logger.warn("Failed to dump sub-graph", e)
         }
 
+        // B-83 4: Stage 0이 확인한 사실(없는 것으로 확인된 항목, 읽은 범위, 응답 저장 경로, 사용자 답변)을 탐색기에 전달한다. 인텐트가 없으면(clarify 없이 분석) 전달하지 않는다.
+        val explorerFacts = try {
+            val orig = clarifyIntent?.originalRequirement?.takeIf { it.isNotBlank() }
+            val factRoot = projectRoot ?: project?.basePath?.let { java.io.File(it) }
+            if (orig == null) null
+            else ClaimedFieldCheck.explorerFacts(orig, projectGraph, factRoot, ClaimedFieldCheck.answersOf(clarifyIntent?.constraints?.map { it.value }.orEmpty()))
+        } catch (e: Exception) {
+            logger.warn("탐색기 사실 블록 생성 실패(사실 없이 진행)", e)
+            null
+        }
+        println("[ExplorerFacts] 사실 블록 ${explorerFacts?.length ?: 0}자, ${explorerFacts?.lines()?.size ?: 0}줄")
+
         val discoveryResult = AdaptiveFileDiscovery.filter(
             primaryReq = effectiveReq,
             secondaryReq = secondaryReq,
@@ -245,7 +257,8 @@ class RequirementAnalysisPipeline(
             client = client,
             project = project,
             projectBasePath = project?.basePath ?: projectRoot?.absolutePath,
-            enhancedRequirements = enhancedRequirements
+            enhancedRequirements = enhancedRequirements,
+            factsBlock = explorerFacts
         ) { progress ->
             onChunk?.invoke("> $progress\n")
         }
@@ -462,7 +475,9 @@ class RequirementAnalysisPipeline(
             val originalSr = clarifyIntent?.originalRequirement?.takeIf { it.isNotBlank() }
             val source = if (originalSr != null && ClaimedFieldCheck.hasDataNoun(originalSr)) originalSr else primaryReq
             val answers = ClaimedFieldCheck.answersOf(clarifyIntent?.constraints?.map { it.value }.orEmpty())
-            ClaimedFieldCheck.check(source, projectGraph, claimRoot, seedPaths).map { it.withAnswer(answers[it.label]) }
+            // B-83 4: 읽은 범위에 응답 저장 경로가 없으면 ℹ️ 줄과 수정 사유가 같은 판정(ResponseWritePath)을 쓴다
+            val writeNotice = ResponseWritePath.notFoundSentence(ClaimedFieldCheck.writePath(projectGraph, claimRoot, seedPaths))
+            ClaimedFieldCheck.check(source, projectGraph, claimRoot, seedPaths).map { it.withAnswer(answers[it.label]).withWriteNotice(writeNotice) }
         } catch (e: Exception) {
             logger.warn("ClaimedFieldCheck 실패(경고 없이 진행)", e)
             emptyList()
@@ -527,6 +542,12 @@ class RequirementAnalysisPipeline(
                 appendLine("### 🎯 분석된 대상 파일 목록")
                 appendLine("| 순번 | 파일 경로 | 작업유형 | 수정 사유 |")
                 appendLine("|:---:|:---|:---:|:---|")
+                val pathRoles = try {
+                    PathRoles.classify(projectGraph, projectRoot ?: project?.basePath?.let { java.io.File(it) }, validatedTargetFiles.map { v -> v.path }, effectiveReq)
+                } catch (e: Exception) {
+                    logger.warn("필수/선택 판정 실패(표시 없이 진행)", e)
+                    emptyMap()
+                }
                 validatedTargetFiles.forEach {
                     val koreanType = when(it.type) {
                         "MODIFY" -> "수정"
@@ -537,7 +558,8 @@ class RequirementAnalysisPipeline(
                     // B-80 6: 답변으로 수집·저장이 범위에 들어갔으면 ℹ️ 줄이 말하는 저장 경로가 첫 Service의 사유에도 보인다
                     val wordedDesc = AnalysisResultWording.description(it.description)
                     val savePath = ClaimedFieldCheck.savePathReason(claimFindings, it.path, validatedTargetFiles.map { v -> v.path }, wordedDesc)
-                    val descForTable = (if (savePath != null) "$wordedDesc / $savePath" else wordedDesc).replace("\n", "<br>")
+                    // B-83 5: 필수/선택 표시와 결정적 사유를 먼저, LLM 사유(저장 경로 문구 포함)를 뒤에 둔다
+                    val descForTable = PathRoles.describe(pathRoles[it.path], if (savePath != null) "$wordedDesc / $savePath" else wordedDesc).replace("\n", "<br>")
                     appendLine("| ${it.order} | ${it.path} | $koreanType | $descForTable |")
                 }
             } else {
