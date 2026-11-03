@@ -11,7 +11,7 @@ class ClaimedFieldB81Test {
 
     private fun finding(answer: String?) = ClaimedFieldCheck.Finding(
         noun = "이메일", subject = "응답자", filesRead = 24, otherCites = listOf("sql_survey.xml:670"),
-        otherTables = listOf("ISSW_ADMIN_USER"), seedNames = listOf("SurveyServiceImpl"), answer = answer, readFolders = listOf("service", "dao")
+        otherTables = listOf("ISSW_ADMIN_USER"), seedNames = listOf("SurveyServiceImpl"), answer = answer, readFolders = listOf("survey/service", "survey/dao")
     )
 
     @Test
@@ -54,9 +54,12 @@ class ClaimedFieldB81Test {
     @Test
     fun u4_범위_문구는_읽은_폴더로_만들고_고정_문구가_없다() {
         val line = ClaimedFieldCheck.render(finding(null))
-        assertTrue(line, line.contains("(설문 패키지의 service·dao 폴더를 읽어 확인)"))
+        assertTrue(line, line.contains("(분석 단계에서 survey/service·survey/dao 폴더를 읽어 확인)"))
         assertFalse(line, line.contains("설문 관련 코드를 읽어"))
         val q = ClaimedFieldCheck.question(finding(null))
-        assertTrue(q, q.contains("(설문 패키지의 service·dao 폴더를 읽어 확인)"))
+        assertTrue(q, q.contains("(분석 단계에서 survey/service·survey/dao 폴더를 읽어 확인)"))
+        // 질문 카드와 대화 기록이 쓰는 question()도 같은 scopeNote 함수를 쓴다(단계만 다르다)
+        val stage0 = ClaimedFieldCheck.question(ClaimedFieldCheck.Finding("이메일", "응답자", 24, emptyList(), readFolders = listOf("survey/service", "batch"), stage = "구체화"))
+        assertTrue(stage0, stage0.contains("(구체화 단계에서 survey/service·batch 폴더를 읽어 확인)"))
     }
 }

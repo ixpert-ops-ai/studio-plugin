@@ -1533,12 +1533,15 @@ class Stage0ClarificationEngine(
                 ${userStatements.joinToString("\n") { "- $it" }}
             """.trimIndent()
 
+            val t0 = System.currentTimeMillis()
             val response = client.chat(
                 systemPrompt = systemPrompt,
                 userCode = userPrompt,
                 maxTokens = 300
             )
             val content = response?.message?.content?.trim()
+            // B-82 9: 확정 뒤 대기 시간 분해용(두 호출이 동시에 나가므로 느린 쪽이 대기 시간이다). 본문은 남기지 않고 길이만 남긴다.
+            println("[LlmCall] label=정제문 프롬프트 ${systemPrompt.length}+${userPrompt.length}자, 최대 출력 300토큰, 응답 ${content?.length ?: 0}자, ${System.currentTimeMillis() - t0}ms")
             if (content.isNullOrBlank() || content.startsWith("[Error]")) {
                 original
             } else {
@@ -1641,6 +1644,7 @@ class Stage0ClarificationEngine(
             val userPrompt = userStatements.joinToString("\n") { "- $it" }
 
             // 구조화 출력(JSON 스키마)을 먼저 걸고, 서버가 지원하지 않거나 거부·오류면 기존 호출로 대체한다(파싱 경로는 그대로).
+            val t0 = System.currentTimeMillis()
             val structured = try {
                 client.chatJsonSchema(systemPrompt, userPrompt, 500, "constraints", CONSTRAINT_SCHEMA)
             } catch (e: Exception) {
@@ -1653,6 +1657,8 @@ class Stage0ClarificationEngine(
                 maxTokens = 500
             )
             val content = response?.message?.content?.trim()
+            // B-82 9: 호출 분해용 길이·시간 로그(구조화 출력 사용 여부 포함, 본문 없음)
+            println("[LlmCall] label=제약 추출 프롬프트 ${systemPrompt.length}+${userPrompt.length}자, 최대 출력 500토큰, 구조화 출력=${structured != null}, 응답 ${content?.length ?: 0}자, ${System.currentTimeMillis() - t0}ms")
             if (content.isNullOrBlank()) {
                 println(extractFailLogLine("응답 없음", response?.message?.content))
                 return ConstraintExtraction(defaultConstraints, true)

@@ -49,6 +49,63 @@ export const completeClarifyCards = <T extends RestorableMessage>(messages: T[],
   return messages.map((m, i) => (m.subType === 'analyze_clarify' && i < idx && !m.clarifyCompleted ? { ...m, clarifyCompleted: true } : m));
 };
 
+/** 결과 말풍선 안에 끼워 넣는 카드 기록 줄: at은 본문(content)에서 기록이 놓이는 글자 위치(줄 경계로 맞춘 값). */
+export type InlineRecord = { at: number; text: string };
+
+export type RecordableMessage = RestorableMessage & { content?: string; inlineRecords?: InlineRecord[] };
+
+/**
+ * 카드 기록을 결과 본문의 어디에 끼울지(B-82 3-5): 글자 수 그대로가 아니라 직전 줄바꿈(완성되지 않은 마지막 줄은 그 줄 앞)에 맞춘다.
+ * 코드 블록 안이면 그 블록이 시작되는 줄 앞으로, 표 바로 뒤(표가 이어질 수 있음)이면 표가 시작되는 줄 앞으로 옮겨 표·코드 블록 중간에 끼지 않는다.
+ */
+export const safeRecordPosition = (content: string): number => {
+  let at = content.lastIndexOf('\n') + 1;
+  const lines = content.slice(0, at).split('\n'); // 마지막 원소는 빈 문자열(at이 줄 시작이므로)
+  lines.pop();
+  // 코드 블록 안: 닫히지 않은 ``` 줄을 찾아 그 앞으로
+  let openFenceLine = -1;
+  lines.forEach((l, i) => { if (l.trimStart().startsWith('```')) openFenceLine = openFenceLine === -1 ? i : -1; });
+  if (openFenceLine !== -1) return lines.slice(0, openFenceLine).reduce((n, l) => n + l.length + 1, 0);
+  // 표 바로 뒤: 이어지는 '|' 줄 묶음의 시작 앞으로
+  let i = lines.length - 1;
+  if (i >= 0 && lines[i].trimStart().startsWith('|')) {
+    while (i > 0 && lines[i - 1].trimStart().startsWith('|')) i--;
+    at = lines.slice(0, i).reduce((n, l) => n + l.length + 1, 0);
+  }
+  return at;
+};
+
+export type RecordSegment = { kind: 'md'; text: string } | { kind: 'rec'; text: string };
+
+/** 본문을 기록 위치에서 잘라 [본문, 기록, 본문…] 순서로 돌려준다. 위치가 겹치면 들어온 순서, 범위를 벗어나면 끝으로 본다. 빈 본문 조각은 만들지 않는다. */
+export const splitWithRecords = (content: string, records: InlineRecord[] | undefined): RecordSegment[] => {
+  const sorted = (records ?? []).map((r, i) => ({ ...r, i, at: Math.max(0, Math.min(r.at, content.length)) })).sort((a, b) => a.at - b.at || a.i - b.i);
+  const out: RecordSegment[] = [];
+  let pos = 0;
+  for (const r of sorted) {
+    if (r.at > pos) out.push({ kind: 'md', text: content.slice(pos, r.at) });
+    out.push({ kind: 'rec', text: r.text });
+    pos = Math.max(pos, r.at);
+  }
+  if (pos < content.length || out.length === 0) out.push({ kind: 'md', text: content.slice(pos) });
+  return out;
+};
+
+/**
+ * 카드 기록 한 줄을 대화에 더한다: 분석 결과가 스트리밍 중이면 그 말풍선 본문의 안전한 위치에 끼우고(그래서 결과 아래에 몰리지 않고 카드를 처리한 시점의
+ * 진행 줄 바로 뒤에 놓인다), 아니면 따로 한 줄 메시지로 끝에 붙인다(결과가 만들어지기 전의 기록).
+ */
+export const appendRecord = <T extends RecordableMessage>(messages: T[], id: string, text: string): T[] => {
+  let idx = -1;
+  messages.forEach((m, i) => {
+    if (m.role === 'ai' && m.id.startsWith('analyze_') && m.subType === 'task_chunk' && (m.isStreaming === true || m.isLoading === true)) idx = i;
+  });
+  if (idx < 0) return [...messages, { id, role: 'ai', subType: 'choice_record', content: text, isLoading: false } as unknown as T];
+  const target = messages[idx];
+  const at = safeRecordPosition(target.content ?? '');
+  return messages.map((m, i) => (i === idx ? { ...m, inlineRecords: [...(m.inlineRecords ?? []), { at, text }] } : m));
+};
+
 /** 완료된 카드의 대화 기록: 답을 받지 못한 마지막 질문도 어시스턴트 발화로 남긴다(이미 기록에 있으면 더하지 않는다). */
 export const historyWithOpenQuestion = (
   history: Array<{ role: string; content: string }> | null | undefined,

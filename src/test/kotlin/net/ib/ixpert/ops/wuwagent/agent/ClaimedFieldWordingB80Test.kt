@@ -12,10 +12,10 @@ class ClaimedFieldWordingB80Test {
 
     private fun finding(
         answer: String?, domainScope: Boolean = true, tables: List<String> = listOf("ISSW_ADMIN_USER", "ISSW_COMPANY"),
-        folders: List<String> = listOf("service", "dao")
+        folders: List<String> = listOf("survey/service", "survey/dao"), stage: String = "분석"
     ) = ClaimedFieldCheck.Finding(
         noun = "이메일", subject = "응답자", filesRead = 24, otherCites = listOf("sql_survey.xml:670", "sql_survey.xml:841"),
-        otherTables = tables, seedNames = listOf("SurveyServiceImpl", "SurveyDao"), answer = answer, domainScope = domainScope, readFolders = folders
+        otherTables = tables, seedNames = listOf("SurveyServiceImpl", "SurveyDao"), answer = answer, domainScope = domainScope, readFolders = folders, stage = stage
     )
 
     private val saved = "응답 테이블에 이메일 컬럼을 새로 추가해서 저장"
@@ -55,18 +55,27 @@ class ClaimedFieldWordingB80Test {
     }
 
     @Test
-    // B-81 8에서 바뀐 기대값: 고정 문구("설문 관련 코드를 읽어 확인") 대신 실제로 읽은 폴더 이름으로 말한다
-    fun w4_읽은_폴더가_도메인_패키지가_아니면_도메인_이름을_쓰지_않는다() {
-        assertEquals("설문 패키지의 service·dao 폴더를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null, domainScope = true)))
-        assertEquals("batch·service 폴더를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null, domainScope = false, folders = listOf("batch", "service"))))
-        assertEquals("관련 코드를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null, folders = emptyList())))
-        assertEquals("설문 패키지의 a·b·c·d 등 폴더를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null, folders = listOf("a", "b", "c", "d", "e"))))
-        val mixed = ClaimedFieldCheck.render(finding(null, domainScope = false, folders = listOf("batch", "service")))
-        assertTrue(mixed, mixed.contains("(batch·service 폴더를 읽어 확인)") && !mixed.contains("설문 패키지"))
-        val domain = ClaimedFieldCheck.render(finding(null, domainScope = true))
-        assertTrue(domain, domain.contains("설문 패키지의 service·dao 폴더를 읽어 확인") && !domain.contains("설문 관련 코드"))
-        val resolvedMixed = ClaimedFieldCheck.renderResolved(finding(saved, domainScope = false, folders = listOf("batch", "service")))
-        assertTrue(resolvedMixed, resolvedMixed.contains(": batch·service 폴더를 읽어 확인했으나") && !resolvedMixed.contains("설문 패키지"))
+    // B-82 3-2에서 바뀐 기대값: 단계("구체화"/"분석")와 패키지 경로(survey/service)로 말한다(전: "설문 패키지의 service·dao 폴더를 읽어 확인")
+    fun w4_범위_문구는_단계와_패키지_경로로_만든다() {
+        assertEquals("분석 단계에서 survey/service·survey/dao 폴더를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null)))
+        assertEquals("구체화 단계에서 survey/service·batch 폴더를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null, folders = listOf("survey/service", "batch"), stage = "구체화")))
+        assertEquals("분석 단계에서 관련 코드를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null, folders = emptyList())))
+        assertEquals("분석 단계에서 a·b·c·d 등 폴더를 읽어 확인", ClaimedFieldCheck.scopeNote(finding(null, folders = listOf("a", "b", "c", "d", "e"))))
+        val q = ClaimedFieldCheck.render(finding(null, folders = listOf("survey/service", "batch"), stage = "구체화"))
+        assertTrue(q, q.contains("(구체화 단계에서 survey/service·batch 폴더를 읽어 확인)") && !q.contains("설문 관련 코드"))
+        val resolved = ClaimedFieldCheck.renderResolved(finding(saved, folders = listOf("survey/service", "survey/dao")))
+        assertTrue(resolved, resolved.contains(": 분석 단계에서 survey/service·survey/dao 폴더를 읽어 확인했으나"))
+    }
+
+    @Test
+    fun w4b_폴더는_업무_계층_순서로_정렬된다() {
+        assertEquals(0, ClaimedFieldCheck.folderLayerRank("survey/service"))
+        assertEquals(1, ClaimedFieldCheck.folderLayerRank("survey/dao"))
+        assertEquals(2, ClaimedFieldCheck.folderLayerRank("survey/dto"))
+        assertEquals(3, ClaimedFieldCheck.folderLayerRank("controller"))
+        assertEquals(4, ClaimedFieldCheck.folderLayerRank("batch"))
+        assertEquals("src/main/java/a", ClaimedFieldCheck.commonDirPrefix(listOf("src/main/java/a/survey/service", "src/main/java/a/batch", "src/main/java/a/user/dto")))
+        assertEquals("", ClaimedFieldCheck.commonDirPrefix(emptyList()))
     }
 
     @Test

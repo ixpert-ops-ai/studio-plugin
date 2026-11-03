@@ -13,6 +13,8 @@ object CardTimeoutNotice {
     const val L1 = "응답이 없어 힌트 없이 진행했습니다."
 
     fun send(project: Project?, text: String) {
+        // B-82 1-2: 시간 초과 처리를 백엔드 로그에도 한 줄 남긴다(전에는 화면으로 보내는 Bridge 줄만 있어 로그만으로는 5분 초과를 알 수 없었다)
+        println("[CardTimeout] 5분 응답 없음 → 자동 진행: $text")
         if (project == null) return
         ApplicationManager.getApplication().invokeLater {
             try {

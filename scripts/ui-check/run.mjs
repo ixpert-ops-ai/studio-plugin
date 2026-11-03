@@ -527,8 +527,9 @@ try {
   // 37) 타임아웃 안내 표시: 백엔드가 응답 없이 넘어가며 보낸 안내(analyze_notice)가 대화창에 보인다
   await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_t', content: '응답이 없어 전체 후보로 진행했습니다.' });
   await sleep(400);
-  const s37 = await evaluate("(()=>{const t=document.body.innerText; return {notice:t.includes('응답이 없어 전체 후보로 진행했습니다.'), cardGone: document.querySelectorAll('[data-card-kind=\"stage3\"]').length}})()");
-  record(37, '타임아웃 안내 표시: "응답이 없어 전체 후보로 진행했습니다." 안내가 보이고 카드는 내려가 있다', s37.notice === true && s37.cardGone === 0, JSON.stringify(s37));
+  // B-82 3-5(b): 기록 줄에 "자동 진행"이 있으므로 같은 뜻의 안내 줄은 따로 보이지 않는다
+  const s37 = await evaluate("(()=>{const t=document.body.innerText; return {record:t.includes('5분 응답 없음, 자동 진행'), plainNotice:t.includes('응답이 없어 전체 후보로 진행했습니다.'), cardGone: document.querySelectorAll('[data-card-kind=\"stage3\"]').length}})()");
+  record(37, '타임아웃 표시: "5분 응답 없음, 자동 진행" 기록이 보이고 같은 뜻의 안내 줄("응답이 없어 전체 후보로 진행했습니다.")은 없으며 카드는 내려가 있다', s37.record === true && s37.plainNotice === false && s37.cardGone === 0, JSON.stringify(s37));
 
   // 38) 질문 표시(B-77): 소스 확인 질문(근거 줄 포함, 여러 줄)이 "추가 확인 필요" 영역에 줄바꿈 그대로 보인다
   const Q38 = '응답자 이메일을 저장하거나 조회하는 코드를 찾지 못했습니다 (후보 범위 파일 30개를 읽어 확인).\n다른 업무 코드에서만 발견됩니다: sql_survey.xml:670, sql_survey.xml:841, sql_survey.xml:857 (테이블 ISSW_ADMIN_USER)\n어디서 가져올까요? (예: 다른 테이블 조인, 새로 저장, 잘 모르겠음)';
@@ -701,6 +702,50 @@ try {
   const s48 = await evaluate(`(()=>{const f=${F48}; return {submitted:!!f.querySelector('[data-clarify-submitted="true"]'), completed:!!f.querySelector('[data-clarify-completed="true"]'), staleText:f.innerText.includes('분석을 진행 중입니다')}})()`);
   await shot('48-result-completed');
   record(48, '결과 뒤 완료 처리: 결과 스트리밍 중에는 제출 줄이 남고, 결과(analyze_removed)가 도착하면 제출 줄은 사라지고 "완료됨"만 보인다(진행 중 문구 없음)', mid48.submitted && !mid48.completed && !s48.submitted && s48.completed && !s48.staleText, JSON.stringify({ mid48, s48 }));
+
+  // 49) 기록 줄 위치(B-82 3-5a): 결과가 스트리밍되는 동안 카드를 처리하면 기록이 결과 아래에 몰리지 않고 그 시점의 진행 줄 바로 뒤에 놓인다.
+  // 표를 쓰는 본문 중간에 끼지 않는다. 같은 흐름(범위 취소 → 힌트 건너뛰기 → Stage 3 시간 초과)을 실제 메시지 순서로 재현한다.
+  await loadChat('chat_p1', []);
+  await sleep(300);
+  const RID = 'analyze_POS1';
+  const mdRid = `document.querySelector('[data-message-id="${RID}"]')`;
+  await post({ type: 'ai_message', subType: 'analyze_start', messageId: RID, content: '분석을 시작합니다' });
+  await post({ type: 'ai_message', subType: 'task_chunk', messageId: RID, content: '> > **(Stage 1) Discovery 시작**\n> 식별된 Seed 바탕으로 그래프 탐색 중...\n', isFirst: true });
+  await sleep(150);
+  await post({ type: 'ai_message', subType: 'scopeSelection/showTree', messageId: 'system', content: JSON.stringify(scopePayload) });
+  await waitFor(BTN('취소 (전체 선택)'));
+  await click(BTN('취소 (전체 선택)'), '범위 취소(위치 확인)');
+  await post({ type: 'ai_message', subType: 'task_chunk', messageId: RID, content: '> 탐색된 파일 연관성 평가 중... (30개 평가 대상)\n> 최종 13개 파일 선정 완료.\n' });
+  await sleep(150);
+  await s3Req();
+  await sleep(200);
+  await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_p1', content: '응답이 없어 전체 후보로 진행했습니다.' });
+  await post({ type: 'ai_message', subType: 'stage3Confirmation/hide', messageId: 'system', content: '' });
+  await post({ type: 'ai_message', subType: 'task_chunk', messageId: RID, content: '> **(Stage 3) LLM Verification** - 최종 연관성 검증...\n\n| 순번 | 파일 |\n|:---:|:---|\n| 1 | A.java |\n| 2 | B.java |\n' });
+  await sleep(300);
+  const order49 = () => evaluate(`(()=>{const m=${mdRid}; if(!m) return null; const c=m.querySelector('.msg-ai-content'); return [...c.children].map(e=>e.getAttribute('data-inline-record')==='true' ? 'REC:'+e.innerText.trim().slice(0,12) : (e.querySelector('table') ? 'TABLE' : 'MD:'+e.innerText.trim().slice(0,14))).filter(x=>!x.startsWith('MD:')||x.length>3)})()`);
+  const o49 = await order49();
+  const standalone49 = await evaluate(`document.querySelectorAll('.chat-list > [data-choice-record="true"], [data-choice-record="true"]:not([data-inline-record="true"])').length`);
+  await shot('49-inline-records');
+  const iRange = o49 ? o49.findIndex(x => x.startsWith('REC:✔ 읽을 범위')) : -1;
+  const iStage1 = o49 ? o49.findIndex(x => x.startsWith('MD:') && x.includes('Stage 1')) : -1;
+  const iEval = o49 ? o49.findIndex(x => x.startsWith('MD:') && x.includes('탐색된')) : -1;
+  const iS3 = o49 ? o49.findIndex(x => x.startsWith('REC:✔ 최종 검증')) : -1;
+  const iTable = o49 ? o49.indexOf('TABLE') : -1;
+  record(49, '기록 줄 위치: 범위 기록은 Stage 1 진행 줄 뒤·평가 줄 앞, Stage 3 시간 초과 기록은 "최종 13개 선정" 뒤·표 앞(표 중간 아님), 결과 아래에 몰린 기록 없음',
+    iStage1 >= 0 && iRange > iStage1 && iEval > iRange && iS3 > iEval && iTable > iS3 && standalone49 === 0, JSON.stringify({ o49, standalone49 }));
+  // 복원 화면에서도 같은 순서: 저장된 메시지(결과 본문 + inlineRecords)를 chat_loaded로 불러온다
+  const body50 = '> > **(Stage 1) Discovery 시작**\n> 식별된 Seed 바탕으로 그래프 탐색 중...\n> 탐색된 파일 연관성 평가 중... (30개 평가 대상)\n> 최종 13개 파일 선정 완료.\n> **(Stage 3) LLM Verification** - 최종 연관성 검증...\n\n| 순번 | 파일 |\n|:---:|:---|\n| 1 | A.java |\n';
+  const restoreMsgs = [
+    { id: 'u49', role: 'user', content: '/clarify 시험' },
+    { id: RID, role: 'ai', subType: 'task_chunk', isStreaming: true, content: body50,
+      inlineRecords: [{ at: body50.indexOf('> 탐색된'), text: '✔ 읽을 범위 선택: 전체(선택 안 함)' }, { at: body50.indexOf('> **(Stage 3)'), text: '✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음, 자동 진행)' }] },
+  ];
+  await loadChat('chat_p2', restoreMsgs);
+  await sleep(500);
+  const o49r = await evaluate(`(()=>{const m=document.querySelector('[data-message-id="${RID}"]'); if(!m) return null; const c=m.querySelector('.msg-ai-content'); return [...c.children].map(e=>e.getAttribute('data-inline-record')==='true' ? 'REC:'+e.innerText.trim().slice(0,12) : (e.querySelector('table') ? 'TABLE' : 'MD'))})()`);
+  record(50, '복원 순서: 저장된 inlineRecords가 복원 화면에서도 같은 자리에 보이고(본문 → 범위 기록 → 본문 → Stage 3 기록 → 표), 정지 버튼은 없다',
+    Array.isArray(o49r) && o49r.map(x => x.startsWith('REC:✔ 읽을') ? 'R1' : x.startsWith('REC:✔ 최종') ? 'R2' : x).join(',') === 'MD,R1,MD,R2,TABLE' && (await evaluate(`document.querySelectorAll('button.btn-icon.stop').length`)) === 0, JSON.stringify(o49r));
 
   const errors = await evaluate(`window.__errors || null`);
   fs.writeFileSync(OUT + '/results.json', JSON.stringify({ results, observations, shots, clicks, errors }, null, 1));

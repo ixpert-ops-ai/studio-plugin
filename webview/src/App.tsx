@@ -17,7 +17,7 @@ import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
-import { completeClarifyCards, finalRefinedText, hintRecord, hintSkipRecord, historyWithOpenQuestion, refinedCancelRecord, refinedRecord, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
+import { appendRecord, completeClarifyCards, finalRefinedText, splitWithRecords, hintRecord, hintSkipRecord, historyWithOpenQuestion, refinedCancelRecord, refinedRecord, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
@@ -59,6 +59,8 @@ interface Message {
   currentStatus?: string;
   // 복원한 채팅에서 확정 뒤 분석이 이어진 Stage 0 카드(읽기 전용 "완료됨"으로 보인다)
   clarifyCompleted?: boolean;
+  // 결과 본문 안에 끼워 넣은 카드 기록 줄(B-82 3-5): at은 본문의 줄 경계 위치
+  inlineRecords?: Array<{ at: number; text: string }>;
   stepNotiStatus?: 'started' | 'completed' | 'failed';
   toolNotiText?: string;
   clarifyData?: {
@@ -963,8 +965,13 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
         {msg.toolNotiText && (
           <div className="tool-noti-text">{msg.toolNotiText}</div>
         )}
-        {msg.content && (
-          <div className="markdown-body" style={{ maxWidth: '100%', overflowX: 'hidden' }}>
+        {msg.content && splitWithRecords(msg.content, msg.inlineRecords).map((seg, segIdx) => seg.kind === 'rec' ? (
+          <div key={`rec${segIdx}`} className="msg-tool" data-choice-record="true" data-inline-record="true">
+            <div className="dot" />
+            {seg.text}
+          </div>
+        ) : (
+          <div key={`md${segIdx}`} className="markdown-body" style={{ maxWidth: '100%', overflowX: 'hidden' }}>
             <Markdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
@@ -1027,10 +1034,10 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
                 }
               }}
             >
-              {msg.content}
+              {seg.text}
             </Markdown>
           </div>
-        )}
+        ))}
 
         {msg.isLoading && (
           <div className="inline-loading-area" style={{ marginTop: msg.content ? '12px' : '0' }}>
@@ -1381,7 +1388,8 @@ function App() {
       if (data.subType === 'choice_record') {
         if (typeof data.content === 'string' && data.content.trim() !== '') {
           const recId = data.id || `rec_${Date.now()}`;
-          setMessages(prev => [...prev, { id: recId, role: 'ai', subType: 'choice_record', content: data.content, isLoading: false }]);
+          // B-82 3-5: 결과가 스트리밍 중이면 그 본문의 진행 줄 바로 뒤에 끼운다(아니면 한 줄 메시지로 끝에 붙는다)
+          setMessages(prev => appendRecord(prev, recId, data.content));
         }
         return;
       }
@@ -1562,12 +1570,11 @@ function App() {
       // 오류가 아닌 안내(예: 분석 취소). messageId와 짝 없이도 안내 말풍선으로 보인다.
       if (data.subType === 'analyze_notice') {
         if (typeof data.content === 'string' && data.content.trim() !== '') {
-          // B-81 7: 5분 시간 초과로 자동 진행한 경우 제출·건너뛰기와 같은 모양의 기록 줄도 남긴다(안내 말풍선은 그대로)
+          // B-81 7: 5분 시간 초과로 자동 진행한 경우 제출·건너뛰기와 같은 모양의 기록 줄을 남긴다.
+          // B-82 3-5: 기록에 "자동 진행"이 들어 있으므로 같은 뜻의 안내 줄("응답이 없어 … 진행했습니다.")은 따로 보이지 않는다.
           const rec = timeoutRecord(data.content, lastStage3Total);
-          setMessages(prev => {
-            const next = [...prev, makeNoticeBubble(data.content, Date.now(), Math.random().toString(36).substring(2, 7)) as Message];
-            return rec ? [...next, { id: `rec_${Date.now()}`, role: 'ai', subType: 'choice_record', content: rec, isLoading: false } as Message] : next;
-          });
+          if (rec) setMessages(prev => appendRecord(prev, `rec_${Date.now()}`, rec));
+          else setMessages(prev => [...prev, makeNoticeBubble(data.content, Date.now(), Math.random().toString(36).substring(2, 7)) as Message]);
         }
         return;
       }

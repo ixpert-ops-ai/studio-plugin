@@ -164,7 +164,9 @@ class ClaimedFieldWarningB78Test {
             assertFalse("시드 이름이 없다: $t", Regex("Survey\\w*|Alimtalk\\w*|시드").containsMatchIn(t.replace("sql_survey.xml", "")))
             assertFalse("파일 수가 없다: $t", Regex("\\d+개").containsMatchIn(t))
         }
-        assertTrue("탐색기 시드(Survey*)는 설문 패키지로 말한다: $warn", warn.contains("설문 패키지의") && warn.contains("폴더를 읽어 확인"))
+        // B-82 3-2: 단계를 밝히고 패키지 경로(survey/service)로, 업무 계층 순서(service → dao → dto)로 말한다
+        assertTrue("Stage 0 질문은 구체화 단계: $q", q.contains("구체화 단계에서 ") && q.contains("survey/service"))
+        assertTrue("결과는 분석 단계: $warn", warn.contains("분석 단계에서 survey/service·survey/dao·survey/dto 폴더를 읽어 확인"))
         // 읽은 파일 수는 로그·시험에만 남긴다
         File("build/b79_scope_numbers.txt").writeText("Stage 0 질문: $q\n결과 경고: $warn\n", Charsets.UTF_8)
     }
