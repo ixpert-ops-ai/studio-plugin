@@ -6,8 +6,22 @@
 |---|---|
 | `harness_58eb590_run1.xml` | 이전 기준선(58eb590, 2026-10 초). 엄격 그룹 5종 EXACT_MATCH 기준이었다. |
 | `harness_a34c35a_m78.xml` | 직전 기준선: a34c35a(add/search 동작어를 이름 일치에서 제외) 이후, B-78 검증 `m78`(HEAD 248cd97)의 XML. |
-| `harness_b80_seed_score.xml` | **현재 기준선**: heuristicSeeds를 점수 기반 선정으로 바꾼 뒤(B-80, dd09019). LlmOff 블록의 대체 시드가 바뀌어 survey_admin 후보 11→17, APC Transit Card 21→31, ISM Core GT 0/4→4/4. LlmOn 2종은 후보 수만 14→15, 17→25로 달라졌다(RefinedReq 줄은 같음). |
+| `harness_b82_seed_c.xml` | **현재 기준선**: heuristicSeeds가 배치 이름(Batch/Runner/Job/Cli)을 시드에서 빼고 점수 상위 5 + 한글 근거 전용 2개를 고르도록 바뀐 뒤(B-82, 91a5922). 변경 내용은 아래 "B-80 → B-82" 표. |
+| `harness_b80_seed_score.xml` | 직전 기준선: heuristicSeeds를 점수 기반 선정으로 바꾼 뒤(B-80, dd09019). LlmOff 블록의 대체 시드가 바뀌어 survey_admin 후보 11→17, APC Transit Card 21→31, ISM Core GT 0/4→4/4. LlmOn 2종은 후보 수만 14→15, 17→25로 달라졌다(RefinedReq 줄은 같음). |
 | `harness_b79_scorer_dict.xml` | 직전 기준선: 사전의 "설문" → survey 항목을 분석 점수기에만 적용한 뒤(B-79). 처음 올린 b2402bd 기준선(전역 적용)은 그 변경이 시험 5건을 깨서 되돌리며 지웠다. |
+
+## B-80 → B-82(시드에서 배치 이름 제외)에서 달라진 블록(2026-11-03)
+전체 7블록이 모두 달라졌다(LlmOn 블록도 탐색기 대체 경로의 시드를 쓴다). 대체 시드가 배치 클래스를 더는 포함하지 않아서이며 정답 손실은 없다(15쌍 필수 정답 손실 0, 측정은 `MeasureB82Test`/`SeedDesignB81Test`).
+
+| 블록 | Top-30 수(전 → 후) | 시드 변화 |
+|---|---|---|
+| APC Transit Card (Intent=LlmOff) | 31 → 31 | #2가 ACMBTBAPC006DEM(54, Seed Class 보호) → ACMBTBAPC008DEM(62) |
+| survey_admin (Intent=LlmOff) | 17 → 13 | 배치 시드 제거 |
+| Ablation-a | 17 → 13 | SurveyPartExport*·AlimtalkTemplateBatch* 제거, SurveyDto·SurveyQImgDto·ReviewDto 추가 |
+| ISM Core (Intent=LlmOff) | 30 → 16 | 후보 잡음 감소 |
+| survey_admin (Intent=LlmOn) | 15 → 18 | |
+| Ablation-b | 15 → 18 | SurveyPartExportCli → ClosingLinkDto, ReviewDto |
+| APC DEM Isolated (Intent=LlmOn) | 25 → 30 | |
 
 ## a34c35a 기준선에서 달라진 블록(2026-10-29, B-79)
 `survey_admin (Intent=LlmOff)`와 `Ablation-a (survey_admin LlmOff refined + 5 identifier lines)` 두 블록의 Top-30이 12개 → 11개이고, 차이는 한 파일뿐이다.
