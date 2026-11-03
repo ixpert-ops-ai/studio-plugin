@@ -109,4 +109,9 @@ tasks {
     named<Test>("test") {
         systemProperties(System.getProperties().mapKeys { it.key.toString() })
     }
+
+    // B-83 E: runIde 콘솔의 한글 깨짐 방지(콘솔 기본 인코딩이 UTF-8이 아니다). idea.log는 이미 UTF-8이라 파일은 정상이다.
+    named<JavaExec>("runIde") {
+        jvmArgs("-Dfile.encoding=UTF-8", "-Dsun.stdout.encoding=UTF-8", "-Dsun.stderr.encoding=UTF-8")
+    }
 }
