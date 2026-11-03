@@ -9,7 +9,10 @@ class RelevanceScorer(
     // CRUD 동사(추가·조회)의 번역 add/search를 이름 일치에 쓰지 않는다(B-78). false는 전/후 비교용이다.
     private val excludeActionTokens: Boolean = true,
     // B-82 6a 측정 전용: 탐색기가 inspect한 것으로 보는 클래스 이름. 점수 미달이어도 구제(보호)한다. 비어 있으면(기본) 동작 변화 없음.
-    private val rescueInspected: Set<String> = emptySet()
+    private val rescueInspected: Set<String> = emptySet(),
+    // B-83 7 측정 전용(기본 꺼짐, 동작 변화 없음): 주석 점수를 단어 희소성(idf)으로 가중 / 명사의 조사를 단어 끝에서만 떼기(이메일 → 메일 같은 훼손 방지)
+    private val commentIdf: Boolean = false,
+    private val fixParticles: Boolean = false
 ) {
 
     fun scoreAndFilter(
@@ -111,7 +114,16 @@ class RelevanceScorer(
 
                 // CommentMatchScore
                 var commentMatchScore = 0.0
-                if (fileNode.koreanComments.any { comment ->
+                if (commentIdf) {
+                    // B-83 7 측정 전용: 이분법 20점 대신 일치한 단어의 희소성(idf, 0~1)을 곱한다. 많은 노드의 주석에 나오는 흔한 단어("설문", "조회")는 거의 점수가 없다.
+                    val matched = (keywords.nouns + keywords.verbs).distinct().filter { w -> w.length >= 2 && fileNode.koreanComments.any { it.contains(w) } }
+                    val n = graph.files.size.toDouble()
+                    val maxIdf = matched.maxOfOrNull { w ->
+                        val df = maxOf(1, graph.files.values.count { f -> f.koreanComments.any { it.contains(w) } })
+                        if (n <= 1) 1.0 else Math.log(n / df) / Math.log(n)
+                    } ?: 0.0
+                    commentMatchScore = 20.0 * maxIdf
+                } else if (fileNode.koreanComments.any { comment ->
                     keywords.nouns.any { noun -> comment.contains(noun) } ||
                     keywords.verbs.any { verb -> comment.contains(verb) }
                 }) {
@@ -485,7 +497,43 @@ class RelevanceScorer(
                 }
             }
         }
+        // D. MyBatis 매퍼 계약 쌍(B-83 2): 보호된 Dao/DaoImpl의 인터페이스가 linkedTo에 있는 매퍼를 결정적으로 포함한다.
+        // 전에는 매퍼가 "Resource Reverse Link" 구제(hasLivingJavaMapper 등 조건)에만 기대 시드·점수 조건에 따라 빠질 수 있었다. 공통 리소스(linkedTo 2개 이상, 인프라 경로·층)는 제외한다.
+        val mapperAdditions = mutableListOf<ScoredFile>()
+        for (item in protectedContractNodes) {
+            val node = graph.files[item.path] ?: continue
+            if (!(node.className.endsWith("Dao") || node.className.endsWith("DaoImpl") || node.className.endsWith("Mapper"))) continue
+            val interfacePaths = if (node.isInterface) listOf(item.path) else {
+                val names = node.implementedInterfaces.map { it.substringAfterLast('.') }.ifEmpty { if (node.className.endsWith("Impl")) listOf(node.className.removeSuffix("Impl")) else emptyList() }
+                graph.files.entries.filter { (_, f) -> f.isInterface && f.className in names }.map { it.key }
+            }
+            if (interfacePaths.isEmpty()) continue
+            for (res in graph.resourceNodes) {
+                if (res.type != net.ib.ixpert.ops.wuwagent.service.metagraph.model.ResourceType.MYBATIS_MAPPER) continue
+                if (res.linkedTo.none { it in interfacePaths }) continue
+                val low = res.path.lowercase()
+                val isCommonMapper = res.linkedTo.size >= 2 || res.layer == "INFRASTRUCTURE" || low.contains("/common/") || low.contains("/libs/") || low.contains("/plugin/") || low.contains("/vendor/")
+                if (isCommonMapper) continue
+                if (scoredFiles.any { it.path == res.path } || mapperAdditions.any { it.path == res.path }) continue
+                println("[RelevanceScorer] CONTRACT PAIR: Added mapper ${res.path.substringAfterLast('/')} for protected ${node.className}")
+                mapperAdditions.add(
+                    ScoredFile(
+                        path = res.path,
+                        className = res.path.substringAfterLast('/'),
+                        fileType = res.type.name,
+                        layer = res.layer,
+                        score = 40,
+                        discoveryReason = "CONTRACT_PAIR [Mapper: ${node.className}]",
+                        hopDistance = item.hopDistance,
+                        fromPath = item.path,
+                        isProtected = true,
+                        protectionReason = "Seed Direct Dependency"
+                    )
+                )
+            }
+        }
         scoredFiles.addAll(contractPairAdditions)
+        scoredFiles.addAll(mapperAdditions)
 
         // 2. Tier 1 Seed들의 토큰 세트 수집 (확장자 제외 순수 basename 기반)
         val seedTokens = scoredFiles.filter { protectionTier(it.protectionReason) == 1 }
@@ -555,7 +603,13 @@ class RelevanceScorer(
             if (cleanWord.endsWith("한다") || cleanWord.endsWith("해라") || cleanWord.endsWith("추가") || cleanWord.endsWith("수정") || cleanWord.endsWith("삭제")) {
                 verbs.add(cleanWord.replace("한다", "").replace("해라", ""))
             } else {
-                nouns.add(cleanWord.replace("을", "").replace("를", "").replace("이", "").replace("가", "").replace("은", "").replace("는", ""))
+                nouns.add(
+                    if (fixParticles) {
+                        // 조사는 단어 끝에서만 한 번 뗀다(남는 길이가 2자 이상일 때). 전에는 단어 안의 "이"·"을" 등을 모두 지워 이메일→메일, 테이블에→테블에가 됐다.
+                        listOf("에서", "으로", "에게", "까지", "부터", "은", "는", "이", "가", "을", "를", "에", "와", "과", "의", "로", "도", "만")
+                            .firstOrNull { cleanWord.endsWith(it) && cleanWord.length - it.length >= 2 }?.let { cleanWord.removeSuffix(it) } ?: cleanWord
+                    } else cleanWord.replace("을", "").replace("를", "").replace("이", "").replace("가", "").replace("은", "").replace("는", "")
+                )
             }
             
             // 한글 명사에 대한 영문 번역(도메인 사전) 추가
