@@ -50,6 +50,25 @@ class ExcludeComponentDialogueTest {
         override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = null
     }
 
+    /**
+     * B-82 2-b: 이 두 시나리오는 "Stage 0에서 제외 확정한 Alimtalk 배치 파일이 Stage 1 후보 30개 안에 있어서 30 → 27/28로 줄어든다"를 검증한다.
+     * 전에는 LLM 없는 대체 시드(그래프 순서 앞쪽, 배치 클래스 포함)가 그 전제를 만들었다. 시드가 배치 이름을 빼도록 바뀌었으므로(B-82 2),
+     * 전제를 시험이 직접 만든다: 이전 대체 시드(배치 클래스 포함)를 확정하는 모의 탐색기다. 단언(30, 27/28, 정답 재현 8)은 그대로다.
+     */
+    private class FixedSeedClient(private val seeds: List<String>) : LLMClient {
+        override fun chat(systemPrompt: String, userCode: String, maxTokens: Int?, onChunk: ((String) -> Unit)?): OllamaChatResponse? = null
+        override fun chatWithTools(systemPrompt: String, messages: List<net.ib.ixpert.ops.wuwagent.model.ChatMessage>, maxTokens: Int?, tools: List<net.ib.ixpert.ops.wuwagent.model.ToolDefinition>?, toolChoice: Any?, temperature: Double?): net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse? {
+            if (!systemPrompt.contains("당신은 시스템의 소스코드 및 메타그래프를")) return null
+            val args = "{\"seed_classes\":[${seeds.joinToString(",") { "\"$it\"" }}],\"rationale\":\"테스트\"}"
+            return net.ib.ixpert.ops.wuwagent.model.ChatCompletionResponse("x", listOf(net.ib.ixpert.ops.wuwagent.model.ChatChoice(0, net.ib.ixpert.ops.wuwagent.model.ChatMessage("assistant", null,
+                toolCalls = listOf(net.ib.ixpert.ops.wuwagent.model.ToolCall("t", "function", net.ib.ixpert.ops.wuwagent.model.ToolCallFunction("confirm_final_seeds", args)))), "tool_calls")))
+        }
+        override fun fetchModels(baseUrl: String, apiKey: String): List<String>? = null
+    }
+
+    /** B-80 시점의 대체 시드(배치 클래스 포함). */
+    private val batchSeeds = listOf("SurveyServiceImpl", "ClosingLinkDto", "SurveyDaoImpl", "SurveyPartExportCli", "SurveyPartExportJob", "SurveyPartExportRunner", "AlimtalkTemplateBatchJob", "AlimtalkTemplateBatchRunner")
+
     @Before
     fun setUp() {
         val path = File("C:/Workspace/HC_card_survey_admin/survey_admin/.meta/project-graph.json")
@@ -200,8 +219,8 @@ class ExcludeComponentDialogueTest {
         assertTrue(intentExplicit.excludedFiles.contains("src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRunner.java"))
         assertTrue(intentExplicit.excludedFiles.contains("src/main/java/net/infobank/iss/batch/AlimtalkTemplateBatchRepository.java"))
 
-        // 4. Analyze 파이프라인 연계 실측 (룰 폴백 조건: LLM-off)
-        val failingClient = FailingLlmClient()
+        // 4. Analyze 파이프라인 연계 실측 (B-82 2-b: 배치 클래스를 포함하는 고정 시드의 모의 탐색기, 단언은 그대로)
+        val failingClient = FixedSeedClient(batchSeeds)
         val baselineResult = AdaptiveFileDiscovery.filter(
             primaryReq = "기존 설문 발송에 브랜드메시지 발송 채널 추가 및 어드민 개발",
             secondaryReq = "",
@@ -360,7 +379,7 @@ class ExcludeComponentDialogueTest {
         assertFalse("GT인 BrandmessageTemplateBatchJob은 excludedFiles에 들어가지 않음", intent.excludedFiles.any { it.contains("Brandmessage") })
 
         // Analyze 연계 실측
-        val failingClient = FailingLlmClient()
+        val failingClient = FixedSeedClient(batchSeeds)
         val baselineResult = AdaptiveFileDiscovery.filter(
             primaryReq = "기존 설문 발송에 브랜드메시지 발송 채널 추가 및 어드민 개발",
             secondaryReq = "",

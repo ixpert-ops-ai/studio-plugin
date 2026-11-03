@@ -363,20 +363,24 @@ class AgenticSeedSelector(
             // 노드마다 근거 점수를 매긴다: 사용자가 직접 쓴 영문 식별자가 이름과 맞으면 토큰당 4점, 한글 이름(localName)이 SR 단어를 품으면 단어당 3점,
             // 번역 토큰이 이름과 맞으면 토큰당 2점, 한글 주석이 SR 단어를 품으면 단어당 1점(한글 이름이 그 코드를 가장 직접 설명한다).
             // 점수가 같으면 업무 계층 순서(서비스 → DAO·컨트롤러 → DTO → 그 밖), 그다음 그래프 순서. 근거가 하나도 없는 노드는 시드가 아니다.
-            class Scored(val className: String, val score: Int, val layerRank: Int, val order: Int)
+            class Scored(val className: String, val score: Int, val layerRank: Int, val order: Int, val nameScore: Int)
             val scored = graph.files.values.mapIndexedNotNull { order, node ->
                 val directScore = 4 * directEnglishTokens.distinct().count { node.className.contains(it, ignoreCase = true) }
                 val translatedScore = 2 * translatedOnly.count { node.className.contains(it, ignoreCase = true) }
                 val localScore = 3 * koreanTokens.distinct().count { t -> node.localName?.contains(t) == true }
                 val commentScore = koreanTokens.distinct().count { t -> node.koreanComments.any { it.contains(t) } }
                 val total = directScore + translatedScore + localScore + commentScore
-                if (total > 0) Scored(node.className, total, seedLayerRank(node.className), order) else null
+                if (total > 0) Scored(node.className, total, seedLayerRank(node.className), order, directScore + translatedScore) else null
             }
-            // 점수 상위 3개 + 그래프 순서 앞 5개(겹치면 한 번만): 점수만으로 고르면 한 이름 묶음이 자리를 모두 차지해 한글 근거(주석·한글명)로만 닿던 정답이 사라진다
-            val byScore = scored.sortedWith(compareByDescending<Scored> { it.score }.thenBy { it.layerRank }.thenBy { it.order })
-                .map { it.className }.distinct().take(3)
-            val byOrder = scored.sortedBy { it.order }.map { it.className }.distinct().take(5)
-            val seeds = (byScore + byOrder).distinct()
+            // B-82 2: 배치 이름(Batch, Runner, Job, Cli)은 시드에서 뺀다. 그 뒤 점수 상위 5개 + 이름 근거 없이 한글 근거(한글명·주석)만 있는 노드 2개(그래프 순서).
+            // 한글 근거 전용 자리는 이름이 안 맞아도 한글 주석으로만 닿던 정답(SR-12)을 위한 것이다. B-80의 임시 방편("그래프 순서 앞 5개")을 대체한다:
+            // 15쌍 필수 정답 손실 0, 배치 시드 5 → 0(측정은 docs의 B-81, B-82).
+            val batchName = Regex("Batch|Runner|Job|Cli")
+            val nonBatch = scored.filter { !batchName.containsMatchIn(it.className) }
+            val byScore = nonBatch.sortedWith(compareByDescending<Scored> { it.score }.thenBy { it.layerRank }.thenBy { it.order })
+                .map { it.className }.distinct().take(5)
+            val koreanOnly = nonBatch.filter { it.nameScore == 0 }.sortedBy { it.order }.map { it.className }.distinct().take(2)
+            val seeds = (byScore + koreanOnly).distinct().ifEmpty { scored.sortedBy { it.order }.map { it.className }.distinct().take(5) }
 
             val isCreate = srText.contains("추가") || srText.contains("생성") || srText.contains("신규")
             val isDelete = srText.contains("삭제") || srText.contains("제거")
@@ -424,7 +428,9 @@ class AgenticSeedSelector(
  * 그래프 툴콜 에이전트를 위한 4대 탐색 도구 엔진 및 3-Tier 구조 매처
  */
 class AgenticGraphTools(
-    private val graph: ProjectGraphQueryable
+    private val graph: ProjectGraphQueryable,
+    // B-82 8: 검색 사전에 도메인 명사(설문 → survey)를 넣을지. 기본 false는 종전 동작이다(측정용 선택지).
+    private val domainNouns: Boolean = false
 ) {
     companion object {
         private val STRUCTURAL_STOPWORDS = setOf(
@@ -531,7 +537,7 @@ class AgenticGraphTools(
             .filter { it.isNotBlank() && it !in STRUCTURAL_STOPWORDS }
     }
 
-    private val dictionary by lazy { DomainDictionary.load(graph) }
+    private val dictionary by lazy { DomainDictionary.load(graph, domainNouns) }
 
     fun searchGraphNodes(query: String, domainHint: String? = null, limit: Int = 10): List<Map<String, Any>> {
         val rawTokens = query.lowercase().split(Regex("[^a-z0-9가-힣]")).filter { it.isNotBlank() }

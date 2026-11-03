@@ -11,16 +11,18 @@ data class EvalGt(
     val path: String? = null,   // gtMatch == "path": 프로젝트 루트 기준 파일 경로
     val name: String? = null,   // gtMatch == "harness-contains": 하네스 규칙(경로가 이름을 대소문자 무시하고 포함)
     val reason: String? = null, // 고른 근거 한 줄
-    val role: String? = null,   // required(고칠 파일, 기본) | reference(읽기만 하는 파일)
+    val role: String? = null,   // required(고칠 파일, 기본) | optional(경로를 그대로 통과하는 계층: 바꿔도 되고 안 바꿔도 되는 파일, B-82 4) | reference(읽기만 하는 파일)
     val inGraph: Boolean? = null, // false면 그래프에 없는 파일(그래프 누락). Recall 분모에서 뺀다. 기본 true
     val uncertain: Boolean? = null // true면 정답 확신이 낮은 행(검토 문서에서 "?"가 붙은 행). Recall을 uncertain 제외 기준으로도 낸다
 ) {
     fun isUncertain(): Boolean = uncertain == true
     fun label(): String = path ?: name ?: "?"
     fun isReference(): Boolean = role == "reference"
+    /** 선택 정답: 조회 경로에서 DTO를 그대로 넘기는 Dao 인터페이스·DaoImpl처럼 있어도 없어도 되는 파일. Recall 분모에는 넣지 않고 적중만 따로 센다. */
+    fun isOptional(): Boolean = role == "optional"
     fun isInGraph(): Boolean = inGraph != false
-    /** Recall 분모: required이면서 그래프에 있는 항목 */
-    fun countsForRecall(): Boolean = !isReference() && isInGraph()
+    /** Recall 분모: required이면서 그래프에 있는 항목(reference와 optional은 뺀다) */
+    fun countsForRecall(): Boolean = !isReference() && !isOptional() && isInGraph()
 }
 
 data class EvalExtra(

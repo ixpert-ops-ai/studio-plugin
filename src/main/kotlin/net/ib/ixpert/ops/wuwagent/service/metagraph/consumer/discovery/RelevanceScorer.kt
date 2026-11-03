@@ -7,7 +7,9 @@ class RelevanceScorer(
     private val fileLimit: Int = 30,
     private val minScore: Int = 10,
     // CRUD 동사(추가·조회)의 번역 add/search를 이름 일치에 쓰지 않는다(B-78). false는 전/후 비교용이다.
-    private val excludeActionTokens: Boolean = true
+    private val excludeActionTokens: Boolean = true,
+    // B-82 6a 측정 전용: 탐색기가 inspect한 것으로 보는 클래스 이름. 점수 미달이어도 구제(보호)한다. 비어 있으면(기본) 동작 변화 없음.
+    private val rescueInspected: Set<String> = emptySet()
 ) {
 
     fun scoreAndFilter(
@@ -135,6 +137,8 @@ class RelevanceScorer(
                 val totalScore = (hopScore + nameMatchScore + methodMatchScore + layerAlignScore + commentMatchScore + typeBonusScore + criticalChainBonus).toInt()
                 
                 println("[RelevanceScorer] Node: ${fileNode.className}, Score: $totalScore")
+                // B-82 6a: 점수 항목별 분해(추정 → 확인). 값은 모두 정수·점수이고 소스·사용자 문장은 없다.
+                println("[SCORE-DIAG] ${fileNode.className} hop=${step.hop}(+$hopScore) name=${"%.1f".format(nameMatchScore)} method=${"%.1f".format(methodMatchScore)} layer=$layerAlignScore comment=${"%.1f".format(commentMatchScore)} type=$typeBonusScore chain=$criticalChainBonus via=${step.via} total=$totalScore")
 
                 val fromClassName = step.from?.substringAfterLast('/')?.substringBeforeLast('.')
                 val fromFileNode = if (step.from != null) graph.files[step.from] else null
@@ -171,6 +175,7 @@ class RelevanceScorer(
                 // LLM이 명시적으로 지목한 파일 판별 (submit_seeds 결과 + Judge pick + Frontend hint + Seed 직접 하향 의존)
                 val protection = protectionReason(fileNode.className)
                     ?: if (isSeedDirectDependency) "Seed Direct Dependency" else null
+                    ?: if (fileNode.className in rescueInspected) "Inspected (측정)" else null
 
                 if (totalScore >= minScore) {
                     scoredFiles.add(
