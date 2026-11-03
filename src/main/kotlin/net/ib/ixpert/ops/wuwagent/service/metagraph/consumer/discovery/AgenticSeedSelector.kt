@@ -15,7 +15,9 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.FileNode
 class AgenticSeedSelector(
     private val llmClient: LLMClient,
     private val projectBasePath: String? = null,
-    private val clarificationBridge: L1ClarificationBridge? = null
+    private val clarificationBridge: L1ClarificationBridge? = null,
+    // B-83 4: Stage 0에서 확인한 사실 블록(ClaimedFieldCheck.explorerFacts). null이면 종전과 같다.
+    private val factsBlock: String? = null
 ) : SeedSelector {
 
     private val gson = Gson()
@@ -57,8 +59,14 @@ class AgenticSeedSelector(
         """.trimIndent()
 
         val messages = mutableListOf(
-            ChatMessage(role = "user", content = "요구사항(SR):\n$srText\n\n위 요구사항을 분석하여 핵심 Seed 클래스들을 탐색하고 확정해주세요. 도메인 명사를 영어로 번역한 키워드를 포함하여 탐색을 시작하세요.")
+            // B-83 4: Stage 0에서 확인한 사실(없는 것으로 확인된 항목, 읽은 범위, 사용자 답변)이 있으면 SR 뒤에 사실 블록으로 붙인다. 사실이 없으면 종전 메시지와 바이트까지 같다.
+            ChatMessage(role = "user", content = "요구사항(SR):\n$srText\n\n${if (factsBlock.isNullOrBlank()) "" else factsBlock + "\n\n"}위 요구사항을 분석하여 핵심 Seed 클래스들을 탐색하고 확정해주세요. 도메인 명사를 영어로 번역한 키워드를 포함하여 탐색을 시작하세요.")
         )
+
+        // B-83 3: 하네스(IpsController 시드 10/10)와 IDE(Dao·DaoImpl 시드)의 입력 차이를 확정하기 위한 입력 기록. 탐색기가 받는 사용자 메시지 전문(SR과 안내문)과 시스템 프롬프트·그래프 규모의 해시를 남긴다.
+        // 사용자 SR 문장은 이미 위의 "SR:" 줄에 남는 값이고, 소스 본문은 들어 있지 않다.
+        println("[ExplorerInput] userMessage(${(messages.first().content ?: "").length}자)=${(messages.first().content ?: "").replace("\n", "\\n")}")
+        println("[ExplorerInput] systemPromptHash=${Integer.toHexString(systemPrompt.hashCode())} graphFiles=${graph.files.size} resources=${graph.resourceNodes.size} bridge=${clarificationBridge != null} projectBasePath=${projectBasePath != null} temperature=0.0")
 
         val searchTool = toolDefinitions.find { it.function.name == "search_graph_nodes" }!!
         val inspectTool = toolDefinitions.find { it.function.name == "inspect_node_detail" }!!
@@ -363,20 +371,22 @@ class AgenticSeedSelector(
             // 노드마다 근거 점수를 매긴다: 사용자가 직접 쓴 영문 식별자가 이름과 맞으면 토큰당 4점, 한글 이름(localName)이 SR 단어를 품으면 단어당 3점,
             // 번역 토큰이 이름과 맞으면 토큰당 2점, 한글 주석이 SR 단어를 품으면 단어당 1점(한글 이름이 그 코드를 가장 직접 설명한다).
             // 점수가 같으면 업무 계층 순서(서비스 → DAO·컨트롤러 → DTO → 그 밖), 그다음 그래프 순서. 근거가 하나도 없는 노드는 시드가 아니다.
-            class Scored(val className: String, val score: Int, val layerRank: Int, val order: Int, val nameScore: Int)
+            class Scored(val className: String, val score: Int, val layerRank: Int, val order: Int, val nameScore: Int, val directScore: Int)
             val scored = graph.files.values.mapIndexedNotNull { order, node ->
                 val directScore = 4 * directEnglishTokens.distinct().count { node.className.contains(it, ignoreCase = true) }
                 val translatedScore = 2 * translatedOnly.count { node.className.contains(it, ignoreCase = true) }
                 val localScore = 3 * koreanTokens.distinct().count { t -> node.localName?.contains(t) == true }
                 val commentScore = koreanTokens.distinct().count { t -> node.koreanComments.any { it.contains(t) } }
                 val total = directScore + translatedScore + localScore + commentScore
-                if (total > 0) Scored(node.className, total, seedLayerRank(node.className), order, directScore + translatedScore) else null
+                if (total > 0) Scored(node.className, total, seedLayerRank(node.className), order, directScore + translatedScore, directScore) else null
             }
             // B-82 2: 배치 이름(Batch, Runner, Job, Cli)은 시드에서 뺀다. 그 뒤 점수 상위 5개 + 이름 근거 없이 한글 근거(한글명·주석)만 있는 노드 2개(그래프 순서).
             // 한글 근거 전용 자리는 이름이 안 맞아도 한글 주석으로만 닿던 정답(SR-12)을 위한 것이다. B-80의 임시 방편("그래프 순서 앞 5개")을 대체한다:
             // 15쌍 필수 정답 손실 0, 배치 시드 5 → 0(측정은 docs의 B-81, B-82).
+            // 예외(B-83): 사용자가 SR에 그 클래스 이름을 직접 썼거나(직접 영문 식별자 일치) SR이 배치를 말하면(배치·batch·스케줄·job·runner) 배치 이름도 시드가 된다.
             val batchName = Regex("Batch|Runner|Job|Cli")
-            val nonBatch = scored.filter { !batchName.containsMatchIn(it.className) }
+            val batchRequested = Regex("배치|batch|스케줄|job|runner", RegexOption.IGNORE_CASE).containsMatchIn(srText)
+            val nonBatch = scored.filter { !batchName.containsMatchIn(it.className) || it.directScore > 0 || batchRequested }
             val byScore = nonBatch.sortedWith(compareByDescending<Scored> { it.score }.thenBy { it.layerRank }.thenBy { it.order })
                 .map { it.className }.distinct().take(5)
             val koreanOnly = nonBatch.filter { it.nameScore == 0 }.sortedBy { it.order }.map { it.className }.distinct().take(2)

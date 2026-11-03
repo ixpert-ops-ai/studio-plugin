@@ -16,6 +16,7 @@ object AdaptiveFileDiscovery {
         projectBasePath: String? = null,
         enhancedRequirements: List<String> = emptyList(),
         seedSelector: SeedSelector? = null,
+        factsBlock: String? = null,
         onProgress: ((String) -> Unit)? = null
     ): DiscoveryResult {
         
@@ -27,7 +28,8 @@ object AdaptiveFileDiscovery {
         val selector: SeedSelector = seedSelector ?: AgenticSeedSelector(
             llmClient = client,
             projectBasePath = projectBasePath ?: project?.basePath,
-            clarificationBridge = defaultBridge
+            clarificationBridge = defaultBridge,
+            factsBlock = factsBlock
         )
         val seedResult = selector.selectSeeds(srText, graph)
 
