@@ -1073,12 +1073,15 @@ class Stage0ClarificationEngine(
                 $candidateDescriptions
             """.trimIndent()
 
+            val summaryStartMs = System.currentTimeMillis()
             val response = client.chat(
                 systemPrompt = systemPrompt,
                 userCode = userPrompt,
                 maxTokens = 500
             )
             val content = response?.message?.content?.trim()
+            // B-84 1: 요약 호출도 [LlmCall]로 길이·시간을 남긴다(로그 전용)
+            println("[LlmCall] thread=${Thread.currentThread().name} label=작업 요약 프롬프트 ${systemPrompt.length}+${userPrompt.length}자, 최대 출력 500토큰, 응답 ${content?.length ?: 0}자, ${System.currentTimeMillis() - summaryStartMs}ms")
             if (content.isNullOrBlank() || content.startsWith("[Error]")) {
                 null
             } else if (fieldFacts.isEmpty()) {

@@ -106,7 +106,7 @@ class JcefRefinedRequirementConfirmationBridge(
                     "refinedRequirement" to refinedRequirement,
                     "message" to "분석을 시작하기 전에 정제된 요구사항을 확인해 주세요. 그대로 진행하거나 고쳐서 진행할 수 있습니다."
                 )
-                println("[RefineGate] rid=${Integer.toHexString(originalRequirement.hashCode())} 카드 요청 전송 projectId=$projectId 정제문 ${refinedRequirement.length}자")
+                println("[RefineGate] rid=${Integer.toHexString(originalRequirement.hashCode())} 카드 요청 전송 projectId=$projectId 정제문 ${refinedRequirement.length}자 (${ConfirmClock.sinceText()})")
                 bridge.sendMessage("refinedConfirmation/request", Gson().toJson(payload), "system")
             } catch (e: Exception) {
                 registry.complete(projectId, null)

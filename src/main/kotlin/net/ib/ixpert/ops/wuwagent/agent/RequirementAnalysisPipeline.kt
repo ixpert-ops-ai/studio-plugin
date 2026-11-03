@@ -390,7 +390,13 @@ class RequirementAnalysisPipeline(
             } else {
                 baseRequirement
             }
+            // B-84 1: Stage 3 검증 시작/종료와 소요 ms(로그 전용)
+            println("[Stage3] 검증 시작: 후보 ${filesToVerify.size}개, 요구사항 ${fullRequirement.length}자")
+            val stage3StartMs = System.currentTimeMillis()
             val verificationOutput = verifier.verify(fullRequirement, filesToVerify)
+            val stage3Ms = System.currentTimeMillis() - stage3StartMs
+            println("[Stage3] 검증 종료: ${stage3Ms}ms, 남은 파일 ${verificationOutput.files.size}개, 대체 경로=${verificationOutput.usedFallback}")
+            println("[LlmCall] thread=${Thread.currentThread().name} label=Stage 3 검증 후보 ${filesToVerify.size}개, ${stage3Ms}ms")
 
             // 사용자가 명시적으로 선택한 파일은 verify 결과에서 누락되었더라도 강제 복원 (Union)
             val verifiedFiles = if (userSelection != null) {

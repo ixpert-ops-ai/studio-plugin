@@ -82,9 +82,15 @@ class AgenticSeedSelector(
         val executedQueries = mutableSetOf<String>()
         val accumulatedTopCandidates = linkedMapOf<String, Double>()
 
+        // B-84 1: 소요 시간 분리(총 ms, 턴별 LLM ms, 사용자 카드 대기 ms). 로그 전용이다.
+        val explorerStartMs = System.currentTimeMillis()
+        val turnLlmMs = mutableListOf<Long>()
+        var cardWaitMs = 0L
+
         for (turn in 1..maxTurns) {
             println("\n[AgenticGraphExplorer] === TURN $turn ===")
-            
+            val llmStartMs = System.currentTimeMillis()
+
             val activeTools = phase1Tools // 모든 턴에서 4대 도구(검색, 상세조회, 확장, 확정) 자율 사용 허용
             val activeToolChoice = "auto" // 항상 자율 판단(auto) 유지
 
@@ -102,6 +108,9 @@ class AgenticSeedSelector(
                 break
             }
 
+            val turnMs = System.currentTimeMillis() - llmStartMs
+            turnLlmMs.add(turnMs)
+            println("[LlmCall] thread=${Thread.currentThread().name} label=탐색기 Turn $turn 메시지 ${messages.size}개, 도구 호출 ${response?.choices?.firstOrNull()?.message?.toolCalls?.size ?: 0}개, ${turnMs}ms")
             val choice = response?.choices?.firstOrNull()
             val assistantMessage = choice?.message
             if (assistantMessage == null) {
@@ -246,6 +255,7 @@ class AgenticSeedSelector(
                 val explanation = assistantMessage.content ?: assistantMessage.reasoningContent ?: ""
                 val distinctCandidates = turnCandidates.distinctBy { it["className"]?.toString() ?: "" }.take(10)
                 val distinctDomains = turnDomains.distinct()
+                val cardStartMs = System.currentTimeMillis()
                 val userHint = clarificationBridge?.requestClarification(
                     turn = turn,
                     query = lastSearchQuery,
@@ -253,6 +263,7 @@ class AgenticSeedSelector(
                     domains = distinctDomains,
                     explanation = explanation
                 )
+                cardWaitMs += System.currentTimeMillis() - cardStartMs
                 if (!userHint.isNullOrBlank()) {
                     println("[AgenticGraphExplorer] Turn $turn Clarification received from user: '$userHint'")
                     // 사용자가 새 힌트를 입력하면 이전 턴의 누적 점수를 감쇠하여 새 피드백 탐색 결과가 우선순위를 갖도록 조정
@@ -281,6 +292,8 @@ class AgenticSeedSelector(
             }
         }
 
+        val explorerTotalMs = System.currentTimeMillis() - explorerStartMs
+        println("[ExplorerTiming] 총 ${explorerTotalMs}ms, 턴별 LLM ${turnLlmMs}ms, 카드 대기(사용자) ${cardWaitMs}ms, 대기를 뺀 순수 ${explorerTotalMs - cardWaitMs}ms (턴 ${turnLlmMs.size}개)")
         clarificationBridge?.hideClarification()
 
         // "백엔드/서버/API"가 있으면 화면 확장을 하지 않고 "~화면용"은 화면 키워드로 세지 않는다(FrontendKeywordRule)

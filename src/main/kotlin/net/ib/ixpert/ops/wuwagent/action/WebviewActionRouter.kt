@@ -228,6 +228,7 @@ class WebviewActionRouter(private val project: Project) {
                         return@invokeLater
                     }
                     val messageId = "analyze_${System.currentTimeMillis()}"
+                    net.ib.ixpert.ops.wuwagent.agent.ConfirmClock.start()
                     println("[RefineGate] /clarify-confirm 수신 messageId=$messageId")
                     
                     val session = net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.getSession(project)
