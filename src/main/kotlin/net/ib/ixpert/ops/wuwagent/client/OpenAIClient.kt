@@ -243,6 +243,17 @@ class OpenAIClient(
                                 ?.get(0)?.asJsonObject
                                 ?.getAsJsonObject("message")
                                 ?.get("content")?.asString ?: ""
+                            // B-83 C: 응답 지연 원인 판정용 토큰 사용량(프롬프트/출력/추론 토큰, 종료 사유, 추론 본문 길이). 본문은 남기지 않는다. 같은 시각에 두 호출이 나가므로 스레드 이름을 붙인다.
+                            try {
+                                val usage = json.getAsJsonObject("usage")
+                                val choice0 = json.getAsJsonArray("choices")?.get(0)?.asJsonObject
+                                val reasoningChars = choice0?.getAsJsonObject("message")?.get("reasoning_content")?.takeIf { it.isJsonPrimitive }?.asString?.length ?: 0
+                                println("[LlmUsage] thread=${Thread.currentThread().name} prompt=${usage?.get("prompt_tokens")} completion=${usage?.get("completion_tokens")} " +
+                                    "reasoning=${usage?.getAsJsonObject("completion_tokens_details")?.get("reasoning_tokens")} finish=${choice0?.get("finish_reason")} " +
+                                    "contentChars=${content.length} reasoningChars=$reasoningChars ms=${System.currentTimeMillis() - startMs}")
+                            } catch (_: Exception) {
+                                // 사용량 기록 실패는 응답 처리에 영향을 주지 않는다
+                            }
                             OllamaChatResponse(
                                 model = settings.model,
                                 createdAt = null,
