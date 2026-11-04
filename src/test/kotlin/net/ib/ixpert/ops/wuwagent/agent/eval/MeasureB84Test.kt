@@ -41,7 +41,8 @@ class MeasureB84Test {
 
     private fun loadIde(): Ide {
         // fixture: IDE 17:36 회차 [ExplorerInput] userMessage 전문(659자, \n 이스케이프를 푼 것). 소스 본문은 없다.
-        val msg = File("src/test/resources/b84/ide_1737_explorer_input.txt").readText(Charsets.UTF_8)
+        // core.autocrlf가 켜진 체크아웃은 이 파일을 CRLF로 바꿀 수 있으므로 줄바꿈을 LF로 맞춰 읽는다(IDE 로그의 \n 이스케이프는 LF였다)
+        val msg = File("src/test/resources/b84/ide_1737_explorer_input.txt").readText(Charsets.UTF_8).replace("\r\n", "\n")
         val parts = msg.split("\n\n\n")
         val sr = parts[0].removePrefix("요구사항(SR):\n")
         val facts = parts[1].substringBefore("\n\n위 요구사항")
