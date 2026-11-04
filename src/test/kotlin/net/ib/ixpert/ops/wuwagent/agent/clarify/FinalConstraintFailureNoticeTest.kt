@@ -117,10 +117,11 @@ class FinalConstraintFailureNoticeTest {
     @Test
     fun g4_routerPassesTheNoticeIntoTheAnalysisStream() {
         val router = File("src/main/kotlin/net/ib/ixpert/ops/wuwagent/action/WebviewActionRouter.kt").readText()
-        assertEquals(2, Regex("""buildClarifyIntentChecked\(turnResult\.state\)""").findAll(router).count())
+        // B-84 0에서 바뀐 기대값(구조 단언의 이름·변수만 바뀌고 뜻은 같다): 두 호출 지점은 buildClarifyIntentDeferred를 부르고, 추출 실패 안내는 카드 응답 뒤(complete)에 정해져 분석 호출에 한 번 넘어간다
+        assertEquals(2, Regex("""buildClarifyIntentDeferred\(turnResult\.state\)""").findAll(router).count())
         // 두 호출 지점은 같은 도우미(continueAfterClarify, 정제문 확인 → 저장 → 분석)로 이어지고, 안내는 그 안의 분석 호출에 한 번 넘어간다
-        assertEquals(2, Regex("""continueAfterClarify\(project, bridge, intentBuild, messageId\)""").findAll(router).count())
-        assertEquals(1, Regex("""clarifyIntent, intentBuild\.constraintNotice\)""").findAll(router).count())
+        assertEquals(2, Regex("""continueAfterClarify\(project, bridge, deferred, messageId\)""").findAll(router).count())
+        assertEquals(1, Regex("""clarifyIntent, constraintNotice\)""").findAll(router).count())
         val analyze = router.substringAfter("private fun executeAnalyzePipeline(")
         val start = analyze.indexOf("""bridge.sendMessage("analyze_start"""")
         val chunk = analyze.indexOf("constraintNotice?.let { bridge.sendMessageChunk(messageId")

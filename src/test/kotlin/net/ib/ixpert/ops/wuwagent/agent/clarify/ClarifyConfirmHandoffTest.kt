@@ -96,8 +96,9 @@ class ClarifyConfirmHandoffTest {
         order.forEach { assertTrue("단계가 있어야 한다: $order", it >= 0) }
         assertEquals("순서가 바뀌면 안 된다: $order", order.sorted(), order)
         // 정제문 생성(LLM 호출)은 백그라운드로 넘기는 람다 안에만 있고 EDT 쪽에는 없다
-        assertEquals(1, Regex("""buildClarifyIntentChecked\(""").findAll(confirm).count())
-        assertTrue(confirm.indexOf("buildClarifyIntentChecked(") > confirm.indexOf("buildIntent = {"))
+        // B-84 0: 확정 분기는 제약 추출을 카드 응답 뒤로 미루는 buildClarifyIntentDeferred를 부른다(이름만 바뀌었고 백그라운드 안에만 있다는 단언은 그대로다)
+        assertEquals(1, Regex("""buildClarifyIntentDeferred\(""").findAll(confirm).count())
+        assertTrue(confirm.indexOf("buildClarifyIntentDeferred(") > confirm.indexOf("buildIntent = {"))
         assertTrue(confirm.contains("executeOnPooledThread { task() }"))
         // 표지는 start 안에서 요약 폐기 다음, 백그라운드 전환 앞에서 세운다(Steps의 beginHandoff를 넘긴다)
         assertTrue(confirm.contains("invalidateSummary = { session.engine.summaryScheduler.invalidate() }"))
@@ -310,7 +311,7 @@ class ClarifyConfirmHandoffTest {
         assertTrue(utterance.contains("AnalyzeSessionManager.touch(project)"))
         assertEquals(2, Regex("""AnalyzeSessionManager\.touch\(""").findAll(router).count())
         // 발화 완료 경로는 원래 백그라운드(executeOnPooledThread) 안에서 정제문을 만든다
-        assertTrue(utterance.indexOf("executeOnPooledThread") in 0 until utterance.indexOf("buildClarifyIntentChecked("))
+        assertTrue(utterance.indexOf("executeOnPooledThread") in 0 until utterance.indexOf("buildClarifyIntentDeferred("))
         assertSame(Unit, Unit)
     }
 }

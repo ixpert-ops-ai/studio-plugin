@@ -95,12 +95,15 @@ object RefinedRequirementGate {
         save: (ClarifyIntent) -> Unit,
         analyze: (ClarifyIntent) -> Unit,
         onCancelled: () -> Unit,
-        onSuperseded: () -> Unit = {}
+        onSuperseded: () -> Unit = {},
+        // B-84 0: 카드 응답 뒤, 저장·분석 앞에서 인텐트를 마저 채운다(제약 추출 완료를 여기서 기다린다). 기본은 그대로 돌려준다. 취소·대체에서는 부르지 않는다.
+        complete: (ClarifyIntent) -> ClarifyIntent = { it }
     ) {
         when (val result = apply(intent, bridge)) {
             is RefinedGateResult.Proceed -> {
-                save(result.intent)
-                analyze(result.intent)
+                val finalIntent = complete(result.intent)
+                save(finalIntent)
+                analyze(finalIntent)
             }
             RefinedGateResult.Cancelled -> onCancelled()
             RefinedGateResult.Superseded -> onSuperseded()

@@ -35,6 +35,9 @@ import net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge
 class WebviewActionRouter(private val project: Project) {
     private val logger = Logger.getInstance(WebviewActionRouter::class.java)
 
+    /** 카드 응답을 기다리는 확정 흐름의 제약 추출(B-84 0). 새 /clarify가 오면 진행 중 추출을 정리한다. */
+    @Volatile private var pendingDeferred: net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine.DeferredClarifyIntent? = null
+
     private fun buildAttachedFileContext(filesJson: String): String {
         if (filesJson.isBlank()) return ""
         return try {
@@ -132,7 +135,9 @@ class WebviewActionRouter(private val project: Project) {
                         return@invokeLater
                     }
 
-                    // 이전 대화가 정제문 확인 카드에서 응답을 기다리고 있으면 정리한다(이전 분석은 시작하지 않는다)
+                    // 이전 대화가 정제문 확인 카드에서 응답을 기다리고 있으면 정리한다(이전 분석은 시작하지 않는다). 그 흐름의 진행 중 제약 추출도 취소한다(B-84 0).
+                    pendingDeferred?.cancel?.invoke()
+                    pendingDeferred = null
                     net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.supersedePending(project.locationHash)
                     println("[RefineGate] /clarify 수신 messageId=$messageId → 대기 중인 정제문 카드 정리를 호출했습니다(이전 분석은 시작하지 않음)")
 
@@ -297,14 +302,16 @@ class WebviewActionRouter(private val project: Project) {
                             beginHandoff = { net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.beginHandoff(project.locationHash) },
                             // Stage 1 전이용 ClarifyIntent 생성 및 저장 (ClarificationContract는 Analyze에서 생산)
                             buildIntent = {
-                                val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
-                                println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 정제문 생성 완료(확정 버튼 경로) messageId=$messageId 원문 ${intentBuild.intent.originalRequirement.length}자, 정제문 ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).length}자, 앞80자: ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).take(80).replace("\n", " ")}")
-                                intentBuild
+                                // B-84 0: 정제문까지만 기다린다(제약 추출은 같은 시각에 시작해 카드 응답 때 기다린다)
+                                val deferred = session.engine.buildClarifyIntentDeferred(turnResult.state)
+                                val intentBuild = deferred.early
+                                println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 정제문 생성 완료(확정 버튼 경로, ${net.ib.ixpert.ops.wuwagent.agent.ConfirmClock.sinceText()}) messageId=$messageId 원문 ${intentBuild.intent.originalRequirement.length}자, 정제문 ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).length}자, 앞80자: ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).take(80).replace("\n", " ")}")
+                                deferred
                             },
                             removeSession = { net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project) },
                             // 분석 시작에 실패하면 같은 세션을 되돌려 사용자가 같은 정제문으로 다시 확정할 수 있게 한다
                             restoreSession = { net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.restoreSession(project, session) },
-                            continueAfterClarify = { intentBuild -> continueAfterClarify(project, bridge, intentBuild, messageId) },
+                            continueAfterClarify = { deferred -> continueAfterClarify(project, bridge, deferred, messageId) },
                             onFailure = { e ->
                                 logger.error("Clarify confirm error", e)
                                 ApplicationManager.getApplication().invokeLater {
@@ -361,12 +368,13 @@ class WebviewActionRouter(private val project: Project) {
                             session.engine.summaryScheduler.invalidate()
 
                             // COMPLETE 상태 전이: ClarifyIntent 생성 및 저장
-                            val intentBuild = session.engine.buildClarifyIntentChecked(turnResult.state)
+                            val deferred = session.engine.buildClarifyIntentDeferred(turnResult.state)
+                            val intentBuild = deferred.early
                             println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 정제문 생성 완료(발화 완료 경로) messageId=$messageId 원문 ${intentBuild.intent.originalRequirement.length}자, 정제문 ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).length}자, 앞80자: ${net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.shownRefined(intentBuild.intent).take(80).replace("\n", " ")}")
                             net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.beginHandoff(project.locationHash)
                     net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project)
 
-                            continueAfterClarify(project, bridge, intentBuild, messageId)
+                            continueAfterClarify(project, bridge, deferred, messageId)
                         } catch (e: Exception) {
                             logger.error("Clarify utterance error", e)
                             ApplicationManager.getApplication().invokeLater {
@@ -1595,9 +1603,13 @@ class WebviewActionRouter(private val project: Project) {
     private fun continueAfterClarify(
         project: Project,
         bridge: JcefBridge,
-        intentBuild: net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine.ClarifyIntentBuild,
+        deferred: net.ib.ixpert.ops.wuwagent.agent.clarify.Stage0ClarificationEngine.DeferredClarifyIntent,
         messageId: String
     ) {
+        // 카드는 정제문만 있는 인텐트로 보내고, 제약 추출 완료는 카드 응답 뒤(complete)에 기다린다(B-84 0). 추출 실패 안내도 그때 정해진다.
+        val intentBuild = deferred.early
+        var constraintNotice: String? = null
+        pendingDeferred = deferred
         val projectBase = java.io.File(project.basePath ?: "")
         println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 브리지 판정: project null=false, 브리지 null=false → 카드 요청 messageId=$messageId")
         try {
@@ -1614,10 +1626,18 @@ class WebviewActionRouter(private val project: Project) {
                 },
                 // 곧바로 Stage 1 (/analyze) 영향도 분석 파이프라인 자동 실행 (executeAnalyzePipeline 내부의 AnalyzeInputResolver.resolve 위임)
                 analyze = { clarifyIntent ->
-                    executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent, intentBuild.constraintNotice)
+                    executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent, constraintNotice)
+                },
+                complete = { edited ->
+                    val waitStartMs = System.currentTimeMillis()
+                    val done = deferred.complete(edited)
+                    constraintNotice = done.constraintNotice
+                    println("[RefineGate] 카드 응답 뒤 제약 추출 대기 ${System.currentTimeMillis() - waitStartMs}ms (${net.ib.ixpert.ops.wuwagent.agent.ConfirmClock.sinceText()})")
+                    done.intent
                 },
                 // 오류가 아닌 안내 메시지(error 형식을 쓰지 않는다)
                 onCancelled = {
+                    deferred.cancel()
                     println("[RefineGate] rid=${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())} 취소 → 분석을 시작하지 않고 안내(analyze_notice)만 보냅니다")
                     ApplicationManager.getApplication().invokeLater {
                         bridge.sendMessage("analyze_notice", "분석을 취소했습니다.", "analyze_notice_${System.currentTimeMillis()}")
@@ -1626,6 +1646,7 @@ class WebviewActionRouter(private val project: Project) {
                 // onSuperseded: 새 /clarify가 이 확인을 대신했다. 분석도 안내도 없다(기본 동작)
             )
         } finally {
+            if (pendingDeferred === deferred) pendingDeferred = null
             net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.endHandoff(project.locationHash)
         }
     }

@@ -9,6 +9,8 @@ import java.util.concurrent.Executors
 
 /** 정제문 호출을 최종 제약 추출과 동시에 돌리는 데 쓰는 백그라운드 스레드(데몬). */
 private val refineExecutor = Executors.newCachedThreadPool { r -> Thread(r, "clarify-refine").apply { isDaemon = true } }
+// B-84 0: 제약 추출 전용 실행기(정제문 호출과 같은 시각에 시작하고, 카드 응답 때 결과를 기다린다)
+private val extractionExecutor = Executors.newCachedThreadPool { r -> Thread(r, "clarify-extract").apply { isDaemon = true } }
 
 /**
  * Stage 0 대화 제어 엔진 및 개방형 질문 트리거.
@@ -1384,7 +1386,20 @@ class Stage0ClarificationEngine(
     /** ClarifyIntent와, 최종 제약 추출이 실패했는데 이 세션에서 아직 알리지 않았다면 화면에 보일 안내 한 줄(ClarifyIntent와 저장 형식은 바꾸지 않는다). */
     data class ClarifyIntentBuild(val intent: ClarifyIntent, val constraintNotice: String?)
 
+    /**
+     * 정제문까지 만든 인텐트([early], 제약은 소스 질문 답 제약만)와, 제약 추출이 끝나기를 기다려 제약·미확정 제외·추출 실패 안내를 채우는 [complete](B-84 0, D안).
+     * 카드(정제문 확인)는 [early]만으로 보내고, 카드 응답(이대로·수정·5분 자동 진행) 뒤에 [complete]를 부른다. 추출은 [early]를 만드는 동안 이미 돌고 있어 호출은 총 1회다.
+     * 수정한 정제문은 [complete]에 넘기는 인텐트에 들어 있고, 추출 입력(발화 목록)은 정제문과 무관하다.
+     */
+    class DeferredClarifyIntent(val early: ClarifyIntentBuild, val complete: (ClarifyIntent) -> ClarifyIntentBuild, val cancel: () -> Unit = {})
+
+    /** 기존 호출부(발화 완료 경로 등)용 동기 버전: 정제문과 추출을 모두 기다려 한 번에 돌려준다. */
     fun buildClarifyIntentChecked(state: Stage0State): ClarifyIntentBuild {
+        val deferred = buildClarifyIntentDeferred(state)
+        return deferred.complete(deferred.early.intent)
+    }
+
+    fun buildClarifyIntentDeferred(state: Stage0State): DeferredClarifyIntent {
         cacheOriginal = state.originalRequirement
         val graphHash = ClarificationContractStore.calculateGraphHash(graph)
         val anchorTokens = state.seedSet.map { it.value }.distinct()
@@ -1395,12 +1410,12 @@ class Stage0ClarificationEngine(
         } catch (e: Exception) {
             null
         }
-        val extraction = extractConstraintsChecked(state.userStatements)
+        // 추출은 정제문과 같은 시각에 시작하되 여기서 기다리지 않는다(카드는 정제문만 기다린다). 결과는 complete에서 받는다. 같은 키의 완료·진행 중 Future는 재사용한다.
+        val extractionFuture = extractionFuture(state.userStatements)
         // 소스 확인 질문에 대한 사용자의 답은 추출 결과와 상관없이 제약으로 남긴다(B-77).
         val fieldConstraints = state.fieldAnswers.map { (label, answer) ->
             IntentConstraint(kind = ConstraintKind.OTHER, value = "$label 출처: $answer", rawStatement = answer, evidence = answer)
         }
-        val constraints = extraction.constraints + fieldConstraints
         val rawRefined = try {
             refineFuture?.join()
         } catch (e: Exception) {
@@ -1420,24 +1435,26 @@ class Stage0ClarificationEngine(
         // 제외 요청 문장이 제외 확정으로 이어지지 않은 경우의 기록(표시 전용, 판정에는 쓰지 않는다).
         // SCOPE_LIMIT('~만 수정')은 파일 제외가 아니므로 대상이 아니다. 후보 파일은 증거 구문의 결정론적 탐색 결과다.
         // SR 원문에 있던 제외 요청(initSession에서 제약 추출을 한 경우)과, 답 없이 확정되어 남은 제외 제안(PENDING)도 미확정 제외로 표시한다.
-        val unconfirmedFromConstraints = (constraints + srExclusionConstraints[state.originalRequirement].orEmpty())
-            .filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT && !it.evidence.isNullOrBlank() }
-            .mapNotNull { c ->
-                val evidence = c.evidence!!
-                val candidates = try {
-                    resolveExclusionCandidates(evidence).candidates.map { it.path }.distinct()
-                } catch (e: Exception) {
-                    emptyList()
+        fun unconfirmedFor(constraints: List<IntentConstraint>): List<UnconfirmedExclusion> {
+            val unconfirmedFromConstraints = (constraints + srExclusionConstraints[state.originalRequirement].orEmpty())
+                .filter { it.kind == ConstraintKind.EXCLUDE_COMPONENT && !it.evidence.isNullOrBlank() }
+                .mapNotNull { c ->
+                    val evidence = c.evidence!!
+                    val candidates = try {
+                        resolveExclusionCandidates(evidence).candidates.map { it.path }.distinct()
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                    if (candidates.isNotEmpty() && excludedFiles.containsAll(candidates)) null
+                    else UnconfirmedExclusion(
+                        evidence = evidence,
+                        candidateFiles = candidates,
+                        statement = state.userStatements.firstOrNull { it.contains(evidence, ignoreCase = true) }
+                            ?: state.originalRequirement.takeIf { it.contains(evidence, ignoreCase = true) }
+                    )
                 }
-                if (candidates.isNotEmpty() && excludedFiles.containsAll(candidates)) null
-                else UnconfirmedExclusion(
-                    evidence = evidence,
-                    candidateFiles = candidates,
-                    statement = state.userStatements.firstOrNull { it.contains(evidence, ignoreCase = true) }
-                        ?: state.originalRequirement.takeIf { it.contains(evidence, ignoreCase = true) }
-                )
-            }
-        val unconfirmedExclusions = (unconfirmedFromConstraints + unconfirmedFromPendingProposals(state)).distinctBy { it.evidence }
+            return (unconfirmedFromConstraints + unconfirmedFromPendingProposals(state)).distinctBy { it.evidence }
+        }
 
         val allStatements = listOf(state.originalRequirement) + state.userStatements
         val classNames = graph.files.values.map { it.className }
@@ -1478,12 +1495,13 @@ class Stage0ClarificationEngine(
                 )
             }
 
-        val intent = ClarifyIntent(
+        // 제약 추출 결과가 없는 상태의 인텐트(카드에 보내는 용도): 제약은 소스 질문 답 제약만, 미확정 제외는 그 제약과 제안 기준
+        val earlyIntent = ClarifyIntent(
             originalRequirement = state.originalRequirement,
             refinedRequirement = refinedRequirement,
             userStatements = state.userStatements,
             anchorTokens = anchorTokens,
-            constraints = constraints,
+            constraints = fieldConstraints,
             excludedFiles = excludedFiles,
             graphHash = graphHash,
             retentionAudit = RetentionAudit(
@@ -1495,11 +1513,29 @@ class Stage0ClarificationEngine(
                 scopeModifierDropped = retentionResult.scopeModifierDropped
             ),
             unresolvedItems = unresolvedItems,
-            unconfirmedExclusions = unconfirmedExclusions,
+            unconfirmedExclusions = unconfirmedFor(fieldConstraints),
             contractVersion = ClarifyIntent.CURRENT_INTENT_VERSION
         )
-        val notice = if (extraction.failed && !constraintFailureNoticeShown) constraintFailureLine() else null
-        return ClarifyIntentBuild(intent, notice)
+        val complete: (ClarifyIntent) -> ClarifyIntentBuild = { base ->
+            // 추출 결과를 기다린다(이미 끝났으면 바로). 실행 중 예외·취소면 기본 제약으로 대체되는 실패 결과로 본다.
+            val extraction = try {
+                extractionFuture.get()
+            } catch (e: Exception) {
+                println(extractFailLogLine("확정 대기 중 예외", null, e))
+                ConstraintExtraction(state.userStatements.map { IntentConstraint(kind = ConstraintKind.OTHER, value = it, rawStatement = it, evidence = null) }, true)
+            }
+            val constraints = extraction.constraints + fieldConstraints
+            val notice = if (extraction.failed && !constraintFailureNoticeShown) constraintFailureLine() else null
+            // base는 사용자가 정제문을 고쳤으면 고친 인텐트다: 제약과 미확정 제외만 채우고 나머지(수정한 정제문 등)는 그대로 둔다
+            ClarifyIntentBuild(base.copy(constraints = constraints, unconfirmedExclusions = unconfirmedFor(constraints)), notice)
+        }
+        // 취소(카드 취소, 새 /clarify가 대신함): 진행 중 추출을 취소하고 캐시에서 뺀다(취소된 Future가 다음 같은 키 조회에 남지 않게 한다)
+        val cancel = {
+            extractionCache.values.removeIf { it === extractionFuture }
+            if (!extractionFuture.isDone) extractionFuture.cancel(true)
+            println("[ConstraintCache] cancel reason=확정 흐름 취소 또는 새 /clarify")
+        }
+        return DeferredClarifyIntent(ClarifyIntentBuild(earlyIntent, null), complete, cancel)
     }
 
     /** 화면 payload용: 확정된 제외 파일과, 제안 상태로 대기 중인 제외 후보(확정 전). 판정에는 쓰지 않는다. */
@@ -1613,17 +1649,60 @@ class Stage0ClarificationEngine(
      * 실패한 추출(기본 제약으로 대체된 경우)은 캐시하지 않는다. 두 호출 모두 결과를 쓰므로(답변 직후는 제외 제안, 확정은 인텐트 제약) 호출을 없애지 않고 재사용한다.
      */
     private val CONSTRAINT_PROMPT_VERSION = "v1" // 제약 추출 프롬프트·스키마를 바꾸면 올린다(캐시 키에 들어간다)
-    private val extractionCache = java.util.concurrent.ConcurrentHashMap<String, ConstraintExtraction>()
+    // B-84 0: 캐시는 Future를 담는다. 진행 중인 추출도 같은 키면 새로 부르지 않고 같은 Future를 기다린다(카드는 정제문만 기다리고, 추출은 카드 응답 때 기다린다).
+    private val extractionCache = java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<ConstraintExtraction>>()
     @Volatile private var cacheOriginal: String = ""
     internal var extractionCacheHits: Int = 0
 
+    /** 제약 추출을 시작하거나(miss) 같은 키의 완료된(hit)·진행 중인(inflight) Future를 돌려준다. 실패한 결과는 캐시에서 빼서 다음 호출이 다시 시도한다. */
+    private fun extractionFuture(userStatements: List<String>): CompletableFuture<ConstraintExtraction> {
+        if (userStatements.isEmpty()) return CompletableFuture.completedFuture(ConstraintExtraction(emptyList(), false))
+        val joined = userStatements.joinToString("\u0001")
+        val key = "${CONSTRAINT_PROMPT_VERSION}\u0000$cacheOriginal\u0000$joined"
+        val hashes = "srHash=${Integer.toHexString(cacheOriginal.hashCode())} utterHash=${Integer.toHexString(joined.hashCode())} n=${userStatements.size}"
+        val created = CompletableFuture<ConstraintExtraction>()
+        val existing = extractionCache.putIfAbsent(key, created)
+        if (existing != null) {
+            extractionCacheHits++
+            println("[ConstraintCache] ${if (existing.isDone) "hit" else "inflight"} reason=${if (existing.isDone) "같은 키의 완료된 결과" else "같은 키의 추출이 진행 중(같은 Future를 기다림)"} $hashes")
+            return existing
+        }
+        println("[ConstraintCache] miss reason=이 키의 추출 없음(새 호출) $hashes")
+        try {
+            extractionExecutor.execute {
+                try {
+                    val r = extractConstraintsUncached(userStatements)
+                    if (r.failed) extractionCache.remove(key, created) // 실패 결과는 캐시하지 않는다
+                    created.complete(r)
+                } catch (e: Throwable) {
+                    extractionCache.remove(key, created)
+                    created.completeExceptionally(e)
+                }
+            }
+        } catch (e: Exception) {
+            extractionCache.remove(key, created)
+            created.completeExceptionally(e)
+        }
+        return created
+    }
+
+    /** 새 /clarify가 이 세션을 대신할 때: 진행 중인 추출 Future를 취소하고 캐시를 비운다(이미 나간 LLM 호출은 끝까지 가지만 결과는 쓰이지 않는다). */
+    fun cancelPending() {
+        val n = extractionCache.size
+        extractionCache.values.forEach { if (!it.isDone) it.cancel(true) }
+        extractionCache.clear()
+        println("[ConstraintCache] cancel reason=새 /clarify가 세션을 대신함 정리한 항목=$n")
+    }
+
+    /** 호출한 스레드에서 결과를 기다린다(기존 호출부는 그대로 동기). 실행 중 예외나 취소면 기본 제약으로 대체되는 실패 결과를 낸다. */
     private fun extractConstraintsChecked(userStatements: List<String>): ConstraintExtraction {
         if (userStatements.isEmpty()) return ConstraintExtraction(emptyList(), false)
-        val key = "${CONSTRAINT_PROMPT_VERSION}\u0000$cacheOriginal\u0000${userStatements.joinToString("\u0001")}"
-        extractionCache[key]?.let { extractionCacheHits++; println("[LlmCall] label=제약 추출 캐시 재사용 (발화 ${userStatements.size}개)"); return it }
-        val result = extractConstraintsUncached(userStatements)
-        if (!result.failed) extractionCache[key] = result
-        return result
+        return try {
+            extractionFuture(userStatements).get()
+        } catch (e: Exception) {
+            println(extractFailLogLine("대기 중 예외", null, e))
+            ConstraintExtraction(userStatements.map { IntentConstraint(kind = ConstraintKind.OTHER, value = it, rawStatement = it, evidence = null) }, true)
+        }
     }
 
     private fun extractConstraintsUncached(userStatements: List<String>): ConstraintExtraction {
