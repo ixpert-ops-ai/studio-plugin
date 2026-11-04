@@ -3685,7 +3685,8 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 
 #### C 제약 추출(구현)
 - 확정 때 재추출은 답변 직후 추출과 입력이 같을 때 불필요(둘 다 결과를 썼다: 답변 직후는 제외 제안, 확정은 인텐트 제약). 키 = 원문 SR + 발화 목록 + 프롬프트 버전, 실패 결과는 캐시하지 않는다. 발화가 둘 이상이면 키가 달라 재호출.
-- 실서버: 확정 대기 30.9초 → 6.1초(정제문만 남음). 호출: 초기 추출 11.2초(91토큰), 답변 직후 추출 31.3초(264토큰), 정제문 6.6초(51토큰), 확정 추출 30.9초(259토큰), 추론 토큰 없음, 출력 약 8 tok/s. vLLM `/metrics`: 확정 직전·직후 `num_requests_running` 0, `num_requests_waiting` 0(대기열 없음).
+- **정정(B-84)**: 아래 "확정 대기 30.9초 → 6.1초"는 하네스 경로(`processTurn`)에서만 잰 값이다. IDE 경로(`/clarify-utterance` → `processUtterance`)는 소스 질문 답을 추출 없이 제약으로 바로 기록하고 답을 "<라벨>의 출처: <답>" 접두로 저장해서 확정 때 캐시 키가 맞지 않았고, 실제 IDE(11-03 17:36)에서는 확정 → 카드 22.0초(정제문 6.4초와 추출 22.0초가 병렬, 카드는 둘을 모두 기다림)였다. 원인과 해결(D안)은 아래 B-84.
+- 실서버(하네스 경로 한정): 확정 대기 30.9초 → 6.1초(정제문만 남음). 호출: 초기 추출 11.2초(91토큰), 답변 직후 추출 31.3초(264토큰), 정제문 6.6초(51토큰), 확정 추출 30.9초(259토큰), 추론 토큰 없음, 출력 약 8 tok/s. vLLM `/metrics`: 확정 직전·직후 `num_requests_running` 0, `num_requests_waiting` 0(대기열 없음).
 - 스키마 축소: 측정만 보류(구현 안 함).
 
 #### A 매퍼
@@ -3718,3 +3719,35 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 #### 이후 시험·커밋
 - 전체 시험 `m83a`(누적 트리): 764개, 실패 42 동일(diff 0), clarify 313 중 1 실패(기준)·3 건너뜀. 커밋은 파일이 겹치지 않게 나눴고 각 커밋의 트리가 아니라 누적 트리에서 시험했다(5d7c4b0만 단독 worktree 시험).
 - 커밋: 5d7c4b0 로그, 58d3b2c E, 8e19b43 A·D, beb7ea4 시드·탐색기 입력, b12f086 C·Stage 0, 56bf977 저장 경로·사실 블록·필수/선택, 8bb142e 기준선. 전체 문장(로그에 앞 80자만 있음), 오늘 SR의 Stage 0 카드를 실제 IDE에서 본 모습(재현은 코드 수준, IDE 재실행 안 함).
+
+### B-84 (2026-11-04)
+
+#### 0 확정 → 카드 지연 (D안), 1 시간 로그
+- 원인(IDE 로그 11-03 17:33-17:36): 확정 → 카드 22.0초 = 정제문 6.4초와 제약 추출 22.0초가 병렬로 돌고 카드가 둘 다 기다림. B-83 캐시는 IDE 경로에서 맞지 않았다(위 B-83 정정).
+- D안(`bc9d2fd`): `buildClarifyIntentDeferred`가 정제문까지 만든 인텐트(early)와 `complete()`를 돌려주고, 추출은 정제문 호출과 같이 시작하되 카드는 정제문만 기다린다. 카드 응답 뒤 `RefinedRequirementGate.handoff`가 `complete()`로 추출을 기다려 제약·미확정 제외·실패 안내를 채운다. 추출 입력은 발화 목록뿐이라 정제문을 고쳐도 같고, 호출은 총 1회. 캐시는 Future를 담아 같은 키의 진행 중·완료 Future를 재사용, 실패 결과는 빼고, 취소(카드 취소·새 /clarify)는 Future를 취소한다. 로그 `[ConstraintCache] hit|miss|inflight|cancel`.
+- 로그(`3da2ac9`): `[RefineGate] ... (confirm 후 N ms)`, `[LlmCall]` 줄(탐색기 Turn n, Stage 3, 작업 요약), `[ExplorerTiming]`. 예(11-04 재현 실행): `[ExplorerTiming] 총 95417ms, 턴별 LLM [12206, 14528, 23423, 45125]ms, 카드 대기(사용자) 0ms, 대기를 뺀 순수 95417ms (턴 4개)`.
+- 한계: `Future.get`에 시간 상한이 없다(LLM 클라이언트 타임아웃 300초에 의존). 카드 응답 뒤 `analyze_start` 전까지는 새 메시지가 없다(로그 `카드 응답 뒤 제약 추출 대기 N ms`만). 후속 구현 대상.
+
+#### 2 SR 끝 줄바꿈 (`5359b0a`)
+- `AdaptiveFileDiscovery.buildSrText`가 각 부분을 다듬고 빈 부분을 뺀 뒤 한 줄바꿈으로 잇는다. 전에는 보조 요구사항이 비면 끝에 줄바꿈이 남았다.
+- 시험 기대값 변경: `ExcludedIdentifierSubtractionTest.d0R`, `d3R`의 SR 기대값에서 끝 "\n" 제거(의미 같음).
+
+#### 하네스 7블록의 한계 (중요)
+- 하네스(`Stage0EngineRoutedBaselineHarnessTest`)의 `StrictPipelineLlm`은 탐색기 프롬프트(표지 C)에 `chatWithTools`로 `null`을 돌려준다. 탐색기 LLM 응답이 없으므로 **하네스 7블록은 탐색기 결과(시드, 턴, 검색어)를 검증하지 못한다.** "하네스 7블록 EXACT_MATCH"는 SR 줄바꿈 정리 같은 탐색기 입력 변경이 시드에 영향이 없다는 근거가 아니다.
+- 탐색기에 영향을 주는 변경은 실서버 8변형 실측(SR 2종 x 끝 줄바꿈 x 사실 블록, 변형마다 1회, n/8)으로 판정한다(`MeasureB84Test.variants`).
+
+#### IDE 입력 재현 (A 조사)
+- IDE 17:36 `[ExplorerInput]`과 하네스의 첫 차이는 SR 문장이었다(userMessage 34번째 글자). 시스템 프롬프트 해시(`c56386b9`), 그래프(59/73), 사실 블록(471자 5줄)은 같았다. 이전 측정의 SR 문장·사실 블록 답변 줄은 IDE 값이 아니었다.
+- 브리지: `clarificationBridge`는 카드 표시와 힌트 수신에만 쓰이고(`AgenticSeedSelector.kt:259`) 힌트가 비면 입력이 바뀌지 않는다. 항상 null을 돌려주는 브리지로 IDE(`bridge=true`, 힌트 없음)와 같은 조건을 만든다.
+- 재현 성공(`MeasureB84Test.repro`): fixture `src/test/resources/b84/ide_1737_explorer_input.txt`(659자 전문)을 그대로 넣으면 userMessage 전문 일치, 시드 [SurveyServiceImpl, SurveyDao, SurveyDaoImpl, SurveyDto], 4턴, 검색어 순서(Survey Response → Survey Detail → … → Survey Result Email → …)까지 IDE와 같다.
+- 회귀 단언은 두 단계다. `fixtureIntact`(서버 없음, 가짜 LLM): fixture(659자, SR 97자, 사실 블록 471자 5줄)와, 탐색기가 실제로 만드는 입력이 IDE와 같은지(userMessage 전문, `systemPromptHash=c56386b9`, `graphFiles=59`, `resources=73`)를 엄격하게 단언한다. `repro`(실서버, `-DrunLiveLlmTests=true`일 때만): 시드는 집합 비교, 턴 수 4, 검색어 3개를 단언하고, 실패하면 입력이 어긋났는지("입력 불일치") 입력은 같은데 출력만 다른지("입력 동일, 서버 출력 차이 가능", 모델 id와 시각 포함)를 메시지로 구분한다.
+- 로그 위치: `build/idea-sandbox/IC-2024.3.5/log/idea.log`(IC-2024.3이 아님). 회차 구간은 `build/ide-logs/b84_ide_1737.log`에 복사.
+
+#### 8변형 재측정(IDE 입력, 변형마다 1회, 브리지 힌트 없음)
+- 시드 매퍼 포함 4/8(사실 블록 유무와 무관 2/4, 2/4), sql_survey.xml Stage 1 후보 8/8(Judge Pick 4, Reverse Link 4), 4턴 5/8, 끝 줄바꿈 유/무만 바꾼 4쌍 모두 시드가 다름(4/4). 같은 입력이면 시드·턴이 같다(2회 실행 일치).
+- 저장·수집 단정 언급 수(중복 제거, 언급 앞뒤 25자에 부정 표현이 없는 것): **근거 없는 단정** 사실 블록 없음 합 9(3, 1, 0, 5), 있음 합 24(4, 6, 7, 7). 중립(이름만 나열한 updateResult) 0 / 1. 부정문 0/8. 이것이 item 3의 "전" 기준이다. 분류 규칙과 집계는 `scripts/recount-b84.js`(원문 `build/b84_variant_logs/`): "응답 저장/조회", "저장 처리" 같은 서술과, updateResult를 저장·응답·테이블과 묶은 언급은 근거 없는 단정, 그런 낱말 없이 이름만 나열한 언급은 중립. 판정 범위: 부정문은 언급 앞뒤 25자, updateResult가 저장·응답과 묶였는지는 40자(25자에서 넓힌 예방 조치이고 이 8개 원문에서는 25자와 40자의 결과가 같다). 1차 분류(단정 18 + 메서드 이름 7)에서 바뀐 것은 범위가 아니라 규칙(updateResult 토큰 전부를 메서드 이름으로 세던 것을, 저장·응답과 묶인 것만 단정으로)이다.
+- `updateResult`는 응답 저장이 아니다: SQL은 `call sp_eb_stat_daily_mt_insert('0')`(일별 MT 통계 프로시저, `sql_survey.xml:788-791`), `#{}` 파라미터도 `ISSW_SURVEY_R` 쓰기도 없고(`ISSW_SURVEY_R`는 보이는 범위에서 FROM에만 나온다), 호출은 `SurveyDaoImpl.java:28-29`와 `SurveyServiceImpl.java:350-355`(`proc`의 updateResult 분기가 updateSmtResult/MmtResult/ItaResult 호출). 따라서 탐색기의 "updateResult가 응답 테이블 저장을 담당" 서술은 오류다.
+- 줄 단위 정규식 집계(`build/b84_variants_linebased_v1.md`)는 같은 줄의 "추가 대상" 때문에 단정을 놓쳤고 사실 블록을 임의 문장으로 쓴 1차 표(0→9)는 틀린 결론이었다.
+
+#### push 범위 경위
+- B-82·B-83 보고의 push 대상은 `backup/explain-1007b`였다(원격 `b88f42f`). 현재 브랜치 upstream은 `origin/feature/explain`이라 이번 `git push origin feature/explain`은 원격 `b7b75cd`(2026-08-03 PR #83 머지)에서 `5359b0a`까지 334커밋(B 표시 143 + 표시 없음 191: 8월 7, 9월 77, 10월 107)을 한 번에 올렸다. `b7b75cd`는 `5359b0a`의 조상이다. 앞으로는 push 전 대상 브랜치·원격 위치를 기록하고, push 출력의 old..new와 log 목록을 첨부하고, ls-remote = HEAD, `git status` 비어 있음, 원격 이전 위치가 HEAD의 조상인지를 확인한다.
