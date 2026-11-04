@@ -214,7 +214,8 @@ class ExcludedIdentifierSubtractionTest {
     fun d3R_seedPromptSrSectionExcludesSubtractedIdentifiers() {
         val resolved = resolve(d1Intent)
         val sr = seedSr(runAnalyze(resolved))
-        assertEquals(resolved.effectiveRequirement + "\n", sr)
+        // B-84 2에서 바뀐 기대값: 전에는 SR 끝에 줄바꿈이 하나 붙었으나(+ "\n") 이제 다듬어서 붙지 않는다
+        assertEquals(resolved.effectiveRequirement, sr)
         assertFalse(sr.contains("SurveyServiceImpl"))
         assertFalse(sr.contains("ZetaService"))
         assertTrue(sr.contains("FooDto"))
@@ -476,8 +477,9 @@ class ExcludedIdentifierSubtractionTest {
         // 단언 4: 시드 프롬프트의 요구사항(SR): 뒤 구간 (표지 정확히 한 번씩은 seedSr가 단언)
         val llm = runAnalyze(resolved, graph)
         val sr = seedSr(llm)
-        assertEquals(resolved.effectiveRequirement + "\n", sr)
-        assertEquals("신규 FooService 추가\n", sr)
+        // B-84 2에서 바뀐 기대값: SR 끝 줄바꿈 없음
+        assertEquals(resolved.effectiveRequirement, sr)
+        assertEquals("신규 FooService 추가", sr)
         assertFalse(sr.contains("SurveyServiceImpl"))
     }
 

@@ -7,6 +7,13 @@ import net.ib.ixpert.ops.wuwagent.service.metagraph.model.ProjectGraphQueryable
 
 object AdaptiveFileDiscovery {
 
+    /**
+     * 탐색·점수·신규 파일 탐지에 쓰는 SR 문장(B-84 2). 전에는 "$primaryReq\n$secondaryReq"라서 secondaryReq가 비면 끝에 줄바꿈이 남았고
+     * 탐색기 메시지에 "\n\n\n"이 생겼다(그 한 줄 때문에 IDE와 하네스의 탐색 결과가 갈렸다, B-83). 각 부분을 다듬고 빈 부분은 뺀 뒤 한 줄바꿈으로 잇는다.
+     */
+    internal fun buildSrText(primaryReq: String, secondaryReq: String): String =
+        listOf(primaryReq, secondaryReq).map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")
+
     fun filter(
         primaryReq: String,
         secondaryReq: String,
@@ -21,7 +28,7 @@ object AdaptiveFileDiscovery {
     ): DiscoveryResult {
         
         onProgress?.invoke("> **(Stage 1) Discovery 시작**\n요구사항 텍스트 기반 Seed 식별 시작...")
-        val srText = "$primaryReq\n$secondaryReq"
+        val srText = buildSrText(primaryReq, secondaryReq)
         // Phase 1: Seed Selection
         // 테스트 환경 등에서는 MockSeedSelector가 주입될 수 있으나, 프로덕션에서는 AgenticSeedSelector 사용
         val defaultBridge = if (project != null) JcefL1ClarificationBridge(project) else null
