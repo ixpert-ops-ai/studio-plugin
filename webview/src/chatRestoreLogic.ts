@@ -149,8 +149,23 @@ export const scopeRecord = (selectedPaths: string[]): string =>
 /** 읽을 범위 카드에서 "취소 (전체 선택)"으로 넘긴 경우(B-81 7: 제출뿐 아니라 건너뛰기도 기록한다). */
 export const scopeSkipRecord = (): string => '✔ 읽을 범위 선택: 전체(선택 안 함)';
 
-/** 탐색 힌트 카드에서 "건너뛰기 (자율 탐색)"으로 넘긴 경우. */
-export const hintSkipRecord = (): string => '✔ 탐색 힌트: 건너뜀(자율 탐색)';
+/**
+ * 탐색 힌트 카드에서 "건너뛰기 (자율 탐색)"으로 넘긴 경우(B-84 e). 탐색이 여러 턴이면 같은 줄이 겹쳐 보이므로 Turn 번호를 붙인다.
+ * 번호를 모르면(Turn이 없는 저장 채팅, 읽을 수 없는 payload) 이전 문구 그대로다.
+ */
+export const hintSkipRecord = (turn?: number): string =>
+  typeof turn === 'number' && Number.isInteger(turn) && turn > 0 ? `✔ Turn ${turn} 탐색 힌트: 건너뜀(자율 탐색)` : '✔ 탐색 힌트: 건너뜀(자율 탐색)';
+
+/** 탐색 힌트 카드 payload(JSON 문자열)의 Turn 번호. 읽을 수 없거나 정수가 아니면 undefined. */
+export const hintTurnOf = (payload: unknown): number | undefined => {
+  if (typeof payload !== 'string') return undefined;
+  try {
+    const t = JSON.parse(payload)?.turn;
+    return typeof t === 'number' && Number.isInteger(t) && t > 0 ? t : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /** Stage 3 카드에서 "건너뛰기 (전체 N개 진행)"으로 넘긴 경우. */
 export const stage3SkipRecord = (total: number): string =>

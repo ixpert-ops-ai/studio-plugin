@@ -660,7 +660,8 @@ try {
   const s44 = { recs: await evaluate(RECS), cmds: await sentCmds(from44) };
   await shot('44-skip-records');
   record(44, '건너뛰기·취소 3경로에 기록 줄: "범위: 전체(선택 안 함)", "힌트: 건너뜀", "Stage 3: 전체 13개 진행" 각 1줄, 전송된 명령은 카드별 cancel 3개뿐이고 /cancel(전역 취소)은 0건',
-    JSON.stringify(s44.recs) === JSON.stringify(['✔ 읽을 범위 선택: 전체(선택 안 함)', '✔ 탐색 힌트: 건너뜀(자율 탐색)', '✔ 최종 검증 대상 선택: 건너뜀(전체 13개 진행)'])
+    // B-84 e에서 바뀐 기대값: 힌트 카드 payload에 turn이 있으므로 건너뜀 기록에 Turn 번호가 붙는다(전: '✔ 탐색 힌트: 건너뜀(자율 탐색)', 후: '✔ Turn 1 탐색 힌트: 건너뜀(자율 탐색)')
+    JSON.stringify(s44.recs) === JSON.stringify(['✔ 읽을 범위 선택: 전체(선택 안 함)', '✔ Turn 1 탐색 힌트: 건너뜀(자율 탐색)', '✔ 최종 검증 대상 선택: 건너뜀(전체 13개 진행)'])
       && JSON.stringify(s44.cmds) === JSON.stringify(['scopeSelection/cancel', 'l1Clarification/cancel', 'stage3Confirmation/cancel']), JSON.stringify(s44));
 
   // 45) 제출 경로: 힌트 제출·Stage 3 제출에도 기록(전에 있던 동작이 그대로인지). 칩에는 계층 이름(service, dao)이 없다(B-81 10).

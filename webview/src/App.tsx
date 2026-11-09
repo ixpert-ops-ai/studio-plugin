@@ -17,7 +17,7 @@ import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
-import { appendRecord, completeClarifyCards, finalRefinedText, splitWithRecords, hintRecord, hintSkipRecord, historyWithOpenQuestion, refinedCancelRecord, refinedRecord, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
+import { appendRecord, completeClarifyCards, finalRefinedText, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, refinedCancelRecord, refinedRecord, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
@@ -809,7 +809,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
               text: JSON.stringify({ projectId })
             }));
           }
-          record(hintSkipRecord());
+          record(hintSkipRecord(hintTurnOf(msg.content)));
         }}
         onSubmit={(projectId, userHint) => {
           if (window.sendToIde) {
