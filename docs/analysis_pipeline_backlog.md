@@ -3696,6 +3696,7 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 #### 3 하네스 경로 정합
 - 원인 확정: `AdaptiveFileDiscovery`가 `srText = "$primaryReq\n$secondaryReq"`로 만들어 IDE의 탐색기 메시지는 SR 끝에 줄바꿈이 하나 더 있다. 하네스에 같은 줄바꿈을 넣으면 IDE(11-03 13:34)와 같은 결과가 10/10으로 재현된다(시드, 3턴, 매퍼 20점 Resource Reverse Link). 범위 카드·힌트 건너뛰기는 입력에 영향 없음(힌트가 비면 대화에 아무것도 추가하지 않는다, `AgenticSeedSelector.kt:248`).
 - 탐색기 temperature: 0.0(`AgenticSeedSelector.kt:90`). `[ExplorerInput]` 로그가 다음 IDE 실행부터 입력 전문과 해시를 남긴다.
+- **정정(B-84)**: 이 절의 "10/10" 표기는 같은 날 같은 서버에서 10번 반복해 같은 결과가 나왔다는 뜻일 뿐이다. temperature 0.0은 결정성을 보장하지 않는다(vLLM은 배치 구성 등에 따라 출력이 달라질 수 있다). 따라서 "10회"를 10개의 독립 표본으로도, 결정적인 1회분 표본으로도(10회 = 1회) 읽으면 안 되고, "그날 그 서버에서 10번 모두 같았다"는 뜻으로만 읽어야 한다. 날짜가 달라지면 같은 입력의 결과도 달라질 수 있다(아래 B-84 "서버 출력 변동").
 
 #### 4(5-1) → B
 - `ResponseWritePath`: 응답 테이블 = SELECT에서 ANSWER_n을 읽는 별칭의 테이블, 쓰기 = 그 테이블에 `#{}` 파라미터를 받는 INSERT/UPDATE(파라미터 없는 집계 UPDATE, 주석 처리된 문장 제외). survey_admin: 응답 테이블 ISSW_SURVEY_R, 파라미터 쓰기 없음 → "읽은 범위에서 발견되지 않음". 결과 ℹ️ 줄·SurveyServiceImpl 사유·Stage 0 즉시 안내가 같은 판정을 쓴다.
@@ -3744,10 +3745,18 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 - 로그 위치: `build/idea-sandbox/IC-2024.3.5/log/idea.log`(IC-2024.3이 아님). 회차 구간은 `build/ide-logs/b84_ide_1737.log`에 복사.
 
 #### 8변형 재측정(IDE 입력, 변형마다 1회, 브리지 힌트 없음)
-- 시드 매퍼 포함 4/8(사실 블록 유무와 무관 2/4, 2/4), sql_survey.xml Stage 1 후보 8/8(Judge Pick 4, Reverse Link 4), 4턴 5/8, 끝 줄바꿈 유/무만 바꾼 4쌍 모두 시드가 다름(4/4). 같은 입력이면 시드·턴이 같다(2회 실행 일치).
+- 시드 매퍼 포함 4/8(사실 블록 유무와 무관 2/4, 2/4), sql_survey.xml Stage 1 후보 8/8(Judge Pick 4, Reverse Link 4), 4턴 5/8, 끝 줄바꿈 유/무만 바꾼 4쌍 모두 시드가 다름(4/4). **정정**: 처음에는 "같은 입력이면 시드·턴이 같다(2회 실행 일치)"고 적었으나 틀린 전제였다. 같은 날 2회 일치는 결정성의 증거가 아니다(아래 "서버 출력 변동").
 - 저장·수집 단정 언급 수(중복 제거, 언급 앞뒤 25자에 부정 표현이 없는 것): **근거 없는 단정** 사실 블록 없음 합 9(3, 1, 0, 5), 있음 합 24(4, 6, 7, 7). 중립(이름만 나열한 updateResult) 0 / 1. 부정문 0/8. 이것이 item 3의 "전" 기준이다. 분류 규칙과 집계는 `scripts/recount-b84.js`(원문 `build/b84_variant_logs/`): "응답 저장/조회", "저장 처리" 같은 서술과, updateResult를 저장·응답·테이블과 묶은 언급은 근거 없는 단정, 그런 낱말 없이 이름만 나열한 언급은 중립. 판정 범위: 부정문은 언급 앞뒤 25자, updateResult가 저장·응답과 묶였는지는 40자(25자에서 넓힌 예방 조치이고 이 8개 원문에서는 25자와 40자의 결과가 같다). 1차 분류(단정 18 + 메서드 이름 7)에서 바뀐 것은 범위가 아니라 규칙(updateResult 토큰 전부를 메서드 이름으로 세던 것을, 저장·응답과 묶인 것만 단정으로)이다.
 - `updateResult`는 응답 저장이 아니다: SQL은 `call sp_eb_stat_daily_mt_insert('0')`(일별 MT 통계 프로시저, `sql_survey.xml:788-791`), `#{}` 파라미터도 `ISSW_SURVEY_R` 쓰기도 없고(`ISSW_SURVEY_R`는 보이는 범위에서 FROM에만 나온다), 호출은 `SurveyDaoImpl.java:28-29`와 `SurveyServiceImpl.java:350-355`(`proc`의 updateResult 분기가 updateSmtResult/MmtResult/ItaResult 호출). 따라서 탐색기의 "updateResult가 응답 테이블 저장을 담당" 서술은 오류다.
 - 줄 단위 정규식 집계(`build/b84_variants_linebased_v1.md`)는 같은 줄의 "추가 대상" 때문에 단정을 놓쳤고 사실 블록을 임의 문장으로 쓴 1차 표(0→9)는 틀린 결론이었다.
+
+#### 서버 출력 변동과 item 3(사실 블록 문구) 해석 정정 (11-09)
+- 사실 블록 3조건 비교(11-04 서버, IDE 17:36 입력, 사실 블록 있는 4변형 x 1회, 40자 규칙): 근거 없는 단정 ① 현재 24 / ② 문구 변경 19 / ③ 2번째 줄 제거 30(사실 블록 없음 9), 시드에 매퍼 포함 2/4, 3/4, 4/4, 부정문은 모두 0. 변형별 편차가 합계 차이보다 컸다(② 97자·줄바꿈 유 11, 97자·줄바꿈 무 1).
+- 11-09에 ②를 같은 4변형으로 다시 돌리자 4개 모두 달랐다(합 19 → 25, 시드·턴 변화: 97자·유 `[Service, DaoImpl, Dto, sql_survey.xml]` → `[Service, DaoImpl, Dto]`, 97자·무 5턴 → 4턴 등). 입력은 같다(실제 코드가 만든 사실 블록은 측정한 ② 텍스트와 바이트까지 같다: `adoptedFactsEqualMeasuredCondition2`).
+- `MeasureB84Test.repro`(IDE 17:36 입력 그대로, userMessage 659자 전문 일치)로 원인을 나눴다: 11-04에는 시드 [SurveyServiceImpl, SurveyDao, SurveyDaoImpl, SurveyDto], 세 번째 검색어 "Survey Result Email"이었는데 11-09에는 시드 [SurveyServiceImpl, SurveyDaoImpl, SurveyDto, sql_survey.xml], 세 번째 검색어 "설문 응답"(턴 4로 같음). 실패 메시지는 "입력 동일, 서버 출력 차이 가능", 설정 모델 `Qwen/Qwen3.8-27B-FP8`, `/v1/models` = [qwen3.8-27b, Qwen/Qwen3.8-27B, Qwen/Qwen3.8-27B-FP8](11-04 목록은 기록하지 않아 무엇이 바뀌었는지는 모른다).
+- 정정: **실서버 1회 측정은 같은 날에도 결정적이라고 볼 수 없다.** 앞서 "temperature 0이라 같은 입력이면 같은 결과"라고 전제하고 변형마다 1회만 돌렸고 8변형 재측정에서 2회 일치를 결정성의 증거로 적었으나, vLLM은 temperature 0에서도 배치 구성 등에 따라 출력이 달라질 수 있어 같은 날 일치는 증거가 아니다. 따라서 위 표(24/19/30/9, 시드·매퍼 n/4, n/8)는 "그날 그 서버에서 1회 본 값"이며 조건 간 차이를 입증하지 못한다. B-83의 "10/10"도 같은 뜻으로만 읽는다(위 B-83 정정).
+- 결론: ② 문구(저장 주체 미확인)는 **문구가 사실에 정확하다는 이유로만** 채택했다(`c085dea`). 단정 감소 효과는 미입증이다(n=4, 변형당 1회, 서버 변동 포함). 같은 날 16회 재측정과 ④(`updateResult` 대상 테이블 사실 한 줄) 측정은 보류했고 사실 블록 문구 최적화는 여기서 종료한다. ④의 매퍼 문 정보(종류, 대상 테이블, CALL 여부, 파라미터 유무)는 결과 단계의 결정적 검사(ReasonGuard)에 쓴다. 결과 표의 저장 단정은 프롬프트가 아니라 결과 단계 검사로 막는다.
+- 앞으로 모든 실서버 측정 기록에는 실행 시각, `/v1/models` 목록, `/metrics`의 실행·대기 수를 남긴다.
 
 #### push 범위 경위
 - B-82·B-83 보고의 push 대상은 `backup/explain-1007b`였다(원격 `b88f42f`). 현재 브랜치 upstream은 `origin/feature/explain`이라 이번 `git push origin feature/explain`은 원격 `b7b75cd`(2026-08-03 PR #83 머지)에서 `5359b0a`까지 334커밋(B 표시 143 + 표시 없음 191: 8월 7, 9월 77, 10월 107)을 한 번에 올렸다. `b7b75cd`는 `5359b0a`의 조상이다. 앞으로는 push 전 대상 브랜치·원격 위치를 기록하고, push 출력의 old..new와 log 목록을 첨부하고, ls-remote = HEAD, `git status` 비어 있음, 원격 이전 위치가 HEAD의 조상인지를 확인한다.
