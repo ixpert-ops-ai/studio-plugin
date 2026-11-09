@@ -7,6 +7,13 @@ package net.ib.ixpert.ops.wuwagent.agent
  * - 판정은 "읽은 범위 안에서 발견되지 않음"까지만 말한다(다른 모듈·다른 시스템에 있을 수 있다).
  */
 object ResponseWritePath {
+    /**
+     * 읽은 매퍼의 문 하나(B-84 4-(a), 결과 단계 사유 검사 ReasonGuard가 쓴다). 주석 처리된 문은 없다.
+     * kind: select/insert/update/delete, targetTable: INSERT INTO / UPDATE / DELETE FROM의 테이블(대문자, 없으면 null),
+     * hasParams: `#{}` 파라미터를 받는지, callsProcedure: `CALL 이름`이 있으면 그 이름.
+     */
+    data class StatementInfo(val file: String, val id: String, val kind: String, val targetTable: String?, val hasParams: Boolean, val callsProcedure: String?)
+
     data class Judgement(
         /** 읽은 범위의 SELECT가 응답 컬럼(ANSWER_n)을 읽는 테이블(대문자). */
         val responseTables: Set<String>,
@@ -14,7 +21,9 @@ object ResponseWritePath {
         val parameterizedWriters: List<String>,
         /** 응답 테이블을 쓰지만 파라미터가 없어 저장 경로로 세지 않은 문장(집계 갱신). */
         val ignoredAggregates: List<String>,
-        val mappersRead: Int
+        val mappersRead: Int,
+        /** 읽은 매퍼의 문(id 기준, 같은 id가 여러 파일에 있으면 먼저 읽은 것). 읽지 않은 매퍼의 문은 없다. */
+        val statements: Map<String, StatementInfo> = emptyMap()
     ) {
         /** 응답 테이블은 확인되는데 값을 받아 쓰는 문장이 읽은 범위에 없다. */
         val noWritePath: Boolean get() = responseTables.isNotEmpty() && parameterizedWriters.isEmpty()
@@ -27,6 +36,7 @@ object ResponseWritePath {
     fun judge(mappers: Map<String, List<String>>): Judgement {
         val responseTables = linkedSetOf<String>()
         val writes = mutableListOf<Triple<String, String, Boolean>>() // (표시 이름, 테이블, 파라미터 여부)
+        val statements = linkedMapOf<String, StatementInfo>()
         for ((file, lines) in mappers) {
             var inComment = false
             var i = 0
@@ -40,6 +50,16 @@ object ResponseWritePath {
                     while (j < lines.size && !lines[j].contains("</$kind>")) j++
                     val body = lines.subList(i, minOf(j + 1, lines.size)).joinToString("\n")
                     val id = m.groupValues[2]
+                    // 문 정보 기록: 여는 태그 뒤의 SQL만 본다(태그의 "update id"가 UPDATE 문으로 읽히지 않게)
+                    val sql = body.substringAfter('>')
+                    val target = when (kind) {
+                        "insert" -> Regex("(?i)INSERT\\s+INTO\\s+$SCHEMA([A-Za-z_]\\w*)").find(sql)?.groupValues?.get(1)
+                        "update" -> Regex("(?i)UPDATE\\s+$SCHEMA([A-Za-z_]\\w*)").find(sql)?.groupValues?.get(1)
+                        "delete" -> Regex("(?i)DELETE\\s+FROM\\s+$SCHEMA([A-Za-z_]\\w*)").find(sql)?.groupValues?.get(1)
+                        else -> null
+                    }?.uppercase()
+                    val proc = Regex("(?i)\\bCALL\\s+([A-Za-z_][\\w.]*)").find(sql)?.groupValues?.get(1)
+                    statements.putIfAbsent(id, StatementInfo(file, id, kind, target, body.contains("#{"), proc))
                     when (kind) {
                         "select" -> {
                             val aliases = Regex("\\b([A-Za-z_]\\w*)\\.ANSWER_\\w+", RegexOption.IGNORE_CASE).findAll(body).map { it.groupValues[1] }.toSet()
@@ -58,7 +78,7 @@ object ResponseWritePath {
             }
         }
         val onResponse = writes.filter { it.second in responseTables }
-        return Judgement(responseTables, onResponse.filter { it.third }.map { it.first }, onResponse.filter { !it.third }.map { it.first }, mappers.size)
+        return Judgement(responseTables, onResponse.filter { it.third }.map { it.first }, onResponse.filter { !it.third }.map { it.first }, mappers.size, statements)
     }
 
     /**

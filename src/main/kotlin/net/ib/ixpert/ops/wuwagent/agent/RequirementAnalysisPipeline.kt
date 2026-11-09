@@ -489,6 +489,23 @@ class RequirementAnalysisPipeline(
             emptyList()
         }
 
+        // B-84 4-(a): 결과 단계 사유 검사(ReasonGuard)가 쓰는 읽은 매퍼의 문 정보. 판정하지 못하면 null이고 사유는 그대로 보인다.
+        val reasonJudgement = try {
+            val seedPaths = projectGraph.files.values.filter { it.className in discoveryResult.metadata.seedClasses }.map { it.path }
+            ClaimedFieldCheck.writePath(projectGraph, projectRoot ?: project?.basePath?.let { java.io.File(it) }, seedPaths)
+        } catch (e: Exception) {
+            logger.warn("읽은 매퍼 판정 실패(사유 검사 없이 진행)", e)
+            null
+        }
+        // 표시만 덧붙이는 검사라 실패해도 원래 문장을 그대로 쓴다
+        fun guardedText(text: String, role: PathRoles.Role? = null, row: Boolean = false): String = try {
+            val ctx = ReasonGuard.Context(reasonJudgement, role)
+            if (row) ReasonGuard.annotateRow(text, ctx) else ReasonGuard.annotateText(text, ctx)
+        } catch (e: Exception) {
+            logger.warn("ReasonGuard 실패(원문 그대로)", e)
+            text
+        }
+
         val formattedOutput = buildString {
             appendLine("### 요구사항 분석 요약")
             // 제외 결과 표시(동작 변경 없음): 확정된 제외 파일과 확정되지 않은 제외 요청 문장
@@ -503,7 +520,7 @@ class RequirementAnalysisPipeline(
                 // B-79: 번호를 파일명으로 복원했으면 INFO(복원 횟수와 이름 불일치 기록), 복원하지 못한 번호(범위 밖)가 남았을 때만 WARN
                 if (citation.unresolved > 0) logger.warn("Stage 3 요약의 후보 번호 ${citation.unresolved}건을 파일명으로 복원하지 못했습니다(범위 밖 번호). 복원 ${citation.restored}건, 이름 불일치 ${citation.mismatches.size}건: ${citation.mismatches}")
                 else if (citation.restored > 0) logger.info("Stage 3 요약의 후보 번호 ${citation.restored}건을 파일명으로 복원했습니다(이름 불일치였지만 바꾼 것 ${citation.mismatches.size}건: ${citation.mismatches}).")
-                appendLine(citation.text.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n"))
+                appendLine(guardedText(citation.text.replace(Regex("\\s+(?=\\d+[\\.\\)]\\s)"), "\n")))
             } else {
                 appendLine("> ⚠️ **검증 단계 파싱 실패**: LLM 응답 포맷 오류로 인해 Stage 1/2 후보 결과를 모두 유지합니다. 결과를 직접 확인하세요.")
                 appendLine()
@@ -555,8 +572,10 @@ class RequirementAnalysisPipeline(
                     emptyMap()
                 }
                 validatedTargetFiles.forEach {
+                    val role = pathRoles[it.path]?.role
                     val koreanType = when(it.type) {
-                        "MODIFY" -> "수정"
+                        // B-84: 선택(경로 통과) 행은 시그니처가 바뀌지 않으면 고칠 것이 없으므로 "수정"이 아니라 "확인"
+                        "MODIFY" -> if (role == PathRoles.Role.OPTIONAL) "확인" else "수정"
                         "CREATE" -> "신규"
                         "DELETE" -> "삭제"
                         else -> it.type
@@ -564,8 +583,10 @@ class RequirementAnalysisPipeline(
                     // B-80 6: 답변으로 수집·저장이 범위에 들어갔으면 ℹ️ 줄이 말하는 저장 경로가 첫 Service의 사유에도 보인다
                     val wordedDesc = AnalysisResultWording.description(it.description)
                     val savePath = ClaimedFieldCheck.savePathReason(claimFindings, it.path, validatedTargetFiles.map { v -> v.path }, wordedDesc)
+                    // B-84 4-(a): LLM 사유가 읽은 매퍼의 사실이나 규칙 판정과 어긋나면 지우지 않고 표시를 덧붙인다
+                    val guardedDesc = guardedText(wordedDesc, role, row = true)
                     // B-83 5: 필수/선택 표시와 결정적 사유를 먼저, LLM 사유(저장 경로 문구 포함)를 뒤에 둔다
-                    val descForTable = PathRoles.describe(pathRoles[it.path], if (savePath != null) "$wordedDesc / $savePath" else wordedDesc).replace("\n", "<br>")
+                    val descForTable = PathRoles.describe(pathRoles[it.path], if (savePath != null) "$guardedDesc / $savePath" else guardedDesc).replace("\n", "<br>")
                     appendLine("| ${it.order} | ${it.path} | $koreanType | $descForTable |")
                 }
             } else {
