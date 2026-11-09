@@ -390,6 +390,33 @@ try {
   const s25 = await evaluate(`document.querySelectorAll('[data-refined-confirm="true"]').length`);
   record(25, '백엔드가 hide를 보내면 확인 카드가 사라짐(대기 시간 초과 경로)', s25 === 0, JSON.stringify({ 카드: s25 }));
 
+  // 25b) B-84 "구현 전 확인 필요" 문장: 정제문은 그대로 두고 그 아래에 따로 보이며, 정제문 칸을 고쳐도 문장은 남고 제출 본문에는 들어가지 않는다. 문장이 없으면 요소도 없다.
+  const RC_NOTE = '응답 테이블(ISSW_SURVEY_R)에 값을 쓰는 쿼리가 읽은 매퍼 1개에 없습니다. 응답자 이메일 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다.';
+  const rcRequestWithNote = note => post({ type: 'ai_message', subType: 'refinedConfirmation/request', messageId: 'system', content: JSON.stringify({ projectId: 'proj1', originalRequirement: RC_ORIG, refinedRequirement: RC_REFINED, message: '분석을 시작하기 전에 확인해 주세요.', decisionNote: note }) });
+  const NOTE = `document.querySelector('[data-refined-confirm-note="true"]')`;
+  const base25b = (await rcSent()).length;
+  await rcRequestWithNote(RC_NOTE);
+  await sleep(300);
+  const s25b1 = await evaluate(`(()=>{const n=${NOTE}; return {note: n ? n.innerText : null, refined: ${EDIT}.value}})()`);
+  await shot('25b-refined-card-note');
+  await typeInto('사용자가 고친 정제문입니다.');
+  const s25b2 = await evaluate(`(()=>{const n=${NOTE}; return {note: n ? n.innerText : null, refined: ${EDIT}.value}})()`);
+  await click(ACT('edited'), '수정한 내용으로 분석');
+  await sleep(200);
+  const sent25b = (await rcSent()).slice(base25b);
+  const body25b = sent25b[0] && sent25b[0].command === 'refinedConfirmation/submit' ? JSON.parse(sent25b[0].text) : null;
+  await post({ type: 'ai_message', subType: 'refinedConfirmation/hide', messageId: 'system', content: '' });
+  await sleep(250);
+  await rcRequest();
+  await sleep(300);
+  const s25b3 = await evaluate(`document.querySelectorAll('[data-refined-confirm-note="true"]').length`);
+  await post({ type: 'ai_message', subType: 'refinedConfirmation/hide', messageId: 'system', content: '' });
+  await sleep(250);
+  record('25b', '확인 필요 문장: 정제문 그대로 + 그 아래 문장 표시, 정제문을 고쳐도 문장 유지, 제출 본문에 문장 없음, 문장이 없으면 요소 없음',
+    s25b1.note && s25b1.note.includes(RC_NOTE) && s25b1.refined === RC_REFINED && s25b2.note === s25b1.note && s25b2.refined === '사용자가 고친 정제문입니다.' &&
+      body25b && body25b.editedText === '사용자가 고친 정제문입니다.' && !JSON.stringify(body25b).includes('연계할지') && s25b3 === 0,
+    JSON.stringify({ s25b1, s25b2, body25b, 문장없는카드의_문장요소: s25b3 }));
+
   // 26) 응답 없이 시간이 지나 위 정제된 문장 그대로 분석이 진행되면(expired) 카드는 지워지지 않고 비활성이 되며 안내가 보인다
   await rcRequest();
   await sleep(300);

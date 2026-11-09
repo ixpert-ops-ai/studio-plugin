@@ -28,6 +28,13 @@ fun interface RefinedRequirementConfirmationBridge {
      */
     fun requestConfirmation(originalRequirement: String, refinedRequirement: String): RefinedConfirmationDecision?
 
+    /**
+     * 정제문 아래에 따로 보일 "확인 필요" 문장([decisionNote], B-84)을 함께 보내는 요청. 정제문 텍스트는 바뀌지 않는다.
+     * 기본 구현은 문장을 쓰지 않는 이전 요청으로 넘긴다(람다로 만든 시험용 브리지는 그대로 동작한다).
+     */
+    fun requestConfirmation(originalRequirement: String, refinedRequirement: String, decisionNote: String?): RefinedConfirmationDecision? =
+        requestConfirmation(originalRequirement, refinedRequirement)
+
     /** 확인 카드를 화면에서 내린다. */
     fun hideConfirmation() {}
 
@@ -57,12 +64,12 @@ object RefinedRequirementGate {
      * 분석 시작 전 확인. bridge가 null이거나 결정이 없으면 intent를 그대로 돌려준다(지금 동작과 같다).
      * 고친 문장이 비어 있거나 보여 준 문장과 같으면 고치지 않은 것으로 본다.
      */
-    fun apply(intent: ClarifyIntent, bridge: RefinedRequirementConfirmationBridge?): RefinedGateResult {
+    fun apply(intent: ClarifyIntent, bridge: RefinedRequirementConfirmationBridge?, decisionNote: String? = null): RefinedGateResult {
         if (bridge == null) println("[RefineGate] rid=${Integer.toHexString(intent.originalRequirement.hashCode())} 브리지 null → 카드 없이 진행")
         if (bridge == null) return RefinedGateResult.Proceed(intent)
         val shown = shownRefined(intent)
         val decision = try {
-            bridge.requestConfirmation(intent.originalRequirement, shown)
+            bridge.requestConfirmation(intent.originalRequirement, shown, decisionNote)
         } catch (e: Exception) {
             null
         }
@@ -97,9 +104,11 @@ object RefinedRequirementGate {
         onCancelled: () -> Unit,
         onSuperseded: () -> Unit = {},
         // B-84 0: 카드 응답 뒤, 저장·분석 앞에서 인텐트를 마저 채운다(제약 추출 완료를 여기서 기다린다). 기본은 그대로 돌려준다. 취소·대체에서는 부르지 않는다.
-        complete: (ClarifyIntent) -> ClarifyIntent = { it }
+        complete: (ClarifyIntent) -> ClarifyIntent = { it },
+        // B-84: 카드에 정제문과 따로 보일 "확인 필요" 문장(정제문은 바뀌지 않는다)
+        decisionNote: String? = null
     ) {
-        when (val result = apply(intent, bridge)) {
+        when (val result = apply(intent, bridge, decisionNote)) {
             is RefinedGateResult.Proceed -> {
                 val finalIntent = complete(result.intent)
                 save(finalIntent)

@@ -1391,7 +1391,13 @@ class Stage0ClarificationEngine(
      * 카드(정제문 확인)는 [early]만으로 보내고, 카드 응답(이대로·수정·5분 자동 진행) 뒤에 [complete]를 부른다. 추출은 [early]를 만드는 동안 이미 돌고 있어 호출은 총 1회다.
      * 수정한 정제문은 [complete]에 넘기는 인텐트에 들어 있고, 추출 입력(발화 목록)은 정제문과 무관하다.
      */
-    class DeferredClarifyIntent(val early: ClarifyIntentBuild, val complete: (ClarifyIntent) -> ClarifyIntentBuild, val cancel: () -> Unit = {})
+    class DeferredClarifyIntent(
+        val early: ClarifyIntentBuild,
+        val complete: (ClarifyIntent) -> ClarifyIntentBuild,
+        val cancel: () -> Unit = {},
+        /** 정제문 확인 카드에 정제문과 따로 보이는 "확인 필요" 문장(B-84). 정제문 텍스트는 바꾸지 않는다. 해당 없으면 null. */
+        val decisionNote: String? = null
+    )
 
     /** 기존 호출부(발화 완료 경로 등)용 동기 버전: 정제문과 추출을 모두 기다려 한 번에 돌려준다. */
     fun buildClarifyIntentChecked(state: Stage0State): ClarifyIntentBuild {
@@ -1535,7 +1541,10 @@ class Stage0ClarificationEngine(
             if (!extractionFuture.isDone) extractionFuture.cancel(true)
             println("[ConstraintCache] cancel reason=확정 흐름 취소 또는 새 /clarify")
         }
-        return DeferredClarifyIntent(ClarifyIntentBuild(earlyIntent, null), complete, cancel)
+        // 정제문은 그대로 두고, 쓰기 쿼리가 없는데 새 데이터 저장을 답한 항목은 카드에 "확인 필요" 한 문장을 따로 보인다(B-84)
+        val decisionNote = net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.decisionNotes(state.fieldFacts, state.fieldAnswers)
+            .takeIf { it.isNotEmpty() }?.joinToString("\n")
+        return DeferredClarifyIntent(ClarifyIntentBuild(earlyIntent, null), complete, cancel, decisionNote)
     }
 
     /** 화면 payload용: 확정된 제외 파일과, 제안 상태로 대기 중인 제외 후보(확정 전). 판정에는 쓰지 않는다. */

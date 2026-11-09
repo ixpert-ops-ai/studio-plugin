@@ -24,6 +24,22 @@ test('카드 데이터를 읽는다: 필수 값이 없거나 깨지면 null', ()
   assert.equal(parsePayload('null'), null);
 });
 
+test('확인 필요 문장(decisionNote)은 있을 때만 읽고, 편집 상태나 제출 본문에 영향이 없다', () => {
+  const note = '응답 테이블(ISSW_SURVEY_R)에 값을 쓰는 쿼리가 읽은 매퍼 1개에 없습니다. 응답자 이메일 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다.';
+  const withNote = parsePayload(JSON.stringify({ projectId: 'p1', originalRequirement: '원문', refinedRequirement: SHOWN, message: '안내', decisionNote: note }));
+  assert.equal(withNote?.decisionNote, note);
+  // 정제문은 그대로다(문장을 바꾸거나 덧붙이지 않는다)
+  assert.equal(withNote?.refinedRequirement, SHOWN);
+  // 없거나 빈 문장이면 키 자체가 없다
+  for (const none of [undefined, '', '   ']) {
+    const p = parsePayload(JSON.stringify({ projectId: 'p1', originalRequirement: '원문', refinedRequirement: SHOWN, decisionNote: none }));
+    assert.equal(p !== null && 'decisionNote' in p, false);
+  }
+  // 정제문을 고쳐도 제출 본문에는 문장이 들어가지 않는다(문장은 화면 표시 전용)
+  assert.equal(buildSubmitText('p1', SHOWN, '고친 정제문', 'edited'), JSON.stringify({ projectId: 'p1', editedText: '고친 정제문' }));
+  assert.deepEqual(evaluateEdit(SHOWN, '고친 정제문'), { blank: false, changed: true, canProceedAsIs: true, canProceedEdited: true });
+});
+
 test('편집 상태: 그대로면 이대로 분석만, 고치면 수정 버튼도, 비면 둘 다 막는다', () => {
   assert.deepEqual(evaluateEdit(SHOWN, SHOWN), { blank: false, changed: false, canProceedAsIs: true, canProceedEdited: false });
   assert.deepEqual(evaluateEdit(SHOWN, `  ${SHOWN}\n`), { blank: false, changed: false, canProceedAsIs: true, canProceedEdited: false });

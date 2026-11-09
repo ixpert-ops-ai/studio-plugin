@@ -1628,6 +1628,7 @@ class WebviewActionRouter(private val project: Project) {
                 analyze = { clarifyIntent ->
                     executeAnalyzePipeline(project, bridge, clarifyIntent.originalRequirement, messageId, clarifyIntent, constraintNotice)
                 },
+                decisionNote = deferred.decisionNote,
                 complete = { edited ->
                     val waitStartMs = System.currentTimeMillis()
                     val done = deferred.complete(edited)

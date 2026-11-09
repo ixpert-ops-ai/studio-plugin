@@ -6,6 +6,8 @@ export type RefinedConfirmPayload = {
   originalRequirement: string;
   refinedRequirement: string;
   message?: string;
+  /** 정제문과 따로 보이는 "확인 필요" 문장(B-84). 정제문 칸을 고쳐도 카드에 그대로 남는다. 없으면 이 키가 없다. */
+  decisionNote?: string;
 };
 
 /** 카드 데이터를 읽는다. 깨졌거나 필수 값이 없으면 null(카드는 불러오기 실패 안내를 보인다). */
@@ -18,6 +20,7 @@ export const parsePayload = (raw: string): RefinedConfirmPayload | null => {
       originalRequirement: typeof d.originalRequirement === 'string' ? d.originalRequirement : '',
       refinedRequirement: d.refinedRequirement,
       message: typeof d.message === 'string' ? d.message : undefined,
+      ...(typeof d.decisionNote === 'string' && d.decisionNote.trim().length > 0 ? { decisionNote: d.decisionNote } : {}),
     };
   } catch {
     return null;

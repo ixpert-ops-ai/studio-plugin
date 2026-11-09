@@ -175,7 +175,10 @@ data class FieldFact(
     val filesRead: Int = 0,
     val question: String? = null,
     val otherTables: List<String> = emptyList(), // found=false일 때 그 발견이 읽는 테이블(요약 프롬프트의 사실 줄을 테이블 기준으로 쓴다)
-    val writeNotice: String? = null // found=false이고 읽은 범위에 응답 저장 경로(파라미터를 받아 쓰는 INSERT/UPDATE)가 없을 때의 한 문장(B-83 4). 사용자가 "새로 저장"이라 답하면 바로 안내한다.
+    val writeNotice: String? = null, // found=false이고 읽은 범위에 응답 저장 경로(파라미터를 받아 쓰는 INSERT/UPDATE)가 없을 때의 한 문장(B-83 4). 사용자가 "새로 저장"이라 답하면 바로 안내한다.
+    // B-84: writeNotice가 있을 때 그 판정의 재료(응답 테이블 이름과 읽은 매퍼 수). 정제문 확인 카드의 "확인 필요" 한 줄을 이 값으로 만든다(ClaimedFieldCheck.decisionNote).
+    val writeTables: List<String> = emptyList(),
+    val mappersRead: Int = 0
 )
 
 /**

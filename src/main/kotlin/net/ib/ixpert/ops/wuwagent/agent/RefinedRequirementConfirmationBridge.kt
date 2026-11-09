@@ -92,7 +92,10 @@ class JcefRefinedRequirementConfirmationBridge(
         fun cancelConfirmation(projectId: String) = registry.cancel(projectId)
     }
 
-    override fun requestConfirmation(originalRequirement: String, refinedRequirement: String): RefinedConfirmationDecision? {
+    override fun requestConfirmation(originalRequirement: String, refinedRequirement: String): RefinedConfirmationDecision? =
+        requestConfirmation(originalRequirement, refinedRequirement, null)
+
+    override fun requestConfirmation(originalRequirement: String, refinedRequirement: String, decisionNote: String?): RefinedConfirmationDecision? {
         if (project == null) return null
         val projectId = project.locationHash
         val future = registry.register(projectId)
@@ -100,12 +103,14 @@ class JcefRefinedRequirementConfirmationBridge(
         ApplicationManager.getApplication().invokeLater {
             try {
                 val bridge = net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(project)
-                val payload = mapOf(
+                val payload = mutableMapOf<String, Any>(
                     "projectId" to projectId,
                     "originalRequirement" to originalRequirement,
                     "refinedRequirement" to refinedRequirement,
                     "message" to "분석을 시작하기 전에 정제된 요구사항을 확인해 주세요. 그대로 진행하거나 고쳐서 진행할 수 있습니다."
                 )
+                // 정제문과 따로 보이는 "확인 필요" 문장(B-84). 정제문 칸의 수정과 무관하게 카드에 남는다.
+                if (!decisionNote.isNullOrBlank()) payload["decisionNote"] = decisionNote
                 println("[RefineGate] rid=${Integer.toHexString(originalRequirement.hashCode())} 카드 요청 전송 projectId=$projectId 정제문 ${refinedRequirement.length}자 (${ConfirmClock.sinceText()})")
                 bridge.sendMessage("refinedConfirmation/request", Gson().toJson(payload), "system")
             } catch (e: Exception) {

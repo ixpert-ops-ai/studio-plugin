@@ -122,6 +122,17 @@ export const RefinedConfirmationForm: React.FC<RefinedConfirmationFormProps> = (
         </div>
       </div>
 
+      {data.decisionNote && (
+        // 정제문은 그대로 두고 그 아래에 따로 보이는 "확인 필요" 문장(B-84). 정제문 칸을 고쳐도 이 문장은 바뀌지 않는다.
+        <div
+          data-refined-confirm-note="true"
+          style={{ ...box, marginBottom: '12px', borderColor: '#b45309', background: 'rgba(120, 53, 15, 0.25)' }}
+        >
+          <div style={{ ...label, color: '#fcd34d' }}>구현 전 확인 필요</div>
+          {data.decisionNote}
+        </div>
+      )}
+
       {expired && (
         <div data-refined-confirm-expired="true" style={{ fontSize: '12px', color: '#fcd34d', marginBottom: '10px' }}>
           {EXPIRED_TEXT}
