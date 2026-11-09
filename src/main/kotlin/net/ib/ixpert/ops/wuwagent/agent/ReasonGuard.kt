@@ -6,7 +6,7 @@ package net.ib.ixpert.ops.wuwagent.agent
  *
  * - G1 이름 대 사실: 사유 안의 이름이 읽은 매퍼의 문 id와 같고 update/insert/save 같은 쓰기처럼 보이는데 실제로는 응답 테이블에 값을 받아 쓰는 문이 아니면(프로시저 호출, 다른 테이블, 조회 문, 파라미터 없는 집계) 그 이름 뒤에 실제를 덧붙인다.
  * - G2 쓰기 경로 없음: 읽은 매퍼에 응답 테이블로 값을 쓰는 문이 없다는 판정(noWritePath)인데 문장이 "조회/저장", "응답 저장", "저장 로직" 같은 저장 단정을 부정어 없이 말하면 그 문장 뒤에 판정을 덧붙인다.
- * - G3 규칙 판정과 충돌(결과 표 한 행에만): 선택(경로 통과) 행인데 LLM 사유가 추가·수정을 말하면 "(규칙 판정과 다름)"을 덧붙인다.
+ * - G3 규칙 판정과 충돌(결과 표 한 행에만): 선택(경로 통과) 행인데 LLM 사유가 추가·수정을 말하면 "(규칙 판정: <판정 내용>)"을 덧붙인다(예: "(규칙 판정: 수정 불필요)", 판정 내용은 [PathRoles.Role.verdict]).
  * 읽지 않은 매퍼의 문은 판정 정보에 없으므로 표시하지 않는다. 판정(Judgement)이 없거나 응답 테이블을 알 수 없으면 아무것도 바꾸지 않는다.
  *
  * 부정어 판정은 scripts/recount-b84.js와 같은 규칙(언급 앞뒤 [NEGATION_WINDOW]자 안에 [NEGATION_PATTERN])을 쓴다. 두 곳이 어긋나지 않는지는 시험이 확인한다.
@@ -26,7 +26,7 @@ object ReasonGuard {
 
     private const val ACTUAL_PREFIX = "(실제:"
     private const val WRITE_MARK_PREFIX = "(읽은 범위의 매퍼"
-    private const val ROLE_MARK = "(규칙 판정과 다름)"
+    private const val ROLE_MARK_PREFIX = "(규칙 판정:"
 
     data class Context(val judgement: ResponseWritePath.Judgement?, val role: PathRoles.Role? = null)
 
@@ -34,10 +34,11 @@ object ReasonGuard {
     fun annotateRow(reason: String, ctx: Context): String {
         if (reason.isBlank()) return reason
         var out = annotateText(reason, ctx)
-        if (ctx.role == PathRoles.Role.OPTIONAL && !out.contains(ROLE_MARK)) {
+        if (ctx.role == PathRoles.Role.OPTIONAL && !out.contains(ROLE_MARK_PREFIX)) {
             // 덧붙인 표시가 아니라 LLM이 쓴 원래 사유로 판정한다
             val change = CHANGE.findAll(reason).firstOrNull { !negatedAround(reason, it.range.first, it.range.last + 1) }
-            if (change != null) out = "$out $ROLE_MARK"
+            // 판정 문구는 PathRoles의 판정(Role.verdict)에서 가져온다: "(규칙 판정: 수정 불필요)"
+            if (change != null) out = "$out $ROLE_MARK_PREFIX ${ctx.role.verdict})"
         }
         return out
     }

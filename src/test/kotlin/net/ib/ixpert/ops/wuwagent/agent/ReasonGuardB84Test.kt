@@ -37,11 +37,13 @@ class ReasonGuardB84Test {
         assertEquals("$reason $mark", row(reason, PathRoles.Role.OPTIONAL))
     }
 
-    // 17:46 IDE 결과 표의 SurveyDao 행: 선택(경로 통과)인데 "시그니처 추가"를 말하므로 규칙 판정과 다르다는 표시만 붙는다.
+    // 17:46 IDE 결과 표의 SurveyDao 행: 선택(경로 통과)인데 "시그니처 추가"를 말하므로 규칙 판정 내용(PathRoles.Role.verdict, 수정 불필요)만 덧붙는다.
     @Test
     fun t2_daoRow_changeWordOnAnOptionalRowGetsTheRoleMark() {
         val reason = "이메일 관련 메서드 시그니처 추가"
-        assertEquals("$reason (규칙 판정과 다름)", row(reason, PathRoles.Role.OPTIONAL))
+        assertEquals("$reason (규칙 판정: 수정 불필요)", row(reason, PathRoles.Role.OPTIONAL))
+        // 덧붙이는 판정 내용은 PathRoles에서 온다(고정 문자열이 아니다)
+        assertEquals("$reason (규칙 판정: ${PathRoles.Role.OPTIONAL.verdict})", row(reason, PathRoles.Role.OPTIONAL))
         // 필수 행이나 판정 없는 행에는 붙지 않는다
         assertEquals(reason, row(reason, PathRoles.Role.REQUIRED))
         assertEquals(reason, row(reason, null))
@@ -111,12 +113,12 @@ class ReasonGuardB84Test {
         assertEquals("updateUnread가 호출됩니다", out)
     }
 
-    // 요약 문단: G1·G2만 문장 단위로. 단정 문장 뒤에만 판정이 붙고 G3(규칙 판정과 다름)는 없다.
+    // 요약 문단: G1·G2만 문장 단위로. 단정 문장 뒤에만 판정이 붙고 G3(규칙 판정: …)는 없다.
     @Test
     fun t8_summaryParagraphIsAnnotatedPerSentence() {
         val paragraph = "SurveyServiceImpl이 응답 저장 로직을 처리합니다. SurveyDto에 이메일 필드를 추가합니다."
         assertEquals("SurveyServiceImpl이 응답 저장 로직을 처리합니다. $mark SurveyDto에 이메일 필드를 추가합니다.", text(paragraph))
-        assertFalse(text(paragraph).contains("규칙 판정과 다름"))
+        assertFalse(text(paragraph).contains("(규칙 판정:"))
         // 줄바꿈은 유지된다
         assertEquals("1. 응답 저장 로직을 처리합니다 $mark\n2. 필드 추가", text("1. 응답 저장 로직을 처리합니다\n2. 필드 추가"))
     }
@@ -150,7 +152,7 @@ class ReasonGuardB84Test {
         val ctx = ReasonGuard.Context(j, PathRoles.Role.OPTIONAL)
         val daoImpl = ReasonGuard.annotateRow("이메일 컬럼 조회/저장 SQL 호출", ctx)
         assertTrue(daoImpl, daoImpl.startsWith("이메일 컬럼 조회/저장 SQL 호출 (읽은 범위의 매퍼 1개에 응답 테이블(ISSW_SURVEY_R)로 값을 쓰는 쿼리 없음"))
-        assertEquals("이메일 관련 메서드 시그니처 추가 (규칙 판정과 다름)", ReasonGuard.annotateRow("이메일 관련 메서드 시그니처 추가", ctx))
+        assertEquals("이메일 관련 메서드 시그니처 추가 (규칙 판정: 수정 불필요)", ReasonGuard.annotateRow("이메일 관련 메서드 시그니처 추가", ctx))
         val explorerStyle = ReasonGuard.annotateRow("SurveyDaoImpl: 응답 테이블의 selectResultList/updateResult 등 이메일 컬럼 접근 SQL을 처리", ReasonGuard.Context(j))
         assertTrue(explorerStyle, explorerStyle.contains("updateResult(실제: 프로시저 sp_eb_stat_daily_mt_insert 호출, 응답 테이블(ISSW_SURVEY_R) 쓰기 아님)"))
     }

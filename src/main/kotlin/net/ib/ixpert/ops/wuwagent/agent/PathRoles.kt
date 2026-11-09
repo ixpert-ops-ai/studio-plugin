@@ -11,7 +11,11 @@ import java.io.File
  * - SR이 새 조회·저장 메서드를 요구하면 선택 판정을 적용하지 않는다(Dao 메서드 선언이 실제로 필요하다).
  */
 object PathRoles {
-    enum class Role(val label: String) { REQUIRED("필수"), OPTIONAL("선택(경로 통과)") }
+    /** verdict: 이 판정이 내리는 결론 한 마디. ReasonGuard G3가 LLM 사유와 어긋날 때 "(규칙 판정: <verdict>)"로 덧붙인다. */
+    enum class Role(val label: String, val verdict: String) {
+        REQUIRED("필수", "수정 필요"),
+        OPTIONAL("선택(경로 통과)", "수정 불필요")
+    }
     data class Hint(val role: Role, val reason: String)
 
     private val NEW_METHOD = Regex("(신규|새로운|새)\\s*(조회|저장|메서드|쿼리|API|엔드포인트)|메서드를?\\s*(추가|신설)|조회\\s*기능을?\\s*(추가|신설)")
