@@ -61,7 +61,16 @@ object ResponseWritePath {
         return Judgement(responseTables, onResponse.filter { it.third }.map { it.first }, onResponse.filter { !it.third }.map { it.first }, mappers.size)
     }
 
-    /** 화면·사실 블록에 쓰는 한 문장(읽은 범위 안에서 발견되지 않음으로 한정한다). 판정할 수 없으면(응답 테이블이 안 보임) null. */
+    /**
+     * 탐색기 사실 블록용 문장(B-84 item 3). 같은 판정을 "저장한다/INSERT/UPDATE" 같은 동사 없이 "저장 주체 미확인"으로 말한다. 화면에 보이는 [notFoundSentence]는 바꾸지 않는다.
+     * 채택 사유는 문구가 사실에 정확하다는 것이다(읽은 범위에 쓰기 쿼리가 없을 뿐 저장 주체가 없다는 뜻이 아니다). 단정 감소 효과는 입증하지 못했다(4변형 x 1회, 합 24 → 19, 변형별 편차가 더 크다).
+     */
+    fun factsSentence(j: Judgement?): String? {
+        if (j == null || !j.noWritePath) return null
+        return "저장 주체 미확인(읽은 범위의 매퍼(${j.mappersRead}개)에 응답 테이블(${j.responseTables.joinToString("/")})로 값을 쓰는 쿼리 없음). 이 프로젝트 밖의 다른 시스템이 값을 쓸 수 있습니다."
+    }
+
+    /** 화면에 쓰는 한 문장(읽은 범위 안에서 발견되지 않음으로 한정한다). 판정할 수 없으면(응답 테이블이 안 보임) null. */
     fun notFoundSentence(j: Judgement?): String? {
         if (j == null || !j.noWritePath) return null
         return "읽은 범위의 매퍼(${j.mappersRead}개)에서 응답 테이블(${j.responseTables.joinToString("/")})에 값을 받아 쓰는 INSERT/UPDATE는 발견되지 않았습니다. 이 프로젝트 밖의 다른 시스템이 응답을 저장할 수 있습니다."

@@ -224,4 +224,84 @@ class MeasureB84Test {
         }
         println(out)
     }
+
+    /** 조건 ②(채택안): IDE 17:36 사실 블록(옛 문구)을 새 문구로 바꾼 것. 측정에 쓴 텍스트이고, 아래 시험이 실제 코드의 출력과 같은지 확인한다. */
+    private fun condition2(oldFacts: String): String {
+        val lines = oldFacts.lines()
+        require(lines.size == 5 && lines[2].startsWith("- 응답 저장:")) { "사실 블록 구성이 예상과 다르다: $lines" }
+        return listOf(
+            lines[0],
+            lines[1].replace("이 항목을 저장하거나 조회하는 코드는", "이 항목을 다루는 코드는"),
+            "- 저장 주체 미확인(읽은 범위의 매퍼(1개)에 응답 테이블(ISSW_SURVEY_R)로 값을 쓰는 쿼리 없음). 이 프로젝트 밖의 다른 시스템이 값을 쓸 수 있습니다.",
+            "- 사용자 답변(응답자 이메일): 기존 데이터 없음 → 설문 응답 테이블에 이메일 컬럼 신규 추가(저장 주체 확인 필요)",
+            lines[4]
+        ).joinToString("\n")
+    }
+
+    /**
+     * 서버 없이 도는 확인: 실제 코드(ClaimedFieldCheck.explorerFacts)가 만든 사실 블록이 측정한 조건 ②의 텍스트와 바이트까지 같다.
+     * 입력은 B-83 측정과 같은 원문 SR과 답변(IDE 17:36의 사실 블록을 만든 것)이다. 로컬 그래프가 없으면 사유를 출력하고 skip한다.
+     */
+    @Test
+    fun adoptedFactsEqualMeasuredCondition2() {
+        val graphFile = File(root, ".meta/project-graph.json")
+        if (!graphFile.isFile) println("[adoptedFacts] skip: 로컬 그래프 파일이 없습니다: ${graphFile.path}")
+        Assume.assumeTrue("로컬 그래프 파일 없음(${graphFile.path})", graphFile.isFile)
+        val g = loadGraph()
+        val original = "기존 설문조사 상세 조회 기능에 응답자 이메일 정보도 같이 내려주도록 백엔드를 수정해주세요"
+        val answer = "응답자 이메일은 아직 수집하지 않아. 설문 응답 테이블에 이메일 컬럼을 새로 추가해서 저장하는 방향으로 해줘."
+        val actual = net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.explorerFacts(
+            original, g, root, net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.answersOf(listOf("응답자 이메일 출처: $answer"))
+        )
+        org.junit.Assert.assertEquals(condition2(loadIde().facts), actual)
+        // 동사 노출이 없어졌는지(채택 사유: 문구가 사실에 정확함)
+        org.junit.Assert.assertFalse(actual!!.contains("INSERT/UPDATE"))
+        org.junit.Assert.assertFalse(actual.contains("신설·저장"))
+        org.junit.Assert.assertFalse(actual.contains("저장하거나 조회하는"))
+    }
+
+    /**
+     * 주의(B-84): 서버 출력은 날짜가 바뀌면 달라질 수 있다. 같은 입력(IDE 17:36 userMessage 전문 일치)에서 11-04에는 시드 [Service, Dao, DaoImpl, Dto]였던 것이
+     * 11-09에는 [Service, DaoImpl, Dto, sql_survey.xml]이 나왔다(repro 실패 메시지가 "입력 동일, 서버 출력 차이 가능"으로 구분). 조건 비교는 같은 날 서버에서 한 번에 재야 한다.
+     *
+     * B-84 item 3 (a): 사실 블록 문구 3조건 비교(사실 블록이 있는 4변형 = SR 2종 x 끝 줄바꿈 유/무, 변형마다 1회).
+     * ① 현재(IDE 471자)는 variants의 사실 블록 있음 4개 결과와 같다(같은 입력, temperature 0.0)라서 여기서 다시 돌리지 않는다.
+     * ② 문구 변경: "저장하거나 조회하는", "INSERT/UPDATE", "신설·저장" 같은 동사를 빼고 "저장 주체 미확인(…응답 쓰기 쿼리 없음)", "신규 추가(저장 주체 확인 필요)"로 쓴다.
+     * ③ 2번째 줄(응답 저장 판정) 제거.
+     * 원문은 build/b84_cond2, build/b84_cond3에 남기고 scripts/recount-b84.js로 센다.
+     */
+    @Test
+    fun factsConditions() {
+        Assume.assumeTrue(live())
+        val g = loadGraph()
+        val ide = loadIde()
+        val lines = ide.facts.lines()
+        val cond2 = condition2(ide.facts)
+        val cond3 = listOf(lines[0], lines[1], lines[3], lines[4]).joinToString("\n")
+        val out = StringBuilder(
+            "# B-84 item 3 (a) 사실 블록 조건 비교(②·③만, ①은 variants의 사실 블록 있음 4개)\n" +
+                "| 조건 | SR | 끝 줄바꿈 | 시드 | 턴 | 시드에 매퍼 | 후보 수 | sql_survey.xml 후보(점수/경로) | 초 | 처음 3개 인자 |\n|---|---|---|---|---|---|---|---|---|---|\n"
+        )
+        // -Db84Conds=2 처럼 조건을 하나만 고를 수 있다(기본: 2와 3)
+        val only = System.getProperty("b84Conds")
+        for ((condName, facts) in listOf("2" to cond2, "3" to cond3).filter { only == null || it.first == only }) {
+            println("[factsConditions] 조건 $condName 사실 블록 ${facts.length}자 ${facts.lines().size}줄")
+            for ((srName, sr) in listOf("97자(17:36)" to ide.sr, "108자(13:34)" to sr108)) for (trailing in listOf(true, false)) {
+                val srText = if (trailing) "$sr\n" else sr
+                val (run, seed) = explore(g, srText, facts)
+                val msgs = run.log.filter { it.contains("Message:") || it.contains("rationale") }
+                val dumpName = "b84_var_${srName.take(3)}_${if (trailing) "nl" else "nonl"}_facts.txt"
+                File("build/b84_cond$condName").apply { mkdirs() }.resolve(dumpName).writeText(
+                    (msgs + run.queries.filter { it.contains("rationale") }).joinToString("\n---\n"), Charsets.UTF_8
+                )
+                val ex = GraphExpander(g, DomainExtractor(g.files), DiscoveryConfig(maxHop = 3)).expand(seed, sr)
+                val old = System.out
+                val scored = try { System.setOut(PrintStream(ByteArrayOutputStream())); RelevanceScorer(g, 30, 55).scoreAndFilter(sr, ex, seed) } finally { System.setOut(old) }
+                val mapper = scored.firstOrNull { it.className == "sql_survey.xml" }
+                out.appendLine("| $condName | $srName | ${if (trailing) "유" else "무"} | ${run.seeds} | ${run.turns} | ${"sql_survey.xml" in run.seeds} | ${scored.size} | ${mapper != null}${mapper?.let { "(${it.score}/${it.protectionReason})" } ?: ""} | ${run.ms / 1000} | ${run.queries.take(3).joinToString(" ")} |")
+                File("build/b84_facts_conditions.md").writeText(out.toString(), Charsets.UTF_8)
+            }
+        }
+        println(out)
+    }
 }

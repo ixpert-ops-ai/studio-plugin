@@ -256,15 +256,22 @@ object ClaimedFieldCheck {
         for (e in evals) {
             val f = toFinding(e, "구체화")
             if (e.inDomainCites.isNotEmpty()) lines.add("- ${f.label}: ${scopeNote(f)}했고 ${e.inDomainCites.first()}에서 발견됨")
-            else lines.add("- ${f.label}: ${scopeNote(f)}했으나 이 항목을 저장하거나 조회하는 코드는 발견되지 않았습니다" +
+            else lines.add("- ${f.label}: ${scopeNote(f)}했으나 이 항목을 다루는 코드는 발견되지 않았습니다" +
                 (if (f.otherTables.isNotEmpty()) "(읽은 범위 안의 ${f.otherTables.joinToString("/")} 테이블 쿼리에서만 발견)" else ""))
         }
-        val writeSentence = ResponseWritePath.notFoundSentence(writePath(graph, projectRoot, seeds))
-        writeSentence?.let { lines.add("- 응답 저장: $it") }
-        for ((label, a) in answers) if (!isUnknownAnswer(a)) lines.add("- 사용자 답변($label): ${sourceSentence(a)}")
+        // B-84 item 3 (②): "저장하거나 조회하는", "응답 저장", "INSERT/UPDATE", "신설·저장" 같은 동사를 빼고 "저장 주체 미확인"으로 쓴다(문구가 사실에 정확하다는 이유로 채택, 단정 감소 효과는 미입증).
+        val writeSentence = ResponseWritePath.factsSentence(writePath(graph, projectRoot, seeds))
+        writeSentence?.let { lines.add("- $it") }
+        for ((label, a) in answers) if (!isUnknownAnswer(a)) {
+            val source = sourceSentence(a)
+            // 쓰기 쿼리가 없다고 확인된 경우에만 "저장 주체 확인 필요"를 붙인다(쓰기 경로가 있으면 "신설·저장"이 그대로 맞는 말이다)
+            lines.add("- 사용자 답변($label): " + if (writeSentence != null) source.replace("컬럼 신설·저장", "컬럼 신규 추가(저장 주체 확인 필요)") else source)
+        }
         return "[Stage 0에서 확인한 사실]\n" + lines.joinToString("\n") +
             "\n위는 읽은 범위 안에서 확인한 사실이며 다른 곳에 없다는 뜻은 아닙니다. 이 사실과 어긋나게 \"이미 포함되어 있다\", \"이미 존재한다\"고 단정하지 말고, 확인하지 못한 것은 추정이라고 말하세요."
             // 측정(B-83): "응답을 저장한다고 쓰지 마세요" 같은 추가 금지 문장은 효과가 없었다(10회 모두 "응답 저장" 단정이 남고 이메일 줄 오탐만 늘었다). 이 사실 블록은 이메일 단정(10→0)과 매퍼 시드 포함(10/10)까지만 보증한다.
+            // 측정(B-84 item 3, IDE 17:36 입력 기준, 사실 블록 있는 4변형 x 1회): 문구를 ②로 바꿔도 저장·수집 단정(근거 없는 단정)은 24 → 19(③ 2번째 줄 제거는 30)이고 변형별 편차(4→11, 6→1)가 합계 차이보다 커서 감소 효과는 입증하지 못했다.
+            // ②는 문구가 사실에 정확해서 채택했다(읽은 범위에 쓰기 쿼리가 없다는 것이 저장 주체가 없다는 뜻이 아니다).
     }
 
     /** Stage 0 대화에 보일 질문 한 개. 못 찾았다는 사실과 다른 업무 코드에서 발견된 위치(file:line, 테이블)를 근거로 붙이고, 정답 출처는 판정하지 않는다. */
