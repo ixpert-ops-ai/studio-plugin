@@ -55,16 +55,26 @@ object ClaimedFieldCheck {
         /** 이 문장을 만든 단계: 구체화(/clarify 질문) 또는 분석(결과). 단계마다 시드가 달라 읽은 폴더가 다를 수 있어 문장에 밝힌다(B-82 3-2). */
         val stage: String = "분석",
         /** 읽은 범위에 응답 저장 경로가 없다는 한 문장(B-83 4). 없으면 null(판정 불가이거나 저장 경로가 있음). */
-        val writeNotice: String? = null
+        val writeNotice: String? = null,
+        /** writeNotice가 있을 때 그 판정의 응답 테이블 이름과 읽은 매퍼 수(결과 화면 "구현 전 결정할 것"의 [decisionNote] 재료, B-84). */
+        val writeTables: List<String> = emptyList(),
+        val mappersRead: Int = 0
     ) {
-        fun withWriteNotice(n: String?): Finding = Finding(noun, subject, filesRead, otherCites, otherTables, seedNames, answer, domainScope, readFolders, stage, n)
+        /** 읽은 범위의 응답 저장 경로 판정을 붙인다: 쓰기 쿼리가 없다는 판정(noWritePath)이면 안내 문장과 판정 재료(테이블 이름, 매퍼 수)가 함께 들어간다. */
+        fun withWriteJudgement(j: ResponseWritePath.Judgement?): Finding {
+            val notice = ResponseWritePath.notFoundSentence(j)
+            return Finding(
+                noun, subject, filesRead, otherCites, otherTables, seedNames, answer, domainScope, readFolders, stage, notice,
+                if (notice != null) j!!.responseTables.toList() else emptyList(), if (notice != null) j!!.mappersRead else 0
+            )
+        }
         /** 화면에 보이는 항목 이름(예: "응답자 이메일"). */
         val label: String get() = (subject?.let { "$it " } ?: "") + noun
 
         /** 출처가 정해지지 않았는가: 답이 없거나 "모름"이다(B-81 3). 이 항목은 결과에서 ⚠️로 남고 /implement 전에 확인이 필요한 항목으로 센다. */
         val unresolved: Boolean get() = answer == null || isUnknownAnswer(answer)
 
-        fun withAnswer(a: String?): Finding = Finding(noun, subject, filesRead, otherCites, otherTables, seedNames, a, domainScope, readFolders, stage, writeNotice)
+        fun withAnswer(a: String?): Finding = Finding(noun, subject, filesRead, otherCites, otherTables, seedNames, a, domainScope, readFolders, stage, writeNotice, writeTables, mappersRead)
     }
 
     private val UNKNOWN_LOOSE = Regex("모르|몰라|모릅")
@@ -256,6 +266,20 @@ object ClaimedFieldCheck {
     fun decisionNote(label: String, writeTables: Collection<String>, mappersRead: Int): String =
         "응답 테이블(${writeTables.joinToString("/")})에 값을 쓰는 쿼리가 읽은 매퍼 ${mappersRead}개에 없습니다. $label 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다."
 
+    /**
+     * 결과 화면 "구현 전 결정할 것" 블록의 줄(B-84 d). 순서: 저장 주체 결정([decisionNote], 정제문 확인 카드와 같은 함수) → 컨트롤러 안내([entryPointNote]) → DDL 안내([ddlNote]).
+     * 각 줄의 조건은 이전 ℹ️ 줄과 같다: 컨트롤러 안내는 새 데이터로 답했는데 최종 목록에 요청 진입점이 없을 때, DDL 안내는 답이 새 컬럼일 때, 저장 주체 결정은 쓰기 쿼리 없음 판정이 있을 때.
+     * 사용자가 카드에 응답하지 않아 5분 뒤 자동 진행했어도 이 줄들은 카드 상태가 아니라 분석 인텐트의 답에서 만든 findings로 정해진다. 해당 줄이 없으면 빈 목록.
+     */
+    fun decisionBlock(findings: List<Finding>, finalPaths: List<String>, suggestedController: String?): List<String> {
+        val resolved = findings.filter { !it.unresolved }
+        val decisions = resolved.filter { it.writeNotice != null && it.writeTables.isNotEmpty() && isNewData(it.answer!!) }
+            .map { decisionNote(it.label, it.writeTables, it.mappersRead) }
+        val entries = if (hasEntryPoint(finalPaths)) emptyList() else resolved.filter { isNewData(it.answer!!) }.map { entryPointNote(it, suggestedController) }
+        val ddls = resolved.mapNotNull { ddlNote(it) }
+        return decisions + entries + ddls
+    }
+
     /** 조건: 사용자가 새 데이터로 답했고([isNewData]) 그 항목에 쓰기 쿼리 없음 판정(writeNotice)이 있다(`Stage0ClarificationEngine`의 즉시 안내와 같은 조건). 해당하는 항목마다 한 문장. */
     fun decisionNotes(facts: List<FieldFact>, answers: Map<String, String>): List<String> =
         facts.filter { it.writeNotice != null && it.writeTables.isNotEmpty() && answers[it.label]?.let { a -> isNewData(a) } == true }
@@ -350,7 +374,9 @@ object ClaimedFieldCheck {
         // B-81 8: 사용자 발화를 통째로 인용하지 않고 Stage 0 "기록함"의 출처 줄과 같은 함수(AnswerInterpreter.sourceLine)가 만든 정리된 출처 문장을 쓴다
         val src = sourceSentence(a)
         // B-83 4: 읽은 범위에 응답 저장 경로가 없으면 "수집·저장 경로 추가가 구현 범위"라고 말하지 않고 확인 범위 안에서 발견되지 않았음을 밝힌다
-        return if (isNewData(a) && f.writeNotice != null) "${f.label}: ${scopeNote(f)}했으나 기존 데이터가 없습니다. 사용자 답변(출처: $src)에 따라 새 컬럼 추가는 구현 범위에 포함됩니다. 다만 ${f.writeNotice}"
+        // B-84 d: 저장 주체(쓰기 쿼리 없음)는 이 줄에 잇지 않고 결과 화면 "구현 전 결정할 것" 블록의 한 문장([decisionBlock])으로 말한다. 판정 재료가 없으면 이전처럼 이 줄에 잇는다.
+        return if (isNewData(a) && f.writeNotice != null && f.writeTables.isNotEmpty()) "${f.label}: ${scopeNote(f)}했으나 기존 데이터가 없습니다. 사용자 답변(출처: $src)에 따라 새 컬럼 추가는 구현 범위에 포함됩니다."
+        else if (isNewData(a) && f.writeNotice != null) "${f.label}: ${scopeNote(f)}했으나 기존 데이터가 없습니다. 사용자 답변(출처: $src)에 따라 새 컬럼 추가는 구현 범위에 포함됩니다. 다만 ${f.writeNotice}"
         else if (isNewData(a)) "${f.label}: ${scopeNote(f)}했으나 기존 데이터가 없습니다. 사용자 답변(출처: $src)에 따라 새 컬럼 추가와 수집·저장 경로가 구현 범위에 포함됩니다."
         else "${f.label}: ${scopeNote(f)}했으나 기존 코드에는 없고, 사용자 답변(출처: $src)으로 출처가 지정되었습니다(조인 대상 확인 필요)."
     }

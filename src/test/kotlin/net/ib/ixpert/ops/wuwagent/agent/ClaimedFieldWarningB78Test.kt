@@ -98,7 +98,11 @@ class ClaimedFieldWarningB78Test {
         assertEquals("경고 줄은 없다", 0, out.lines().count { it.startsWith("> ⚠️ 확인 안 됨:") })
         val line = out.lines().single { it.startsWith("> ℹ️ 응답자 이메일:") }
         // B-83 4에서 바뀐 기대값: 읽은 범위에 응답 저장 경로가 없으면 "수집·저장 경로가 구현 범위에 포함됩니다" 대신 확인 범위 안에서 발견되지 않았음을 밝힌다
-        assertTrue(line, line.contains("기존 데이터가 없습니다") && line.contains("새 컬럼 추가는 구현 범위에 포함됩니다") && line.contains("INSERT/UPDATE는 발견되지 않았습니다"))
+        // B-84 d에서 다시 바뀐 기대값(전: ℹ️ 줄 끝에 "다만 … INSERT/UPDATE는 발견되지 않았습니다 …" / 후: ℹ️ 줄에서는 빠지고 "구현 전 결정할 것" 블록의 한 문장으로 말한다. 뜻은 같고 자리가 옮겨졌다)
+        assertTrue(line, line.contains("기존 데이터가 없습니다") && line.contains("새 컬럼 추가는 구현 범위에 포함됩니다"))
+        assertFalse(line, line.contains("INSERT/UPDATE") || line.contains("다른 시스템"))
+        assertTrue(out, out.lines().contains("> 📌 **구현 전 결정할 것**"))
+        assertTrue(out, out.lines().any { it.startsWith("> - 응답 테이블(") && it.contains("에 값을 쓰는 쿼리가 읽은 매퍼") && it.contains("다른 시스템과 연계할지 정해야 합니다") })
         assertFalse(line, line.contains("수집·저장 경로가 구현 범위에 포함됩니다"))
         assertTrue(line, line.contains("사용자 답변"))
         // 수정 사유: SurveyServiceImpl 사유에 "수집·저장 경로 추가"가 붙지 않는다
@@ -136,10 +140,18 @@ class ClaimedFieldWarningB78Test {
     fun w3c_정보_줄은_빈_인용_줄로_갈라지고_출처는_정리된_문장이다() {
         val answer = "설문 응답 테이블에 이메일 컬럼을 새로 추가해서 저장하는 방향으로 해줘"
         val (out, _) = run(intent("응답자 이메일 출처: $answer"), refined)
+        // B-84 d에서 바뀐 기대값(전: 출처·저장 경로·진입점·DDL이 모두 ℹ️ 줄 3줄 이상 / 후: ℹ️ 줄은 출처 한 줄이고, 저장 주체 결정 → 컨트롤러 안내 → DDL 안내는 "구현 전 결정할 것" 블록의 줄 3개)
         val infos = out.lines().filter { it.startsWith("> ℹ️") }
-        assertTrue("출처·수집 경로·DDL 3줄: $infos", infos.size >= 3)
+        assertEquals("ℹ️ 줄은 출처 한 줄: $infos", 1, infos.size)
         val lines = out.lines()
-        for (l in infos.drop(1)) assertEquals("ℹ️ 줄 앞은 빈 인용 줄이다: $l", ">", lines[lines.indexOf(l) - 1])
+        val header = lines.indexOf("> 📌 **구현 전 결정할 것**")
+        assertTrue("블록 머리글이 있다", header > 0)
+        assertEquals("블록 앞은 빈 인용 줄이다", ">", lines[header - 1])
+        val bullets = lines.drop(header + 1).takeWhile { it.startsWith("> - ") }
+        assertEquals("저장 주체 결정 → 컨트롤러 안내 → DDL 안내: $bullets", 3, bullets.size)
+        assertTrue(bullets[0], bullets[0].contains("정해야 합니다"))
+        assertTrue(bullets[1], bullets[1].contains("입력·전달하는 경로"))
+        assertTrue(bullets[2], bullets[2].contains("ALTER TABLE"))
         val first = infos.first()
         assertTrue(first, first.contains("사용자 답변(출처: 설문 응답 테이블에 이메일 컬럼 신설·저장)"))
         assertFalse("발화를 통째로 인용하지 않는다: $first", first.contains("해줘") || first.contains("하는 방향으로"))
@@ -179,12 +191,26 @@ class ClaimedFieldWarningB78Test {
     @Test
     fun w6_새로_저장인데_진입점이_없으면_안내_한_줄이_붙고_파일은_늘지_않는다() {
         val (out, result) = run(intent("응답자 이메일 출처: 새 컬럼을 추가해서 저장"), refined)
-        val note = out.lines().single { it.startsWith("> ℹ️ 응답자가 이메일을 입력·전달하는 경로") }
+        // B-84 d에서 바뀐 기대값(전: "> ℹ️ 응답자가 …" 한 줄 / 후: "구현 전 결정할 것" 블록 안의 "> - 응답자가 …" 줄, 문장은 같다)
+        val note = out.lines().single { it.startsWith("> - 응답자가 이메일을 입력·전달하는 경로") }
         assertTrue(note, note.contains("분석 대상에 없습니다") && note.contains("파일을 추가하지 않았습니다"))
         assertFalse("목록에 컨트롤러·화면이 들어오지 않았다", ClaimedFieldCheck.hasEntryPoint(result.targetFiles.map { it.path }))
         // 답이 없으면(경고 줄만) 이 안내는 붙지 않는다
         val (out2, _) = run(intent(), refined)
         assertEquals(0, out2.lines().count { it.contains("입력·전달하는 경로") })
+    }
+
+    // B-84 c: 결과 표는 필수가 먼저 보이고 번호가 1부터 이어진다(분석 결과의 order 값은 그대로)
+    @Test
+    fun w6b_표는_필수가_먼저이고_번호가_1부터_이어진다() {
+        val (out, result) = run(intent("응답자 이메일 출처: 새 컬럼을 추가해서 저장"), refined)
+        val rows = out.lines().filter { Regex("^\\| \\d+ \\|").containsMatchIn(it) }
+        assertTrue(out, rows.isNotEmpty())
+        assertEquals("번호는 1부터 이어진다", (1..rows.size).toList(), rows.map { it.split("|")[1].trim().toInt() })
+        val firstOptional = rows.indexOfFirst { it.contains("**선택(경로 통과)**") }
+        if (firstOptional >= 0) assertFalse("선택 행 뒤에 필수 행이 오지 않는다", rows.drop(firstOptional).any { it.contains("**필수**") })
+        // 표시 순서만 바꾼다: 파일 집합과 분석 결과(order 값)는 그대로다
+        assertEquals(result.targetFiles.map { it.path }.toSet(), rows.map { it.split("|")[2].trim() }.toSet())
     }
 
     @Test

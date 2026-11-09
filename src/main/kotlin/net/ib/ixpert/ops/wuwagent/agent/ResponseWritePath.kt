@@ -23,7 +23,9 @@ object ResponseWritePath {
         val ignoredAggregates: List<String>,
         val mappersRead: Int,
         /** 읽은 매퍼의 문(id 기준, 같은 id가 여러 파일에 있으면 먼저 읽은 것). 읽지 않은 매퍼의 문은 없다. */
-        val statements: Map<String, StatementInfo> = emptyMap()
+        val statements: Map<String, StatementInfo> = emptyMap(),
+        /** 읽은 매퍼 파일 이름(읽은 순서, 예: sql_survey.xml). Stage 0 안내가 어느 매퍼를 읽었는지 밝히는 데 쓴다(B-84 f). */
+        val mapperFiles: List<String> = emptyList()
     ) {
         /** 응답 테이블은 확인되는데 값을 받아 쓰는 문장이 읽은 범위에 없다. */
         val noWritePath: Boolean get() = responseTables.isNotEmpty() && parameterizedWriters.isEmpty()
@@ -78,7 +80,7 @@ object ResponseWritePath {
             }
         }
         val onResponse = writes.filter { it.second in responseTables }
-        return Judgement(responseTables, onResponse.filter { it.third }.map { it.first }, onResponse.filter { !it.third }.map { it.first }, mappers.size, statements)
+        return Judgement(responseTables, onResponse.filter { it.third }.map { it.first }, onResponse.filter { !it.third }.map { it.first }, mappers.size, statements, mappers.keys.toList())
     }
 
     /**
@@ -90,9 +92,19 @@ object ResponseWritePath {
         return "저장 주체 미확인(읽은 범위의 매퍼(${j.mappersRead}개)에 응답 테이블(${j.responseTables.joinToString("/")})로 값을 쓰는 쿼리 없음). 이 프로젝트 밖의 다른 시스템이 값을 쓸 수 있습니다."
     }
 
+    /**
+     * 읽은 매퍼를 화면에 밝히는 말(B-84 f): "읽은 매퍼 1개(sql_survey.xml)". 여러 개면 앞 3개와 "외 k개"로 줄인다.
+     * 파일 이름을 모르는 판정(이전 형식)이면 "읽은 범위의 매퍼(N개)"로 쓴다.
+     */
+    internal fun mapperLabel(j: Judgement): String {
+        if (j.mapperFiles.isEmpty()) return "읽은 범위의 매퍼(${j.mappersRead}개)"
+        val rest = j.mapperFiles.size - 3
+        return "읽은 매퍼 ${j.mappersRead}개(${j.mapperFiles.take(3).joinToString(", ")}${if (rest > 0) " 외 ${rest}개" else ""})"
+    }
+
     /** 화면에 쓰는 한 문장(읽은 범위 안에서 발견되지 않음으로 한정한다). 판정할 수 없으면(응답 테이블이 안 보임) null. */
     fun notFoundSentence(j: Judgement?): String? {
         if (j == null || !j.noWritePath) return null
-        return "읽은 범위의 매퍼(${j.mappersRead}개)에서 응답 테이블(${j.responseTables.joinToString("/")})에 값을 받아 쓰는 INSERT/UPDATE는 발견되지 않았습니다. 이 프로젝트 밖의 다른 시스템이 응답을 저장할 수 있습니다."
+        return "${mapperLabel(j)}에서 응답 테이블(${j.responseTables.joinToString("/")})에 값을 받아 쓰는 INSERT/UPDATE는 발견되지 않았습니다. 이 프로젝트 밖의 다른 시스템이 응답을 저장할 수 있습니다."
     }
 }

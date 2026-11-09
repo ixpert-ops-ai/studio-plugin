@@ -5,6 +5,7 @@ import net.ib.ixpert.ops.wuwagent.agent.RemovedCandidate
 import net.ib.ixpert.ops.wuwagent.agent.RemovedSource
 import net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisPipeline
 import net.ib.ixpert.ops.wuwagent.agent.RequirementAnalysisResult
+import net.ib.ixpert.ops.wuwagent.agent.ResultTableOrder
 import net.ib.ixpert.ops.wuwagent.agent.clarify.model.ClarifyIntent
 import net.ib.ixpert.ops.wuwagent.client.LLMClient
 import net.ib.ixpert.ops.wuwagent.model.ChatChoice
@@ -279,7 +280,9 @@ class RemovedCandidatesRestoreTest {
         val names = listOf(cands[1], cands[2]).joinToString(", ") { it.substringAfterLast('/') }
         // B-76 3a: 사유가 없으면 "(사유: 제공하지 않음)"을 붙이지 않는다
         assertTrue(md, md.contains("- Stage 3에서 제외된 후보 2개: $names") && !md.contains("사유: 제공하지 않음"))
-        result.targetFiles.forEach { assertTrue(md, md.contains("| ${it.order} | ${it.path} | 수정 | ${it.description} |")) }
+        // B-84 c에서 바뀐 기대값(전: 표의 번호와 순서가 result.targetFiles의 order 그대로 / 후: 표시 순서는 필수 → 판정 없음 → 선택, 묶음 안에서 service → dao → dto → mapper → 그 밖이고
+        // 번호는 1부터 다시 매긴다. 이 그래프에는 필수/선택 판정이 없어 service 둘 다음 dao가 온다. 분석 결과(result.targetFiles)의 order 값은 그대로이고 위 (2)가 그것을 확인한다)
+        ResultTableOrder.sort(result.targetFiles, { it.path }, { null }).forEachIndexed { i, f -> assertTrue(md, md.contains("| ${i + 1} | ${f.path} | 수정 | ${f.description} |")) }
         listOf("removedCandidates", "STAGE3_", "USER_EXCLUDED", "되살").forEach { assertFalse("마크다운에 \"$it\"가 나오면 안 된다", md.contains(it)) }
         assertTrue(md.contains("### 요구사항 분석 요약"))
 

@@ -482,8 +482,9 @@ class RequirementAnalysisPipeline(
             val source = if (originalSr != null && ClaimedFieldCheck.hasDataNoun(originalSr)) originalSr else primaryReq
             val answers = ClaimedFieldCheck.answersOf(clarifyIntent?.constraints?.map { it.value }.orEmpty())
             // B-83 4: 읽은 범위에 응답 저장 경로가 없으면 ℹ️ 줄과 수정 사유가 같은 판정(ResponseWritePath)을 쓴다
-            val writeNotice = ResponseWritePath.notFoundSentence(ClaimedFieldCheck.writePath(projectGraph, claimRoot, seedPaths))
-            ClaimedFieldCheck.check(source, projectGraph, claimRoot, seedPaths).map { it.withAnswer(answers[it.label]).withWriteNotice(writeNotice) }
+            // B-84 d: 안내 문장과 함께 판정 재료(테이블 이름, 매퍼 수)도 항목에 싣는다("구현 전 결정할 것"의 한 문장을 같은 판정으로 만든다)
+            val writeJudgement = ClaimedFieldCheck.writePath(projectGraph, claimRoot, seedPaths)
+            ClaimedFieldCheck.check(source, projectGraph, claimRoot, seedPaths).map { it.withAnswer(answers[it.label]).withWriteJudgement(writeJudgement) }
         } catch (e: Exception) {
             logger.warn("ClaimedFieldCheck 실패(경고 없이 진행)", e)
             emptyList()
@@ -534,15 +535,12 @@ class RequirementAnalysisPipeline(
             // B-81 3: 답이 "모름"인 항목은 출처가 정해지지 않은 것이므로 답이 없는 항목과 같이 ⚠️로 남긴다(ℹ️로 내리지 않는다)
             val claimLines = mutableListOf<String>()
             claimFindings.filter { it.unresolved }.forEach { claimLines.add("> ⚠️ ${ClaimedFieldCheck.render(it)}") }
-            claimFindings.filter { !it.unresolved }.forEach { f ->
-                claimLines.add("> ℹ️ ${ClaimedFieldCheck.renderResolved(f)}")
-                // 새로 저장하기로 했는데 요청 진입점(컨트롤러·화면)이 최종 목록에 없으면 한 줄 안내(파일은 추가하지 않는다)
-                if (ClaimedFieldCheck.isNewData(f.answer!!) && !ClaimedFieldCheck.hasEntryPoint(validatedTargetFiles.map { it.path })) {
-                    val finalPaths = validatedTargetFiles.map { it.path }
-                    claimLines.add("> ℹ️ ${ClaimedFieldCheck.entryPointNote(f, ClaimedFieldCheck.suggestedEntryController(discoveryResult.relevantFiles.map { it.path }, finalPaths))}")
-                }
-                // 새 컬럼이면 DB 스키마 변경이 먼저 필요하다는 한 줄(B-80 6)
-                ClaimedFieldCheck.ddlNote(f)?.let { claimLines.add("> ℹ️ $it") }
+            claimFindings.filter { !it.unresolved }.forEach { f -> claimLines.add("> ℹ️ ${ClaimedFieldCheck.renderResolved(f)}") }
+            // B-84 d: 구현 전에 사용자가 정해야 할 것을 한 블록으로 모은다. 저장 주체 결정(정제문 확인 카드와 같은 문장) → 컨트롤러 안내(파일은 추가하지 않는다) → DDL 안내(B-80 6)
+            run {
+                val finalPaths = validatedTargetFiles.map { it.path }
+                val decisionLines = ClaimedFieldCheck.decisionBlock(claimFindings, finalPaths, ClaimedFieldCheck.suggestedEntryController(discoveryResult.relevantFiles.map { it.path }, finalPaths))
+                if (decisionLines.isNotEmpty()) claimLines.add("> 📌 **구현 전 결정할 것**\n" + decisionLines.joinToString("\n") { "> - $it" })
             }
             // B-81 8: 줄마다 나눠 보인다. 인용문 안에서 줄바꿈만 두면 마크다운이 한 문단으로 이어 붙이므로 빈 인용 줄(">")로 문단을 가른다
             if (claimLines.isNotEmpty()) appendLine(claimLines.joinToString("\n>\n"))
@@ -571,7 +569,9 @@ class RequirementAnalysisPipeline(
                     logger.warn("필수/선택 판정 실패(표시 없이 진행)", e)
                     emptyMap()
                 }
-                validatedTargetFiles.forEach {
+                // B-84 c: 필수 파일이 먼저 보이도록 표시 순서만 바꾼다(필수 → 판정 없음 → 선택, 묶음 안은 service → dao → dto → mapper → 그 밖, 같은 칸은 기존 순서).
+                // 분석 결과의 order(의존성 정렬, 구현 단계가 쓰는 값)는 그대로 두고 표의 번호만 1부터 다시 매긴다.
+                ResultTableOrder.sort(validatedTargetFiles, { v -> v.path }, { v -> pathRoles[v.path]?.role }).forEachIndexed { rowIndex, it ->
                     val role = pathRoles[it.path]?.role
                     val koreanType = when(it.type) {
                         // B-84: 선택(경로 통과) 행은 시그니처가 바뀌지 않으면 고칠 것이 없으므로 "수정"이 아니라 "확인"
@@ -587,7 +587,7 @@ class RequirementAnalysisPipeline(
                     val guardedDesc = guardedText(wordedDesc, role, row = true)
                     // B-83 5: 필수/선택 표시와 결정적 사유를 먼저, LLM 사유(저장 경로 문구 포함)를 뒤에 둔다
                     val descForTable = PathRoles.describe(pathRoles[it.path], if (savePath != null) "$guardedDesc / $savePath" else guardedDesc).replace("\n", "<br>")
-                    appendLine("| ${it.order} | ${it.path} | $koreanType | $descForTable |")
+                    appendLine("| ${rowIndex + 1} | ${it.path} | $koreanType | $descForTable |")
                 }
             } else {
                 appendLine("⚠️ **경고**: 관련된 대상 파일을 찾지 못했습니다.")
