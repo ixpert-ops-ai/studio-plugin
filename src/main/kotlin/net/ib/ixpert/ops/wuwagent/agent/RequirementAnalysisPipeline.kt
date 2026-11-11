@@ -498,9 +498,20 @@ class RequirementAnalysisPipeline(
             logger.warn("읽은 매퍼 판정 실패(사유 검사 없이 진행)", e)
             null
         }
+        // B-85 4: 필수/선택 판정(PathRoles)은 요약 문장 검사(G4)와 결과 표가 같이 쓰므로 요약보다 먼저 한 번 계산한다(표는 이 값을 그대로 쓴다)
+        val pathRoles: Map<String, PathRoles.Hint> = try {
+            if (validatedTargetFiles.isEmpty()) emptyMap()
+            else PathRoles.classify(projectGraph, projectRoot ?: project?.basePath?.let { java.io.File(it) }, validatedTargetFiles.map { v -> v.path }, effectiveReq)
+        } catch (e: Exception) {
+            logger.warn("필수/선택 판정 실패(표시 없이 진행)", e)
+            emptyMap()
+        }
+        // G4가 요약 문장에서 찾는 선택(경로 통과) 행의 클래스 이름(확장자 없는 파일 이름)
+        val optionalNames = pathRoles.filter { it.value.role == PathRoles.Role.OPTIONAL }.keys
+            .map { it.replace('\\', '/').substringAfterLast('/').substringBeforeLast('.') }.distinct()
         // 표시만 덧붙이는 검사라 실패해도 원래 문장을 그대로 쓴다
         fun guardedText(text: String, role: PathRoles.Role? = null, row: Boolean = false): String = try {
-            val ctx = ReasonGuard.Context(reasonJudgement, role)
+            val ctx = ReasonGuard.Context(reasonJudgement, role, if (row) emptyList() else optionalNames)
             if (row) ReasonGuard.annotateRow(text, ctx) else ReasonGuard.annotateText(text, ctx)
         } catch (e: Exception) {
             logger.warn("ReasonGuard 실패(원문 그대로)", e)
@@ -563,12 +574,6 @@ class RequirementAnalysisPipeline(
                 appendLine("### 🎯 분석된 대상 파일 목록")
                 appendLine("| 순번 | 파일 경로 | 작업유형 | 수정 사유 |")
                 appendLine("|:---:|:---|:---:|:---|")
-                val pathRoles = try {
-                    PathRoles.classify(projectGraph, projectRoot ?: project?.basePath?.let { java.io.File(it) }, validatedTargetFiles.map { v -> v.path }, effectiveReq)
-                } catch (e: Exception) {
-                    logger.warn("필수/선택 판정 실패(표시 없이 진행)", e)
-                    emptyMap()
-                }
                 // B-84 c: 필수 파일이 먼저 보이도록 표시 순서만 바꾼다(필수 → 판정 없음 → 선택, 묶음 안은 service → dao → dto → mapper → 그 밖, 같은 칸은 기존 순서).
                 // 분석 결과의 order(의존성 정렬, 구현 단계가 쓰는 값)는 그대로 두고 표의 번호만 1부터 다시 매긴다.
                 ResultTableOrder.sort(validatedTargetFiles, { v -> v.path }, { v -> pathRoles[v.path]?.role }).forEachIndexed { rowIndex, it ->

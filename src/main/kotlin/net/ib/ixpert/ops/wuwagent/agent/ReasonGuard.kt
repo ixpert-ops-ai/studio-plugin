@@ -7,6 +7,7 @@ package net.ib.ixpert.ops.wuwagent.agent
  * - G1 이름 대 사실: 사유 안의 이름이 읽은 매퍼의 문 id와 같고 update/insert/save 같은 쓰기처럼 보이는데 실제로는 응답 테이블에 값을 받아 쓰는 문이 아니면(프로시저 호출, 다른 테이블, 조회 문, 파라미터 없는 집계) 그 이름 뒤에 실제를 덧붙인다.
  * - G2 쓰기 경로 없음: 읽은 매퍼에 응답 테이블로 값을 쓰는 문이 없다는 판정(noWritePath)인데 문장이 "조회/저장", "응답 저장", "저장 로직" 같은 저장 단정을 부정어 없이 말하면 그 문장 뒤에 판정을 덧붙인다.
  * - G3 규칙 판정과 충돌(결과 표 한 행에만): 선택(경로 통과) 행인데 LLM 사유가 추가·수정을 말하면 "(규칙 판정: <판정 내용>)"을 덧붙인다(예: "(규칙 판정: 수정 불필요)", 판정 내용은 [PathRoles.Role.verdict]).
+ * - G4 요약과 표의 불일치(Stage 3 요약 문장에만, B-85 4): 요약 문장에 선택(경로 통과) 행의 클래스 이름이 직접 나오고 같은 문장에 수정 동사가 있으면 "(<이름> 규칙 판정: 수정 불필요)"를 덧붙인다.
  * 읽지 않은 매퍼의 문은 판정 정보에 없으므로 표시하지 않는다. 판정(Judgement)이 없거나 응답 테이블을 알 수 없으면 아무것도 바꾸지 않는다.
  *
  * 부정어 판정은 scripts/recount-b84.js와 같은 규칙(언급 앞뒤 [NEGATION_WINDOW]자 안에 [NEGATION_PATTERN])을 쓴다. 두 곳이 어긋나지 않는지는 시험이 확인한다.
@@ -28,12 +29,22 @@ object ReasonGuard {
     private const val WRITE_MARK_PREFIX = "(읽은 범위의 매퍼"
     private const val ROLE_MARK_PREFIX = "(규칙 판정:"
 
-    data class Context(val judgement: ResponseWritePath.Judgement?, val role: PathRoles.Role? = null)
+    /** 요약 문장에서 선택 행의 이름을 찾는 G4의 수정 동사(B-85 4). "반영"은 넣지 않는다(뜻이 넓어 "결과에 반영" 같은 말까지 잡는다). */
+    private val MODIFY_VERB = Regex("수정|변경|추가|고치|개선|교체|보완")
+    private const val ROLE_NAME_MARK = "규칙 판정:"
+    /** G4가 덧붙인 "(SurveyDaoImpl 규칙 판정: …)" 표시. 마침표 뒤에 따로 떨어져 있어도 앞 문장의 일부로 본다. */
+    private val ROLE_NAME_MARK_START = Regex("^\\([A-Za-z0-9_, ]+ 규칙 판정:")
 
-    /** 결과 표 한 행의 LLM 사유: G1, G2, G3. */
+    /**
+     * judgement: G1·G2에 쓰는 읽은 매퍼 판정. role: 결과 표 한 행의 필수/선택 판정(G3).
+     * optionalFiles: G4가 요약 문장에서 찾는 "선택(경로 통과)" 행의 클래스 이름(확장자 없는 파일 이름, 예: SurveyDaoImpl). 결과 표가 같은 판정(PathRoles)으로 정한다.
+     */
+    data class Context(val judgement: ResponseWritePath.Judgement?, val role: PathRoles.Role? = null, val optionalFiles: List<String> = emptyList())
+
+    /** 결과 표 한 행의 LLM 사유: G1, G2, G3. (G4는 요약 문장에만 쓴다.) */
     fun annotateRow(reason: String, ctx: Context): String {
         if (reason.isBlank()) return reason
-        var out = annotateText(reason, ctx)
+        var out = annotateText(reason, ctx.copy(optionalFiles = emptyList()))
         if (ctx.role == PathRoles.Role.OPTIONAL && !out.contains(ROLE_MARK_PREFIX)) {
             // 덧붙인 표시가 아니라 LLM이 쓴 원래 사유로 판정한다
             val change = CHANGE.findAll(reason).firstOrNull { !negatedAround(reason, it.range.first, it.range.last + 1) }
@@ -43,28 +54,48 @@ object ReasonGuard {
         return out
     }
 
-    /** Stage 3 요약 문단: G1, G2를 문장 단위로(G3 제외). 줄바꿈은 유지하고 문장 사이 공백은 한 칸으로 맞춘다. */
+    /**
+     * Stage 3 요약 문단: G1, G2, G4를 문장 단위로(G3 제외). 줄바꿈은 유지하고 문장 사이 공백은 한 칸으로 맞춘다.
+     * G1·G2는 읽은 매퍼 판정이 있을 때만, G4는 선택 행이 있을 때만 일한다. 둘 다 없으면 원문 그대로다.
+     */
     fun annotateText(text: String, ctx: Context): String {
-        val j = ctx.judgement ?: return text
-        if (j.responseTables.isEmpty()) return text
+        val j = ctx.judgement?.takeIf { it.responseTables.isNotEmpty() }
+        val optional = ctx.optionalFiles
+        if (j == null && optional.isEmpty()) return text
         return text.split("\n").joinToString("\n") { line ->
-            // 앞서 덧붙인 판정 표시("(읽은 범위의 매퍼 …)")는 마침표 뒤에 따로 떨어져 있어도 앞 문장의 일부로 본다(두 번 적용해도 같게)
+            // 앞서 덧붙인 표시("(읽은 범위의 매퍼 …)", "(SurveyDaoImpl 규칙 판정: …)")는 마침표 뒤에 따로 떨어져 있어도 앞 문장의 일부로 본다(두 번 적용해도 같게)
             val sentences = mutableListOf<String>()
             for (piece in line.split(SENTENCE_BREAK)) {
-                if (piece.startsWith(WRITE_MARK_PREFIX) && sentences.isNotEmpty()) sentences[sentences.lastIndex] = sentences.last() + " " + piece
+                if ((piece.startsWith(WRITE_MARK_PREFIX) || ROLE_NAME_MARK_START.containsMatchIn(piece)) && sentences.isNotEmpty()) sentences[sentences.lastIndex] = sentences.last() + " " + piece
                 else sentences += piece
             }
-            sentences.joinToString(" ") { sentence -> annotateSentence(sentence, j) }
+            sentences.joinToString(" ") { sentence -> annotateSentence(sentence, j, optional) }
         }
     }
 
-    private fun annotateSentence(sentence: String, j: ResponseWritePath.Judgement): String {
-        var s = withActuals(sentence, j)
-        if (j.noWritePath && !s.contains(WRITE_MARK_PREFIX)) {
+    private fun annotateSentence(sentence: String, j: ResponseWritePath.Judgement?, optional: List<String>): String {
+        var s = if (j != null) withActuals(sentence, j) else sentence
+        if (j != null && j.noWritePath && !s.contains(WRITE_MARK_PREFIX)) {
             val hit = ASSERTION.findAll(s).firstOrNull { !negatedAround(s, it.range.first, it.range.last + 1) }
             if (hit != null) s = "$s ${writeMark(j)}"
         }
-        return s
+        return withRoleMark(sentence, s, optional)
+    }
+
+    /**
+     * G4(B-85 4): 요약 문장에 "선택(경로 통과)" 행의 클래스 이름이 직접 나오고(식별자가 완전히 같을 때, 파일 이름 "SurveyDaoImpl.java"도 확장자 앞의 이름으로 같다) 같은 문장에 수정 동사가 있으면,
+     * 그 문장 뒤에 "(<이름> 규칙 판정: 수정 불필요)"를 덧붙인다. 이름 앞뒤 [NEGATION_WINDOW]자 안에 부정어가 있으면 그 이름은 건너뛴다. 판정 내용은 [PathRoles.Role.verdict]이고,
+     * 삭제·바꿔쓰기는 하지 않는다. 같은 표시가 이미 있으면 덧붙이지 않는다(멱등). 이름은 덧붙이기 전의 원래 문장([original])에서 찾는다.
+     */
+    private fun withRoleMark(original: String, annotated: String, optional: List<String>): String {
+        if (optional.isEmpty() || !MODIFY_VERB.containsMatchIn(original)) return annotated
+        val names = LinkedHashSet<String>()
+        for (m in IDENT.findAll(original)) {
+            if (m.value in optional && !negatedAround(original, m.range.first, m.range.last + 1)) names += m.value
+        }
+        if (names.isEmpty()) return annotated
+        val mark = "(${names.joinToString(", ")} $ROLE_NAME_MARK ${PathRoles.Role.OPTIONAL.verdict})"
+        return if (annotated.contains(mark)) annotated else "$annotated $mark"
     }
 
     /** G1: 쓰기처럼 보이는 이름 뒤에 실제를 덧붙인다(뒤에서부터 끼워 앞쪽 위치가 밀리지 않게 한다). */
