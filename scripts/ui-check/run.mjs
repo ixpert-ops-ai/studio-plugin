@@ -405,7 +405,7 @@ try {
   record(25, '백엔드가 hide를 보내면 확인 카드가 사라짐(대기 시간 초과 경로)', s25 === 0, JSON.stringify({ 카드: s25 }));
 
   // 25b) B-84 "구현 전 확인 필요" 문장: 정제문은 그대로 두고 그 아래에 따로 보이며, 정제문 칸을 고쳐도 문장은 남고 제출 본문에는 들어가지 않는다. 문장이 없으면 요소도 없다.
-  const RC_NOTE = '응답 테이블(ISSW_SURVEY_R)에 값을 쓰는 쿼리가 읽은 매퍼 1개에 없습니다. 응답자 이메일 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다.';
+  const RC_NOTE = '응답 테이블(ISSW_SURVEY_R)에 값을 쓰는 쿼리가 읽은 매퍼 1개(sql_survey.xml)에 없습니다. 응답자 이메일 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다.';
   const rcRequestWithNote = note => post({ type: 'ai_message', subType: 'refinedConfirmation/request', messageId: 'system', content: JSON.stringify({ projectId: 'proj1', originalRequirement: RC_ORIG, refinedRequirement: RC_REFINED, message: '분석을 시작하기 전에 확인해 주세요.', decisionNote: note }) });
   const NOTE = `document.querySelector('[data-refined-confirm-note="true"]')`;
   const base25b = (await rcSent()).length;

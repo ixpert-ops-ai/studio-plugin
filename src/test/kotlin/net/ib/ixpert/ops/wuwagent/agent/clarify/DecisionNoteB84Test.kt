@@ -26,18 +26,23 @@ import java.io.File
 class DecisionNoteB84Test {
     private val label = "응답자 이메일"
     private val newAnswer = "응답자 이메일은 아직 수집하지 않아. 설문 응답 테이블에 이메일 컬럼을 새로 추가해서 저장하는 방향으로 해줘."
-    private val expected = "응답 테이블(ISSW_SURVEY_R)에 값을 쓰는 쿼리가 읽은 매퍼 1개에 없습니다. 응답자 이메일 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다."
+    // B-85 3에서 바뀐 기대값(전: "…쿼리가 읽은 매퍼 1개에 없습니다." / 후: "…쿼리가 읽은 매퍼 1개(sql_survey.xml)에 없습니다." Stage 0 안내와 같은 표기 함수, 파일 이름만)
+    private val expected = "응답 테이블(ISSW_SURVEY_R)에 값을 쓰는 쿼리가 읽은 매퍼 1개(sql_survey.xml)에 없습니다. 응답자 이메일 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다."
 
     private fun fact(writeNotice: String? = "읽은 범위에서 발견되지 않음", tables: List<String> = listOf("ISSW_SURVEY_R"), n: Int = 1, lbl: String = label) =
-        FieldFact(lbl, found = false, question = "어디서 가져올까요?", writeNotice = writeNotice, writeTables = if (writeNotice != null) tables else emptyList(), mappersRead = n)
+        FieldFact(lbl, found = false, question = "어디서 가져올까요?", writeNotice = writeNotice, writeTables = if (writeNotice != null) tables else emptyList(), mappersRead = n,
+            mapperFiles = if (writeNotice != null) listOf("sql_survey.xml") else emptyList())
 
     // n1: 조건이 맞으면 판정의 테이블 이름과 매퍼 수로 만든 한 문장, 아니면 없다
     @Test
     fun n1_oneLineOnlyWhenTheConditionHolds() {
         assertEquals(listOf(expected), ClaimedFieldCheck.decisionNotes(listOf(fact()), mapOf(label to newAnswer)))
         // 테이블 이름과 매퍼 수는 판정에서 온다
+        // B-85 3에서 바뀐 기대값: 파일 이름을 모르는 판정은 "읽은 범위의 매퍼(3개)", 알면 "읽은 매퍼 3개(a.xml, b.xml, c.xml)", 세 개를 넘으면 앞 3개와 "외 k개"
         val other = ClaimedFieldCheck.decisionNote("고객 전화번호", listOf("T1", "T2"), 3)
-        assertTrue(other, other.startsWith("응답 테이블(T1/T2)에 값을 쓰는 쿼리가 읽은 매퍼 3개에 없습니다. 고객 전화번호 저장을"))
+        assertTrue(other, other.startsWith("응답 테이블(T1/T2)에 값을 쓰는 쿼리가 읽은 범위의 매퍼(3개)에 없습니다. 고객 전화번호 저장을"))
+        assertTrue(ClaimedFieldCheck.decisionNote("고객 전화번호", listOf("T1"), 3, listOf("a.xml", "b.xml", "c.xml")).contains("읽은 매퍼 3개(a.xml, b.xml, c.xml)에 없습니다."))
+        assertTrue(ClaimedFieldCheck.decisionNote("고객 전화번호", listOf("T1"), 5, listOf("a.xml", "b.xml", "c.xml", "d.xml", "e.xml")).contains("읽은 매퍼 5개(a.xml, b.xml, c.xml 외 2개)에 없습니다."))
         // 새 데이터가 아닌 답, 쓰기 쿼리 없음 판정이 없는 항목, 답이 없는 항목, 판정 재료가 없는 항목, 다른 항목의 답
         assertEquals(emptyList<String>(), ClaimedFieldCheck.decisionNotes(listOf(fact()), mapOf(label to "잘 모르겠음")))
         assertEquals(emptyList<String>(), ClaimedFieldCheck.decisionNotes(listOf(fact()), mapOf(label to "다른 테이블 조인해서 가져와")))
@@ -146,5 +151,15 @@ class DecisionNoteB84Test {
         val count = File("src/main/kotlin").walkTopDown().filter { it.isFile && it.extension == "kt" }
             .sumOf { Regex("다른 시스템과 연계할지 정해야 합니다").findAll(it.readText(Charsets.UTF_8)).count() }
         assertEquals(1, count)
+        // B-85 3: 읽은 매퍼 표기는 Stage 0 안내(notFoundSentence)와 같은 함수(ResponseWritePath.mapperLabel)가 만든다 — 소스와 동작 둘 다 확인한다
+        val check = File("src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ClaimedFieldCheck.kt").readText(Charsets.UTF_8)
+        val write = File("src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/ResponseWritePath.kt").readText(Charsets.UTF_8)
+        assertTrue(check.contains("ResponseWritePath.mapperLabel(mappersRead, mapperFiles)"))
+        assertTrue(write.substringAfter("fun notFoundSentence").contains("mapperLabel(j)"))
+        val j = net.ib.ixpert.ops.wuwagent.agent.ResponseWritePath.Judgement(setOf("ISSW_SURVEY_R"), emptyList(), emptyList(), 2, emptyMap(), listOf("sql_survey.xml", "sql_other.xml"))
+        val label = net.ib.ixpert.ops.wuwagent.agent.ResponseWritePath.mapperLabel(j)
+        assertEquals("읽은 매퍼 2개(sql_survey.xml, sql_other.xml)", label)
+        assertTrue(net.ib.ixpert.ops.wuwagent.agent.ResponseWritePath.notFoundSentence(j)!!.startsWith("${label}에서 "))
+        assertTrue(ClaimedFieldCheck.decisionNote(this.label, j.responseTables, j.mappersRead, j.mapperFiles).contains("${label}에 없습니다."))
     }
 }

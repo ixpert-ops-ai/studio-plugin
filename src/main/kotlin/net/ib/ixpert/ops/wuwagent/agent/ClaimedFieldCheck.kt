@@ -58,14 +58,16 @@ object ClaimedFieldCheck {
         val writeNotice: String? = null,
         /** writeNotice가 있을 때 그 판정의 응답 테이블 이름과 읽은 매퍼 수(결과 화면 "구현 전 결정할 것"의 [decisionNote] 재료, B-84). */
         val writeTables: List<String> = emptyList(),
-        val mappersRead: Int = 0
+        val mappersRead: Int = 0,
+        val mapperFiles: List<String> = emptyList()
     ) {
         /** 읽은 범위의 응답 저장 경로 판정을 붙인다: 쓰기 쿼리가 없다는 판정(noWritePath)이면 안내 문장과 판정 재료(테이블 이름, 매퍼 수)가 함께 들어간다. */
         fun withWriteJudgement(j: ResponseWritePath.Judgement?): Finding {
             val notice = ResponseWritePath.notFoundSentence(j)
             return Finding(
                 noun, subject, filesRead, otherCites, otherTables, seedNames, answer, domainScope, readFolders, stage, notice,
-                if (notice != null) j!!.responseTables.toList() else emptyList(), if (notice != null) j!!.mappersRead else 0
+                if (notice != null) j!!.responseTables.toList() else emptyList(), if (notice != null) j!!.mappersRead else 0,
+                if (notice != null) j!!.mapperFiles else emptyList()
             )
         }
         /** 화면에 보이는 항목 이름(예: "응답자 이메일"). */
@@ -74,7 +76,7 @@ object ClaimedFieldCheck {
         /** 출처가 정해지지 않았는가: 답이 없거나 "모름"이다(B-81 3). 이 항목은 결과에서 ⚠️로 남고 /implement 전에 확인이 필요한 항목으로 센다. */
         val unresolved: Boolean get() = answer == null || isUnknownAnswer(answer)
 
-        fun withAnswer(a: String?): Finding = Finding(noun, subject, filesRead, otherCites, otherTables, seedNames, a, domainScope, readFolders, stage, writeNotice, writeTables, mappersRead)
+        fun withAnswer(a: String?): Finding = Finding(noun, subject, filesRead, otherCites, otherTables, seedNames, a, domainScope, readFolders, stage, writeNotice, writeTables, mappersRead, mapperFiles)
     }
 
     private val UNKNOWN_LOOSE = Regex("모르|몰라|모릅")
@@ -253,7 +255,8 @@ object ClaimedFieldCheck {
             else FieldFact(
                 f.label, found = false, otherCites = f.otherCites, filesRead = e.read, question = question(f), otherTables = f.otherTables, writeNotice = writeNotice,
                 writeTables = if (writeNotice != null) judgement?.responseTables?.toList().orEmpty() else emptyList(),
-                mappersRead = if (writeNotice != null) judgement?.mappersRead ?: 0 else 0
+                mappersRead = if (writeNotice != null) judgement?.mappersRead ?: 0 else 0,
+                mapperFiles = if (writeNotice != null) judgement?.mapperFiles.orEmpty() else emptyList()
             )
         }
     }
@@ -263,8 +266,9 @@ object ClaimedFieldCheck {
      * 저장을 이 프로젝트에서 구현할지 다른 시스템과 연계할지 정해야 한다는 것을 말한다. 테이블 이름과 읽은 매퍼 수는 판정에서 가져온다(고정 문자열 아님).
      * 정제문은 건드리지 않는다(사용자 발화의 "새로 추가해서 저장하는 방향"은 요구이고 정제문에 그대로 옮겨도 된다).
      */
-    fun decisionNote(label: String, writeTables: Collection<String>, mappersRead: Int): String =
-        "응답 테이블(${writeTables.joinToString("/")})에 값을 쓰는 쿼리가 읽은 매퍼 ${mappersRead}개에 없습니다. $label 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다."
+    fun decisionNote(label: String, writeTables: Collection<String>, mappersRead: Int, mapperFiles: List<String> = emptyList()): String =
+        // 읽은 매퍼 표기는 Stage 0 안내와 같은 함수(B-85 3): "읽은 매퍼 1개(sql_survey.xml)"
+        "응답 테이블(${writeTables.joinToString("/")})에 값을 쓰는 쿼리가 ${ResponseWritePath.mapperLabel(mappersRead, mapperFiles)}에 없습니다. $label 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다."
 
     /**
      * 결과 화면 "구현 전 결정할 것" 블록의 줄(B-84 d). 순서: 저장 주체 결정([decisionNote], 정제문 확인 카드와 같은 함수) → 컨트롤러 안내([entryPointNote]) → DDL 안내([ddlNote]).
@@ -274,7 +278,7 @@ object ClaimedFieldCheck {
     fun decisionBlock(findings: List<Finding>, finalPaths: List<String>, suggestedController: String?): List<String> {
         val resolved = findings.filter { !it.unresolved }
         val decisions = resolved.filter { it.writeNotice != null && it.writeTables.isNotEmpty() && isNewData(it.answer!!) }
-            .map { decisionNote(it.label, it.writeTables, it.mappersRead) }
+            .map { decisionNote(it.label, it.writeTables, it.mappersRead, it.mapperFiles) }
         val entries = if (hasEntryPoint(finalPaths)) emptyList() else resolved.filter { isNewData(it.answer!!) }.map { entryPointNote(it, suggestedController) }
         val ddls = resolved.mapNotNull { ddlNote(it) }
         return decisions + entries + ddls
@@ -283,7 +287,7 @@ object ClaimedFieldCheck {
     /** 조건: 사용자가 새 데이터로 답했고([isNewData]) 그 항목에 쓰기 쿼리 없음 판정(writeNotice)이 있다(`Stage0ClarificationEngine`의 즉시 안내와 같은 조건). 해당하는 항목마다 한 문장. */
     fun decisionNotes(facts: List<FieldFact>, answers: Map<String, String>): List<String> =
         facts.filter { it.writeNotice != null && it.writeTables.isNotEmpty() && answers[it.label]?.let { a -> isNewData(a) } == true }
-            .map { decisionNote(it.label, it.writeTables, it.mappersRead) }
+            .map { decisionNote(it.label, it.writeTables, it.mappersRead, it.mapperFiles) }
 
     /**
      * 탐색기(시드 선정)에 SR과 함께 전달하는 사실 블록(B-83 4). Stage 0이 확인한 사실만 담는다: 항목별 확인 결과(읽은 범위 포함), 응답 저장 경로 판정(같은 [ResponseWritePath]), 사용자 답변의 정리된 출처 문장.

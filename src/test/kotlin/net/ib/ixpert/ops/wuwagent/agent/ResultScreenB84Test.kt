@@ -87,7 +87,8 @@ class ResultScreenB84Test {
     // ── (d) "구현 전 결정할 것" 블록 ──
     private val label = "응답자 이메일"
     private val newAnswer = "응답자 이메일은 아직 수집하지 않아. 설문 응답 테이블에 이메일 컬럼을 새로 추가해서 저장하는 방향으로 해줘."
-    private val decision = "응답 테이블(ISSW_SURVEY_R)에 값을 쓰는 쿼리가 읽은 매퍼 1개에 없습니다. 응답자 이메일 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다."
+    // B-85 3에서 바뀐 기대값(전: "…읽은 매퍼 1개에 없습니다." / 후: "…읽은 매퍼 1개(sql_survey.xml)에 없습니다.")
+    private val decision = "응답 테이블(ISSW_SURVEY_R)에 값을 쓰는 쿼리가 읽은 매퍼 1개(sql_survey.xml)에 없습니다. 응답자 이메일 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다."
 
     private fun finding(answer: String?, j: ResponseWritePath.Judgement? = judgement(listOf("sql_survey.xml"))) = ClaimedFieldCheck.Finding(
         noun = "이메일", subject = "응답자", filesRead = 24, otherCites = emptyList(), otherTables = emptyList(), seedNames = listOf("SurveyServiceImpl"), answer = answer
@@ -159,7 +160,7 @@ class ResultScreenB84Test {
         }
         // 카드와 결과는 같은 함수가 만든 같은 문장이다
         val fromCard = ClaimedFieldCheck.decisionNotes(
-            listOf(FieldFact(label, found = false, writeNotice = "x", writeTables = listOf("ISSW_SURVEY_R"), mappersRead = 1)), mapOf(label to newAnswer)
+            listOf(FieldFact(label, found = false, writeNotice = "x", writeTables = listOf("ISSW_SURVEY_R"), mappersRead = 1, mapperFiles = listOf("sql_survey.xml"))), mapOf(label to newAnswer)
         ).single()
         assertEquals(fromCard, decision)
     }

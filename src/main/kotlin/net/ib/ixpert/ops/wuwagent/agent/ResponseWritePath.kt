@@ -96,10 +96,16 @@ object ResponseWritePath {
      * 읽은 매퍼를 화면에 밝히는 말(B-84 f): "읽은 매퍼 1개(sql_survey.xml)". 여러 개면 앞 3개와 "외 k개"로 줄인다.
      * 파일 이름을 모르는 판정(이전 형식)이면 "읽은 범위의 매퍼(N개)"로 쓴다.
      */
-    internal fun mapperLabel(j: Judgement): String {
-        if (j.mapperFiles.isEmpty()) return "읽은 범위의 매퍼(${j.mappersRead}개)"
-        val rest = j.mapperFiles.size - 3
-        return "읽은 매퍼 ${j.mappersRead}개(${j.mapperFiles.take(3).joinToString(", ")}${if (rest > 0) " 외 ${rest}개" else ""})"
+    internal fun mapperLabel(j: Judgement): String = mapperLabel(j.mappersRead, j.mapperFiles)
+
+    /**
+     * Stage 0 안내([notFoundSentence])와 "구현 전 확인 필요/결정할 것" 문장([ClaimedFieldCheck.decisionNote])이 같이 쓰는 표기(B-85 3). 경로가 아니라 파일 이름만 쓴다.
+     * 개수와 파일 이름 목록이 있으면 "읽은 매퍼 1개(sql_survey.xml)", 세 개를 넘으면 앞 3개와 "외 k개", 파일 이름을 모르면 "읽은 범위의 매퍼(N개)".
+     */
+    fun mapperLabel(count: Int, files: List<String>): String {
+        if (files.isEmpty()) return "읽은 범위의 매퍼(${count}개)"
+        val rest = files.size - 3
+        return "읽은 매퍼 ${count}개(${files.take(3).joinToString(", ")}${if (rest > 0) " 외 ${rest}개" else ""})"
     }
 
     /** 화면에 쓰는 한 문장(읽은 범위 안에서 발견되지 않음으로 한정한다). 판정할 수 없으면(응답 테이블이 안 보임) null. */
