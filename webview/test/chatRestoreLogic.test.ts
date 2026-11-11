@@ -6,7 +6,7 @@ import {
   finalRefinedText,
   hintRecord,
   historyWithOpenQuestion,
-  refinedRecord,
+  refinedCloseRecords,
   restoreMessages,
   scopeRecord,
   stage3Record,
@@ -75,7 +75,8 @@ test('정제문 카드의 최종 문장은 고쳤으면 고친 문장, 아니면
 });
 
 test('카드 선택 기록은 한 줄이다', () => {
-  assert.equal(refinedRecord('설문 상세 조회에 응답자 이메일을\n추가'), '✔ 확정한 정제문: 설문 상세 조회에 응답자 이메일을 추가');
+  // B-85 1에서 바뀐 기대값(전: refinedRecord 한 줄 "✔ 확정한 정제문: …" / 후: 첫 줄 "✔ 정제문 확인: <이유>" + 다음 줄 "↳ 분석에 쓴 정제문: …")
+  assert.deepEqual(refinedCloseRecords('asis', '설문 상세 조회에 응답자 이메일을\n추가', undefined), ['✔ 정제문 확인: 이대로 분석', '↳ 분석에 쓴 정제문: 설문 상세 조회에 응답자 이메일을 추가']);
   assert.equal(hintRecord('  '), '✔ 탐색 힌트: 없음(그대로 진행)');
   assert.equal(hintRecord('설문 매퍼 위주로'), '✔ 탐색 힌트: 설문 매퍼 위주로');
   assert.equal(scopeRecord(['a/b/SurveyDao.java', 'a/b/SurveyService.java']), '✔ 읽을 범위 선택: 2개(SurveyDao.java, SurveyService.java)');

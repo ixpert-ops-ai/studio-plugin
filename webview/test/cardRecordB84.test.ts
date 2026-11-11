@@ -23,7 +23,7 @@ test('카드 payload에서 Turn 번호를 읽는다: 정수만, 읽을 수 없�
   assert.equal(hintTurnOf(null), undefined);
 });
 
-test('저장 채팅 복원: Turn 번호가 없는 이전 기록 줄과 카드 payload(decisionNote)는 그대로 남는다', () => {
+test('저장 채팅 복원: Turn 번호가 없는 이전 기록 줄은 그대로 남고, 카드의 확인 필요 문장은 기록 줄로 남는다', () => {
   const note = '응답 테이블(ISSW_SURVEY_R)에 값을 쓰는 쿼리가 읽은 매퍼 1개에 없습니다. 응답자 이메일 저장을 이 프로젝트에서 구현할지, 응답을 저장하는 다른 시스템과 연계할지 정해야 합니다.';
   const payload = JSON.stringify({ projectId: 'p1', originalRequirement: '원문', refinedRequirement: '정제문', decisionNote: note });
   const result = {
@@ -37,6 +37,8 @@ test('저장 채팅 복원: Turn 번호가 없는 이전 기록 줄과 카드 pa
   const card = { id: 'rc_1', role: 'ai', subType: 'refinedConfirmation/request', content: payload, isLoading: false };
   const restored = restoreMessages([result, card]);
   assert.deepEqual(restored[0].inlineRecords, result.inlineRecords);
-  assert.equal(restored[1].content, payload);
-  assert.equal(JSON.parse(restored[1].content).decisionNote, note);
+  // B-85 1 D에서 바뀐 기대값(전: 응답 전에 저장된 카드가 payload 그대로 복원됨 / 후: 눌러도 아무 일도 못 하는 카드 대신 기록 줄로 바뀌고, 확인 필요 문장은 그 기록 줄에 남는다)
+  assert.equal(restored.some(m => m.subType === 'refinedConfirmation/request'), false);
+  assert.equal(restored[1].content, '✔ 정제문 확인: 응답 전 종료됨(IDE 재시작)');
+  assert.equal(restored[2].content, `📌 구현 전 확인 필요: ${note}`);
 });

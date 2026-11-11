@@ -9,7 +9,7 @@ import {
   splitWithRecords,
   completeClarifyCards,
   hintSkipRecord,
-  refinedCancelRecord,
+  refinedCloseRecords,
   scopeSkipRecord,
   stage3CandidateCount,
   stage3SkipRecord,
@@ -22,7 +22,8 @@ test('건너뛰기·취소 기록 줄은 선택하지 않았다는 사실을 말
   assert.equal(hintSkipRecord(), '✔ 탐색 힌트: 건너뜀(자율 탐색)');
   assert.equal(stage3SkipRecord(13), '✔ 최종 검증 대상 선택: 건너뜀(전체 13개 진행)');
   assert.equal(stage3SkipRecord(0), '✔ 최종 검증 대상 선택: 건너뜀(전체 진행)');
-  assert.equal(refinedCancelRecord(), '✖ 정제문 확인: 취소(분석을 진행하지 않음)');
+  // B-85 1에서 바뀐 기대값(전: '✖ 정제문 확인: 취소(분석을 진행하지 않음)' / 후: 취소도 같은 "✔ 정제문 확인: <이유>" 형식, 분석에 쓴 정제문 줄은 없다)
+  assert.deepEqual(refinedCloseRecords('cancel', '정제문', undefined), ['✔ 정제문 확인: 취소']);
 });
 
 test('5분 시간 초과 안내는 같은 모양의 기록 줄로 바뀐다', () => {

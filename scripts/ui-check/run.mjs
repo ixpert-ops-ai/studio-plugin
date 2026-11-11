@@ -339,11 +339,16 @@ try {
   await click(ACT('edited'), '수정한 내용으로 분석');
   await sleep(200);
   const sent21 = (await rcSent()).slice(sentBase);
-  const s21b = await evaluate(`({edited:${ACT('edited')}.disabled, asis:${ACT('asis')}.disabled, cancel:${ACT('cancel')}.disabled, area:${EDIT}.disabled, label:${ACT('edited')}.innerText.trim()})`);
+  // B-85 1에서 바뀐 기대값(전: 제출하면 카드가 잠기고 백엔드 hide를 기다렸다 / 후: 카드가 대기 줄(타이머)·버튼과 함께 즉시 사라지고 기록 줄에 고친 문장이 남는다)
+  const RC_FRAME = `document.querySelectorAll('[data-card-kind="refined"]')`;
+  const RC_RECS = `[...document.querySelectorAll('[data-choice-record="true"]')].map(x=>x.innerText.trim())`;
+  const s21b = await evaluate(`({card:document.querySelectorAll('[data-refined-confirm="true"]').length, frame:${RC_FRAME}.length, recs:${RC_RECS}})`);
   await shot('21-refined-edited-submit');
   const submit21 = sent21.find(o => o.command === 'refinedConfirmation/submit');
   const body21 = submit21 ? JSON.parse(submit21.text) : null;
-  record(21, '수정 후 진행: 고치면 수정 버튼이 켜지고, 누르면 고친 문장이 editedText로 한 번만 전송되며 카드가 잠김', s21a.edited === false && s21a.value === typed && sent21.length === 1 && body21 && body21.projectId === 'proj1' && body21.editedText === typed && s21b.edited && s21b.asis && s21b.cancel && s21b.area, JSON.stringify({ 전송: sent21, 잠금: s21b }));
+  record(21, '수정 후 진행: 고치면 수정 버튼이 켜지고, 누르면 고친 문장이 editedText로 한 번만 전송되며 카드(대기 줄·버튼 포함)가 즉시 사라지고 기록 줄에 고친 문장이 남음',
+    s21a.edited === false && s21a.value === typed && sent21.length === 1 && body21 && body21.projectId === 'proj1' && body21.editedText === typed && s21b.card === 0 && s21b.frame === 0 &&
+      s21b.recs.includes('✔ 정제문 확인: 수정한 내용으로 분석') && s21b.recs.includes(`↳ 분석에 쓴 정제문: ${typed}`), JSON.stringify({ 전송: sent21, 종료: s21b }));
 
   // 22) 이대로 분석: 편집 내용 없이 projectId만 전송
   await rcRequest();
@@ -352,7 +357,11 @@ try {
   await sleep(200);
   const sent22 = (await rcSent()).slice(sentBase + 1);
   const body22 = sent22[0] && sent22[0].command === 'refinedConfirmation/submit' ? JSON.parse(sent22[0].text) : null;
-  record(22, '이대로 분석: submit에 projectId만 있고 editedText가 없음', sent22.length === 1 && body22 && body22.projectId === 'proj1' && !('editedText' in body22), JSON.stringify(sent22));
+  const s22 = await evaluate(`({card:document.querySelectorAll('[data-refined-confirm="true"]').length, frame:${RC_FRAME}.length, recs:${RC_RECS}})`);
+  // B-85 1: 이대로 분석도 카드가 즉시 사라지고 기록 줄(정제문 인용 포함)이 남는다
+  record(22, '이대로 분석: submit에 projectId만 있고 editedText가 없으며, 카드가 즉시 사라지고 기록 줄에 카드가 보인 정제문이 남음',
+    sent22.length === 1 && body22 && body22.projectId === 'proj1' && !('editedText' in body22) && s22.card === 0 && s22.frame === 0 &&
+      s22.recs.includes('✔ 정제문 확인: 이대로 분석') && s22.recs.includes(`↳ 분석에 쓴 정제문: ${RC_REFINED}`), JSON.stringify({ 전송: sent22, 종료: s22 }));
 
   // 23) 취소: cancel만 전송하고, 이어서 오는 안내는 오류가 아닌 일반 말풍선으로 보임
   await rcRequest();
@@ -362,12 +371,17 @@ try {
   await click(ACT('cancel'), '취소');
   await sleep(200);
   const sent23 = (await rcSent()).slice(sentBase + 2);
+  // B-85 1: 취소도 백엔드 hide를 기다리지 않고 카드가 즉시 사라진다(기록 줄에는 정제문 인용이 없다)
+  const s23a = await evaluate(`({card:document.querySelectorAll('[data-refined-confirm="true"]').length, frame:${RC_FRAME}.length, recs:${RC_RECS}})`);
   await post({ type: 'ai_message', subType: 'refinedConfirmation/hide', messageId: 'system', content: '' });
   await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_1', content: '분석을 취소했습니다.' });
   await sleep(300);
   const s23 = await evaluate(`(()=>{const t=document.body.innerText; const bubbles=[...document.querySelectorAll('[data-message-id^="notice_"]')]; return {text:t.includes('분석을 취소했습니다.'), notice:bubbles.length, noticeIsError:bubbles.some(b=>b.classList.contains('error')), errBubbles:document.querySelectorAll('[data-message-id^="error_"]').length, errClass:document.querySelectorAll('.msg-ai.error').length, card:document.querySelectorAll('[data-refined-confirm="true"]').length};})()`);
   await shot('23-refined-cancel-notice');
-  record(23, '취소: cancel만 전송, 카드는 내려가고 "분석을 취소했습니다."가 오류가 아닌 안내 말풍선으로 보임(오류 말풍선 증가 없음)', sent23.length === 1 && sent23[0].command === 'refinedConfirmation/cancel' && s23.text && s23.notice === 1 && !s23.noticeIsError && s23.errBubbles === errBefore && s23.errClass === errClassBefore && s23.card === 0, JSON.stringify({ 전송: sent23, ...s23 }));
+  record(23, '취소: cancel만 전송, 카드는 즉시 사라지고(기록 줄 "✔ 정제문 확인: 취소", 정제문 인용 없음) "분석을 취소했습니다."가 오류가 아닌 안내 말풍선으로 보임(오류 말풍선 증가 없음)',
+    sent23.length === 1 && sent23[0].command === 'refinedConfirmation/cancel' && s23a.card === 0 && s23a.frame === 0 && s23a.recs.includes('✔ 정제문 확인: 취소') &&
+      s23a.recs.filter(t => t.startsWith('↳ 분석에 쓴 정제문:')).length === 2 /* 앞의 21·22번 기록 둘뿐 */ &&
+      s23.text && s23.notice === 1 && !s23.noticeIsError && s23.errBubbles === errBefore && s23.errClass === errClassBefore && s23.card === 0, JSON.stringify({ 전송: sent23, 종료: s23a, ...s23 }));
 
   // 24) 빈 문장 차단: 두 진행 버튼이 모두 막히고 경고가 보이며 눌러도 아무것도 전송되지 않음. 되돌리면 다시 켜짐
   await rcRequest();
@@ -417,18 +431,37 @@ try {
       body25b && body25b.editedText === '사용자가 고친 정제문입니다.' && !JSON.stringify(body25b).includes('연계할지') && s25b3 === 0,
     JSON.stringify({ s25b1, s25b2, body25b, 문장없는카드의_문장요소: s25b3 }));
 
-  // 26) 응답 없이 시간이 지나 위 정제된 문장 그대로 분석이 진행되면(expired) 카드는 지워지지 않고 비활성이 되며 안내가 보인다
-  await rcRequest();
+  // 26) 응답 없이 5분이 지나 정제문 그대로 분석이 진행되면(expired) 카드가 즉시 사라지고(대기 줄 타이머·버튼 포함) 기록 줄이 남는다
+  // B-85 1에서 바뀐 기대값(전: 카드가 남아 비활성이 되고 안내 문구가 보였으며 대기 타이머가 계속 늘었다 / 후: 카드 제거 + "✔ 정제문 확인: 응답 없음(5분, 정제문 그대로 진행)" + 정제문 인용 + 확인 필요 문장)
+  await rcRequestWithNote(RC_NOTE);
   await sleep(300);
   const base26 = (await rcSent()).length;
   await post({ type: 'ai_message', subType: 'refinedConfirmation/expired', messageId: 'system', content: '' });
   await sleep(300);
-  const s26 = await evaluate(`(()=>{const c=${CARD}; if(!c) return {card:false}; const q=a=>c.querySelector('[data-refined-confirm-action="'+a+'"]'); return {card:true, text:c.innerText.includes('응답이 없어 위 정제된 문장 그대로 분석을 진행했습니다.'), expiredEl:!!c.querySelector('[data-refined-confirm-expired="true"]'), cancel:q('cancel').disabled, asis:q('asis').disabled, edited:q('edited').disabled, area:c.querySelector('[data-refined-confirm-edit="true"]').disabled};})()`);
-  await evaluate(`${ACT('asis')}.click(); ${ACT('cancel')}.click(); true`);
-  await sleep(200);
-  const sent26 = (await rcSent()).slice(base26);
+  const s26 = await evaluate(`({card:document.querySelectorAll('[data-refined-confirm="true"]').length, frame:${RC_FRAME}.length, timer:document.querySelectorAll('[data-card-kind="refined"] [data-card-wait="true"]').length, buttons:document.querySelectorAll('[data-refined-confirm-action]').length, recs:${RC_RECS}})`);
   await shot('26-refined-expired');
-  record(26, '시간 초과로 진행되면 카드가 남아 비활성이 되고 안내 문구가 보이며, 이후 눌러도 전송 0건', s26.card && s26.text && s26.expiredEl && s26.cancel && s26.asis && s26.edited && s26.area && sent26.length === 0, JSON.stringify({ ...s26, 전송: sent26.length }));
+  const sent26 = (await rcSent()).slice(base26);
+  record(26, '시간 초과로 진행되면 카드(대기 줄 타이머·버튼 포함)가 즉시 사라지고 기록 줄 "응답 없음(5분, 정제문 그대로 진행)"·정제문 인용·확인 필요 문장이 남으며 전송은 0건',
+    s26.card === 0 && s26.frame === 0 && s26.timer === 0 && s26.buttons === 0 && sent26.length === 0 &&
+      s26.recs.includes('✔ 정제문 확인: 응답 없음(5분, 정제문 그대로 진행)') && s26.recs.includes(`↳ 분석에 쓴 정제문: ${RC_REFINED}`) && s26.recs.includes(`📌 구현 전 확인 필요: ${RC_NOTE}`),
+    JSON.stringify({ ...s26, 전송: sent26.length }));
+  await post({ type: 'ai_message', subType: 'refinedConfirmation/hide', messageId: 'system', content: '' });
+
+  // 26b) 요청 식별자: 카드 payload의 requestId가 제출·취소 본문에 같이 실린다(백엔드가 오래된 카드의 응답을 가리는 데 쓴다)
+  await post({ type: 'ai_message', subType: 'refinedConfirmation/request', messageId: 'system', content: JSON.stringify({ projectId: 'proj1', requestId: '180f0685:analyze_1', originalRequirement: RC_ORIG, refinedRequirement: RC_REFINED }) });
+  await sleep(300);
+  const base26b = (await rcSent()).length;
+  await click(ACT('asis'), '이대로 분석');
+  await sleep(200);
+  await post({ type: 'ai_message', subType: 'refinedConfirmation/request', messageId: 'system', content: JSON.stringify({ projectId: 'proj1', requestId: '180f0685:analyze_2', originalRequirement: RC_ORIG, refinedRequirement: RC_REFINED }) });
+  await sleep(300);
+  await click(ACT('cancel'), '취소');
+  await sleep(200);
+  const sent26b = (await rcSent()).slice(base26b).map(o => ({ command: o.command, body: JSON.parse(o.text) }));
+  record('26b', '요청 식별자: 제출·취소 본문에 카드 payload의 requestId가 같이 실리고(카드마다 다른 값), 응답 뒤 카드는 남지 않음',
+    sent26b.length === 2 && sent26b[0].command === 'refinedConfirmation/submit' && sent26b[0].body.requestId === '180f0685:analyze_1' &&
+      sent26b[1].command === 'refinedConfirmation/cancel' && sent26b[1].body.requestId === '180f0685:analyze_2' && (await evaluate(`document.querySelectorAll('[data-refined-confirm="true"]').length`)) === 0,
+    JSON.stringify(sent26b));
   await post({ type: 'ai_message', subType: 'refinedConfirmation/hide', messageId: 'system', content: '' });
 
   // ───────── clarify 세션 만료(27~30) ─────────
@@ -630,7 +663,9 @@ try {
   await click(ACT('asis'), '이대로 분석(기록 확인)');
   await sleep(400);
   const s43 = await evaluate(`(()=>{const r=[...document.querySelectorAll('[data-choice-record="true"]')].map(e=>e.innerText.trim()); return {records:r}})()`);
-  record(43, '선택 기록: "이대로 분석" 뒤 "확정한 정제문: <정제문>" 한 줄 기록이 1개 남는다', s43.records.length === 1 && s43.records[0].includes('확정한 정제문: ' + RC_REFINED) && !s43.records[0].includes('\n'), JSON.stringify(s43));
+  // B-85 1에서 바뀐 기대값(전: "✔ 확정한 정제문: <정제문>" 한 줄 / 후: "✔ 정제문 확인: 이대로 분석"과 다음 줄 "↳ 분석에 쓴 정제문: <정제문>" 두 줄, 각각 한 줄 기록)
+  record(43, '선택 기록: "이대로 분석" 뒤 "✔ 정제문 확인: 이대로 분석"과 "↳ 분석에 쓴 정제문: <정제문>"이 각각 한 줄 기록으로 남는다',
+    JSON.stringify(s43.records) === JSON.stringify(['✔ 정제문 확인: 이대로 분석', '↳ 분석에 쓴 정제문: ' + RC_REFINED]) && s43.records.every(r => !r.includes('\n')), JSON.stringify(s43));
 
   // 44~48) 카드 응답 기록(B-81 7): 실제 메시지 흐름(카드 요청 → 사용자 응답 → 백엔드가 카드를 내림 → 다음 카드)으로 제출·건너뛰기·취소·시간 초과를 각각 재현한다.
   // B-80 IDE 확인: 정제문 제출만 기록이 남고 패키지 "취소 (전체 선택)", 힌트 "건너뛰기 (자율 탐색)", Stage 3 "건너뛰기" 세 카드는 기록이 없었다.
@@ -708,7 +743,8 @@ try {
   await click(ACT('cancel'), '정제문 취소');
   await waitFor(`${RECS}.length>=1`);
   const s47 = { recs: await evaluate(RECS), cmds: await sentCmds(from47) };
-  record(47, '정제문 취소: "취소(분석을 진행하지 않음)" 기록 1줄, 전송은 refinedConfirmation/cancel 1건뿐', JSON.stringify(s47.recs) === JSON.stringify(['✖ 정제문 확인: 취소(분석을 진행하지 않음)']) && JSON.stringify(s47.cmds) === JSON.stringify(['refinedConfirmation/cancel']), JSON.stringify(s47));
+  // B-85 1에서 바뀐 기대값(전: '✖ 정제문 확인: 취소(분석을 진행하지 않음)' / 후: '✔ 정제문 확인: 취소', 분석에 쓴 정제문 줄은 없다)
+  record(47, '정제문 취소: "✔ 정제문 확인: 취소" 기록 1줄, 전송은 refinedConfirmation/cancel 1건뿐', JSON.stringify(s47.recs) === JSON.stringify(['✔ 정제문 확인: 취소']) && JSON.stringify(s47.cmds) === JSON.stringify(['refinedConfirmation/cancel']), JSON.stringify(s47));
 
   // 48) 결과가 나온 뒤 Stage 0 카드(B-81 9): 실행 중인 화면에서 결과(analyze_removed)가 도착하면 제출 줄이 "완료됨"으로 바뀐다(전: "분석을 진행 중입니다..." 유지)
   await loadChat('chat_s5', []);

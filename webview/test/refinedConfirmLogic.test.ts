@@ -6,9 +6,9 @@ import {
   buildCancelText,
   buildSubmitText,
   evaluateEdit,
-  EXPIRED_TEXT,
+  closeRefinedCard,
+  findRefinedCard,
   makeNoticeBubble,
-  markExpired,
   parsePayload,
 } from '../src/refinedConfirmLogic.ts';
 import { IDLE, onBackendMessage, startWait } from '../src/clarifyWaitLogic.ts';
@@ -83,19 +83,33 @@ test('확인 카드나 취소 안내가 오면 분석 대기 표시가 내려간
   assert.equal(onBackendMessage(wait, 'refinedConfirmation/hide'), wait);
 });
 
-test('만료 표시: 확인 카드에만 달리고 다른 메시지는 그대로이며 카드는 지워지지 않는다', () => {
+// B-85 1에서 바뀐 기대값(전: 시간 초과 때 markExpired가 카드를 지우지 않고 expired 표시만 달아 대기 타이머가 계속 늘었다 / 후: closeRefinedCard가 카드를 목록에서 뺀다)
+test('카드 닫기: 정제문 확인 카드만 빠지고 다른 메시지는 그대로이며, 카드가 없으면 같은 목록을 돌려준다', () => {
   const list = [
     { id: 'a', subType: 'analyze_clarify' },
     { id: 'b', subType: 'refinedConfirmation/request' },
     { id: 'c' },
   ];
-  const out = markExpired(list);
-  assert.equal(out.length, 3);
-  assert.deepEqual(out[0], list[0]);
-  assert.deepEqual(out[1], { id: 'b', subType: 'refinedConfirmation/request', expired: true });
-  assert.deepEqual(out[2], list[2]);
-  assert.equal(list[1].expired, undefined); // 입력을 바꾸지 않는다
-  assert.equal(EXPIRED_TEXT, '응답이 없어 위 정제된 문장 그대로 분석을 진행했습니다.');
-  // 이미 만료된 카드는 같은 값으로 남는다
-  assert.deepEqual(markExpired(out)[1], out[1]);
+  const out = closeRefinedCard(list);
+  assert.deepEqual(out.map(m => m.id), ['a', 'c']);
+  assert.equal(list.length, 3); // 입력을 바꾸지 않는다
+  // 같은 종료 신호가 두 번 와도(응답 뒤 백엔드 hide) 안전하다: 카드가 없으면 같은 배열
+  assert.equal(closeRefinedCard(out), out);
+  assert.equal(findRefinedCard(list)?.id, 'b');
+  assert.equal(findRefinedCard(out), undefined);
+});
+
+test('requestId: 카드 payload에서 읽고, 제출·취소 본문에 같이 싣는다(없으면 이전 본문 그대로)', () => {
+  const withId = parsePayload(JSON.stringify({ projectId: 'p1', originalRequirement: '원문', refinedRequirement: SHOWN, requestId: '180f0685:analyze_17' }));
+  assert.equal(withId?.requestId, '180f0685:analyze_17');
+  for (const none of [undefined, '', '  ']) {
+    const p = parsePayload(JSON.stringify({ projectId: 'p1', refinedRequirement: SHOWN, requestId: none }));
+    assert.equal(p !== null && 'requestId' in p, false);
+  }
+  assert.equal(buildSubmitText('p1', SHOWN, SHOWN, 'asis', 'rid:m1'), JSON.stringify({ projectId: 'p1', requestId: 'rid:m1' }));
+  assert.equal(buildSubmitText('p1', SHOWN, '고친 문장', 'edited', 'rid:m1'), JSON.stringify({ projectId: 'p1', requestId: 'rid:m1', editedText: '고친 문장' }));
+  assert.equal(buildCancelText('p1', 'rid:m1'), JSON.stringify({ projectId: 'p1', requestId: 'rid:m1' }));
+  // requestId가 없던 이전 카드는 이전과 같은 본문
+  assert.equal(buildSubmitText('p1', SHOWN, SHOWN, 'asis'), JSON.stringify({ projectId: 'p1' }));
+  assert.equal(buildCancelText('p1'), JSON.stringify({ projectId: 'p1' }));
 });

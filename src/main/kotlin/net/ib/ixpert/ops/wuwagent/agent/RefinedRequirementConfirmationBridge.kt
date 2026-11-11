@@ -12,24 +12,42 @@ import java.util.concurrent.TimeoutException
 
 /** 응답을 기다리는 확인 요청 표. 화면 응답(complete)과 대기(await)를 이어 준다. IDE 없이 테스트할 수 있게 따로 둔다. */
 class RefinedConfirmationRegistry {
-    private val pending = ConcurrentHashMap<String, CompletableFuture<RefinedConfirmationDecision?>>()
+    /** requestId: 이 확인을 만든 요청(백엔드 rid + messageId). 응답이 같은 요청의 것인지 가릴 때 쓴다(B-85 1 F). 시험에서 쓰는 이전 형식은 null. */
+    private class Pending(val future: CompletableFuture<RefinedConfirmationDecision?>, val requestId: String?)
+
+    private val pending = ConcurrentHashMap<String, Pending>()
 
     /** 같은 키에 이미 기다리는 요청이 있으면 그 요청은 새 요청이 대신한 것으로 끝낸다(분석을 시작하지 않는다). */
-    fun register(key: String): CompletableFuture<RefinedConfirmationDecision?> {
+    fun register(key: String, requestId: String? = null): CompletableFuture<RefinedConfirmationDecision?> {
         val future = CompletableFuture<RefinedConfirmationDecision?>()
-        pending.put(key, future)?.complete(RefinedConfirmationDecision.Superseded)
+        pending.put(key, Pending(future, requestId))?.future?.complete(RefinedConfirmationDecision.Superseded)
         return future
     }
 
     /** 기다리는 요청이 있으면 대신 처리됐다고 끝낸다(새 /clarify). 없으면 아무 일도 없다. */
     fun supersede(key: String) {
-        pending.remove(key)?.complete(RefinedConfirmationDecision.Superseded)
+        pending.remove(key)?.future?.complete(RefinedConfirmationDecision.Superseded)
     }
 
     fun isPending(key: String): Boolean = pending.containsKey(key)
 
+    /** 지금 기다리는 요청의 식별자(없으면 null). 오래된 응답을 무시할 때 로그에 남긴다. */
+    fun pendingRequestId(key: String): String? = pending[key]?.requestId
+
     fun complete(key: String, decision: RefinedConfirmationDecision?) {
-        pending.remove(key)?.complete(decision)
+        pending.remove(key)?.future?.complete(decision)
+    }
+
+    /**
+     * 응답이 지금 기다리는 요청의 것일 때만 처리한다(B-85 1 F). 기다리는 요청이 없거나 요청 식별자가 다르면(오래된 카드의 응답) 처리하지 않고 false를 돌려준다.
+     * 기다리는 요청에 식별자가 없으면(이전 형식) 식별자를 따지지 않는다.
+     */
+    fun completeIfCurrent(key: String, requestId: String?, decision: RefinedConfirmationDecision?): Boolean {
+        val current = pending[key] ?: return false
+        if (current.requestId != null && current.requestId != requestId) return false
+        if (!pending.remove(key, current)) return false
+        current.future.complete(decision)
+        return true
     }
 
     fun cancel(key: String) = complete(key, RefinedConfirmationDecision.Cancel)
@@ -42,12 +60,16 @@ class RefinedConfirmationRegistry {
         try {
             future.get(timeoutSeconds, TimeUnit.SECONDS)
         } catch (e: TimeoutException) {
-            pending.remove(key, future)
+            removeIfSame(key, future)
             RefinedConfirmationDecision.TimedOut
         } catch (e: Exception) {
-            pending.remove(key, future)
+            removeIfSame(key, future)
             null
         }
+
+    private fun removeIfSame(key: String, future: CompletableFuture<RefinedConfirmationDecision?>) {
+        pending.computeIfPresent(key) { _, p -> if (p.future === future) null else p }
+    }
 
     fun forget(key: String) {
         pending.remove(key)
@@ -57,7 +79,9 @@ class RefinedConfirmationRegistry {
 /** IntelliJ JCEF 웹뷰와 통신하는 정제문 확인 브리지. Stage3ConfirmationBridge와 같은 요청·응답·대기 방식이다. */
 class JcefRefinedRequirementConfirmationBridge(
     private val project: Project?,
-    private val timeoutSeconds: Long = 300 // 5분, Stage 3 확인과 같다
+    private val timeoutSeconds: Long = 300, // 5분, Stage 3 확인과 같다
+    /** 이 카드를 만든 요청의 식별자(rid + messageId). 카드 payload에 실리고, 웹뷰가 응답에 되돌려 보낸다. null이면 식별자를 따지지 않는 이전 동작. */
+    private val requestId: String? = null
 ) : RefinedRequirementConfirmationBridge {
 
     companion object {
@@ -90,6 +114,29 @@ class JcefRefinedRequirementConfirmationBridge(
         }
 
         fun cancelConfirmation(projectId: String) = registry.cancel(projectId)
+
+        /**
+         * 요청 식별자를 확인하는 응답 처리(B-85 1 F). 지금 기다리는 요청의 응답이면 처리하고 true, 기다리는 요청이 없거나 식별자가 다르면(오래된 카드의 응답) 무시하고 false.
+         * 무시하면 "[RefineGate] stale response ignored" 로그를 남기고 호출한 쪽이 [CardWaitLog] 줄을 남긴다.
+         */
+        fun completeConfirmation(projectId: String, requestId: String?, editedText: String?): Boolean {
+            val accepted = registry.completeIfCurrent(
+                projectId, requestId,
+                if (editedText == null) RefinedConfirmationDecision.Proceed else RefinedConfirmationDecision.ProceedEdited(editedText)
+            )
+            if (!accepted) logStale(projectId, requestId)
+            return accepted
+        }
+
+        fun cancelConfirmation(projectId: String, requestId: String?): Boolean {
+            val accepted = registry.completeIfCurrent(projectId, requestId, RefinedConfirmationDecision.Cancel)
+            if (!accepted) logStale(projectId, requestId)
+            return accepted
+        }
+
+        private fun logStale(projectId: String, requestId: String?) {
+            println("[RefineGate] stale response ignored projectId=$projectId requestId=${requestId ?: "-"} 기다리는 요청=${registry.pendingRequestId(projectId) ?: (if (registry.isPending(projectId)) "식별자 없음" else "없음")}")
+        }
     }
 
     override fun requestConfirmation(originalRequirement: String, refinedRequirement: String): RefinedConfirmationDecision? =
@@ -98,7 +145,7 @@ class JcefRefinedRequirementConfirmationBridge(
     override fun requestConfirmation(originalRequirement: String, refinedRequirement: String, decisionNote: String?): RefinedConfirmationDecision? {
         if (project == null) return null
         val projectId = project.locationHash
-        val future = registry.register(projectId)
+        val future = registry.register(projectId, requestId)
 
         ApplicationManager.getApplication().invokeLater {
             try {
@@ -111,6 +158,8 @@ class JcefRefinedRequirementConfirmationBridge(
                 )
                 // 정제문과 따로 보이는 "확인 필요" 문장(B-84). 정제문 칸의 수정과 무관하게 카드에 남는다.
                 if (!decisionNote.isNullOrBlank()) payload["decisionNote"] = decisionNote
+                // 요청 식별자(B-85 1 F): 웹뷰가 응답에 되돌려 보내고, 지금 기다리는 요청과 다르면 무시한다
+                if (!requestId.isNullOrBlank()) payload["requestId"] = requestId
                 println("[RefineGate] rid=${Integer.toHexString(originalRequirement.hashCode())} 카드 요청 전송 projectId=$projectId 정제문 ${refinedRequirement.length}자 (${ConfirmClock.sinceText()})")
                 bridge.sendMessage("refinedConfirmation/request", Gson().toJson(payload), "system")
             } catch (e: Exception) {

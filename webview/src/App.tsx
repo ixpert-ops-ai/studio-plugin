@@ -10,14 +10,14 @@ import { ScopeSelectionTree } from './ScopeSelectionTree';
 import { L1ClarificationForm } from './L1ClarificationForm';
 import { Stage3ConfirmationForm } from './Stage3ConfirmationForm';
 import { RefinedConfirmationForm } from './RefinedConfirmationForm';
-import { buildCancelText, makeNoticeBubble, markExpired, parsePayload } from './refinedConfirmLogic';
+import { buildCancelText, makeNoticeBubble, parsePayload } from './refinedConfirmLogic';
 import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
 import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
-import { appendRecord, completeClarifyCards, finalRefinedText, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, refinedCancelRecord, refinedRecord, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
+import { appendRecord, completeClarifyCards, finishRefinedCard, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
@@ -39,7 +39,6 @@ interface Message {
   id: string;
   role: 'user' | 'ai' | 'tool';
   subType?: string;
-  expired?: boolean;
   content: string;
   stepLabel?: string;
   applyable?: boolean;
@@ -766,6 +765,9 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
 
   // 카드에서 고른 내용을 채팅에 한 줄로 남긴다(App의 choice_record 처리로 이어진다)
   const record = (text: string) => window.postMessage({ type: 'ai_message', subType: 'choice_record', id: `rec_${Date.now()}`, content: text }, '*');
+  // 정제문 확인 카드를 끝낸다(응답·취소): App의 refinedConfirmation/finished 처리가 카드를 지우고 기록 줄(정제문 인용, 구현 전 확인 필요 문장 포함)을 남긴다.
+  const finishRefined = (cause: 'asis' | 'edited' | 'cancel', editedText?: string) =>
+    window.postMessage({ type: 'ai_message', subType: 'refinedConfirmation/finished', id: 'system', cause, editedText }, '*');
 
   // 0.6 Scope Selection
   if (msg.subType === 'scopeSelection/showTree') {
@@ -862,15 +864,16 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
       <RefinedConfirmationForm
         key={msg.id}
         payload={msg.content}
-        expired={msg.expired === true}
         onCancel={(projectId) => {
           if (window.sendToIde) {
             window.sendToIde(JSON.stringify({
               command: 'refinedConfirmation/cancel',
-              text: buildCancelText(projectId)
+              // requestId: 이 카드를 만든 요청. 백엔드가 지금 기다리는 요청과 다르면 무시한다(B-85 1 F)
+              text: buildCancelText(projectId, parsePayload(msg.content)?.requestId)
             }));
           }
-          record(refinedCancelRecord());
+          // B-85 1: 응답·취소·시간 초과 모두 카드를 즉시 지우고 기록 줄을 남긴다(패키지 카드와 같은 방식, 백엔드 hide를 기다리지 않는다)
+          finishRefined('cancel');
         }}
         onSubmit={(_projectId, text) => {
           if (window.sendToIde) {
@@ -879,7 +882,10 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
               text
             }));
           }
-          record(refinedRecord(finalRefinedText(text, parsePayload(msg.content)?.refinedRequirement ?? '')));
+          // 분석에 쓰는 문장: 고쳤으면 editedText, 아니면 카드가 보인 정제문
+          let editedText: string | undefined;
+          try { editedText = JSON.parse(text)?.editedText; } catch { editedText = undefined; }
+          finishRefined(typeof editedText === 'string' && editedText.trim() !== '' ? 'edited' : 'asis', editedText);
         }}
       />
       </CardWaitFrame>
@@ -1556,9 +1562,16 @@ function App() {
         return;
       }
 
-      // 응답 없이 시간이 지나 원래 문장으로 분석이 진행됨: 카드를 지우지 않고 비활성으로 바꿔 이유를 보인다
+      // 응답 없이 5분이 지나 정제문 그대로 분석이 진행됨: 카드를 즉시 지우고 기록 줄을 남긴다(B-85 1: 전에는 카드를 비활성으로 남겨 대기 타이머가 계속 늘었다)
       if (data.subType === 'refinedConfirmation/expired') {
-        setMessages(prev => markExpired(prev));
+        setMessages(prev => finishRefinedCard(prev, 'timeout', { idBase: `rec_refined_${Date.now()}` }));
+        return;
+      }
+
+      // 사용자의 응답·취소(웹뷰가 스스로 보낸다): 카드를 즉시 지우고 기록 줄을 남긴다. 이어서 오는 백엔드 hide는 카드가 이미 없어 아무 일도 하지 않는다.
+      if (data.subType === 'refinedConfirmation/finished') {
+        const cause = data.cause === 'edited' || data.cause === 'cancel' ? data.cause : 'asis';
+        setMessages(prev => finishRefinedCard(prev, cause, { editedText: typeof data.editedText === 'string' ? data.editedText : undefined, idBase: `rec_refined_${Date.now()}` }));
         return;
       }
 

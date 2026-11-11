@@ -8,6 +8,8 @@ export type RefinedConfirmPayload = {
   message?: string;
   /** 정제문과 따로 보이는 "확인 필요" 문장(B-84). 정제문 칸을 고쳐도 카드에 그대로 남는다. 없으면 이 키가 없다. */
   decisionNote?: string;
+  /** 이 카드를 만든 요청의 식별자(백엔드 rid + messageId). 응답에 같이 실어 보내고, 백엔드가 지금 기다리는 요청과 다르면 무시한다(B-85 1 F). 없으면 이 키가 없다. */
+  requestId?: string;
 };
 
 /** 카드 데이터를 읽는다. 깨졌거나 필수 값이 없으면 null(카드는 불러오기 실패 안내를 보인다). */
@@ -21,6 +23,7 @@ export const parsePayload = (raw: string): RefinedConfirmPayload | null => {
       refinedRequirement: d.refinedRequirement,
       message: typeof d.message === 'string' ? d.message : undefined,
       ...(typeof d.decisionNote === 'string' && d.decisionNote.trim().length > 0 ? { decisionNote: d.decisionNote } : {}),
+      ...(typeof d.requestId === 'string' && d.requestId.trim().length > 0 ? { requestId: d.requestId } : {}),
     };
   } catch {
     return null;
@@ -46,12 +49,19 @@ export const evaluateEdit = (shown: string, edited: string): EditState => {
 
 export type ConfirmAction = 'asis' | 'edited';
 
-/** 응답 없이 대기 시간이 지나 백엔드가 카드에 보인 정제된 문장 그대로 분석을 진행했을 때 카드에 보이는 안내. */
-export const EXPIRED_TEXT = '응답이 없어 위 정제된 문장 그대로 분석을 진행했습니다.';
+/** 정제문 확인 카드 메시지의 subType. */
+export const REFINED_CARD = 'refinedConfirmation/request';
 
-/** 확인 카드 메시지에 만료 표시를 단다(다른 메시지와 이미 만료된 카드는 그대로). 카드는 지우지 않고 비활성으로 남긴다. */
-export const markExpired = <T extends { subType?: string; expired?: boolean }>(messages: T[]): T[] =>
-  messages.map(m => (m.subType === 'refinedConfirmation/request' && !m.expired ? { ...m, expired: true } : m));
+/**
+ * 정제문 확인 카드를 목록에서 뺀다(B-85 1). 카드를 빼면 카드를 감싼 대기 줄(타이머)과 버튼도 함께 사라진다.
+ * 응답·취소·시간 초과 어느 경우든 같은 함수를 쓰고, 카드가 없으면 목록을 그대로 돌려준다(같은 종료 신호가 두 번 와도 안전).
+ */
+export const closeRefinedCard = <T extends { subType?: string }>(messages: T[]): T[] =>
+  messages.some(m => m.subType === REFINED_CARD) ? messages.filter(m => m.subType !== REFINED_CARD) : messages;
+
+/** 목록에 있는 정제문 확인 카드 한 장(없으면 undefined). */
+export const findRefinedCard = <T extends { subType?: string }>(messages: T[]): T | undefined =>
+  messages.find(m => m.subType === REFINED_CARD);
 
 /**
  * 백엔드로 보내는 응답 본문. "이대로 분석"은 editedText가 없고, "수정한 내용으로 분석"은 앞뒤 공백을 뗀 고친 문장이 들어간다.
@@ -62,13 +72,17 @@ export const buildSubmitText = (
   shown: string,
   edited: string,
   action: ConfirmAction,
+  requestId?: string,
 ): string | null => {
   const s = evaluateEdit(shown, edited);
-  if (action === 'asis') return s.canProceedAsIs ? JSON.stringify({ projectId }) : null;
-  return s.canProceedEdited ? JSON.stringify({ projectId, editedText: edited.trim() }) : null;
+  // requestId는 카드 payload에 있었을 때만 같이 보낸다(없던 이전 카드는 이전 본문 그대로)
+  const base = requestId ? { projectId, requestId } : { projectId };
+  if (action === 'asis') return s.canProceedAsIs ? JSON.stringify(base) : null;
+  return s.canProceedEdited ? JSON.stringify({ ...base, editedText: edited.trim() }) : null;
 };
 
-export const buildCancelText = (projectId: string): string => JSON.stringify({ projectId });
+export const buildCancelText = (projectId: string, requestId?: string): string =>
+  JSON.stringify(requestId ? { projectId, requestId } : { projectId });
 
 /** 취소 안내 등 오류가 아닌 안내 메시지(analyze_notice)를 대화창에 붙이는 말풍선. error 형식과 달리 isError가 없다. */
 export type NoticeBubble = {

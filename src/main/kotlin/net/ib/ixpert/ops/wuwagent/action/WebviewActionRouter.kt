@@ -426,15 +426,18 @@ class WebviewActionRouter(private val project: Project) {
                     val projectId = payload["projectId"]?.toString() ?: project.locationHash
                     // editedText가 있으면 "수정한 내용으로 분석", 없으면 "이대로 분석"
                     val editedText = payload["editedText"] as? String
-                    println("[RefineGate] 웹뷰 응답 수신: submit ${if (editedText == null) "이대로 분석" else "수정(" + editedText.length + "자)"} projectId=$projectId")
-                    net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.completeConfirmation(projectId, editedText)
+                    val requestId = payload["requestId"] as? String
+                    println("[RefineGate] 웹뷰 응답 수신: submit ${if (editedText == null) "이대로 분석" else "수정(" + editedText.length + "자)"} projectId=$projectId requestId=${requestId ?: "-"}")
+                    // B-85 1 F: 지금 기다리는 요청의 응답일 때만 처리한다(오래된 카드의 응답은 무시하고 로그만 남긴다)
+                    net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.completeConfirmation(projectId, requestId, editedText)
                 }
 
                 "refinedConfirmation/cancel" -> {
                     val payload = com.google.gson.Gson().fromJson(textBody.trim(), Map::class.java)
                     val projectId = payload["projectId"]?.toString() ?: project.locationHash
-                    println("[RefineGate] 웹뷰 응답 수신: cancel projectId=$projectId")
-                    net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.cancelConfirmation(projectId)
+                    val requestId = payload["requestId"] as? String
+                    println("[RefineGate] 웹뷰 응답 수신: cancel projectId=$projectId requestId=${requestId ?: "-"}")
+                    net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge.cancelConfirmation(projectId, requestId)
                 }
 
                 // ── Stage 3 User Confirmation Events ────────
@@ -1615,7 +1618,10 @@ class WebviewActionRouter(private val project: Project) {
         try {
             net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedRequirementGate.handoff(
                 intent = intentBuild.intent,
-                bridge = net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge(project),
+                // 카드 요청 식별자(rid + messageId): 응답이 지금 기다리는 요청의 것인지 가린다(B-85 1 F)
+                bridge = net.ib.ixpert.ops.wuwagent.agent.JcefRefinedRequirementConfirmationBridge(
+                    project, requestId = "${Integer.toHexString(intentBuild.intent.originalRequirement.hashCode())}:$messageId"
+                ),
                 save = { clarifyIntent ->
                     try {
                         val savedFile = net.ib.ixpert.ops.wuwagent.agent.clarify.ClarifyIntentStore.saveIntent(projectBase, clarifyIntent)

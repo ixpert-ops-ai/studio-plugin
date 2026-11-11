@@ -1,3 +1,5 @@
+import { REFINED_CARD, closeRefinedCard, findRefinedCard, parsePayload } from './refinedConfirmLogic.ts';
+
 // 저장된 채팅을 복원할 때의 화면 상태 정리와, 카드에서 고른 내용을 채팅에 남기는 한 줄 기록 문구(React 없음).
 // node의 타입 제거 실행(--experimental-strip-types)으로 webview/test에서 테스트하므로 타입 제거만으로 실행되는 문법만 쓴다(enum 등 금지).
 
@@ -24,8 +26,8 @@ const AFTER_CONFIRM = [
  *   누르면 진행 중인 분석이 없는데도 /cancel이 나간다. 진행 표시를 끄고 시작만 하고 끝나지 않은 단계 알림은 실패로 표시한다.
  * - 확정 뒤 분석이 이어진 Stage 0 카드는 clarifyCompleted를 켠다(복원 화면에서 읽기 전용 "완료됨"). 확정하지 않은 카드는 그대로 둔다.
  */
-export const restoreMessages = <T extends RestorableMessage>(messages: T[]): T[] =>
-  messages.map((m, i) => {
+export const restoreMessages = <T extends RecordableMessage>(messages: T[]): T[] =>
+  restoreRefinedCard(messages.map((m, i) => {
     let next: T = m;
     if (m.isLoading || m.isStreaming) {
       next = { ...next, isLoading: false, isStreaming: false, currentStatus: undefined };
@@ -37,7 +39,7 @@ export const restoreMessages = <T extends RestorableMessage>(messages: T[]): T[]
       next = { ...next, clarifyCompleted: true };
     }
     return next;
-  });
+  }));
 
 /**
  * 실행 중인 화면에서 분석 결과(resultId)가 나오면 그 앞에 있는 Stage 0 카드를 "완료됨"으로 바꾼다(B-81 9: 복원할 때의 [restoreMessages]와 같은 결과).
@@ -133,8 +135,63 @@ export const finalRefinedText = (submitText: string, shownRefined: string): stri
   return shownRefined;
 };
 
-/** 정제문 확인 카드에서 확정한 문장. */
-export const refinedRecord = (finalText: string): string => `✔ 확정한 정제문: ${oneLine(finalText)}`;
+/** 정제문 확인 카드가 끝난 이유. orphan은 응답 전에 저장된 채팅을 복원했을 때(IDE 재시작 등으로 응답을 기다리던 요청이 사라진 경우). */
+export type RefinedCloseCause = 'asis' | 'edited' | 'cancel' | 'timeout' | 'orphan';
+
+const REFINED_CAUSE_LABEL: Record<RefinedCloseCause, string> = {
+  asis: '이대로 분석',
+  edited: '수정한 내용으로 분석',
+  cancel: '취소',
+  timeout: '응답 없음(5분, 정제문 그대로 진행)',
+  orphan: '응답 전 종료됨(IDE 재시작)',
+};
+
+/**
+ * 정제문 확인 카드가 끝났을 때 남기는 기록 줄(B-85 1): "✔ 정제문 확인: <이유>", 다음 줄에 실제 분석에 쓴 정제문(취소·응답 전 종료는 분석에 쓴 문장이 없어 생략),
+ * "구현 전 확인 필요" 문장이 있었으면 그 줄(카드를 지워도 문장이 남게 한다). 결과 화면의 📌 블록과 같은 문장이다.
+ */
+export const refinedCloseRecords = (cause: RefinedCloseCause, finalText: string, decisionNote: string | undefined): string[] => {
+  const lines = [`✔ 정제문 확인: ${REFINED_CAUSE_LABEL[cause]}`];
+  if (cause !== 'cancel' && cause !== 'orphan' && finalText.trim() !== '') lines.push(`↳ 분석에 쓴 정제문: ${oneLine(finalText)}`);
+  if (decisionNote !== undefined && decisionNote.trim() !== '') lines.push(`📌 구현 전 확인 필요: ${oneLine(decisionNote)}`);
+  return lines;
+};
+
+const cardContent = (card: { content?: string } | undefined): string => card?.content ?? '';
+
+/**
+ * 정제문 확인 카드를 즉시 지우고 기록 줄을 남긴다(응답·취소·시간 초과 공통). 기록은 다른 카드 기록과 같이 [appendRecord]로 붙는다.
+ * edited일 때만 editedText가 분석에 쓴 문장이고, 그 밖에는 카드가 보인 정제문이다. 카드가 이미 없으면 목록을 그대로 돌려준다(종료 신호가 두 번 와도 기록은 한 번).
+ */
+export const finishRefinedCard = <T extends RecordableMessage>(messages: T[], cause: RefinedCloseCause, opts: { editedText?: string; idBase: string }): T[] => {
+  const card = findRefinedCard(messages);
+  if (!card) return messages;
+  const payload = parsePayload(cardContent(card));
+  const shown = payload?.refinedRequirement ?? '';
+  const edited = (opts.editedText ?? '').trim();
+  const finalText = cause === 'edited' && edited !== '' ? edited : shown;
+  let next = closeRefinedCard(messages);
+  refinedCloseRecords(cause, finalText, payload?.decisionNote).forEach((text, i) => {
+    next = appendRecord(next, `${opts.idBase}_${i}`, text);
+  });
+  return next;
+};
+
+/**
+ * 저장된 채팅을 복원할 때 정제문 확인 카드를 그 자리에서 기록 줄로 바꾼다(B-85 1 D): 예전 형식으로 만료 표시(expired)가 저장된 카드는 시간 초과 기록,
+ * 응답 전에 저장된 활성 카드는 "응답 전 종료됨(IDE 재시작)". 복원한 카드는 기다리는 요청이 이미 없어 눌러도 아무 일도 하지 못한다.
+ */
+export const restoreRefinedCard = <T extends RecordableMessage>(messages: T[]): T[] => {
+  const idx = messages.findIndex(m => m.subType === REFINED_CARD);
+  if (idx < 0) return messages;
+  const card = messages[idx];
+  const payload = parsePayload(cardContent(card));
+  const expired = (card as unknown as { expired?: boolean }).expired === true;
+  const cause: RefinedCloseCause = expired ? 'timeout' : 'orphan';
+  const records = refinedCloseRecords(cause, payload?.refinedRequirement ?? '', payload?.decisionNote)
+    .map((text, i) => ({ id: `rec_restore_refined_${i}`, role: 'ai', subType: 'choice_record', content: text, isLoading: false }) as unknown as T);
+  return [...messages.slice(0, idx), ...records, ...messages.slice(idx + 1).filter(m => m.subType !== REFINED_CARD)];
+};
 
 /** 탐색 힌트 카드에서 보낸 힌트(비어 있으면 힌트 없이 진행). */
 export const hintRecord = (userHint: string | null | undefined): string => {
@@ -171,8 +228,6 @@ export const hintTurnOf = (payload: unknown): number | undefined => {
 export const stage3SkipRecord = (total: number): string =>
   total > 0 ? `✔ 최종 검증 대상 선택: 건너뜀(전체 ${total}개 진행)` : '✔ 최종 검증 대상 선택: 건너뜀(전체 진행)';
 
-/** 정제문 확인 카드에서 취소한 경우(분석을 시작하지 않는다). */
-export const refinedCancelRecord = (): string => '✖ 정제문 확인: 취소(분석을 진행하지 않음)';
 
 /** 백엔드가 5분 시간 초과로 보낸 안내(CardTimeoutNotice)를 같은 모양의 기록 줄로 바꾼다. 해당 안내가 아니면 null. */
 export const timeoutRecord = (noticeText: string | null | undefined, stage3Total: number): string | null => {
