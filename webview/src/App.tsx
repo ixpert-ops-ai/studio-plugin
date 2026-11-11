@@ -17,7 +17,7 @@ import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
-import { appendRecord, completeClarifyCards, finishRefinedCard, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
+import { appendRecord, completeClarifyCards, finishRefinedCard, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, noticeTurnOf, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
@@ -83,6 +83,8 @@ const sendUiLog = (text: string) => {
 // 사용자 응답을 기다리는 확인 카드의 틀: 대기 상태와 경과 시간을 보이고, 카드가 도착하면 하단 근접 여부와 무관하게 화면 안으로 스크롤하며, 렌더 결과(뷰포트 안인지)를 진단 로그로 남긴다.
 // 가장 최근 Stage 3 카드의 후보 수(시간 초과 안내가 카드를 내린 뒤에 와도 "전체 N개 진행" 기록을 만들 수 있게 한다)
 let lastStage3Total = 0;
+// 가장 최근 힌트 카드의 Turn 번호(백엔드가 시간 초과 안내에 turn을 싣지 않은 경우의 대체값, B-85 2)
+let lastHintTurn: number | undefined;
 
 const CardWaitFrame: React.FC<{ kind: string; msgId: string; children: React.ReactNode }> = ({ kind, msgId, children }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -1507,6 +1509,7 @@ function App() {
       }
 
       if (data.subType === 'l1Clarification/request') {
+        lastHintTurn = hintTurnOf(data.content);
         const uniqueId = `l1_${Date.now()}`;
         setMessages(prev => {
           const filtered = prev.filter(m => m.subType !== 'l1Clarification/request');
@@ -1522,6 +1525,7 @@ function App() {
       }
 
       if (data.subType === 'l1Clarification/hide') {
+        lastHintTurn = undefined; // 힌트 카드가 내려갔으면 그 Turn 번호는 더 이상 시간 초과 안내의 대체값이 아니다
         setMessages(prev => prev.filter(m => m.subType !== 'l1Clarification/request'));
         return;
       }
@@ -1585,7 +1589,8 @@ function App() {
         if (typeof data.content === 'string' && data.content.trim() !== '') {
           // B-81 7: 5분 시간 초과로 자동 진행한 경우 제출·건너뛰기와 같은 모양의 기록 줄을 남긴다.
           // B-82 3-5: 기록에 "자동 진행"이 들어 있으므로 같은 뜻의 안내 줄("응답이 없어 … 진행했습니다.")은 따로 보이지 않는다.
-          const rec = timeoutRecord(data.content, lastStage3Total);
+          // B-85 2: 백엔드가 안내에 실은 turn을 우선하고, 없으면 마지막 힌트 카드 payload의 turn, 그래도 없으면 이전 문구
+          const rec = timeoutRecord(data.content, lastStage3Total, noticeTurnOf(data.turn) ?? lastHintTurn);
           if (rec) setMessages(prev => appendRecord(prev, `rec_${Date.now()}`, rec));
           else setMessages(prev => [...prev, makeNoticeBubble(data.content, Date.now(), Math.random().toString(36).substring(2, 7)) as Message]);
         }

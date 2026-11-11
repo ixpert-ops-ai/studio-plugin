@@ -210,8 +210,17 @@ export const scopeSkipRecord = (): string => '✔ 읽을 범위 선택: 전체(�
  * 탐색 힌트 카드에서 "건너뛰기 (자율 탐색)"으로 넘긴 경우(B-84 e). 탐색이 여러 턴이면 같은 줄이 겹쳐 보이므로 Turn 번호를 붙인다.
  * 번호를 모르면(Turn이 없는 저장 채팅, 읽을 수 없는 payload) 이전 문구 그대로다.
  */
-export const hintSkipRecord = (turn?: number): string =>
-  typeof turn === 'number' && Number.isInteger(turn) && turn > 0 ? `✔ Turn ${turn} 탐색 힌트: 건너뜀(자율 탐색)` : '✔ 탐색 힌트: 건너뜀(자율 탐색)';
+export const hintSkipRecord = (turn?: number): string => `✔ ${hintTurnLabel(turn)}탐색 힌트: 건너뜀(자율 탐색)`;
+
+/** "Turn 2 " (끝에 공백 포함). 번호를 모르거나 양의 정수가 아니면 빈 문자열이라 이전 문구가 된다. */
+export const hintTurnLabel = (turn: number | undefined): string =>
+  typeof turn === 'number' && Number.isInteger(turn) && turn > 0 ? `Turn ${turn} ` : '';
+
+/** 백엔드 안내(analyze_notice)의 turn 필드(숫자 또는 숫자 문자열, 메타 필드는 문자열로 온다). 양의 정수가 아니면 undefined. */
+export const noticeTurnOf = (raw: unknown): number | undefined => {
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+};
 
 /** 탐색 힌트 카드 payload(JSON 문자열)의 Turn 번호. 읽을 수 없거나 정수가 아니면 undefined. */
 export const hintTurnOf = (payload: unknown): number | undefined => {
@@ -230,10 +239,11 @@ export const stage3SkipRecord = (total: number): string =>
 
 
 /** 백엔드가 5분 시간 초과로 보낸 안내(CardTimeoutNotice)를 같은 모양의 기록 줄로 바꾼다. 해당 안내가 아니면 null. */
-export const timeoutRecord = (noticeText: string | null | undefined, stage3Total: number): string | null => {
+export const timeoutRecord = (noticeText: string | null | undefined, stage3Total: number, hintTurn?: number): string | null => {
   const t = (noticeText ?? '').trim();
   if (t === '응답이 없어 전체 프로젝트로 진행했습니다.') return '✔ 읽을 범위 선택: 전체(5분 응답 없음, 자동 진행)';
-  if (t === '응답이 없어 힌트 없이 진행했습니다.') return '✔ 탐색 힌트: 없음(5분 응답 없음, 자동 진행)';
+  // B-85 2: 힌트 카드 시간 초과도 건너뛰기([hintSkipRecord])처럼 Turn 번호를 붙인다. 번호를 모르면 이전 문구 그대로다.
+  if (t === '응답이 없어 힌트 없이 진행했습니다.') return `✔ ${hintTurnLabel(hintTurn)}탐색 힌트: 없음(5분 응답 없음, 자동 진행)`;
   if (t === '응답이 없어 전체 후보로 진행했습니다.') return stage3Total > 0 ? `✔ 최종 검증 대상 선택: 전체 ${stage3Total}개 진행(5분 응답 없음, 자동 진행)` : '✔ 최종 검증 대상 선택: 전체 진행(5분 응답 없음, 자동 진행)';
   return null;
 };

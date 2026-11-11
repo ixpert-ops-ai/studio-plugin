@@ -726,13 +726,27 @@ try {
   await sleep(300);
   await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_s3', content: '응답이 없어 전체 후보로 진행했습니다.' });
   await post({ type: 'ai_message', subType: 'stage3Confirmation/hide', messageId: 'system', content: '' });
-  await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_l1', content: '응답이 없어 힌트 없이 진행했습니다.' });
+  // B-85 2에서 바뀐 기대값(전: 힌트 시간 초과 기록에 Turn 번호가 없었다 / 후: 백엔드가 안내에 실은 turn(메타 필드, 문자열로 온다)이 기록에 "Turn N"으로 붙는다)
+  await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_l1', content: '응답이 없어 힌트 없이 진행했습니다.', turn: '2' });
   await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_sc', content: '응답이 없어 전체 프로젝트로 진행했습니다.' });
   await waitFor(`${RECS}.length>=3`);
   const s46 = { recs: await evaluate(RECS), cmds: await sentCmds(from46) };
   await shot('46-timeout-records');
-  record(46, '시간 초과 3경로에도 기록 줄(전체 13개 진행·힌트 없음·전체 범위, 모두 "5분 응답 없음"), 사용자 응답 명령은 0건',
-    JSON.stringify(s46.recs) === JSON.stringify(['✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음, 자동 진행)', '✔ 탐색 힌트: 없음(5분 응답 없음, 자동 진행)', '✔ 읽을 범위 선택: 전체(5분 응답 없음, 자동 진행)']) && s46.cmds.length === 0, JSON.stringify(s46));
+  record(46, '시간 초과 3경로에도 기록 줄(전체 13개 진행·Turn 2 힌트 없음·전체 범위, 모두 "5분 응답 없음"), 사용자 응답 명령은 0건',
+    JSON.stringify(s46.recs) === JSON.stringify(['✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음, 자동 진행)', '✔ Turn 2 탐색 힌트: 없음(5분 응답 없음, 자동 진행)', '✔ 읽을 범위 선택: 전체(5분 응답 없음, 자동 진행)']) && s46.cmds.length === 0, JSON.stringify(s46));
+
+  // 46b) 힌트 시간 초과 안내에 turn이 없으면 마지막 힌트 카드의 Turn 번호, 카드도 없으면 이전 문구
+  await loadChat('chat_s3b', []);
+  await sleep(300);
+  await post({ type: 'ai_message', subType: 'l1Clarification/request', messageId: 'system', content: JSON.stringify({ projectId: 'p1', turn: 4, query: 'survey', topCandidates: [], domains: [] }) });
+  await sleep(200);
+  await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_l1b', content: '응답이 없어 힌트 없이 진행했습니다.' });
+  await post({ type: 'ai_message', subType: 'l1Clarification/hide', messageId: 'system', content: '' });
+  await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_l1c', content: '응답이 없어 힌트 없이 진행했습니다.' });
+  await waitFor(`${RECS}.length>=2`);
+  const s46b = await evaluate(RECS);
+  record('46b', '힌트 시간 초과 안내에 turn이 없으면 마지막 힌트 카드의 Turn 4를 쓰고, 카드가 내려간 뒤에는 이전 문구 그대로',
+    JSON.stringify(s46b) === JSON.stringify(['✔ Turn 4 탐색 힌트: 없음(5분 응답 없음, 자동 진행)', '✔ 탐색 힌트: 없음(5분 응답 없음, 자동 진행)']), JSON.stringify(s46b));
 
   // 47) 정제문 카드 취소: 취소 기록 1줄, 전송은 refinedConfirmation/cancel 1건뿐(/cancel 0건)
   await loadChat('chat_s4', []);

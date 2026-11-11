@@ -2,7 +2,7 @@
 // 실행(저장소 루트): node --experimental-strip-types --test webview/test/cardRecordB84.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hintSkipRecord, hintTurnOf, restoreMessages } from '../src/chatRestoreLogic.ts';
+import { hintSkipRecord, hintTurnLabel, hintTurnOf, noticeTurnOf, restoreMessages, timeoutRecord } from '../src/chatRestoreLogic.ts';
 
 test('탐색 힌트 건너뜀 줄: Turn 번호가 있으면 붙이고, 없으면 이전 문구 그대로', () => {
   assert.equal(hintSkipRecord(2), '✔ Turn 2 탐색 힌트: 건너뜀(자율 탐색)');
@@ -41,4 +41,41 @@ test('저장 채팅 복원: Turn 번호가 없는 이전 기록 줄은 그대로
   assert.equal(restored.some(m => m.subType === 'refinedConfirmation/request'), false);
   assert.equal(restored[1].content, '✔ 정제문 확인: 응답 전 종료됨(IDE 재시작)');
   assert.equal(restored[2].content, `📌 구현 전 확인 필요: ${note}`);
+});
+
+// B-85 2: 시간 초과 기록에도 Turn 번호(건너뛰기와 같은 방식). 값은 백엔드가 안내에 실은 turn → 마지막 힌트 카드의 turn → 없으면 이전 문구.
+test('힌트 시간 초과 기록: Turn 번호가 있으면 붙이고, 없으면 이전 문구, 다른 카드의 기록은 turn과 무관하다', () => {
+  const hintNotice = '응답이 없어 힌트 없이 진행했습니다.';
+  assert.equal(timeoutRecord(hintNotice, 0, 2), '✔ Turn 2 탐색 힌트: 없음(5분 응답 없음, 자동 진행)');
+  for (const none of [undefined, 0, -1, 1.5, NaN]) {
+    assert.equal(timeoutRecord(hintNotice, 0, none as number | undefined), '✔ 탐색 힌트: 없음(5분 응답 없음, 자동 진행)');
+  }
+  assert.equal(timeoutRecord(hintNotice, 0), '✔ 탐색 힌트: 없음(5분 응답 없음, 자동 진행)');
+  // 건너뛰기 기록과 같은 형식: 시간 초과만 "없음(5분 응답 없음, 자동 진행)"이 다르다
+  assert.equal(hintSkipRecord(2).replace('건너뜀(자율 탐색)', ''), timeoutRecord(hintNotice, 0, 2)!.replace('없음(5분 응답 없음, 자동 진행)', ''));
+  // 범위·Stage 3 기록에는 turn이 붙지 않는다
+  assert.equal(timeoutRecord('응답이 없어 전체 프로젝트로 진행했습니다.', 0, 2), '✔ 읽을 범위 선택: 전체(5분 응답 없음, 자동 진행)');
+  assert.equal(timeoutRecord('응답이 없어 전체 후보로 진행했습니다.', 13, 2), '✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음, 자동 진행)');
+});
+
+test('시간 초과 안내의 turn 필드: 숫자 또는 숫자 문자열(메타 필드는 문자열), 양의 정수만 읽는다', () => {
+  assert.equal(noticeTurnOf(3), 3);
+  assert.equal(noticeTurnOf('3'), 3);
+  assert.equal(noticeTurnOf(' 3 '), 3);
+  for (const none of ['3.5', '0', 0, -1, '-1', '', '  ', 'abc', undefined, null, NaN, {}]) {
+    assert.equal(noticeTurnOf(none), undefined);
+  }
+  assert.equal(hintTurnLabel(2), 'Turn 2 ');
+  assert.equal(hintTurnLabel(undefined), '');
+});
+
+test('복원: Turn이 붙은 시간 초과 기록 줄과 붙지 않은 이전 기록 줄은 복원 때 바뀌지 않는다', () => {
+  const result = {
+    id: 'analyze_1', role: 'ai', subType: 'analyze_start', content: '결과',
+    inlineRecords: [
+      { at: 10, text: '✔ Turn 2 탐색 힌트: 없음(5분 응답 없음, 자동 진행)' },
+      { at: 10, text: '✔ 탐색 힌트: 없음(5분 응답 없음, 자동 진행)' },
+    ],
+  };
+  assert.deepEqual(restoreMessages([result])[0].inlineRecords, result.inlineRecords);
 });
