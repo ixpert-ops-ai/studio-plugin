@@ -1524,11 +1524,16 @@ class Stage0ClarificationEngine(
         )
         val complete: (ClarifyIntent) -> ClarifyIntentBuild = { base ->
             // 추출 결과를 기다린다(이미 끝났으면 바로). 실행 중 예외·취소면 기본 제약으로 대체되는 실패 결과로 본다.
+            val reuseStartMs = System.currentTimeMillis()
+            val alreadyDone = extractionFuture.isDone
             val extraction = try {
                 extractionFuture.get()
             } catch (e: Exception) {
                 println(extractFailLogLine("확정 대기 중 예외", null, e))
                 ConstraintExtraction(state.userStatements.map { IntentConstraint(kind = ConstraintKind.OTHER, value = it, rawStatement = it, evidence = null) }, true)
+            } finally {
+                // B-85 7: 같은 Future를 받은 대기 시간과 그때 이미 끝나 있었는지(로그만으로 "추출 1회" 판정)
+                println(ConstraintCacheLog.futureReuseLine(System.currentTimeMillis() - reuseStartMs, alreadyDone))
             }
             val constraints = extraction.constraints + fieldConstraints
             val notice = if (extraction.failed && !constraintFailureNoticeShown) constraintFailureLine() else null

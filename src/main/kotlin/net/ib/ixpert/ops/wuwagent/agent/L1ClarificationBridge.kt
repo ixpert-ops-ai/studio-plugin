@@ -67,6 +67,7 @@ class JcefL1ClarificationBridge(
 
         val future = CompletableFuture<String?>()
         pendingClarifications[projectId] = future
+        val startedMs = System.currentTimeMillis() // B-85 7: 카드를 보낸 뒤 결과가 정해질 때까지의 실측 시간(CardWaitLog)
 
         ApplicationManager.getApplication().invokeLater {
             try {
@@ -89,14 +90,19 @@ class JcefL1ClarificationBridge(
         }
 
         return try {
-            future.get(timeoutSeconds, TimeUnit.SECONDS)
+            val hint = future.get(timeoutSeconds, TimeUnit.SECONDS)
+            // 힌트를 보냈으면 submit(빈 힌트로 "그대로 진행"도 포함), 건너뛰기(취소)는 null이다
+            CardWaitLog.log(CardWaitLog.Card.HINT, turn, if (hint == null) CardWaitLog.Result.SKIP else CardWaitLog.Result.SUBMIT, System.currentTimeMillis() - startedMs)
+            hint
         } catch (e: java.util.concurrent.TimeoutException) {
             // 응답 없이 시간이 지나 힌트 없이 진행한다: 말없이 넘어가지 않게 안내한다
             pendingClarifications.remove(projectId)
+            CardWaitLog.log(CardWaitLog.Card.HINT, turn, CardWaitLog.Result.TIMEOUT, System.currentTimeMillis() - startedMs)
             CardTimeoutNotice.send(project, CardTimeoutNotice.L1, turn)
             null
         } catch (e: Exception) {
             pendingClarifications.remove(projectId)
+            CardWaitLog.log(CardWaitLog.Card.HINT, turn, CardWaitLog.Result.NONE, System.currentTimeMillis() - startedMs)
             null
         }
     }

@@ -31,8 +31,9 @@ class CardTimeoutNoticeB76Test {
         assertTrue(l1.substringAfter("catch (e: java.util.concurrent.TimeoutException) {").substringBefore("} catch (e: Exception)").contains("CardTimeoutNotice.L1"))
         // 범위 선택: 건너뛰기(곧바로 null)는 안내하지 않고 5분을 채운 null만 안내한다
         val scope = src("agent/ScopeSelectionBridge.kt")
-        assertTrue(scope.contains("result == null && System.currentTimeMillis() - startedMs >= 5 * 60 * 1000L - 1000L"))
-        assertTrue(scope.contains("CardTimeoutNotice.send(project, CardTimeoutNotice.SCOPE)"))
+        // B-85 7에서 바뀐 기대값(전: if (result == null && System.currentTimeMillis() - startedMs >= 5분-1초) 안내 / 후: 같은 조건을 waitedMs·timedOut 변수로 먼저 계산해 [CardWait] 로그와 안내가 함께 쓴다. 조건과 동작은 같다)
+        assertTrue(scope.contains("val timedOut = result == null && waitedMs >= 5 * 60 * 1000L - 1000L"))
+        assertTrue(scope.contains("if (timedOut) {") && scope.substringAfter("if (timedOut) {").substringBefore("}").contains("CardTimeoutNotice.send(project, CardTimeoutNotice.SCOPE)"))
         // 건너뛰기(cancel) 경로에는 안내가 없다
         assertTrue(!stage3.substringAfter("fun completeConfirmation").substringBefore("override fun requestConfirmation").contains("CardTimeoutNotice"))
     }

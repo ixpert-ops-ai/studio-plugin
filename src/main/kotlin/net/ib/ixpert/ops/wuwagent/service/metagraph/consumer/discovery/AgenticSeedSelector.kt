@@ -85,7 +85,7 @@ class AgenticSeedSelector(
         // B-84 1: 소요 시간 분리(총 ms, 턴별 LLM ms, 사용자 카드 대기 ms). 로그 전용이다.
         val explorerStartMs = System.currentTimeMillis()
         val turnLlmMs = mutableListOf<Long>()
-        var cardWaitMs = 0L
+        val cardWaitByTurnMs = mutableMapOf<Int, Long>() // B-85 7: 턴마다 힌트 카드를 기다린 시간(합계만 찍으면 여러 카드의 합이 한 카드로 읽힌다)
 
         for (turn in 1..maxTurns) {
             println("\n[AgenticGraphExplorer] === TURN $turn ===")
@@ -263,7 +263,7 @@ class AgenticSeedSelector(
                     domains = distinctDomains,
                     explanation = explanation
                 )
-                cardWaitMs += System.currentTimeMillis() - cardStartMs
+                cardWaitByTurnMs[turn] = (cardWaitByTurnMs[turn] ?: 0L) + (System.currentTimeMillis() - cardStartMs)
                 if (!userHint.isNullOrBlank()) {
                     println("[AgenticGraphExplorer] Turn $turn Clarification received from user: '$userHint'")
                     // 사용자가 새 힌트를 입력하면 이전 턴의 누적 점수를 감쇠하여 새 피드백 탐색 결과가 우선순위를 갖도록 조정
@@ -293,7 +293,7 @@ class AgenticSeedSelector(
         }
 
         val explorerTotalMs = System.currentTimeMillis() - explorerStartMs
-        println("[ExplorerTiming] 총 ${explorerTotalMs}ms, 턴별 LLM ${turnLlmMs}ms, 카드 대기(사용자) ${cardWaitMs}ms, 대기를 뺀 순수 ${explorerTotalMs - cardWaitMs}ms (턴 ${turnLlmMs.size}개)")
+        println(ExplorerTimingLog.line(explorerTotalMs, turnLlmMs, (1..turnLlmMs.size).map { cardWaitByTurnMs[it] ?: 0L }))
         clarificationBridge?.hideClarification()
 
         // "백엔드/서버/API"가 있으면 화면 확장을 하지 않고 "~화면용"은 화면 키워드로 세지 않는다(FrontendKeywordRule)

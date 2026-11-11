@@ -48,7 +48,11 @@ object ScopeSelectionBridge {
             }
         }
         // 사용자의 건너뛰기(취소)는 곧바로 null이 되고, 타임아웃은 5분을 채운 뒤 null이다: 후자일 때만 안내한다
-        if (result == null && System.currentTimeMillis() - startedMs >= 5 * 60 * 1000L - 1000L) {
+        val waitedMs = System.currentTimeMillis() - startedMs
+        val timedOut = result == null && waitedMs >= 5 * 60 * 1000L - 1000L
+        // B-85 7: 패키지 카드 결과 로그(제출 / 건너뛰기 / 시간 초과)
+        CardWaitLog.log(CardWaitLog.Card.PACKAGE, null, if (result != null) CardWaitLog.Result.SUBMIT else if (timedOut) CardWaitLog.Result.TIMEOUT else CardWaitLog.Result.SKIP, waitedMs)
+        if (timedOut) {
             CardTimeoutNotice.send(project, CardTimeoutNotice.SCOPE)
         }
         return result

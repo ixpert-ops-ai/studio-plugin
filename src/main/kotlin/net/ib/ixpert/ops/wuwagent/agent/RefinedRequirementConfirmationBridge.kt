@@ -135,6 +135,8 @@ class JcefRefinedRequirementConfirmationBridge(
         }
 
         private fun logStale(projectId: String, requestId: String?) {
+            // 오래된 응답은 무시했으므로 기다린 시간은 모른다("-")
+            CardWaitLog.log(CardWaitLog.Card.REFINE, null, CardWaitLog.Result.STALE, null)
             println("[RefineGate] stale response ignored projectId=$projectId requestId=${requestId ?: "-"} 기다리는 요청=${registry.pendingRequestId(projectId) ?: (if (registry.isPending(projectId)) "식별자 없음" else "없음")}")
         }
     }
@@ -146,6 +148,7 @@ class JcefRefinedRequirementConfirmationBridge(
         if (project == null) return null
         val projectId = project.locationHash
         val future = registry.register(projectId, requestId)
+        val startedMs = System.currentTimeMillis() // B-85 7: CardWaitLog의 waitedMs(카드를 보낸 뒤 결과가 정해질 때까지)
 
         ApplicationManager.getApplication().invokeLater {
             try {
@@ -166,7 +169,9 @@ class JcefRefinedRequirementConfirmationBridge(
                 registry.complete(projectId, null)
             }
         }
-        return registry.await(projectId, future, timeoutSeconds)
+        val decision = registry.await(projectId, future, timeoutSeconds)
+        CardWaitLog.log(CardWaitLog.Card.REFINE, null, CardWaitLog.refineResult(decision), System.currentTimeMillis() - startedMs)
+        return decision
     }
 
     override fun expireConfirmation() {

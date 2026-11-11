@@ -52,6 +52,7 @@ class JcefStage3ConfirmationBridge(
 
         val future = CompletableFuture<List<String>?>()
         pendingConfirmations[projectId] = future
+        val startedMs = System.currentTimeMillis() // B-85 7: CardWaitLog의 waitedMs
 
         ApplicationManager.getApplication().invokeLater {
             try {
@@ -77,14 +78,19 @@ class JcefStage3ConfirmationBridge(
         }
 
         return try {
-            future.get(timeoutSeconds, TimeUnit.SECONDS)
+            val selected = future.get(timeoutSeconds, TimeUnit.SECONDS)
+            // 선택해서 보냈으면 submit, 건너뛰기(취소)는 null이다
+            CardWaitLog.log(CardWaitLog.Card.STAGE3, null, if (selected == null) CardWaitLog.Result.SKIP else CardWaitLog.Result.SUBMIT, System.currentTimeMillis() - startedMs)
+            selected
         } catch (e: java.util.concurrent.TimeoutException) {
             // 응답 없이 시간이 지나 전체 후보로 진행한다: 말없이 넘어가지 않게 안내한다
             pendingConfirmations.remove(projectId)
+            CardWaitLog.log(CardWaitLog.Card.STAGE3, null, CardWaitLog.Result.TIMEOUT, System.currentTimeMillis() - startedMs)
             CardTimeoutNotice.send(project, CardTimeoutNotice.STAGE3)
             null
         } catch (e: Exception) {
             pendingConfirmations.remove(projectId)
+            CardWaitLog.log(CardWaitLog.Card.STAGE3, null, CardWaitLog.Result.NONE, System.currentTimeMillis() - startedMs)
             null
         }
     }
