@@ -23,7 +23,9 @@ webview/build/
 node_modules
 .graphify/
 bin/
-.claude/
+.claude/*
+# 작업 규칙 강제 훅(heredoc·sed -i·git push 차단)은 추적한다. settings.local.json은 이미 추적 중이다.
+!.claude/hooks/
 .kotlin/
 
 # Test artifacts and caches
