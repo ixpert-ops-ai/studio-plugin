@@ -39,7 +39,8 @@ test('저장 채팅 복원: Turn 번호가 없는 이전 기록 줄은 그대로
   assert.deepEqual(restored[0].inlineRecords, result.inlineRecords);
   // B-85 1 D에서 바뀐 기대값(전: 응답 전에 저장된 카드가 payload 그대로 복원됨 / 후: 눌러도 아무 일도 못 하는 카드 대신 기록 줄로 바뀌고, 확인 필요 문장은 그 기록 줄에 남는다)
   assert.equal(restored.some(m => m.subType === 'refinedConfirmation/request'), false);
-  assert.equal(restored[1].content, '✔ 정제문 확인: 응답 전 종료됨(IDE 재시작)');
+  // B-86 c에서 바뀐 기대값(전: "응답 전 종료됨(IDE 재시작)" / 후: 채팅 전환 뒤 이미 끝난 경우도 있어 중립 문구)
+  assert.equal(restored[1].content, '✔ 정제문 확인: 이전에 끝난 카드(채팅 복원)');
   assert.equal(restored[2].content, `📌 구현 전 확인 필요: ${note}`);
 });
 

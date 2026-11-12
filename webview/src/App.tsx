@@ -17,7 +17,8 @@ import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
-import { appendRecord, completeClarifyCards, finishRefinedCard, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, noticeTurnOf, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
+import { appendRecord, completeClarifyCards, finishRefinedCard, refinedCloseRecords, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, noticeTurnOf, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
+import { CARD_INFO, cardKeyFor, createLiveCards, endCard, kindOfTimeoutNotice, registerCard, type CardKind } from './liveCardsLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
 // Mermaid 글로벌 초기 설정
@@ -58,6 +59,9 @@ interface Message {
   currentStatus?: string;
   // 복원한 채팅에서 확정 뒤 분석이 이어진 Stage 0 카드(읽기 전용 "완료됨"으로 보인다)
   clarifyCompleted?: boolean;
+  // 확인 카드(정제문·범위·힌트·Stage 3) 메시지: 카드 번호(B-86 c, 살아 있는 카드 표의 키)와 사용자가 답했는지(복원할 때 줄을 더하지 않는다)
+  cardKey?: string;
+  cardDone?: boolean;
   // 결과 본문 안에 끼워 넣은 카드 기록 줄(B-82 3-5): at은 본문의 줄 경계 위치
   inlineRecords?: Array<{ at: number; text: string }>;
   stepNotiStatus?: 'started' | 'completed' | 'failed';
@@ -85,6 +89,16 @@ const sendUiLog = (text: string) => {
 let lastStage3Total = 0;
 // 가장 최근 힌트 카드의 Turn 번호(백엔드가 시간 초과 안내에 turn을 싣지 않은 경우의 대체값, B-85 2)
 let lastHintTurn: number | undefined;
+
+// 살아 있는 확인 카드 표(B-86 c). 앱 수준(모듈 수준) 상태라 채팅 전환·컴포넌트 다시 그리기에도 유지된다. 웹뷰를 새로고침하면 사라지고, 그때 복원한 카드는 닫힌다(백엔드의 5분 자동 진행에 맡긴다).
+const liveCards = createLiveCards();
+let cardSeq = 0;
+/** 카드 요청을 받았다: 같은 종류의 이전 번호는 무효가 되고 새 번호를 돌려준다(메시지의 cardKey에 저장한다). */
+const openCard = (kind: CardKind, content: string): string => {
+  const key = cardKeyFor(kind, content, ++cardSeq, Date.now());
+  registerCard(liveCards, kind, key, content);
+  return key;
+};
 
 const CardWaitFrame: React.FC<{ kind: string; msgId: string; children: React.ReactNode }> = ({ kind, msgId, children }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -771,6 +785,9 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   const finishRefined = (cause: 'asis' | 'edited' | 'cancel', editedText?: string) =>
     window.postMessage({ type: 'ai_message', subType: 'refinedConfirmation/finished', id: 'system', cause, editedText }, '*');
 
+  // 힌트·Stage 3 카드에 사용자가 답했다(B-86 c): 살아 있는 카드 표에서 빼고 카드에 cardDone을 표시한다(기록 줄은 record()가 이미 남겼다). 범위·정제문 카드는 카드가 바로 지워진다.
+  const cardAnswered = (kind: 'hint' | 'stage3') => window.postMessage({ type: 'ai_message', subType: 'cardAnswered', id: 'system', kind }, '*');
+
   // 0.6 Scope Selection
   if (msg.subType === 'scopeSelection/showTree') {
     return (
@@ -814,6 +831,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
             }));
           }
           record(hintSkipRecord(hintTurnOf(msg.content)));
+          cardAnswered('hint');
         }}
         onSubmit={(projectId, userHint) => {
           if (window.sendToIde) {
@@ -823,6 +841,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
             }));
           }
           record(hintRecord(userHint));
+          cardAnswered('hint');
         }}
       />
       </CardWaitFrame>
@@ -844,6 +863,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
             }));
           }
           record(stage3SkipRecord(stage3CandidateCount(msg.content)));
+          cardAnswered('stage3');
         }}
         onSubmit={(projectId, selectedPaths) => {
           if (window.sendToIde) {
@@ -853,6 +873,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
             }));
           }
           record(stage3Record(selectedPaths));
+          cardAnswered('stage3');
         }}
       />
       </CardWaitFrame>
@@ -1383,7 +1404,7 @@ function App() {
           setChatId(chatData.id);
           setChatTitle(chatData.title || 'New Chat');
           // 저장 시점에 진행 중이던 표시를 끄고(정지 버튼이 켜져 진행 중인 분석이 없는데 /cancel이 나가는 것을 막는다) 완료된 Stage 0 카드를 표시한다
-          setMessages(restoreMessages(loadedMessages));
+          setMessages(restoreMessages(loadedMessages, liveCards));
           setTimeout(() => { isLoadingChat.current = false; }, 100);
         } catch (err) {
           console.log('[chat_loaded] 파싱 실패:', err);
@@ -1489,6 +1510,8 @@ function App() {
 
       if (data.subType === 'scopeSelection/showTree') {
         if (messageId) {
+          // B-86 c: 카드 번호(같은 종류의 이전 번호는 무효). setMessages 안이 아니라 밖에서 한 번만 만든다
+          const cardKey = openCard('package', data.content);
           setMessages(prev => {
             const filtered = prev.filter(m => m.subType !== 'scopeSelection/showTree');
             return [...filtered, {
@@ -1496,14 +1519,17 @@ function App() {
               role: 'ai',
               subType: 'scopeSelection/showTree',
               content: data.content,
-              isLoading: false
+              isLoading: false,
+              cardKey
             }];
           });
         }
         return;
       }
 
+      // 카드가 끝난 신호(응답·취소·만료·hide)는 지금 표시 중인 채팅과 무관하게 살아 있는 카드 표에서 그 종류의 번호를 뺀다(B-86 c)
       if (data.subType === 'scopeSelection/hideTree') {
+        endCard(liveCards, 'package');
         setMessages(prev => prev.filter(m => m.subType !== 'scopeSelection/showTree'));
         return;
       }
@@ -1511,6 +1537,7 @@ function App() {
       if (data.subType === 'l1Clarification/request') {
         lastHintTurn = hintTurnOf(data.content);
         const uniqueId = `l1_${Date.now()}`;
+        const cardKey = openCard('hint', data.content);
         setMessages(prev => {
           const filtered = prev.filter(m => m.subType !== 'l1Clarification/request');
           return [...filtered, {
@@ -1518,7 +1545,8 @@ function App() {
             role: 'ai',
             subType: 'l1Clarification/request',
             content: data.content,
-            isLoading: false
+            isLoading: false,
+            cardKey
           }];
         });
         return;
@@ -1526,6 +1554,7 @@ function App() {
 
       if (data.subType === 'l1Clarification/hide') {
         lastHintTurn = undefined; // 힌트 카드가 내려갔으면 그 Turn 번호는 더 이상 시간 초과 안내의 대체값이 아니다
+        endCard(liveCards, 'hint');
         setMessages(prev => prev.filter(m => m.subType !== 'l1Clarification/request'));
         return;
       }
@@ -1533,6 +1562,7 @@ function App() {
       if (data.subType === 'stage3Confirmation/request') {
         lastStage3Total = stage3CandidateCount(data.content);
         const uniqueId = `s3_${Date.now()}`;
+        const cardKey = openCard('stage3', data.content);
         setMessages(prev => {
           const filtered = prev.filter(m => m.subType !== 'stage3Confirmation/request');
           return [...filtered, {
@@ -1540,19 +1570,22 @@ function App() {
             role: 'ai',
             subType: 'stage3Confirmation/request',
             content: data.content,
-            isLoading: false
+            isLoading: false,
+            cardKey
           }];
         });
         return;
       }
 
       if (data.subType === 'stage3Confirmation/hide') {
+        endCard(liveCards, 'stage3');
         setMessages(prev => prev.filter(m => m.subType !== 'stage3Confirmation/request'));
         return;
       }
 
       if (data.subType === 'refinedConfirmation/request') {
         const uniqueId = `rc_${Date.now()}`;
+        const cardKey = openCard('refined', data.content);
         setMessages(prev => {
           const filtered = prev.filter(m => m.subType !== 'refinedConfirmation/request');
           return [...filtered, {
@@ -1560,14 +1593,29 @@ function App() {
             role: 'ai',
             subType: 'refinedConfirmation/request',
             content: data.content,
-            isLoading: false
+            isLoading: false,
+            cardKey
           }];
         });
         return;
       }
 
+      // 힌트·Stage 3 카드에 사용자가 답했다(App의 카드 응답 처리가 보낸다): 표에서 빼고 카드에 답함 표시를 한다(복원할 때 카드만 지우고 줄은 더하지 않는다)
+      if (data.subType === 'cardAnswered') {
+        const kind: CardKind | undefined = data.kind === 'hint' || data.kind === 'stage3' ? data.kind : undefined;
+        if (kind) {
+          endCard(liveCards, kind);
+          setMessages(prev => prev.map(m => (m.subType === CARD_INFO[kind].subType ? { ...m, cardDone: true } : m)));
+        }
+        return;
+      }
+
       // 응답 없이 5분이 지나 정제문 그대로 분석이 진행됨: 카드를 즉시 지우고 기록 줄을 남긴다(B-85 1: 전에는 카드를 비활성으로 남겨 대기 타이머가 계속 늘었다)
       if (data.subType === 'refinedConfirmation/expired') {
+        // 채팅 전환 중이라 화면에 카드가 없어도 결과를 기억해 둔다: 복원할 때 이 줄이 실제 결과로 쓰인다(B-86 c)
+        const live = liveCards.live.refined;
+        const p = parsePayload(live?.content ?? '');
+        endCard(liveCards, 'refined', refinedCloseRecords('timeout', p?.refinedRequirement ?? '', p?.decisionNote));
         setMessages(prev => finishRefinedCard(prev, 'timeout', { idBase: `rec_refined_${Date.now()}` }));
         return;
       }
@@ -1575,11 +1623,13 @@ function App() {
       // 사용자의 응답·취소(웹뷰가 스스로 보낸다): 카드를 즉시 지우고 기록 줄을 남긴다. 이어서 오는 백엔드 hide는 카드가 이미 없어 아무 일도 하지 않는다.
       if (data.subType === 'refinedConfirmation/finished') {
         const cause = data.cause === 'edited' || data.cause === 'cancel' ? data.cause : 'asis';
+        endCard(liveCards, 'refined');
         setMessages(prev => finishRefinedCard(prev, cause, { editedText: typeof data.editedText === 'string' ? data.editedText : undefined, idBase: `rec_refined_${Date.now()}` }));
         return;
       }
 
       if (data.subType === 'refinedConfirmation/hide') {
+        endCard(liveCards, 'refined');
         setMessages(prev => prev.filter(m => m.subType !== 'refinedConfirmation/request'));
         return;
       }
@@ -1591,6 +1641,9 @@ function App() {
           // B-82 3-5: 기록에 "자동 진행"이 들어 있으므로 같은 뜻의 안내 줄("응답이 없어 … 진행했습니다.")은 따로 보이지 않는다.
           // B-85 2: 백엔드가 안내에 실은 turn을 우선하고, 없으면 마지막 힌트 카드 payload의 turn, 그래도 없으면 이전 문구
           const rec = timeoutRecord(data.content, lastStage3Total, noticeTurnOf(data.turn) ?? lastHintTurn);
+          // B-86 c: 시간 초과로 끝난 카드는 번호를 표에서 빼고 이 기록 줄을 결과로 기억한다(채팅을 전환해 두었다가 돌아와도 실제 결과가 보이게)
+          const timedOutKind = kindOfTimeoutNotice(data.content);
+          if (timedOutKind) endCard(liveCards, timedOutKind, rec ? [rec] : undefined);
           if (rec) setMessages(prev => appendRecord(prev, `rec_${Date.now()}`, rec));
           else setMessages(prev => [...prev, makeNoticeBubble(data.content, Date.now(), Math.random().toString(36).substring(2, 7)) as Message]);
         }

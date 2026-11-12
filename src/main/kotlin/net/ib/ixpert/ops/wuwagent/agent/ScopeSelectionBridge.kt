@@ -16,6 +16,29 @@ object ScopeSelectionBridge {
     private val scopeSelectionContinuations = ConcurrentHashMap<String, Continuation<ScopeSelectionResult?>>()
     private val dependencyContinuations = ConcurrentHashMap<String, Continuation<List<String>?>>()
 
+    /**
+     * 블록이 어떻게 끝나든(값, null(건너뛰기·시간 초과), 예외, 코루틴 취소) 마지막에 [hide]를 부른다(B-86 c (i)). Stage 3 카드의 `finally { hideConfirmation() }`와 같은 방식이다.
+     * hide가 던져도 결과는 그대로다.
+     */
+    internal suspend fun <T> hideAfter(hide: () -> Unit, block: suspend () -> T): T {
+        try {
+            return block()
+        } finally {
+            try { hide() } catch (e: Exception) { /* 화면 정리 실패는 진행에 영향 없음 */ }
+        }
+    }
+
+    /** 패키지 카드를 화면에서 내린다(웹뷰가 scopeSelection/hideTree로 카드를 지운다). */
+    private fun sendHideTree(project: Project) {
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                net.ib.ixpert.ops.wuwagent.ui.bridge.JcefBridge.getInstance(project).sendMessage("scopeSelection/hideTree", "", "system")
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
+
     suspend fun requestScopeSelection(
         project: Project?,
         tree: List<DirectoryNode>,
@@ -23,6 +46,11 @@ object ScopeSelectionBridge {
         onChunk: ((String) -> Unit)?
     ): ScopeSelectionResult? {
         if (project == null) return null
+        // 제출·건너뛰기·시간 초과·오류 모두 끝에서 카드를 내린다(전에는 시간 초과나 분석이 끝난 뒤에도 카드가 남아 타이머가 계속 늘었다)
+        return hideAfter({ sendHideTree(project) }) { requestScopeSelectionBody(project, tree, config) }
+    }
+
+    private suspend fun requestScopeSelectionBody(project: Project, tree: List<DirectoryNode>, config: ScopeConfig): ScopeSelectionResult? {
         val projectId = project.locationHash
 
         val startedMs = System.currentTimeMillis()

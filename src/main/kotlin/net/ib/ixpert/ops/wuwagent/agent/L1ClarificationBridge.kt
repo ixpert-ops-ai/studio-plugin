@@ -99,6 +99,8 @@ class JcefL1ClarificationBridge(
             pendingClarifications.remove(projectId)
             CardWaitLog.log(CardWaitLog.Card.HINT, turn, CardWaitLog.Result.TIMEOUT, System.currentTimeMillis() - startedMs)
             CardTimeoutNotice.send(project, CardTimeoutNotice.L1, turn)
+            // B-86 c (ii): 시간 초과로 넘어간 힌트 카드는 탐색이 끝날 때까지 남지 않게 바로 내린다(전에는 약 85초 남았다)
+            hideClarification()
             null
         } catch (e: Exception) {
             pendingClarifications.remove(projectId)

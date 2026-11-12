@@ -825,6 +825,100 @@ try {
   record(50, '복원 순서: 저장된 inlineRecords가 복원 화면에서도 같은 자리에 보이고(본문 → 범위 기록 → 본문 → Stage 3 기록 → 표), 정지 버튼은 없다',
     Array.isArray(o49r) && o49r.map(x => x.startsWith('REC:✔ 읽을') ? 'R1' : x.startsWith('REC:✔ 최종') ? 'R2' : x).join(',') === 'MD,R1,MD,R2,TABLE' && (await evaluate(`document.querySelectorAll('button.btn-icon.stop').length`)) === 0, JSON.stringify(o49r));
 
+  // 51~55) 살아 있는 확인 카드 표(B-86 c): 채팅을 전환했다가 돌아와도 대기 중인 카드는 남고, 끝난 카드는 기록 줄이 되며, 번호가 없거나 새로고침한 뒤에는 닫힌다.
+  // 저장된 채팅은 웹뷰가 자동 저장으로 보낸 /saveChat 본문을 그대로 다시 불러온다(실제 채팅 전환과 같은 경로: chat_loaded → restoreMessages).
+  const U_C = id => ({ id, role: 'user', content: '/clarify 시험' });
+  const savedOf = chatId => evaluate(`(()=>{const l=window.__sent.map(x=>JSON.parse(x)).filter(o=>o.command==='/saveChat'&&o.id===${JSON.stringify(chatId)}); return l.length?JSON.parse(l[l.length-1].messages):null})()`);
+  const CARD_SEL = k => `document.querySelectorAll('[data-card-kind="${k}"]').length`;
+  const waitSaved = async (chatId, pred) => { for (let i = 0; i < 40; i++) { const m = await savedOf(chatId); if (m && pred(m)) return m; await sleep(100); } return await savedOf(chatId); };
+
+  // 51) 채팅 전환 후 복귀: 힌트 카드가 대기 중인 채팅 A를 떠났다가 돌아오면 카드가 그대로 남고(활성), 다른 채팅에는 카드가 없고, "끝난 카드" 줄도 없다
+  await loadChat('chat_c1', [U_C('u51')]);
+  await sleep(300);
+  await l1Req();
+  await waitFor(CARD_SEL('l1') + '===1');
+  const saved51 = await waitSaved('chat_c1', m => m.some(x => x.subType === 'l1Clarification/request'));
+  const key51 = saved51?.find(x => x.subType === 'l1Clarification/request')?.cardKey;
+  await loadChat('chat_c2', [U_C('u51b')]);
+  await sleep(300);
+  const inOther51 = await evaluate(`${CARD_SEL('l1')}`);
+  await loadChat('chat_c1', saved51);
+  await sleep(400);
+  const back51 = await evaluate(`({card:${CARD_SEL('l1')}, recs:${RECS}.filter(r=>r.includes('이전에 끝난 카드'))})`);
+  await shot('51-switch-and-return');
+  record(51, '채팅 전환 후 복귀: 대기 중인 힌트 카드는 저장된 카드 번호(cardKey)를 갖고, 다른 채팅에서는 보이지 않으며, 돌아오면 카드 1개가 그대로 있고 "이전에 끝난 카드" 줄은 없다',
+    typeof key51 === 'string' && key51.startsWith('hint:') && inOther51 === 0 && back51.card === 1 && back51.recs.length === 0, JSON.stringify({ key51, inOther51, back51 }));
+
+  // 52) 채팅을 떠나 있는 동안 패키지 카드가 시간 초과로 끝남: 돌아오면 카드는 없고 그때의 실제 결과(시간 초과 기록)가 1줄 보인다(떠나 있던 채팅에는 카드가 없다)
+  await loadChat('chat_c3', [U_C('u52')]);
+  await sleep(300);
+  await post({ type: 'ai_message', subType: 'scopeSelection/showTree', messageId: 'system', content: JSON.stringify(scopePayload) });
+  await waitFor(CARD_SEL('scope') + '===1');
+  const saved52 = await waitSaved('chat_c3', m => m.some(x => x.subType === 'scopeSelection/showTree'));
+  await loadChat('chat_c4', [U_C('u52b')]);
+  await sleep(300);
+  await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_c4', content: '응답이 없어 전체 프로젝트로 진행했습니다.' });
+  await post({ type: 'ai_message', subType: 'scopeSelection/hideTree', messageId: 'system', content: '' });
+  await sleep(200);
+  await loadChat('chat_c3', saved52);
+  await sleep(400);
+  const back52 = await evaluate(`({card:${CARD_SEL('scope')}, recs:${RECS}})`);
+  await shot('52-ended-while-away');
+  record(52, '떠나 있는 동안 끝난 카드: 패키지 카드가 시간 초과로 끝난 뒤 돌아오면 카드 0개, 기록 줄은 "✔ 읽을 범위 선택: 전체(5분 응답 없음, 자동 진행)" 1줄(중립 문구 없음)',
+    back52.card === 0 && JSON.stringify(back52.recs) === JSON.stringify(['✔ 읽을 범위 선택: 전체(5분 응답 없음, 자동 진행)']), JSON.stringify(back52));
+
+  // 53) 결과를 모르는 끝난 카드(hide만 받음): 중립 문구 1줄. 54) 번호가 없는 예전 저장 채팅의 카드: 닫히고 중립 문구 1줄
+  await loadChat('chat_c5', [U_C('u53')]);
+  await sleep(300);
+  await l1Req();
+  await waitFor(CARD_SEL('l1') + '===1');
+  const saved53 = await waitSaved('chat_c5', m => m.some(x => x.subType === 'l1Clarification/request'));
+  await loadChat('chat_c6', [U_C('u53b')]);
+  await sleep(300);
+  await post({ type: 'ai_message', subType: 'l1Clarification/hide', messageId: 'system', content: '' });
+  await loadChat('chat_c5', saved53);
+  await sleep(400);
+  const back53 = await evaluate(`({card:${CARD_SEL('l1')}, recs:${RECS}})`);
+  record(53, '결과를 모르는 끝난 카드: hide만 받은 힌트 카드는 돌아오면 카드 0개, 기록 줄은 "✔ 탐색 힌트: 이전에 끝난 카드(채팅 복원)" 1줄',
+    back53.card === 0 && JSON.stringify(back53.recs) === JSON.stringify(['✔ 탐색 힌트: 이전에 끝난 카드(채팅 복원)']), JSON.stringify(back53));
+  await loadChat('chat_c7', [U_C('u54'), { id: 'old54', role: 'ai', subType: 'stage3Confirmation/request', isLoading: false, content: JSON.stringify({ projectId: 'p1', candidates: [{ order: 1, path: 'src/main/java/a/C1.java', type: 'SERVICE', description: '' }] }) }]);
+  await sleep(400);
+  const back54 = await evaluate(`({card:${CARD_SEL('stage3')}, recs:${RECS}})`);
+  record(54, '예전 저장 채팅(카드 번호 없음): Stage 3 카드는 닫히고 "✔ 최종 검증 대상 선택: 이전에 끝난 카드(채팅 복원)" 1줄',
+    back54.card === 0 && JSON.stringify(back54.recs) === JSON.stringify(['✔ 최종 검증 대상 선택: 이전에 끝난 카드(채팅 복원)']), JSON.stringify(back54));
+
+  // 54b) 이미 답한 카드(건너뛰기)의 기록 줄이 있으면 복원할 때 줄을 더하지 않는다
+  await loadChat('chat_c8', [U_C('u54b')]);
+  await sleep(300);
+  await l1Req();
+  await waitFor(BTN('건너뛰기 (자율 탐색)'));
+  await click(BTN('건너뛰기 (자율 탐색)'), '힌트 건너뛰기(복원 중복 확인)');
+  const saved54b = await waitSaved('chat_c8', m => m.some(x => x.subType === 'l1Clarification/request' && x.cardDone === true) && m.some(x => x.subType === 'choice_record'));
+  await loadChat('chat_c2', [U_C('u54c')]);
+  await sleep(300);
+  await loadChat('chat_c8', saved54b);
+  await sleep(400);
+  const back54b = await evaluate(`({card:${CARD_SEL('l1')}, recs:${RECS}})`);
+  record('54b', '이미 답한 카드: 건너뛰기 뒤 저장한 채팅을 복원하면 카드는 없고 기록 줄은 "✔ Turn 1 탐색 힌트: 건너뜀(자율 탐색)" 1줄뿐이다(중립 문구로 중복되지 않는다)',
+    back54b.card === 0 && JSON.stringify(back54b.recs) === JSON.stringify(['✔ Turn 1 탐색 힌트: 건너뜀(자율 탐색)']), JSON.stringify(back54b));
+
+  // 55) 웹뷰 새로고침: 카드 번호가 있는 저장 채팅이라도 표가 사라진 뒤에는 닫힌다(백엔드의 5분 자동 진행에 맡긴다)
+  await loadChat('chat_c9', [U_C('u55')]);
+  await sleep(300);
+  await post({ type: 'ai_message', subType: 'scopeSelection/showTree', messageId: 'system', content: JSON.stringify(scopePayload) });
+  await waitFor(CARD_SEL('scope') + '===1');
+  const saved55 = await waitSaved('chat_c9', m => m.some(x => x.subType === 'scopeSelection/showTree'));
+  const hadKey55 = typeof saved55?.find(x => x.subType === 'scopeSelection/showTree')?.cardKey === 'string';
+  await send('Page.navigate', { url: `http://127.0.0.1:${PORT_WEB}/` });
+  for (let i = 0; i < 80; i++) { if (await evaluate(`document.readyState==='complete' && (document.querySelector('#root')?.children.length||0)>0`)) break; await sleep(250); }
+  await sleep(500);
+  await loadChat('chat_c9', saved55);
+  await sleep(400);
+  const back55 = await evaluate(`({card:${CARD_SEL('scope')}, recs:${RECS}})`);
+  await shot('55-after-reload');
+  record(55, '새로고침 뒤 복원: 카드 번호가 있는 저장 채팅의 패키지 카드도 닫히고 "✔ 읽을 범위 선택: 이전에 끝난 카드(채팅 복원)" 1줄',
+    hadKey55 && back55.card === 0 && JSON.stringify(back55.recs) === JSON.stringify(['✔ 읽을 범위 선택: 이전에 끝난 카드(채팅 복원)']), JSON.stringify({ hadKey55, back55 }));
+
   const errors = await evaluate(`window.__errors || null`);
   fs.writeFileSync(OUT + '/results.json', JSON.stringify({ results, observations, shots, clicks, errors }, null, 1));
   const md = ['| # | 항목 | 결과 | 근거 |', '|---|---|---|---|', ...results.map(r => `| ${r.id} | ${r.item} | ${r.ok ? '됨' : '**안 됨**'} | ${String(r.evidence).replace(/\|/g, '\\|').slice(0, 300)} |`)].join('\n');

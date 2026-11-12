@@ -70,11 +70,12 @@ test('복원: 예전 형식으로 expired가 저장된 카드는 그 자리에�
   assert.deepEqual(texts(out), ['✔ 정제문 확인: 응답 없음(5분, 정제문 그대로 진행)', `↳ 분석에 쓴 정제문: ${SHOWN}`, `📌 구현 전 확인 필요: ${NOTE}`]);
 });
 
-test('복원: 응답 전에 저장된 활성 카드는 "응답 전 종료됨(IDE 재시작)" 기록 줄이 되고 정제문 인용은 없다', () => {
+// B-86 c에서 바뀐 기대값(전: "응답 전 종료됨(IDE 재시작)" / 후: 살아 있는 카드 표에 없는 저장 카드는 중립 문구 "이전에 끝난 카드(채팅 복원)")
+test('복원: 살아 있는 카드가 아닌 저장 카드는 "이전에 끝난 카드(채팅 복원)" 기록 줄이 되고 정제문 인용은 없다', () => {
   const saved: Msg[] = [{ id: 'u1', role: 'user', content: '/clarify' }, card()];
   const out = restoreMessages(saved);
   assert.equal(out.some(m => m.subType === 'refinedConfirmation/request'), false);
-  assert.deepEqual(texts(out), ['✔ 정제문 확인: 응답 전 종료됨(IDE 재시작)', `📌 구현 전 확인 필요: ${NOTE}`]);
+  assert.deepEqual(texts(out), ['✔ 정제문 확인: 이전에 끝난 카드(채팅 복원)', `📌 구현 전 확인 필요: ${NOTE}`]);
   // 카드가 없는 저장 채팅은 그대로(같은 내용)
   const plain: Msg[] = [{ id: 'u1', role: 'user', content: '/clarify' }, { id: 'rec_1', role: 'ai', subType: 'choice_record', content: '✔ 정제문 확인: 이대로 분석' }];
   assert.deepEqual(restoreMessages(plain), plain);
@@ -85,5 +86,5 @@ test('기록 줄 문구: 이유 5가지', () => {
   assert.equal(refinedCloseRecords('edited', 'x', undefined)[0], '✔ 정제문 확인: 수정한 내용으로 분석');
   assert.equal(refinedCloseRecords('cancel', 'x', undefined)[0], '✔ 정제문 확인: 취소');
   assert.equal(refinedCloseRecords('timeout', 'x', undefined)[0], '✔ 정제문 확인: 응답 없음(5분, 정제문 그대로 진행)');
-  assert.equal(refinedCloseRecords('orphan', 'x', undefined)[0], '✔ 정제문 확인: 응답 전 종료됨(IDE 재시작)');
+  assert.equal(refinedCloseRecords('orphan', 'x', undefined)[0], '✔ 정제문 확인: 이전에 끝난 카드(채팅 복원)');
 });
