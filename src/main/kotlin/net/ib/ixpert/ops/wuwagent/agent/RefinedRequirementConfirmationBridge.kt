@@ -136,7 +136,7 @@ class JcefRefinedRequirementConfirmationBridge(
 
         private fun logStale(projectId: String, requestId: String?) {
             // 오래된 응답은 무시했으므로 기다린 시간은 모른다("-")
-            CardWaitLog.log(CardWaitLog.Card.REFINE, null, CardWaitLog.Result.STALE, null)
+            CardWaitLog.log(CardWaitLog.Card.REFINE, null, CardWaitLog.Result.STALE, null, requestId)
             println("[RefineGate] stale response ignored projectId=$projectId requestId=${requestId ?: "-"} 기다리는 요청=${registry.pendingRequestId(projectId) ?: (if (registry.isPending(projectId)) "식별자 없음" else "없음")}")
         }
     }
@@ -163,16 +163,18 @@ class JcefRefinedRequirementConfirmationBridge(
                 if (!decisionNote.isNullOrBlank()) payload["decisionNote"] = decisionNote
                 // 요청 식별자(B-85 1 F): 웹뷰가 응답에 되돌려 보내고, 지금 기다리는 요청과 다르면 무시한다
                 if (!requestId.isNullOrBlank()) payload["requestId"] = requestId
-                println("[RefineGate] rid=${Integer.toHexString(originalRequirement.hashCode())} 카드 요청 전송 projectId=$projectId 정제문 ${refinedRequirement.length}자 (${ConfirmClock.sinceText()})")
+                println(RefineGateLog.requestSentLine(Integer.toHexString(originalRequirement.hashCode()), projectId, refinedRequirement.length, ConfirmClock.sinceText(), requestId))
                 bridge.sendMessage("refinedConfirmation/request", Gson().toJson(payload), "system")
             } catch (e: Exception) {
                 registry.complete(projectId, null)
             }
         }
         val decision = registry.await(projectId, future, timeoutSeconds)
-        CardWaitLog.log(CardWaitLog.Card.REFINE, null, CardWaitLog.refineResult(decision), System.currentTimeMillis() - startedMs)
+        CardWaitLog.log(CardWaitLog.Card.REFINE, null, CardWaitLog.refineResult(decision), System.currentTimeMillis() - startedMs, requestId)
         return decision
     }
+
+    override fun requestIdForLog(): String? = requestId
 
     override fun expireConfirmation() {
         if (project == null) return

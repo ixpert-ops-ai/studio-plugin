@@ -35,6 +35,9 @@ fun interface RefinedRequirementConfirmationBridge {
     fun requestConfirmation(originalRequirement: String, refinedRequirement: String, decisionNote: String?): RefinedConfirmationDecision? =
         requestConfirmation(originalRequirement, refinedRequirement)
 
+    /** 로그 전용: 이 확인 카드의 요청 식별자(rid:messageId). 모르면 null. [RefinedRequirementGate.apply]의 "응답 결과" 줄에 붙는다. */
+    fun requestIdForLog(): String? = null
+
     /** 확인 카드를 화면에서 내린다. */
     fun hideConfirmation() {}
 
@@ -73,7 +76,9 @@ object RefinedRequirementGate {
         } catch (e: Exception) {
             null
         }
-        println("[RefineGate] rid=${Integer.toHexString(intent.originalRequirement.hashCode())} 응답 결과: ${when (decision) { null -> "결정 없음(정제문 그대로 진행)"; RefinedConfirmationDecision.Proceed -> "이대로 분석"; is RefinedConfirmationDecision.ProceedEdited -> "수정(" + decision.text.trim().length + "자)"; RefinedConfirmationDecision.Cancel -> "취소"; RefinedConfirmationDecision.Superseded -> "새 /clarify가 대신함(분석 안 함)"; RefinedConfirmationDecision.TimedOut -> "시간 초과(정제문 그대로 진행)" }}")
+        println(net.ib.ixpert.ops.wuwagent.agent.RefineGateLog.responseLine(
+            Integer.toHexString(intent.originalRequirement.hashCode()), decision, try { bridge.requestIdForLog() } catch (e: Exception) { null }
+        ))
         try {
             // 시간 초과로 진행하면 카드를 지우지 않고 비활성으로 바꿔 이유를 보인다. 그 밖에는 카드를 내린다.
             if (decision == RefinedConfirmationDecision.TimedOut) bridge.expireConfirmation() else bridge.hideConfirmation()

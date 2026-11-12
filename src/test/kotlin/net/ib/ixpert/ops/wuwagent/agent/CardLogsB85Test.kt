@@ -71,10 +71,51 @@ class CardLogsB85Test {
         assertTrue(s3.contains("CardWaitLog.Card.STAGE3") && s3.contains("CardWaitLog.Result.TIMEOUT"))
         val refine = src("RefinedRequirementConfirmationBridge.kt")
         assertTrue(refine.contains("CardWaitLog.log(CardWaitLog.Card.REFINE, null, CardWaitLog.refineResult(decision)"))
-        assertTrue("오래된 응답은 stale로 남긴다", refine.contains("CardWaitLog.log(CardWaitLog.Card.REFINE, null, CardWaitLog.Result.STALE, null)"))
+        assertTrue("오래된 응답은 stale로 남긴다(응답이 실은 requestId와 함께)", refine.contains("CardWaitLog.log(CardWaitLog.Card.REFINE, null, CardWaitLog.Result.STALE, null, requestId)"))
         // 기존 [CardTimeout]·[RefineGate] 줄은 그대로 남는다
         assertTrue(src("CardTimeoutNotice.kt").contains("[CardTimeout] 5분 응답 없음 → 자동 진행: \$text"))
         assertTrue(refine.contains("[RefineGate] stale response ignored"))
+    }
+
+    // ── requestId (B-85 후속 4) ──
+    @Test
+    fun q1_theRefineCardLinesCarryTheRequestId() {
+        val rid = "180f0685:analyze_1794457545812"
+        // [CardWait]: 정제문 카드는 끝에 requestId, 다른 카드와 식별자 없음은 이전 형식 그대로
+        assertEquals("[CardWait] card=refine turn=- result=timeout waitedMs=300025 requestId=$rid", CardWaitLog.line(Card.REFINE, null, Result.TIMEOUT, 300025, rid))
+        assertEquals("[CardWait] card=refine turn=- result=stale waitedMs=- requestId=$rid", CardWaitLog.line(Card.REFINE, null, Result.STALE, null, rid))
+        assertEquals("[CardWait] card=refine turn=- result=submit waitedMs=900", CardWaitLog.line(Card.REFINE, null, Result.SUBMIT, 900, null))
+        assertEquals("[CardWait] card=refine turn=- result=submit waitedMs=900", CardWaitLog.line(Card.REFINE, null, Result.SUBMIT, 900, "  "))
+        assertEquals("[CardWait] card=hint turn=1 result=timeout waitedMs=300013", CardWaitLog.line(Card.HINT, 1, Result.TIMEOUT, 300013))
+        // [RefineGate] 요청 전송
+        assertEquals(
+            "[RefineGate] rid=180f0685 카드 요청 전송 projectId=fd533872 정제문 97자 (confirm 후 6424 ms) requestId=$rid",
+            RefineGateLog.requestSentLine("180f0685", "fd533872", 97, "confirm 후 6424 ms", rid)
+        )
+        assertEquals(
+            "[RefineGate] rid=180f0685 카드 요청 전송 projectId=fd533872 정제문 98자 (confirm 후 6680 ms) requestId=-",
+            RefineGateLog.requestSentLine("180f0685", "fd533872", 98, "confirm 후 6680 ms", null)
+        )
+        // [RefineGate] 응답 결과: 기존 문구는 그대로이고 끝에 requestId
+        assertEquals("[RefineGate] rid=180f0685 응답 결과: 시간 초과(정제문 그대로 진행) requestId=$rid", RefineGateLog.responseLine("180f0685", RefinedConfirmationDecision.TimedOut, rid))
+        assertEquals("[RefineGate] rid=180f0685 응답 결과: 이대로 분석 requestId=$rid", RefineGateLog.responseLine("180f0685", RefinedConfirmationDecision.Proceed, rid))
+        assertEquals("[RefineGate] rid=180f0685 응답 결과: 수정(2자) requestId=$rid", RefineGateLog.responseLine("180f0685", RefinedConfirmationDecision.ProceedEdited(" 고친 "), rid))
+        assertEquals("[RefineGate] rid=180f0685 응답 결과: 취소 requestId=-", RefineGateLog.responseLine("180f0685", RefinedConfirmationDecision.Cancel, null))
+        assertEquals("[RefineGate] rid=180f0685 응답 결과: 새 /clarify가 대신함(분석 안 함) requestId=$rid", RefineGateLog.responseLine("180f0685", RefinedConfirmationDecision.Superseded, rid))
+        assertEquals("[RefineGate] rid=180f0685 응답 결과: 결정 없음(정제문 그대로 진행) requestId=-", RefineGateLog.responseLine("180f0685", null, null))
+    }
+
+    @Test
+    fun q2_theBridgeAndGateUseThePureFunctionsAndTheSameRequestId() {
+        val dir = "src/main/kotlin/net/ib/ixpert/ops/wuwagent/agent/"
+        val refine = File(dir + "RefinedRequirementConfirmationBridge.kt").readText(Charsets.UTF_8)
+        assertTrue(refine.contains("println(RefineGateLog.requestSentLine("))
+        assertTrue("결과 줄도 같은 requestId", refine.contains("CardWaitLog.refineResult(decision), System.currentTimeMillis() - startedMs, requestId)"))
+        assertTrue("stale 줄도 같은 형식", refine.contains("CardWaitLog.Result.STALE, null, requestId)"))
+        assertTrue(refine.contains("override fun requestIdForLog(): String? = requestId"))
+        val gate = File(dir + "clarify/RefinedRequirementGate.kt").readText(Charsets.UTF_8)
+        assertTrue(gate.contains("RefineGateLog.responseLine("))
+        assertTrue(gate.contains("bridge.requestIdForLog()"))
     }
 
     // ── [ExplorerTiming] ──

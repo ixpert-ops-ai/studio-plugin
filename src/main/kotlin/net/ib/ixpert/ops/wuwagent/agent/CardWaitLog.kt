@@ -8,6 +8,7 @@ package net.ib.ixpert.ops.wuwagent.agent
  * - result: submit = 제출, edit = 수정해서 제출(정제문), skip = 건너뛰기, cancel = 취소(정제문), timeout = 5분 자동 진행, stale = 기다리는 요청과 달라 무시한 오래된 응답(정제문),
  *   superseded = 새 /clarify가 대신함(정제문), none = 결정 없이 끝남(전송 실패 등).
  * - waitedMs: 카드를 보낸 뒤 결과가 정해질 때까지의 실측 시간. 모르면 "-".
+ * - requestId(정제문 카드만, 끝에 선택): `<rid>:<messageId>`. [RefineGateLog]의 요청·응답 줄과 같은 값이다.
  * 기존 [CardTimeout]·[RefineGate] 줄은 그대로 남고 이 줄이 더해진다. 형식은 시험이 고정한다(순수 함수 [line]).
  */
 object CardWaitLog {
@@ -17,10 +18,12 @@ object CardWaitLog {
         SUBMIT("submit"), EDIT("edit"), SKIP("skip"), CANCEL("cancel"), TIMEOUT("timeout"), STALE("stale"), SUPERSEDED("superseded"), NONE("none")
     }
 
-    fun line(card: Card, turn: Int?, result: Result, waitedMs: Long?): String =
-        "[CardWait] card=${card.label} turn=${turn?.takeIf { it > 0 }?.toString() ?: "-"} result=${result.label} waitedMs=${waitedMs?.takeIf { it >= 0 }?.toString() ?: "-"}"
+    /** requestId(정제문 카드: `<rid>:<messageId>`)가 있으면 끝에 ` requestId=<값>`을 붙인다. 다른 카드와 식별자를 모르는 경우는 이전 형식 그대로다. */
+    fun line(card: Card, turn: Int?, result: Result, waitedMs: Long?, requestId: String? = null): String =
+        "[CardWait] card=${card.label} turn=${turn?.takeIf { it > 0 }?.toString() ?: "-"} result=${result.label} waitedMs=${waitedMs?.takeIf { it >= 0 }?.toString() ?: "-"}" +
+            (requestId?.takeIf { it.isNotBlank() }?.let { " requestId=$it" } ?: "")
 
-    fun log(card: Card, turn: Int?, result: Result, waitedMs: Long?) = println(line(card, turn, result, waitedMs))
+    fun log(card: Card, turn: Int?, result: Result, waitedMs: Long?, requestId: String? = null) = println(line(card, turn, result, waitedMs, requestId))
 
     /** 정제문 확인의 결정을 로그 결과값으로: 이대로 = submit, 수정 = edit, 취소 = cancel, 5분 = timeout, 새 /clarify가 대신함 = superseded, 결정 없음 = none. */
     fun refineResult(decision: net.ib.ixpert.ops.wuwagent.agent.clarify.RefinedConfirmationDecision?): Result = when (decision) {
