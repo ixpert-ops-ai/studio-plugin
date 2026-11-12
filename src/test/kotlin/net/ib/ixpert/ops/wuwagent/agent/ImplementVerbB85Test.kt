@@ -98,6 +98,19 @@ class ImplementVerbB85Test {
         assertEquals("SurveyDaoImpl에서 쿼리를 구현한다. (SurveyDaoImpl 규칙 판정: 수정 불필요)", ReasonGuard.annotateText("SurveyDaoImpl에서 쿼리를 구현한다.", ctx))
     }
 
+    // "구현 필요 없", "구현할 필요 없"은 낱말 자체에서 뺐다. 요약(G4)의 부정어 판정은 이름 앞뒤 25자라서, 이름과 먼 곳의 "구현 필요 없다"는 부정어 판정으로는 못 잡는다.
+    @Test
+    fun a6_noNeedToImplementIsNotAVerbEvenFarFromTheName() {
+        val filler = "이 요청은 조회 결과를 그대로 돌려주는 경로라서 기존 코드가 이미 같은 값을 반환하고 있고 별도로 손볼 부분은 없으며"
+        val ctx = ReasonGuard.Context(null, null, listOf("SurveyDaoImpl"))
+        for (tail in listOf("구현 필요 없다", "구현할 필요 없다")) {
+            val s = "SurveyDaoImpl은 $filler 새 쿼리를 $tail."
+            // 이름과 부정어("없")가 25자보다 멀다(부정어 판정만으로는 표시가 붙는다는 전제)
+            assertTrue(tail, s.indexOf("없다") - (s.indexOf("SurveyDaoImpl") + "SurveyDaoImpl".length) > 25)
+            assertEquals(s, ReasonGuard.annotateText(s, ctx))
+        }
+    }
+
     @Test
     fun a5_negatedOrNonVerbUsesOfImplementChangeNothing() {
         val optionalRow = ReasonGuard.Context(null, PathRoles.Role.OPTIONAL)
