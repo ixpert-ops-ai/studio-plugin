@@ -1,0 +1,34 @@
+{
+  "source": "11-11 09:20 IDE 결과(chat_1794355144871): 요약 두 줄은 저장된 채팅의 원문, 표는 네 행의 경로·작업유형·결정적 부분(LLM 사유 제외)",
+  "sr": "설문 응답 테이블에 이메일 컬럼을 추가하여 수집하고, 관리자 설문 상세 조회 시 응답자 이메일을 앞 2자리와 도메인만 노출되도록 마스킹 처리하여 백엔드에서 반환하도록 수정한다.",
+  "summary": [
+    "1) 이메일 수집·마스킹은 SurveyDto 필드 추가, SurveyServiceImpl 마스킹, SurveyDaoImpl·sql_survey.xml 쿼리 수정으로 충분.",
+    "2) 인터페이스(SurveyService/SurveyDao)는 시그니처 변경 없이 구현체만 수정 가능, Address·User·Review·ClosingLink·SurveyQImg는 요구사항과 무관."
+  ],
+  "rows": [
+    {
+      "n": 1,
+      "path": "src/main/java/net/infobank/iss/survey/service/SurveyServiceImpl.java",
+      "type": "수정",
+      "deterministic": "**필수** · SR이 값을 가공(마스킹)하므로 그 처리가 들어갈 비즈니스 로직 위치입니다"
+    },
+    {
+      "n": 2,
+      "path": "src/main/java/net/infobank/iss/survey/dto/SurveyDto.java",
+      "type": "수정",
+      "deterministic": "**필수** · 매퍼가 SurveyDto로 결과를 받으므로 응답 항목은 이 DTO의 필드로 추가됩니다"
+    },
+    {
+      "n": 3,
+      "path": "src/main/java/net/infobank/iss/sql/mysql/sql_survey.xml",
+      "type": "수정",
+      "deterministic": "**필수** · 매퍼 resultType/parameterType이 SurveyDto라서 응답 항목 추가는 SELECT 컬럼 추가가 필요합니다"
+    },
+    {
+      "n": 4,
+      "path": "src/main/java/net/infobank/iss/survey/dao/SurveyDaoImpl.java",
+      "type": "확인",
+      "deterministic": "**선택(경로 통과)** · 기존 메서드(selectResultList, selectSurveyList 등)가 SurveyDto를 그대로 받거나 반환합니다. 시그니처가 바뀌지 않으면 수정할 필요가 없습니다"
+    }
+  ]
+}

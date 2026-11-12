@@ -29,16 +29,36 @@ class SummaryRoleMarkB85Test {
     private fun mark(text: String, files: List<String> = optional, j: ResponseWritePath.Judgement? = null) =
         ReasonGuard.annotateText(text, ReasonGuard.Context(j, null, files))
 
-    // 11-11 09:20 요약의 실제 두 줄
-    private val line1 = "1) 이메일 수집·마스킹은 SurveyDto 필드 추가, SurveyServiceImpl 마스킹, SurveyDaoImpl·sql_survey.xml 쿼리 수정으로 충분."
-    private val line2 = "2) 인터페이스(SurveyService/SurveyDao)는 시그니처 변경 없이 구현체만 수정 가능, Address·User·Review·ClosingLink·SurveyQImg는 요구사항과 무관."
+    // 11-11 09:20 요약의 실제 두 줄(저장된 채팅의 원문)과 표의 네 행은 고정 파일에서 읽는다
+    private val fixture = com.google.gson.JsonParser.parseString(File("src/test/resources/b85/recorded_1111_0920.json").readText(Charsets.UTF_8)).asJsonObject
+    private val line1 = fixture["summary"].asJsonArray[0].asString
+    private val line2 = fixture["summary"].asJsonArray[1].asString
+    private val fixtureRows = fixture["rows"].asJsonArray.map { it.asJsonObject }
+    /** 고정 파일 표에서 "선택(경로 통과)" 행의 클래스 이름: 결과 표가 정한 선택 행과 같은 방식으로 찾는다. */
+    private val fixtureOptional = fixtureRows.filter { it["deterministic"].asString.startsWith("**선택") }.map { it["path"].asString.substringAfterLast('/').substringBeforeLast('.') }
 
     @Test
     fun m1_theRealSummaryGetsTheMarkOnTheSentenceWithTheOptionalName() {
-        assertEquals("$line1 (SurveyDaoImpl 규칙 판정: 수정 불필요)", mark(line1))
+        assertEquals("고정 파일의 선택 행은 SurveyDaoImpl 하나", listOf("SurveyDaoImpl"), fixtureOptional)
+        assertEquals("$line1 (SurveyDaoImpl 규칙 판정: 수정 불필요)", mark(line1, fixtureOptional))
         // 표에 없는 인터페이스(SurveyService, SurveyDao)만 말한 2번 문장은 그대로다
-        assertEquals(line2, mark(line2))
-        assertEquals("$line1 (SurveyDaoImpl 규칙 판정: 수정 불필요)\n$line2", mark("$line1\n$line2"))
+        assertEquals(line2, mark(line2, fixtureOptional))
+        assertEquals("$line1 (SurveyDaoImpl 규칙 판정: 수정 불필요)\n$line2", mark("$line1\n$line2", fixtureOptional))
+    }
+
+    // 11-03 17:46처럼 SurveyDao도 선택 행이면(표에 SurveyDaoImpl과 SurveyDao가 함께 있는 경우) 2번 문장이 어떻게 되는가: 동작을 그대로 고정한다(고치지 않음).
+    // 2번 문장 "(SurveyService/SurveyDao)는 시그니처 변경 없이 …"은 SurveyDao 뒤 25자 안에 부정어("없이")가 있어서 그 이름을 건너뛰므로 표시가 붙지 않는다.
+    // 1번 문장은 SurveyDaoImpl(식별자 완전 일치)만 표시되고, SurveyDao는 "SurveyDaoImpl"의 일부일 뿐이라 따로 잡히지 않는다.
+    @Test
+    fun m7_whenSurveyDaoIsAlsoAnOptionalRowTheSecondSentenceStillGetsNoMarkBecauseOfTheNegationWindow() {
+        val both = listOf("SurveyDaoImpl", "SurveyDao")
+        assertEquals("$line1 (SurveyDaoImpl 규칙 판정: 수정 불필요)", mark(line1, both))
+        assertEquals(line2, mark(line2, both))
+        // 대조: 같은 문장에서 부정어("없이")만 빼면 SurveyDao에 표시가 붙는다 → 표시가 안 붙은 원인은 부정어 판정이다
+        val noNegation = line2.replace("시그니처 변경 없이", "시그니처 변경과 함께")
+        assertTrue(noNegation, mark(noNegation, both).endsWith("(SurveyDao 규칙 판정: 수정 불필요)"))
+        // 선택 행이 SurveyDaoImpl 하나뿐이면(11-11 표) 같은 문장이 SurveyDao를 이름으로 갖더라도 아무 일도 없다
+        assertEquals(noNegation, mark(noNegation, fixtureOptional))
     }
 
     @Test
