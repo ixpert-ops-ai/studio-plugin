@@ -3790,7 +3790,7 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 
 #### 6번 정정: 탐색기 카드 대기 434.7초는 한 카드가 아니다
 - 11-11 09:08:55~09:18:05 탐색기의 `카드 대기(사용자) 434721ms`는 Turn 1 힌트 카드 시간 초과 300.0초(09:09:06.802 표시 → 09:14:06.813 `[CardTimeout]`)와 Turn 2 힌트 카드 건너뛰기 134.7초(09:14:22.984 → 09:16:37.660)의 합이다. 패키지 카드 대기(81초, 09:07:34 → 09:08:55)는 탐색기 시작 전이라 섞이지 않았다. 힌트 카드의 5분 타이머는 카드 전송을 `invokeLater`에 넣은 직후 시작하므로 사용자가 본 대기는 300초보다 길지 않다. 계측 지점은 `AgenticSeedSelector`의 `requestClarification` 호출 앞뒤(턴마다 합산)였고 합계만 찍어서 한 카드처럼 읽혔다 → 이제 `cardWaitByTurn`을 함께 찍는다.
-- 11-11 한 회차의 카드 대기(로그에서 계산): 정제문 카드 5분 시간 초과 300.0초(09:02:34 → 09:07:34) + 패키지 카드 건너뛰기 80.9초 + 힌트 Turn 1 시간 초과 300.0초 + 힌트 Turn 2 건너뛰기 134.7초 + Stage 3 카드 건너뛰기 90.1초(09:18:07 → 09:19:37) = 905.8초(약 15분 6초, 정제문 카드를 빼면 약 10분 6초). 같은 회차에서 탐색기 LLM 순수 시간은 116.0초였다. 지시서의 "약 13분"과 다른 값이라 계산 근거를 적어 둔다(어느 카드를 합쳤는지 확인 필요).
+- 11-11 한 회차의 카드 대기(로그에서 계산): 정제문 카드 5분 시간 초과 300.0초(09:02:34 → 09:07:34) + 패키지 카드 건너뛰기 80.9초 + 힌트 Turn 1 시간 초과 300.0초 + 힌트 Turn 2 건너뛰기 134.7초 + Stage 3 카드 건너뛰기 90.1초(09:18:07 → 09:19:37) = 905.8초(약 15분 6초, 정제문 카드를 빼면 약 10분 6초). 같은 회차에서 탐색기 LLM 순수 시간은 116.0초였다. 지시서의 "약 13분"은 Stage 3 카드 90.1초를 빠뜨린 값이고 905.8초가 맞다(정정).
 
 #### 기록(구현하지 않음)
 - Discovery 블록이 "> >"로 이중 인용으로 나오고 다음 줄의 ">"가 빠진다.
@@ -3805,3 +3805,30 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 - 정정: B-84 문서(`c730efa`)의 "번호를 이어 쓰는 곳은 `@`로 추가한 파일 표(`WebviewActionRouter.kt:1736`, `RequirementAnalysisPipeline.kt:108`)뿐"은 틀렸다. 1736은 위의 "자동 교정 결과" 표이고, 108은 `@` 추가가 아니라 `/restore`(빠진 후보 되살리기)가 `lastResult`에 붙이는 `order`다(표를 새로 찍지 않는다). `/implement`는 `lastResult.targetFiles`를 받지만 `ImplementService.sortTargetsByLayer`로 다시 정렬하고 자체 "(i/N)" 번호를 쓰므로 `order`도 표시 번호도 읽지 않는다. 코드에서 "N번 파일"을 해석하는 곳은 없다.
 - 규칙 위반 기록(B-84~B-85 작업 중): ① `sed -i.bak ... /dev/null` 1건(대상이 `/dev/null`이라 파일이 바뀌지 않았고 `.bak`도 생기지 않음), ② 빈 heredoc `cat >> /dev/null <<'EOF'` 1건(내용 없음, 파일 변경 없음). 둘 다 불필요한 명령이었다.
 - 재발 방지 절차: Bash를 보내기 전에 명령 문자열에 `sed`, `<<`, `-i`가 있는지 스스로 점검한다. 파일 읽기·수정은 Read·Grep·Edit·Write만 쓰고, Bash는 git·gradle·node 실행과 출력 확인에만 쓴다. 점검에 걸리면 보내지 않고 Edit/Write로 바꾼다. 커밋 메시지는 `printf`나 Write로 만든 파일을 `git commit -F`로 넘긴다(heredoc 없이).
+- 이 절차를 훅이 강제한다(`6a5439e`): `.claude/hooks/block-bash.js`가 heredoc·`sed -i`·`git push`(`git -C … push`, `git -c k=v push` 포함)를 명령 실행 전에 막고, `bash -c`·`sh -c`·`eval`·`powershell -Command`·`-EncodedCommand`·`cmd /c`·`$( )`·백틱 안의 문자열도 검사한다. 설정은 `.claude/settings.local.json`이고 탈출구는 없다. **한계**: 문자열 검사라서 Write로 만든 스크립트 안의 `git push`, `node -e`·`python -c` 안의 호출, git alias는 막지 못한다.
+
+### B-85 후속 (2026-11-12, IDE 회차 A 판정 이후)
+
+#### IDE 판정과 정정
+- 11-12 13:2x IDE(chat_1794457353620): B-85 1·2·3·7번, G3, 결과 화면 통과. `[CardWait]` 4줄(refine·package·hint turn=1 timeout, stage3 skip), `cardWaitByTurn=[300013, 0, 0, 0]`, `future-reuse waitMs=2`.
+- **정정**: 힌트 카드는 시간 초과가 아니라 탐색 종료 때 hide된다(시간 초과 뒤 약 85초 남아 있었다: 13:41:06 시간 초과 → 13:42:31 탐색 종료). 앞선 판정의 "시간 초과 때 지워진다"는 추정이 틀렸다.
+
+#### 조사 결과(읽기만)
+- 힌트 카드는 검색 도구(`search_graph_nodes`)를 부른 턴에만, 확정 턴을 빼고 뜬다(`AgenticSeedSelector.kt:254`의 `searchExecutedInTurn && !confirmed`). `searchExecutedInTurn`은 검색 호출 직전에 켜지므로 `DUPLICATE_QUERY`로 막힌 호출과 결과 0건인 검색도 카드를 띄운다(**의도된 동작으로 유지**). inspect·expand만 부른 턴에는 카드가 없다: 11-12 Turn 2(inspect 3), Turn 3(expand), Turn 4(confirm), 11-11 Turn 3·4도 같다.
+- 카드를 지우는 주체: 힌트 = 백엔드(`L1ClarificationBridge.hideClarification` → `l1Clarification/hide` → `App.tsx:1527`), 호출은 `AgenticSeedSelector.kt:290`(확정 턴)·`:297`(탐색 종료)뿐이고 시간 초과 분기(`L1ClarificationBridge.kt:97-102`)는 기록과 안내만 한다. Stage 3 = 백엔드(`RequirementAnalysisPipeline.kt:416` `finally { hideConfirmation() }`). **패키지 = 지우는 주체 없음**: `ScopeSelectionBridge`(`:55-57`)는 안내만 보내고 `scopeSelection/hideTree`는 웹뷰가 제출·건너뛰기에서 스스로 보낼 때만 있다. 그래서 시간 초과 뒤에도, 분석이 끝난 뒤에도 카드가 남고 `CardWaitFrame` 타이머(`App.tsx:94`의 `setInterval`)가 16분 39초까지 올라갔다.
+- `restoreMessages`는 IDE 재시작 복원(`/loadLastChat`, `App.tsx:1266`)뿐 아니라 채팅 전환(`/loadChat`, `App.tsx:2208-2209`)에서도 `chat_loaded`(`App.tsx:1374-1387`)로 실행된다. 채팅 전환·새 채팅 어디에도 `/cancel`이나 백엔드 정리가 없고 자동 저장이 메시지 변경마다 나가므로(`App.tsx:1873-1888`) 활성 카드가 든 채팅이 저장되고, 카드를 기다리는 요청(최대 5분)이 살아 있는 채 다른 채팅으로 갈 수 있다. 그 채팅을 다시 불러오면 B-85 1 D의 "응답 전 종료됨(IDE 재시작)"은 사실이 아니다(채팅 전환에서는 요청이 살아 있을 수 있다). 또 백엔드 메시지에 채팅 식별자가 없어 진행 중 분석의 카드·안내가 지금 화면에 있는 다른 채팅에 붙을 수 있다(관찰하지 않은 위험).
+- Stage 0 "✓ 확인이 제출되었습니다."는 `submittedStatusText(pending)`(`cardWaitLogic.ts:31`)이고 `pending`은 카드 요청이면 true, hide 계열이면 false다(`App.tsx:375`). 붙여 준 화면은 모두 카드 대기 중(pending true)이어서 코드와 일치한다(문구 의문 해소). "✔ 완료됨"으로 바뀌는 시점은 결과가 나올 때 `completeClarifyCards`(`App.tsx:1407-1410`) 하나뿐이다.
+
+#### 구현
+- 로그 requestId(`919bd1c`): `[RefineGate] … 카드 요청 전송 … requestId=<rid:messageId>`, `[RefineGate] … 응답 결과: … requestId=<…>`, `[CardWait] card=refine … requestId=<…>`(stale 줄 포함). 다른 카드 줄은 이전 형식 그대로다. 형식은 순수 함수(`RefineGateLog`, `CardWaitLog.line`)와 `CardLogsB85Test`가 고정한다.
+- "구현" 수정 낱말(`9ec0283`): G3(결과 표 선택 행)와 G4(요약 문장)가 `ReasonGuard.IMPLEMENT_VERB`를 함께 쓴다. 동사로 세지 않는 쓰임: 구현체, 구현되/된/돼, 구현 불필요, 구현하지 않/말, 구현 안 함/해/한(부정어 상수에는 "불필요"를 넣지 않았다: `recount-b84.js`와 공유). 지시서가 말한 "공통 수정 동사 상수"는 없었고 G3(`CHANGE`)와 G4(`MODIFY_VERB`)의 낱말 목록이 달랐다. 목록은 합치지 않고 "구현" 부분만 공통으로 했다.
+- 11-12 결과 고정(`golden_1112_1330.md`, 저장된 채팅 원문)과 `ImplementVerbB85Test`: 표 다섯 행 중 SurveyDaoImpl 행("확인 / 선택(경로 통과)", LLM 사유 "이메일 컬럼 매핑 및 쿼리 구현")만 새로 "(규칙 판정: 수정 불필요)"가 붙고 나머지 네 행은 바이트가 같다. 요약 두 줄은 G4로 바뀌지 않는다(1번은 수정 낱말이 없고 2번의 이름은 선택 행이 아니다). 📌 결정 블록·ℹ️ 줄은 G4를 거치지 않음을 시험으로 고정했다. 기존 golden 3개는 바이트 변화가 없다.
+- G4 fixture(`eb36f72`): `recorded_1111_0920.json`(요약 두 줄 원문, 분석에 쓴 문장 98자, 표 네 행), `r1`을 `r1a`(11-03 17:46, 97자)와 `r1b`(11-11 09:20)로 분리. 지난 `r1`은 11-11도 97자 문장으로 대신했으나 요약 두 줄은 대체 문장이 아니라 원문이었다.
+- **정정**: "SurveyDao 선택 행이 있으면 2번 문장에 표시가 붙는다"는 틀렸다. 2번 문장 "(SurveyService/SurveyDao)는 시그니처 변경 없이 …"은 SurveyDao 뒤 25자 안에 부정어("없이")가 있어 그 이름을 건너뛰므로 표시가 붙지 않는다(`SummaryRoleMarkB85Test.m7`, 동작은 고치지 않음). 부정어만 빼면 붙는다(대조). 1번 문장은 SurveyDaoImpl(식별자 완전 일치)만 표시된다. 이는 앞서 적은 "과표시보다 누락이 낫다"는 선택의 한 사례이고, 부정어 범위가 문장의 다른 절까지 닿는 점은 보류 항목이다.
+- 요약의 "완성됨" 불일치(11-12 요약 1번 "…5개 파일로 데이터 흐름이 완성됨"은 표에서 "선택(경로 통과)"로 판정한 SurveyDao·SurveyDaoImpl을 흐름에 넣었다)는 동사로 잡지 않고 보류 항목 (a)(요약 문장은 필수 파일만 근거로 삼는다)의 사례로 둔다.
+- 관찰(n=1): 탐색기 `updateResult` 저장 단정이 ② 사실 블록 적용 뒤 IDE에서도 나왔다(11-12 Turn 3·4, rationale). 결과 표에는 올라오지 않았다(G1 미발동, 정상). 효과 판단 근거로 쓰지 않는다.
+
+#### B-86 범위(설계안 승인 전, 구현하지 않음)
+- 순서: ① c 시간 초과·종료 시 카드 제거 + 복원 시 활성 카드 처리, ② a Stage 0 accepted 중간 상태, ③ d displayPaths, ④ CardRegistry 공용화(**하지 않음**으로 정정, 지시).
+- c (i)(ii): 카드를 지우는 호출은 `CardTimeoutNotice`가 아니라 각 브리지의 시간 초과 분기에서 한다(`L1ClarificationBridge.kt:97-102`는 `hideClarification`, `ScopeSelectionBridge.kt:55-57`은 `hideTree`). 패키지 카드는 Stage 3처럼 `finally`로 완료·취소·오류 모두 `hideTree`를 보낸다. (iii) 복원 처리는 위 조사(채팅 전환에서도 복원이 실행되고 요청이 살아 있을 수 있음)를 근거로 설계안을 먼저 보고하고, 승인 뒤에 구현·기록한다.
+- a: 정제문 카드가 응답 또는 만료로 끝나는 시점에 Stage 0 카드를 "✔ 확인이 반영되었습니다(분석 진행 중)" 중간 상태로 바꾼다(`finishRefinedCard`와 `ClarifyForm` 상태 판정에 한정, 카드 요청·hide의 `pending` 흐름은 그대로). 결과가 나오면 지금처럼 "✔ 완료됨". c 다음 순서.
