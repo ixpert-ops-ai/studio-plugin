@@ -22,7 +22,13 @@ object ReasonGuard {
     private val IDENT = Regex("[A-Za-z_][A-Za-z0-9_]*")
     /** recount-b84.js의 `assertion`과 같은 낱말에 INSERT를 더한 저장 단정 표현. */
     private val ASSERTION = Regex("조회\\s*/\\s*저장|저장\\s*/\\s*조회|수집\\s*/\\s*저장|저장\\s*(처리|로직|담당)|수집\\s*(처리|로직|담당)|응답\\s*(저장|수집)|INSERT")
-    private val CHANGE = Regex("추가|수정|변경|신설|신규|새로")
+    /**
+     * "구현"을 수정 동사로 보는 낱말(G3·G4가 함께 쓴다, B-85 후속 5). 11-12 사례: 선택 행 SurveyDaoImpl의 사유가 "이메일 컬럼 매핑 및 쿼리 구현"이라 추가·수정 낱말이 없어 표시가 빠졌다.
+     * 이미 있는 것을 말하거나 하지 않겠다는 쓰임은 동사가 아니다: 구현체(Impl 같은 구현 클래스), 구현되/구현된/구현돼(이미 있음), 구현 불필요, 구현하지 않/말, 구현 안 함/해/한.
+     * (부정어 판정 [NEGATION_PATTERN]은 recount-b84.js와 같아야 해서 "불필요"를 넣지 않고, 이 낱말 자체에서 뺀다.)
+     */
+    private const val IMPLEMENT_VERB = "구현(?!체|되|된|돼|\\s*불필요|하지\\s*(않|말)|\\s*안\\s*(함|해|한))"
+    private val CHANGE = Regex("추가|수정|변경|신설|신규|새로|$IMPLEMENT_VERB")
     private val SENTENCE_BREAK = Regex("(?<=[.!?])\\s+")
 
     private const val ACTUAL_PREFIX = "(실제:"
@@ -30,7 +36,7 @@ object ReasonGuard {
     private const val ROLE_MARK_PREFIX = "(규칙 판정:"
 
     /** 요약 문장에서 선택 행의 이름을 찾는 G4의 수정 동사(B-85 4). "반영"은 넣지 않는다(뜻이 넓어 "결과에 반영" 같은 말까지 잡는다). */
-    private val MODIFY_VERB = Regex("수정|변경|추가|고치|개선|교체|보완")
+    private val MODIFY_VERB = Regex("수정|변경|추가|고치|개선|교체|보완|$IMPLEMENT_VERB")
     private const val ROLE_NAME_MARK = "규칙 판정:"
     /** G4가 덧붙인 "(SurveyDaoImpl 규칙 판정: …)" 표시. 마침표 뒤에 따로 떨어져 있어도 앞 문장의 일부로 본다. */
     private val ROLE_NAME_MARK_START = Regex("^\\([A-Za-z0-9_, ]+ 규칙 판정:")
