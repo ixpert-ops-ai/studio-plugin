@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { restoreMessages } from '../src/chatRestoreLogic.ts';
+import { cardElapsedSeconds, cardElapsedText, cardWaitLine } from '../src/cardWaitLogic.ts';
 import {
   CARD_INFO, MAX_ENDED, cardKeyFor, createLiveCards, endCard, endedLines, isLive, kindOfSubType, kindOfTimeoutNotice, neutralLine, registerCard,
   type CardKind,
@@ -157,6 +158,46 @@ test('끝내기: 살아 있는 카드가 없으면 아무 일도 없고(두 번 
   for (let i = 2; i < 2 + MAX_ENDED + 3; i++) { open(cards, 'hint', i); endCard(cards, 'hint', [`줄${i}`]); }
   assert.equal(cards.ended.length, MAX_ENDED);
   assert.equal(endedLines(cards, a.cardKey), undefined, '오래된 것은 밀려난다');
+});
+
+test('Stage 3 시간 초과 뒤 hide가 두 번 와도(시간 초과 분기 + 파이프라인 finally) 결과 기록은 그대로이고 새 카드의 번호는 지워지지 않는다', () => {
+  const cards = createLiveCards();
+  const s3 = open(cards, 'stage3', 1);
+  // 시간 초과 안내 → 시간 초과 분기의 hide → 검증이 끝난 뒤 finally의 hide
+  const key = endCard(cards, 'stage3', ['✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음, 자동 진행)']);
+  assert.equal(key, s3.cardKey);
+  assert.equal(endCard(cards, 'stage3'), undefined, '첫 hide: 이미 끝난 카드라 아무 일도 없다');
+  assert.equal(endCard(cards, 'stage3'), undefined, 'finally의 두 번째 hide도 같다');
+  assert.deepEqual(endedLines(cards, key), ['✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음, 자동 진행)']);
+  const out = restoreMessages<Msg>([s3], cards);
+  assert.deepEqual(recs(out), ['✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음, 자동 진행)']);
+});
+
+test('복원 후 타이머: 대기 중 채팅을 전환했다가 돌아오면 도착 시각부터 이어 센다(2분 대기면 경과 2분 이상), 도착 시각이 없는 예전 메시지는 0부터', () => {
+  const now = 1_000_000_000;
+  const cards = createLiveCards();
+  const hint: Msg & { cardAt?: number } = { ...open(cards, 'hint', 1), cardAt: now - 125_000 };
+  const back = restoreMessages<Msg & { cardAt?: number }>([hint], cards);
+  assert.equal(back.length, 1, '살아 있는 카드는 그대로');
+  assert.equal(back[0].cardAt, now - 125_000, '복원이 도착 시각을 지우지 않는다');
+  const sec = cardElapsedSeconds(back[0].cardAt, now);
+  assert.ok(sec >= 120, `경과 ${sec}초`);
+  assert.equal(cardElapsedText(sec), '2분 5초');
+  assert.match(cardWaitLine('l1', sec), /경과 2분 5초/);
+  // 도착 시각이 없거나 깨진 값, 시계가 뒤로 간 경우
+  assert.equal(cardElapsedSeconds(undefined, now), 0);
+  assert.equal(cardElapsedSeconds(Number.NaN, now), 0);
+  assert.equal(cardElapsedSeconds(now + 5000, now), 0);
+  assert.equal(cardElapsedSeconds(now - 999, now), 0);
+  assert.equal(cardElapsedSeconds(now - 1000, now), 1);
+});
+
+test('App의 카드 틀은 저장한 도착 시각(cardAt)에서 타이머를 시작하고, 요청 4종이 도착 시각을 저장한다', () => {
+  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  for (const kind of ['scope', 'l1', 'stage3', 'refined']) assert.ok(app.includes(`<CardWaitFrame kind="${kind}" msgId={msg.id} startedAt={msg.cardAt}>`), kind);
+  assert.equal(app.split('at: cardAt } = openCard(').length - 1, 4, '요청 4종이 도착 시각을 받는다');
+  assert.ok(app.includes('useState(() => cardElapsedSeconds(startedAt, Date.now()))'));
+  assert.ok(app.includes("const started = typeof startedAt === 'number' ? startedAt : Date.now();"));
 });
 
 test('시간 초과 안내 문구와 종류', () => {

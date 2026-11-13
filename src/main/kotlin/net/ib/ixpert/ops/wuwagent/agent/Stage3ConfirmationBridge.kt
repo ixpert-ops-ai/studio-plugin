@@ -87,6 +87,8 @@ class JcefStage3ConfirmationBridge(
             pendingConfirmations.remove(projectId)
             CardWaitLog.log(CardWaitLog.Card.STAGE3, null, CardWaitLog.Result.TIMEOUT, System.currentTimeMillis() - startedMs)
             CardTimeoutNotice.send(project, CardTimeoutNotice.STAGE3)
+            // B-86 c: 시간 초과로 넘어간 Stage 3 카드는 최종 검증이 끝나 파이프라인의 finally가 내릴 때까지 남지 않게 바로 내린다. 그 finally의 hide는 그대로 두며 두 번째 hide는 아무 일도 하지 않는다(웹뷰의 hide 처리가 멱등).
+            hideConfirmation()
             null
         } catch (e: Exception) {
             pendingConfirmations.remove(projectId)

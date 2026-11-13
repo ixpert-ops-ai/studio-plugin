@@ -16,7 +16,7 @@ import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type Res
 import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
-import { applyCardStatus, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
+import { applyCardStatus, cardElapsedSeconds, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
 import { appendRecord, completeClarifyCards, finishRefinedCard, refinedCloseRecords, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, noticeTurnOf, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
 import { CARD_INFO, cardKeyFor, createLiveCards, endCard, kindOfTimeoutNotice, registerCard, type CardKind } from './liveCardsLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
@@ -62,6 +62,8 @@ interface Message {
   // 확인 카드(정제문·범위·힌트·Stage 3) 메시지: 카드 번호(B-86 c, 살아 있는 카드 표의 키)와 사용자가 답했는지(복원할 때 줄을 더하지 않는다)
   cardKey?: string;
   cardDone?: boolean;
+  // 확인 카드 메시지: 웹뷰가 카드 요청을 받은 시각(ms). 대기 타이머가 복원 뒤에도 이어 센다. 없던 예전 메시지는 복원 시점부터 센다.
+  cardAt?: number;
   // 결과 본문 안에 끼워 넣은 카드 기록 줄(B-82 3-5): at은 본문의 줄 경계 위치
   inlineRecords?: Array<{ at: number; text: string }>;
   stepNotiStatus?: 'started' | 'completed' | 'failed';
@@ -93,19 +95,21 @@ let lastHintTurn: number | undefined;
 // 살아 있는 확인 카드 표(B-86 c). 앱 수준(모듈 수준) 상태라 채팅 전환·컴포넌트 다시 그리기에도 유지된다. 웹뷰를 새로고침하면 사라지고, 그때 복원한 카드는 닫힌다(백엔드의 5분 자동 진행에 맡긴다).
 const liveCards = createLiveCards();
 let cardSeq = 0;
-/** 카드 요청을 받았다: 같은 종류의 이전 번호는 무효가 되고 새 번호를 돌려준다(메시지의 cardKey에 저장한다). */
-const openCard = (kind: CardKind, content: string): string => {
-  const key = cardKeyFor(kind, content, ++cardSeq, Date.now());
+/** 카드 요청을 받았다: 같은 종류의 이전 번호는 무효가 되고 새 번호와 도착 시각을 돌려준다(메시지의 cardKey, cardAt에 저장한다. cardAt은 대기 타이머가 복원 뒤에도 이어 세는 기준이다). */
+const openCard = (kind: CardKind, content: string): { key: string; at: number } => {
+  const at = Date.now();
+  const key = cardKeyFor(kind, content, ++cardSeq, at);
   registerCard(liveCards, kind, key, content);
-  return key;
+  return { key, at };
 };
 
-const CardWaitFrame: React.FC<{ kind: string; msgId: string; children: React.ReactNode }> = ({ kind, msgId, children }) => {
+// startedAt: 카드 메시지에 저장한 도착 시각. 있으면 그 시각부터 세어 채팅 전환 뒤 돌아와 다시 그려도 실제 대기 시간이 이어지고, 없으면(예전 메시지) 지금부터 센다.
+const CardWaitFrame: React.FC<{ kind: string; msgId: string; startedAt?: number; children: React.ReactNode }> = ({ kind, msgId, startedAt, children }) => {
   const ref = useRef<HTMLDivElement>(null);
-  const [seconds, setSeconds] = useState(0);
+  const [seconds, setSeconds] = useState(() => cardElapsedSeconds(startedAt, Date.now()));
   useEffect(() => {
-    const started = Date.now();
-    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    const started = typeof startedAt === 'number' ? startedAt : Date.now();
+    const timer = setInterval(() => setSeconds(cardElapsedSeconds(started, Date.now())), 1000);
     const report = (phase: string) => {
       const el = ref.current;
       if (!el) return;
@@ -791,7 +795,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   // 0.6 Scope Selection
   if (msg.subType === 'scopeSelection/showTree') {
     return (
-      <CardWaitFrame kind="scope" msgId={msg.id}>
+      <CardWaitFrame kind="scope" msgId={msg.id} startedAt={msg.cardAt}>
       <ScopeSelectionTree
         payload={msg.content}
         onCancel={() => {
@@ -819,7 +823,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   // 0.7 L1 Clarification (도메인 힌트 및 멀티턴 탐색 피드백)
   if (msg.subType === 'l1Clarification/request') {
     return (
-      <CardWaitFrame kind="l1" msgId={msg.id}>
+      <CardWaitFrame kind="l1" msgId={msg.id} startedAt={msg.cardAt}>
       <L1ClarificationForm
         key={msg.id}
         payload={msg.content}
@@ -851,7 +855,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   // 0.8 Stage 3 User Confirmation (최종 LLM 검증 전 대상 파일 확인)
   if (msg.subType === 'stage3Confirmation/request') {
     return (
-      <CardWaitFrame kind="stage3" msgId={msg.id}>
+      <CardWaitFrame kind="stage3" msgId={msg.id} startedAt={msg.cardAt}>
       <Stage3ConfirmationForm
         key={msg.id}
         payload={msg.content}
@@ -883,7 +887,7 @@ const MessageItem = React.memo(({ msg }: { msg: Message }) => {
   // 0.85 분석 시작 전 정제문 확인 카드 (원문과 정제문을 나란히 보이고, 정제문을 고쳐 진행하거나 취소)
   if (msg.subType === 'refinedConfirmation/request') {
     return (
-      <CardWaitFrame kind="refined" msgId={msg.id}>
+      <CardWaitFrame kind="refined" msgId={msg.id} startedAt={msg.cardAt}>
       <RefinedConfirmationForm
         key={msg.id}
         payload={msg.content}
@@ -1511,7 +1515,7 @@ function App() {
       if (data.subType === 'scopeSelection/showTree') {
         if (messageId) {
           // B-86 c: 카드 번호(같은 종류의 이전 번호는 무효). setMessages 안이 아니라 밖에서 한 번만 만든다
-          const cardKey = openCard('package', data.content);
+          const { key: cardKey, at: cardAt } = openCard('package', data.content);
           setMessages(prev => {
             const filtered = prev.filter(m => m.subType !== 'scopeSelection/showTree');
             return [...filtered, {
@@ -1520,7 +1524,8 @@ function App() {
               subType: 'scopeSelection/showTree',
               content: data.content,
               isLoading: false,
-              cardKey
+              cardKey,
+              cardAt
             }];
           });
         }
@@ -1537,7 +1542,7 @@ function App() {
       if (data.subType === 'l1Clarification/request') {
         lastHintTurn = hintTurnOf(data.content);
         const uniqueId = `l1_${Date.now()}`;
-        const cardKey = openCard('hint', data.content);
+        const { key: cardKey, at: cardAt } = openCard('hint', data.content);
         setMessages(prev => {
           const filtered = prev.filter(m => m.subType !== 'l1Clarification/request');
           return [...filtered, {
@@ -1546,7 +1551,8 @@ function App() {
             subType: 'l1Clarification/request',
             content: data.content,
             isLoading: false,
-            cardKey
+            cardKey,
+            cardAt
           }];
         });
         return;
@@ -1562,7 +1568,7 @@ function App() {
       if (data.subType === 'stage3Confirmation/request') {
         lastStage3Total = stage3CandidateCount(data.content);
         const uniqueId = `s3_${Date.now()}`;
-        const cardKey = openCard('stage3', data.content);
+        const { key: cardKey, at: cardAt } = openCard('stage3', data.content);
         setMessages(prev => {
           const filtered = prev.filter(m => m.subType !== 'stage3Confirmation/request');
           return [...filtered, {
@@ -1571,7 +1577,8 @@ function App() {
             subType: 'stage3Confirmation/request',
             content: data.content,
             isLoading: false,
-            cardKey
+            cardKey,
+            cardAt
           }];
         });
         return;
@@ -1585,7 +1592,7 @@ function App() {
 
       if (data.subType === 'refinedConfirmation/request') {
         const uniqueId = `rc_${Date.now()}`;
-        const cardKey = openCard('refined', data.content);
+        const { key: cardKey, at: cardAt } = openCard('refined', data.content);
         setMessages(prev => {
           const filtered = prev.filter(m => m.subType !== 'refinedConfirmation/request');
           return [...filtered, {
@@ -1594,7 +1601,8 @@ function App() {
             subType: 'refinedConfirmation/request',
             content: data.content,
             isLoading: false,
-            cardKey
+            cardKey,
+            cardAt
           }];
         });
         return;

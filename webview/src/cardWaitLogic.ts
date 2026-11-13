@@ -38,6 +38,13 @@ export const CARD_WAIT_INFO: Record<string, { timeoutSec: number; fallback: stri
   refined: { timeoutSec: 300, fallback: '위 정제된 문장 그대로' },
 };
 
+/**
+ * 카드가 도착한 뒤 흐른 초(B-86 c 후속): 카드 메시지에 저장한 도착 시각(cardAt)이 있으면 그 시각부터, 없으면(도착 시각이 없던 예전 메시지) 0에서 센다.
+ * 채팅을 전환했다가 돌아와 카드를 다시 그려도 실제 대기 시간이 이어진다. 시계가 뒤로 가도 음수는 0이다.
+ */
+export const cardElapsedSeconds = (startedAt: number | undefined, now: number): number =>
+  typeof startedAt === 'number' && Number.isFinite(startedAt) ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
+
 /** 경과 시간 표시: 60초 미만은 "N초", 이상은 "M분 S초". */
 export const cardElapsedText = (seconds: number): string => {
   const s = Math.max(0, Math.floor(seconds));

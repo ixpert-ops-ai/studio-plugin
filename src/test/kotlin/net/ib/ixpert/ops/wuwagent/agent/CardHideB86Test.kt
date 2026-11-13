@@ -70,7 +70,11 @@ class CardHideB86Test {
         val l1 = File(dir + "L1ClarificationBridge.kt").readText(Charsets.UTF_8)
         val timeoutBranch = l1.substringAfter("catch (e: java.util.concurrent.TimeoutException) {").substringBefore("} catch (e: Exception) {")
         assertTrue(timeoutBranch, timeoutBranch.indexOf("CardTimeoutNotice.send(project, CardTimeoutNotice.L1, turn)") in 0 until timeoutBranch.indexOf("hideClarification()"))
-        // Stage 3 카드는 이전처럼 finally에서 내린다(변경 없음)
+        // Stage 3 카드: 시간 초과 분기에서도 안내를 보낸 뒤 바로 내리고(hide 1회), 기존 finally의 hide는 그대로 둔다(두 번째 hide는 웹뷰에서 멱등)
+        val s3 = File(dir + "Stage3ConfirmationBridge.kt").readText(Charsets.UTF_8)
+        val s3Timeout = s3.substringAfter("catch (e: java.util.concurrent.TimeoutException) {").substringBefore("} catch (e: Exception) {")
+        assertTrue(s3Timeout, s3Timeout.indexOf("CardTimeoutNotice.send(project, CardTimeoutNotice.STAGE3)") in 0 until s3Timeout.indexOf("hideConfirmation()"))
+        assertEquals("시간 초과 분기에서 hide는 정확히 한 번", 1, Regex("hideConfirmation\\(\\)").findAll(s3Timeout).count())
         assertTrue(File(dir + "RequirementAnalysisPipeline.kt").readText(Charsets.UTF_8).contains("confirmationBridge.hideConfirmation()"))
     }
 }

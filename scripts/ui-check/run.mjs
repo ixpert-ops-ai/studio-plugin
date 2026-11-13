@@ -919,6 +919,49 @@ try {
   record(55, '새로고침 뒤 복원: 카드 번호가 있는 저장 채팅의 패키지 카드도 닫히고 "✔ 읽을 범위 선택: 이전에 끝난 카드(채팅 복원)" 1줄',
     hadKey55 && back55.card === 0 && JSON.stringify(back55.recs) === JSON.stringify(['✔ 읽을 범위 선택: 이전에 끝난 카드(채팅 복원)']), JSON.stringify({ hadKey55, back55 }));
 
+  // 56) 복원 후 타이머 이어 세기(B-86 c 후속): 2분 넘게 대기 중이던 카드를 가진 채팅을 전환했다가 돌아오면 대기 줄의 경과가 복원 시점부터가 아니라 도착 시각부터 이어진다.
+  // 실제로 2분을 기다리는 대신 저장된 카드 메시지의 도착 시각(cardAt)을 125초 전으로 당겨 같은 경로(저장 → 전환 → chat_loaded)로 불러온다.
+  await loadChat('chat_c10', [U_C('u56')]);
+  await sleep(300);
+  await l1Req();
+  await waitFor(CARD_SEL('l1') + '===1');
+  const saved56 = await waitSaved('chat_c10', m => m.some(x => x.subType === 'l1Clarification/request' && typeof x.cardAt === 'number'));
+  const hasAt56 = typeof saved56?.find(x => x.subType === 'l1Clarification/request')?.cardAt === 'number';
+  const aged56 = saved56.map(x => (x.subType === 'l1Clarification/request' ? { ...x, cardAt: Date.now() - 125000 } : x));
+  await loadChat('chat_c2', [U_C('u56b')]);
+  await sleep(300);
+  await loadChat('chat_c10', aged56);
+  await sleep(500);
+  const wait56 = await evaluate(`(()=>{const el=document.querySelector('[data-card-kind="l1"] [data-card-wait="true"]'); return el ? el.innerText.trim() : null})()`);
+  const m56 = /경과 (\d+)분 (\d+)초/.exec(wait56 || '');
+  const sec56 = m56 ? Number(m56[1]) * 60 + Number(m56[2]) : -1;
+  await shot('56-timer-continues');
+  record(56, '복원 후 타이머: 저장된 카드 메시지에 도착 시각(cardAt)이 있고, 2분 넘게 대기한 카드를 복원하면 대기 줄 경과가 125초 이상(복원 시점부터 0초로 다시 세지 않음)', hasAt56 && sec56 >= 125 && sec56 < 140, JSON.stringify({ hasAt56, wait56, sec56 }));
+  // 도착 시각이 없는 예전 메시지는 지금처럼 복원 시점부터(0초대)
+  const noAt56 = saved56.map(x => { if (x.subType !== 'l1Clarification/request') return x; const { cardAt, ...rest } = x; return rest; });
+  await loadChat('chat_c2', [U_C('u56c')]);
+  await sleep(300);
+  await loadChat('chat_c10', noAt56);
+  await sleep(500);
+  const wait56b = await evaluate(`(()=>{const el=document.querySelector('[data-card-kind="l1"] [data-card-wait="true"]'); return el ? el.innerText.trim() : null})()`);
+  record('56b', '도착 시각이 없는 예전 저장 메시지의 카드는 복원 시점부터 센다(경과 10초 미만)', /경과 \d초/.test(wait56b || ''), JSON.stringify({ wait56b }));
+
+  // 57) Stage 3 카드가 시간 초과로 끝남: 시간 초과 안내 → 시간 초과 분기의 hide → (검증이 끝난 뒤) finally의 hide가 두 번 와도 카드는 없고 기록은 1줄이며 오류가 없다.
+  // 이어서 새 카드가 오면 그 뒤에 늦게 온 hide는 현재 구현에서 새 카드를 지운다는 점도 기록한다(같은 분석에서는 Stage 3 카드가 한 장이라 일어나지 않는다).
+  await loadChat('chat_c11', [U_C('u57')]);
+  await sleep(300);
+  await s3Req();
+  await waitFor(CARD_SEL('stage3') + '===1');
+  await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_s57', content: '응답이 없어 전체 후보로 진행했습니다.' });
+  await post({ type: 'ai_message', subType: 'stage3Confirmation/hide', messageId: 'system', content: '' });
+  await sleep(200);
+  const mid57 = await evaluate(`({card:${CARD_SEL('stage3')}, recs:${RECS}})`);
+  await post({ type: 'ai_message', subType: 'stage3Confirmation/hide', messageId: 'system', content: '' });
+  await sleep(200);
+  const end57 = await evaluate(`({card:${CARD_SEL('stage3')}, recs:${RECS}, errors:(window.__errors||[]).length})`);
+  record(57, 'Stage 3 시간 초과: 시간 초과 분기의 hide 한 번으로 카드가 사라지고, 뒤따른 finally의 hide(두 번째)는 화면에 해가 없다(카드 0개, 기록 "✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음, 자동 진행)" 1줄 그대로, 오류 없음)',
+    mid57.card === 0 && end57.card === 0 && JSON.stringify(end57.recs) === JSON.stringify(mid57.recs) && end57.recs.length === 1 && end57.recs[0].startsWith('✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음') && end57.errors === 0, JSON.stringify({ mid57, end57 }));
+
   const errors = await evaluate(`window.__errors || null`);
   fs.writeFileSync(OUT + '/results.json', JSON.stringify({ results, observations, shots, clicks, errors }, null, 1));
   const md = ['| # | 항목 | 결과 | 근거 |', '|---|---|---|---|', ...results.map(r => `| ${r.id} | ${r.item} | ${r.ok ? '됨' : '**안 됨**'} | ${String(r.evidence).replace(/\|/g, '\\|').slice(0, 300)} |`)].join('\n');
