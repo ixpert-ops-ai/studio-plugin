@@ -20,6 +20,8 @@ _release/
 webview/node_modules/
 webview/dist/
 webview/build/
+# tsc -b가 빌드마다 다시 쓰는 증분 상태 파일(추적하면 빌드할 때마다 변경으로 보인다)
+webview/tsconfig.tsbuildinfo
 node_modules
 .graphify/
 bin/
