@@ -3852,6 +3852,32 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 - **`webview/tsconfig.tsbuildinfo`**: `tsc -b`가 빌드마다 다시 쓰는 증분 상태 파일이라 `.gitignore`에 넣고 추적을 해제했다(파일은 로컬에 남고 다음 빌드가 다시 만든다).
 - **`.claude/settings.local.json`(추적 해제 `11da020`)**: **이력은 다시 쓰지 않는다.** 이미 원격 `5359b0a`에 있는 버전은 그대로 남는다(이전 개발자의 macOS 홈 경로가 들어 있을 뿐 토큰·URL·IP·이메일은 없다). 추적 해제 커밋을 받는 다른 작업 트리에서는 pull 때 이 로컬 파일이 삭제될 수 있다(허용 명령 목록·훅 등록이 사라진다). **push 전에 팀에 공지해야 한다**(받은 뒤 필요한 허용 규칙은 각자 `.claude/settings.local.json`에 다시 만들면 되고, 훅 스크립트 `.claude/hooks/`는 계속 추적된다).
 
+#### B-86 c IDE 확인 (2026-11-13, 읽기만)
+
+**1) 11-13 09:29 IDE 종료 조사**
+- 이 IDE는 정상 종료 절차를 밟았다: `idea.log`는 09:29:01에 끝나지 않고 09:29:42(설정 저장) → 09:31:22~37(VFS 점검, 정상) → 09:31:56(캐시 닫기, `Index dispose completed`)까지 이어졌다. ERROR/SEVERE 없음(WARN은 Caffeine `setContextClassLoader`, 호스트 조회 실패, 색인 점검, CPU 감지뿐), `hs_err_pid*.log` 없음.
+- runIde 콘솔의 `Could not dispatch a message to the daemon`은 Gradle 데몬 연결이 사라진 증상이다. 데몬 24656의 로그(`daemon-24656.out.log`)에 OutOfMemoryError, stop 요청, expiration 문구가 없고 빌드 `063b0601`은 끝났다는 줄 없이 끝났다. **데몬이 사라진 원인과 IDE 종료 요청의 주체는 확인하지 못했다.** **플러그인 원인 근거는 없다.**
+- 이 세션의 마지막 Gradle 실행은 09:15:11에 끝났고 runIde 빌드는 09:18:36에 시작해 겹치지 않았다. 이 구간에 `gradlew --stop`이나 프로세스 종료는 없었다.
+- 재발 방지(회차 운영): 회차 전 사용자가 `gradlew --stop`을 실행하고, `runIde --console=plain | Tee-Object build\ide-logs\<파일>`로 콘솔을 파일로 남기며, 회차 중에는 그 콘솔을 조작하지 않는다.
+
+**2) 11-13 10:42~11:12 IDE 회차: 통과** (`idea.1.log` 42853행부터, 로그가 11-14에 새로 시작되어 이 회차는 `idea.1.log`에 있다. ERROR/SEVERE 0건)
+
+| 카드 | 요청 전송 | `[CardWait]` result / waitedMs | hide 전송 | 시간 초과→hide |
+|---|---|---|---|---|
+| refine (`180f0685:analyze_1794534268138`) | 10:44:28.172 | timeout / 300027 | `refinedConfirmation/expired` 10:49:28.210 | 11ms |
+| package | 10:49:28.270 | timeout / 300007 | `scopeSelection/hideTree` 10:54:28.280 | 8ms |
+| hint turn=1 | 10:54:40.041 | timeout / 300020 | `l1Clarification/hide` 10:59:40.062 | 2ms |
+| hint turn=2 | 10:59:56.079 | timeout / 300007 | `l1Clarification/hide` 11:04:56.087 | 1ms |
+| stage3 | 11:06:41.142 | timeout / 300009 | `stage3Confirmation/hide` 11:11:41.141 | 1ms |
+
+- hide는 백엔드 전송 줄이 따로 없어 `Bridge → Webview` 줄 시각이다. 시간 초과 안내(`analyze_notice`)와 hide가 같은 밀리초 안에 함께 나갔다.
+- 두 번째 hide(힌트 11:06:40.974·.987 탐색 종료, Stage 3 11:12:05.749 파이프라인 `finally`)는 카드가 이미 없어 아무 일도 하지 않았다(웹뷰 메시지 수 13→13). 같은 hide를 두 번 보내도 결과가 같다.
+- 10:56:41 채팅 복원(`/loadChat`) 뒤 힌트 카드(turn=1)가 다시 그려지고(0.8초 뒤 뷰포트 안) 정상으로 시간 초과까지 갔다: B-86 c(ii)(iii)를 실제 IDE에서 확인했다.
+- `[ExplorerTiming] … 카드 대기(사용자) 600030ms, cardWaitByTurn=[300022, 300008, 0, 0, 0] …`, `stale response ignored`와 `result=stale` 0건.
+- Turn 2는 (A): 카드가 실제로 떴고(10:59:56) `[CardWait] turn=2 timeout`이 남았으며 기록 줄은 카드 하나에 하나다(저장된 채팅에서 확인). 앞서 "Turn 2~4는 검색이 있을 때만 카드가 뜬다"고 한 것과 모순이 아니다(이번에는 Turn 2에서 검색을 해서 카드가 떴다). 결함이 아니다.
+- B-85 후속 4번(`[CardWait] card=refine`에 `requestId` 출력)을 실제 IDE에서 확인했다.
+- 판정: B-85 1·2번, B-86 c(i)(ii)(iii), Stage 3 후속, 복원 뒤 기록 줄 중복 없음 통과.
+
 ### B-87 (2026-11-12, 기록만)
 
 - **채팅 식별자 없음**: `WebviewActionRouter`가 웹뷰로 보내는 메시지(카드 요청·hide·안내·결과 청크)에 채팅 id가 없다. 웹뷰는 지금 표시 중인 채팅에 그대로 적용하므로, 채팅 A의 분석이 진행 중일 때 B로 전환하면 A 분석의 카드·안내·결과가 B 화면에 붙을 수 있다. 채팅 전환에서 백엔드를 정리하지 않는 점(`/loadChat`·새 채팅 어디에도 `/cancel` 없음)과 맞물린 위험이다. **코드로만 확인했고 화면에서 재현하지 않았다.**
@@ -3859,3 +3885,29 @@ R-EMAIL-PIPE를 정제문 두 개로 각 3회(파이프라인 전체, 프로젝�
 - 연관: B-86 c (iii)은 채팅 식별자 없이 웹뷰가 받은 카드에 번호를 붙여 "살아 있는 카드" 목록을 쓰는 안(A안, nonce)이라, 위 위험(다른 채팅에 카드가 붙는 것)은 그대로 남는다.
 - **카드 payload messageId가 `"system"` 고정**: 백엔드는 카드 요청(`scopeSelection/showTree`, `l1Clarification/request`, `stage3Confirmation/request`, `refinedConfirmation/request`)과 hide의 messageId 자리에 항상 `"system"`을 보낸다(`ScopeSelectionBridge`, `L1ClarificationBridge`, `Stage3ConfirmationBridge`, `RefinedRequirementConfirmationBridge`의 `sendMessage(…, "system")`). 이 자리에 **실제 분석 id**(`analyze_<번호>`, 정제문 카드의 requestId에 이미 들어 있는 messageId)를 싣고, payload에 채팅 id도 함께 실으면 웹뷰가 카드를 올바른 채팅에만 붙이고(다른 채팅 화면이면 표에만 반영), 복원 때 "카드 종류 + 분석 id(+ turn)"로 키를 만들 수 있다. 지금은 `"system"`이 같은 값이라 카드 메시지만으로는 어느 분석의 카드인지 알 수 없다.
 - **nonce 안(B-86 c)의 남는 한계**: (1) 채팅 A의 분석이 진행 중일 때 B로 전환하면 이후에 오는 카드·hide·안내가 B 화면에 붙는다(카드 번호 표는 맞게 갱신되지만 카드 자체는 B의 메시지로 들어간다). A로 돌아오면 A에 저장된 카드는 번호가 달라져 "이전에 끝난 카드"로 닫히고 실제 카드는 B 쪽에 살아 있다. 시간 초과 안내의 기록 줄도 지금 보이는 채팅에 붙는다. (2) 웹뷰를 새로고침하면 표가 사라져, 복원한 카드가 모두 닫힌다(백엔드는 5분 자동 진행으로 이어 가므로 분석은 막히지 않는다). (3) 사용자가 답하기 전에 번호 없이 저장된 이전 버전의 채팅은 모두 닫힌다.
+
+#### B-87 후보 우선순위 (2026-11-16 정리, 구현은 이번 회차 push 뒤 승인을 받아 (가) → (다) → (나) 순서로 한 단위씩)
+
+**(가) 높음 — 확정 시 입력창 미전송 글 소실 → 출처 답 판정 분리**
+- 증상(11-13 10:42 회차): "지시 전송"을 누르지 않고 "확인 완료 및 분석 시작"을 누르면 입력창의 글은 서버로 가지 않고(`App.tsx:471-476`의 `userStatement: null`) 입력창이 사라져 안내 없이 없어진다. 사용자 답변 수 0 → `refineRequirement`가 `userStatements.isEmpty()`(`Stage0ClarificationEngine.kt:1573`)로 LLM을 부르지 않고 원문을 그대로 돌려줘 정제문 50자 = 원문 50자(`[RefineGate] … confirm 후 19 ms`, `[LlmCall] label=정제문` 0건), `decisionNote`도 `fieldAnswers`가 비어 나오지 않는다(`ClaimedFieldCheck.decisionNotes`, `Stage0ClarificationEngine.kt:1550`). 같은 원인이다.
+- 채택하지 않는 최소안: `userStatement`로 싣기만 하면 `processTurn`(`:450-504`)이 `isNewData`·`fieldAnswers`를 처리하지 않아 `decisionNote`가 나오지 않는다.
+- 설계: `processUtterance`의 출처 답 판정(`:1253-1269`: 대상 항목 선택, 완료·제외 표현 제외, `isNewData`, `AnswerInterpreter.echo`, `userStatements`의 `"<항목>의 출처: <글>"`, `fieldAnswers`, `dialogueHistory` 갱신 `:1342-1353`)은 결정적이고(LLM 없음) 외부 효과가 없어 함수로 떼어 `processTurn`(확정 경로)에서 `userStatement`가 있을 때 먼저 부를 수 있다. 분리 함수는 `processUtterance`와 같은 규칙을 따른다: `dialogueHistory` 갱신 포함, 제외 제안 답 판정은 `lenient=true`(`:1248`; `processTurn`은 `lenient=false` `:455`). **출처 답으로 처리했다면 `processTurn`의 `:450` 블록(제약 추출 `:458`, 식별자 해소 `:467`)은 건너뛴다**(이중 처리 방지). `processUtterance`의 출처 답 경로는 `extractConstraintsChecked`를 부르지 않는다(`:1255`의 `!containsExclusionWord` 때문에 `:1326-1335` 분기에 들어가지 않는다). 제약 추출은 확정 때 `buildClarifyIntentDeferred`의 `extractionFuture(state.userStatements)`(`:1420`)에서 한 번만 한다.
+- 완료 기준(등가 시험): "전송 후 확인"과 "입력만 하고 확인"의 `fieldAnswers`·`userStatements`·`dialogueHistory`·정제문 입력·`decisionNote`가 같다. 시험 입력은 두 가지: 제외 제안이 열려 있지 않은 상태, 열려 있는 상태.
+
+**(다) 중상 — `analyze_start` 로딩 미해제(정지 버튼 켜짐 포함)와 Turn 기록 줄 순서**
+- 원인: `analyze_clarify` 분기(`App.tsx:1491-1513`)가 같은 id의 `analyze_start` 메시지를 갱신하지 않고 기존 `analyze_clarify`만 걸러낸 뒤 새 메시지를 뒤에 붙이고 `return`한다. 그래서 같은 id의 메시지가 둘 생기고(저장된 채팅: 인덱스 5 `analyze_start` `isLoading=true`·상태 문구 "확인을 기다리고 있습니다", 인덱스 6 `analyze_clarify`), "완료 신호가 오면 로딩을 모두 초기화"하는 `App.tsx:1816-1822`에도 닿지 않는다. 첫 `/clarify`의 `analyze_start`(인덱스 2)도 같은 상태로 남았다.
+- 영향: (1) 카드가 뜰 때 이전 `/clarify`들의 진행 줄이 "확인을 기다리고 있습니다"로 덮인다(`applyCardStatus`, `cardWaitLogic.ts:19-23`, `isLoading && currentStatus` 전부에 적용, `App.tsx:1354-1355`). (2) 정지 버튼이 계속 켜진다(`App.tsx:2448`, `messages.some(isLoading || isStreaming)`; 채팅 복원이 풀어 준다 `chatRestoreLogic.ts:39-40`). (3) `key={msg.id}` 중복(`App.tsx:2296`). (4) `m.id === messageId` 갱신들이 두 메시지에 모두 적용되고 `findIndex`는 첫 번째(`analyze_start`)를 고른다(`App.tsx:1673`, `:1715`). B-86 c의 `liveCards`와 복원 로직, 채팅 저장은 messageId 고유성을 쓰지 않아 영향 없다(카드 번호는 `cardKey`, 복원은 인덱스 기준).
+- Turn 기록 줄 순서: 11-13 회차 저장 채팅에서 읽을 범위·최종 검증 대상 기록은 결과 말풍선 안(`inlineRecords`)에 들어갔고 Turn 1·2 힌트 기록은 결과 말풍선 뒤의 별도 `choice_record`(인덱스 11·12)로 들어갔다. **원인은 추정**: `appendRecord`(`chatRestoreLogic.ts:107-112`)는 결과가 `task_chunk`이고 스트리밍·로딩 중일 때만 안에 끼우는데, 10:56:41 채팅 복원이 `isLoading/isStreaming`을 껐고(`:39-40`) 이후 청크가 다시 오기 전(10:59:40, 11:04:56)이라 끝에 붙은 것으로 보인다(청크가 안 왔다는 확인은 못 했다: (다) 설계 때 확인).
+- 설계 조건: "진행 중인 분석"을 `isLoading`으로 판단하면 같은 문제가 되풀이되므로 **분석 완료 신호를 `isLoading`과 분리**해 한 설계로 묶는다. 근본 수정은 `analyze_clarify` 도착 때 같은 id의 진행 줄 로딩을 끄는 것, 보조로 `applyCardStatus`를 현재 분석 id로 제한하는 안. 시험: `analyze_clarify` 뒤 로딩 0, 같은 id 메시지 1개.
+
+**(나) 중간 — 만료 오류 이중 표시**
+- 백엔드는 만료 때 오류를 한 번만 보낸다(`WebviewActionRouter.kt:241`, `:335`, 같은 문구; 11-13 10:39:41.318 `/clarify-utterance`에 `error` 1건). 웹뷰가 그 한 메시지를 두 곳에서 따로 처리해 (1) clarify 카드의 "대화 세션이 끝나서 확인을 이어갈 수 없습니다 … 다시 시작" 블록(`App.tsx:388-403`, `:671-716`, `clarifySessionLogic.ts:37`)과 (2) 오류 말풍선("분석 세션이 만료되었거나 유효하지 않습니다 …" + ERROR, `App.tsx:1860`, `:1915`)이 함께 나온다. "지시 전송"·"확인 완료 및 분석 시작" 두 경로 모두 (1)+(2)이고 (1)만 나오는 경로는 없다. 제출하지 않은 카드가 여럿이면 (1)이 카드 수만큼 나올 수 있다(코드 판정, 재현 안 함).
+- 안: 만료 오류는 카드가 (1)로 처리했음을 표시해 말풍선을 만들지 않는다(`isSessionExpiredError` 재사용). 새 오류는 가장 최근 `analyze_clarify` 카드만 처리한다. 상호작용 카드가 없는 경우에만 (2)를 남기고 두 문구를 하나로 맞춘다.
+
+**기타(기록)**
+- `isNewData` 과판정(`ClaimedFieldCheck.kt:435-438`, 정규식 `새로|신규|추가|수집|저장`, 부정·문맥을 보지 않는다; 코드 판정, 실행해서 확인하지 않음): "저장된 값을 조인"(`저장`), "저장 안 함"(`저장`), "수집하지 않음"(`수집`), "추가 정보 없이"(`추가`)가 새 데이터로 판정된다. 11-13 시험 문장("아직 수집하지 않아 … 새로 추가해서 저장")은 결과가 맞지만 "수집하지 않음, 기존 테이블 조인으로" 같은 답은 잘못 판정된다. 고칠 때는 `AnswerInterpreter`의 `NEGATION`·`NO_DATA`(`AnswerInterpreter.kt:21-22`) 재사용 가능 여부부터 본다.
+- 출처 미답변 회차의 요약 모순(ReasonGuard G2 범위 밖). 저장된 채팅 `chat_1794530287985`의 결과 메시지 `analyze_1794534268138`(11-13 10:42 회차, 사용자 답변 0개)에서 원문 그대로:
+  - 요약 1) 줄: `1) 응답자 이메일은 기존 selectResultList 쿼리에서 JOIN으로 조회 가능하므로 SurveyDao/DaoImpl/Service 인터페이스 시그니처 변경 불필요.`
+  - 같은 화면의 ⚠️ 줄(앞부분): `⚠️ 확인 안 됨: 응답자 이메일을 조회하는 코드/SQL을 찾지 못했습니다 (분석 단계에서 survey/service·survey/dao·survey/dto 폴더를 읽어 확인). …`(이하 테이블·줄 번호 생략)
+  - 요약은 "JOIN으로 조회 가능"이라 단정하고 같은 화면은 "조회하는 코드/SQL을 찾지 못했다"고 말한다.
+- 카드 payload messageId `"system"` 고정과 `CardRegistry<T>` 공용화는 위 B-87 항목을 유지한다.
