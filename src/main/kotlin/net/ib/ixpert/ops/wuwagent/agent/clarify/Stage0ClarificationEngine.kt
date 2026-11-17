@@ -423,6 +423,22 @@ class Stage0ClarificationEngine(
      * 3절: 대화 턴 처리 (증분 seed 확장 + 미판정 영역 재탐색 + 확정분 동결)
      */
     fun processTurn(state: Stage0State, userInput: UserInput): Stage0TurnResult {
+        // B-87 가: 확정(완결 선언) 때 입력창에 남은 글은 대화 경로(processUtterance)와 같은 규칙으로 먼저 본다.
+        // 열린 소스 확인 질문이나 제외 제안의 답이면 그 답으로 기록하고(제약 추출·식별자 해소는 건너뛴다. 제약 추출은 확정 때 한 번 한다),
+        // 완료 표현뿐인 글은 무시한다. 그 밖의 글과 완결 선언이 아닌 턴은 아래 기존 경로(processTurnCore)를 그대로 탄다.
+        val statement = userInput.userStatement?.trim()?.takeIf { it.isNotEmpty() }
+        if (!userInput.isCompletionDeclared || statement == null) return processTurnCore(state, userInput)
+        if (ClarifyUtteranceTranslator.isCompletionOnly(statement)) {
+            println("[ClarifyConfirm] completion-only statement ignored len=${statement.length}")
+            return processTurnCore(state, userInput.copy(userStatement = null))
+        }
+        val step = applyAnswerStep(state, statement)
+        if (step.kind == AnswerStepKind.NONE) return processTurnCore(state, userInput)
+        // 글은 이미 상태(userStatements 등)에 들어갔으므로 코어에는 글 없이 넘긴다. 체크박스 선택(verdictUpdates)은 코어가 그 뒤에 반영해 우선한다.
+        return processTurnCore(step.state, userInput.copy(userStatement = null))
+    }
+
+    private fun processTurnCore(state: Stage0State, userInput: UserInput): Stage0TurnResult {
         cacheOriginal = state.originalRequirement
         val currentTurn = state.userStatements.size + 2
 
@@ -1239,9 +1255,16 @@ class Stage0ClarificationEngine(
      * - (e) NOT_IN_CANDIDATES & UNKNOWN: items No-Op (0건 훼손) 및 안내 되비추기
      * - (f) userStatements 추적 보존
      */
-    fun processUtterance(state: Stage0State, utterance: String): Stage0TurnResult {
-        val trimmed = utterance.trim()
+    /** 글이 무엇에 대한 답으로 판정됐는가(B-87 가). */
+    internal enum class AnswerStepKind { NONE, EXCLUSION_ANSWER, FIELD_ANSWER }
 
+    /** [applyAnswerStep]의 결과: 판정 종류, 답을 반영한 상태(NONE이면 입력 그대로), 안내문. */
+    internal data class AnswerStep(val kind: AnswerStepKind, val state: Stage0State, val echo: String?)
+
+    private class AnswerClassification(val answerItems: MutableList<RequirementItem>, val answer: PendingAnswerOutcome, val fieldAnswered: FieldFact?)
+
+    /** 직전 제외 제안이나 열린 소스 확인 질문에 대한 답인지 판정한다(LLM 없음). processUtterance와 확정 경로(processTurn)가 같은 규칙을 쓴다. */
+    private fun classifyAnswer(state: Stage0State, trimmed: String): AnswerClassification {
         // 직전에 제외 제안(예/아니요 질문)을 했다면 이 발화가 그 답인지 먼저 본다. 답이면 번역기를 거치지 않는다(제안 1회, 답 1회).
         val answerItems = state.items.toMutableList()
         val answer = if (trimmed.isNotBlank() && !ClarifyUtteranceTranslator.isCompletionUtterance(trimmed)) {
@@ -1253,13 +1276,74 @@ class Stage0ClarificationEngine(
         val pendingField = state.fieldFacts.firstOrNull { it.question != null && it.label !in state.fieldAnswers }
         val fieldAnswered = if (pendingField != null && !answer.handled && trimmed.isNotBlank() &&
             !ClarifyUtteranceTranslator.isCompletionUtterance(trimmed) && !ExclusionWords.containsExclusionWord(trimmed)) pendingField else null
+        return AnswerClassification(answerItems, answer, fieldAnswered)
+    }
+
+    /** 소스 확인 질문의 답에 대한 안내문. B-83 4: "새로 저장"이라고 답했는데 읽은 범위에 응답을 저장하는 경로가 없으면 바로 안내한다(확인 범위 안에서 발견되지 않음으로 한정). */
+    private fun fieldAnswerEcho(fact: FieldFact, trimmed: String): String {
+        val writeNote = fact.writeNotice?.takeIf { net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.isNewData(trimmed) }
+        return AnswerInterpreter.echo(fact.label, trimmed) + (writeNote?.let { "\nℹ️ $it" } ?: "")
+    }
+
+    /** 답을 기록한 뒤의 대화 기록: 답하는 시점에 열려 있던 소스 확인 질문(B-80 11b), 사용자 글, 안내문 순. */
+    private fun dialogueAfter(state: Stage0State, trimmed: String, echoMsg: String?): List<DialogueHistoryItem> {
+        val newDialogueHistory = state.dialogueHistory.toMutableList()
+        // B-80 11b: 사용자가 답하는 시점에 열려 있던 소스 확인 질문(필드 질문)을 어시스턴트 발화로 남긴다. 그래야 카드가 갱신되거나 복원된 뒤에도 무엇에 대한 답인지 보인다.
+        val answeredFieldQuestion = state.fieldFacts.firstOrNull { it.question != null && it.label !in state.fieldAnswers }?.question
+        if (trimmed.isNotBlank() && answeredFieldQuestion != null && newDialogueHistory.none { it.role == "assistant" && it.content == answeredFieldQuestion }) {
+            newDialogueHistory.add(DialogueHistoryItem(role = "assistant", content = answeredFieldQuestion))
+        }
+        if (trimmed.isNotBlank()) {
+            newDialogueHistory.add(DialogueHistoryItem(role = "user", content = trimmed))
+        }
+        if (!echoMsg.isNullOrBlank()) {
+            newDialogueHistory.add(DialogueHistoryItem(role = "assistant", content = echoMsg))
+        }
+        return newDialogueHistory
+    }
+
+    /**
+     * 글이 열린 제외 제안이나 소스 확인 질문의 답이면 그 답을 반영한 상태를 돌려준다(B-87 가). processUtterance의 앞 단계와 같은 규칙(제외 답은 lenient)이다.
+     * 첫 열린 질문 하나에만 답으로 본다. 답이 아니면 NONE과 입력 상태 그대로.
+     */
+    internal fun applyAnswerStep(state: Stage0State, utterance: String): AnswerStep {
+        val trimmed = utterance.trim()
+        if (trimmed.isEmpty()) return AnswerStep(AnswerStepKind.NONE, state, null)
+        val c = classifyAnswer(state, trimmed)
+        val fact = c.fieldAnswered
+        return when {
+            c.answer.handled -> AnswerStep(
+                AnswerStepKind.EXCLUSION_ANSWER,
+                state.copy(items = c.answerItems, userStatements = state.userStatements + trimmed, dialogueHistory = dialogueAfter(state, trimmed, c.answer.echo)),
+                c.answer.echo
+            )
+            fact != null -> {
+                val echo = fieldAnswerEcho(fact, trimmed)
+                AnswerStep(
+                    AnswerStepKind.FIELD_ANSWER,
+                    state.copy(
+                        userStatements = state.userStatements + "${fact.label}의 출처: $trimmed",
+                        dialogueHistory = dialogueAfter(state, trimmed, echo),
+                        fieldAnswers = state.fieldAnswers + (fact.label to trimmed)
+                    ),
+                    echo
+                )
+            }
+            else -> AnswerStep(AnswerStepKind.NONE, state, null)
+        }
+    }
+
+    fun processUtterance(state: Stage0State, utterance: String): Stage0TurnResult {
+        val trimmed = utterance.trim()
+
+        val classified = classifyAnswer(state, trimmed)
+        val answerItems = classified.answerItems
+        val answer = classified.answer
+        val fieldAnswered = classified.fieldAnswered
         val translated = if (answer.handled) {
             TranslatedAction(kind = UserActionKind.UNKNOWN, rawStatement = trimmed, clarificationMessage = answer.echo)
         } else if (fieldAnswered != null) {
-            // B-83 4: "새로 저장"이라고 답했는데 읽은 범위에 응답을 저장하는 경로가 없으면 바로 안내한다(확인 범위 안에서 발견되지 않음으로 한정)
-            val writeNote = fieldAnswered.writeNotice?.takeIf { net.ib.ixpert.ops.wuwagent.agent.ClaimedFieldCheck.isNewData(trimmed) }
-            TranslatedAction(kind = UserActionKind.ADD_CONSTRAINT, rawStatement = trimmed,
-                clarificationMessage = AnswerInterpreter.echo(fieldAnswered.label, trimmed) + (writeNote?.let { "\nℹ️ $it" } ?: ""))
+            TranslatedAction(kind = UserActionKind.ADD_CONSTRAINT, rawStatement = trimmed, clarificationMessage = fieldAnswerEcho(fieldAnswered, trimmed))
         } else {
             ClarifyUtteranceTranslator.translate(trimmed, state.items, llmClient, state.originalRequirement)
         }
@@ -1339,18 +1423,7 @@ class Stage0ClarificationEngine(
         val echoMsg = listOfNotNull(if (dropTranslatorMessage) null else translated.clarificationMessage, exclusionNote, exclusionQuestion)
             .joinToString("\n").ifBlank { null }
 
-        val newDialogueHistory = state.dialogueHistory.toMutableList()
-        // B-80 11b: 사용자가 답하는 시점에 열려 있던 소스 확인 질문(필드 질문)을 어시스턴트 발화로 남긴다. 그래야 카드가 갱신되거나 복원된 뒤에도 무엇에 대한 답인지 보인다.
-        val answeredFieldQuestion = state.fieldFacts.firstOrNull { it.question != null && it.label !in state.fieldAnswers }?.question
-        if (trimmed.isNotBlank() && answeredFieldQuestion != null && newDialogueHistory.none { it.role == "assistant" && it.content == answeredFieldQuestion }) {
-            newDialogueHistory.add(DialogueHistoryItem(role = "assistant", content = answeredFieldQuestion))
-        }
-        if (trimmed.isNotBlank()) {
-            newDialogueHistory.add(DialogueHistoryItem(role = "user", content = trimmed))
-        }
-        if (!echoMsg.isNullOrBlank()) {
-            newDialogueHistory.add(DialogueHistoryItem(role = "assistant", content = echoMsg))
-        }
+        val newDialogueHistory = dialogueAfter(state, trimmed, echoMsg)
 
         val nextState = state.copy(
             items = updatedItems,

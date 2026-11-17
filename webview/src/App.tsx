@@ -14,7 +14,7 @@ import { buildCancelText, makeNoticeBubble, parsePayload } from './refinedConfir
 import { RemovedCandidatesPanel } from './RemovedCandidatesPanel';
 import { applyRestoreReply, parseRemovedPayload, type RemovedCandidate, type RestoreNotice } from './removedCandidatesLogic';
 import { makeErrorBubble } from './errorDisplayLogic';
-import { confirmButtonLabel, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
+import { confirmButtonLabel, confirmPayload, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardElapsedSeconds, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
 import { appendRecord, completeClarifyCards, finishRefinedCard, refinedCloseRecords, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, noticeTurnOf, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
@@ -468,12 +468,12 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
       }
     });
 
-    const responsePayload = {
-      verdictUpdates: verdicts,
-      rejectionReasonUpdates,
-      userStatement: null,
-      isCompletionDeclared
-    };
+    // B-87 가: 입력창에 쓰고 보내지 않은 글도 함께 보낸다(빈 글은 null). 입력창은 비우지 않는다(실패하면 글이 그대로 다시 보이고 백엔드가 확정 전 상태로 되돌린다).
+    const responsePayload = confirmPayload(verdicts, rejectionReasonUpdates, naturalUtterance, isCompletionDeclared);
+    if (responsePayload.userStatement !== null) {
+      const sent = responsePayload.userStatement;
+      setSentUtterances(prev => (prev.includes(sent) ? prev : [...prev, sent]));
+    }
 
     if (window.sendToIde) {
       window.sendToIde(JSON.stringify({

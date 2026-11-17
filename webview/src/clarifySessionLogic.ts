@@ -54,6 +54,25 @@ export const onClarifyBackendMessage = (state: ClarifyFormState, subType: string
 export const isRetryableConfirmFailure = (outcome: { revertSubmitted: boolean; sessionExpired: boolean }): boolean =>
   outcome.revertSubmitted && !outcome.sessionExpired;
 
+/**
+ * 확정(/analyze-confirm)으로 보내는 payload(B-87 가). 입력창에 쓰고 보내지 않은 글은 userStatement로 함께 보낸다(앞뒤 공백 제거).
+ * 빈 글과 공백뿐인 글은 null이라 이전과 같은 payload다. 입력창은 비우지 않는다: 확정이 실패하면 글이 그대로 다시 보이고, 백엔드가 확정 전 상태로 되돌리므로 다시 보내도 중복되지 않는다.
+ */
+export const confirmPayload = <V, R>(
+  verdicts: V,
+  rejectionReasons: R,
+  pendingText: string | null | undefined,
+  isCompletionDeclared: boolean = true,
+): { verdictUpdates: V; rejectionReasonUpdates: R; userStatement: string | null; isCompletionDeclared: boolean } => {
+  const text = (pendingText ?? '').trim();
+  return {
+    verdictUpdates: verdicts,
+    rejectionReasonUpdates: rejectionReasons,
+    userStatement: text === '' ? null : text,
+    isCompletionDeclared,
+  };
+};
+
 /** 확정 버튼 문구: 확정 실패 뒤에는 "다시 시도". */
 export const confirmButtonLabel = (confirmFailed: boolean): string => (confirmFailed ? '다시 시도' : '확인 완료 및 분석 시작 →');
 

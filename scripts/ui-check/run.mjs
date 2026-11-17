@@ -962,6 +962,26 @@ try {
   record(57, 'Stage 3 시간 초과: 시간 초과 분기의 hide 한 번으로 카드가 사라지고, 뒤따른 finally의 hide(두 번째)는 화면에 해가 없다(카드 0개, 기록 "✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음, 자동 진행)" 1줄 그대로, 오류 없음)',
     mid57.card === 0 && end57.card === 0 && JSON.stringify(end57.recs) === JSON.stringify(mid57.recs) && end57.recs.length === 1 && end57.recs[0].startsWith('✔ 최종 검증 대상 선택: 전체 13개 진행(5분 응답 없음') && end57.errors === 0, JSON.stringify({ mid57, end57 }));
 
+  // 58) B-87 가: 입력창에 쓰고 보내지 않은 글은 확정(/analyze-confirm) payload의 userStatement로 간다(앞뒤 공백 제외). 입력창이 비어 있으면 null. 입력창은 비우지 않는다(실패하면 글이 그대로 보인다).
+  await evaluate("window.__confirmMode = 'ok', window.__confirmDelayMs = 100, true");
+  const typeIntoForm = (msgId, text) => evaluate("(()=>{const t=document.querySelector('[data-message-id=\"" + msgId + "\"] input[type=text]'); if(!t) return false; const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set; set.call(t, " + JSON.stringify(text) + "); t.dispatchEvent(new Event('input',{bubbles:true})); return true})()");
+  const lastConfirm = () => evaluate("(()=>{const c=window.__sent.map(x=>JSON.parse(x)).filter(o=>o.command==='/analyze-confirm'); return c.length? JSON.parse(c[c.length-1].text): null})()");
+  await post({ type: 'ai_message', subType: 'analyze_clarify', messageId: 'clarify_b87a', content: JSON.stringify({ ...expPayload, originalRequirement: 'B-87 글 있음' }) });
+  await sleep(400);
+  const typed58 = await typeIntoForm('clarify_b87a', '  이메일은 설문 응답 테이블에서 가져와  ');
+  await sleep(200);
+  await click("[...document.querySelector('[data-message-id=\"clarify_b87a\"]').querySelectorAll('button')].find(b=>b.textContent.includes('확인 완료'))", '확인 완료(글 있음)');
+  await sleep(500);
+  const p58a = await lastConfirm();
+  await post({ type: 'ai_message', subType: 'analyze_clarify', messageId: 'clarify_b87b', content: JSON.stringify({ ...expPayload, originalRequirement: 'B-87 글 없음' }) });
+  await sleep(400);
+  await typeIntoForm('clarify_b87b', '   ');
+  await sleep(200);
+  await click("[...document.querySelector('[data-message-id=\"clarify_b87b\"]').querySelectorAll('button')].find(b=>b.textContent.includes('확인 완료'))", '확인 완료(글 없음, 공백뿐)');
+  await sleep(500);
+  const p58b = await lastConfirm();
+  record(58, '확정 payload: 입력창에 남은 글은 userStatement(앞뒤 공백 제외)로 가고, 공백뿐인 입력창은 null이다', typed58 === true && p58a && p58a.userStatement === '이메일은 설문 응답 테이블에서 가져와' && p58a.isCompletionDeclared === true && p58b && p58b.userStatement === null && p58b.isCompletionDeclared === true, JSON.stringify({ typed58, p58a: p58a && p58a.userStatement, p58b: p58b && p58b.userStatement }));
+
   const errors = await evaluate(`window.__errors || null`);
   fs.writeFileSync(OUT + '/results.json', JSON.stringify({ results, observations, shots, clicks, errors }, null, 1));
   const md = ['| # | 항목 | 결과 | 근거 |', '|---|---|---|---|', ...results.map(r => `| ${r.id} | ${r.item} | ${r.ok ? '됨' : '**안 됨**'} | ${String(r.evidence).replace(/\|/g, '\\|').slice(0, 300)} |`)].join('\n');

@@ -27,6 +27,31 @@ data class Stage0Session(
     }
 }
 
+/**
+ * 확정(`/analyze-confirm`) 처리 전후의 세션 상태 기록(B-87 가). 확정 처리(processTurn)가 상태를 바꾼 뒤 분석 시작이 실패하면 처리 전 상태로 되돌려,
+ * 같은 글을 다시 보내도 userStatements에 중복되지 않게 한다.
+ * 되돌림 조건: 세션의 현재 상태가 [applied]가 기록한 객체와 같은 인스턴스일 때만(=== 비교). 그 사이 `/clarify-utterance` 등이 상태를 바꿨으면 그 변경을 유지한다.
+ */
+class ConfirmCheckpoint(private val session: Stage0Session) {
+    private val stateBefore = session.currentState
+    private val turnBefore = session.lastTurnResult
+    private var stateAfter: Stage0State? = null
+
+    /** 확정 처리 결과를 세션에 대입한 직후에 부른다. */
+    fun applied() {
+        stateAfter = session.currentState
+    }
+
+    /** 되돌렸으면 true. 대입 전이거나 그 사이 상태가 바뀌었으면 아무 것도 하지 않고 false. */
+    fun rollback(): Boolean {
+        val after = stateAfter ?: return false
+        if (session.currentState !== after) return false
+        session.currentState = stateBefore
+        session.lastTurnResult = turnBefore
+        return true
+    }
+}
+
 object AnalyzeSessionManager {
     // Project base path -> Session
     private val sessions = ConcurrentHashMap<String, Stage0Session>()

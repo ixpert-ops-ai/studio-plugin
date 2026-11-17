@@ -170,13 +170,35 @@ object ClarifyUtteranceTranslator {
         }
     }
 
+    private val completionKeywords = listOf(
+        "분석시작", "시작해줘", "시작하자", "분석진행", "진행해줘",
+        "완료", "다음으로", "단계진행", "분석해줘"
+    )
+
+    // 완료 표현 사이에 붙는 군더더기(어미, 부사). 키워드를 지우고 남은 글자가 이것뿐이면 완료 표현만 있는 글로 본다(B-87 가).
+    private val completionFillers = listOf(
+        "해주세요", "주세요", "해줘", "합니다", "하자", "분석", "이제", "이대로", "그럼", "바로", "그리고", "좀", "요", "해"
+    )
+
     internal fun isCompletionUtterance(text: String): Boolean {
         val normalized = text.lowercase().replace(" ", "")
-        val completionKeywords = listOf(
-            "분석시작", "시작해줘", "시작하자", "분석진행", "진행해줘",
-            "완료", "다음으로", "단계진행", "분석해줘"
-        )
         return completionKeywords.any { normalized.contains(it) }
+    }
+
+    /**
+     * 완료 표현뿐인 글인가("분석 시작해줘", "이제 분석해줘!"). 완료 키워드, 군더더기, 공백·문장부호를 지우고 아무 글자도 남지 않으면 참.
+     * "분석 시작해줘, 단 Address는 빼줘"처럼 다른 지시가 섞이면 거짓이다. 확정(isCompletionDeclared) 때 입력창에 남은 글을 처리하는 데만 쓴다.
+     */
+    internal fun isCompletionOnly(text: String): Boolean {
+        if (!isCompletionUtterance(text)) return false
+        var rest = text.lowercase().replace(Regex("[\\p{P}\\p{S}\\s]"), "")
+        val tokens = completionKeywords.sortedByDescending { it.length } + completionFillers
+        while (true) {
+            val next = tokens.fold(rest) { acc, t -> acc.replace(t, "") }
+            if (next == rest) break
+            rest = next
+        }
+        return rest.isEmpty()
     }
 
     private fun buildCandidatesContext(items: List<RequirementItem>, mentionTexts: List<String>): String {

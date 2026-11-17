@@ -18,7 +18,9 @@ object ClarifyConfirmHandoff {
         val onFailure: (Exception) -> Unit,
         val endHandoff: () -> Unit,
         /** 세션을 지운 뒤 분석 시작이 실패하면 세션을 되돌린다(재확정이 가능해야 한다). 기본은 아무 것도 하지 않는다. */
-        val restoreSession: () -> Unit = {}
+        val restoreSession: () -> Unit = {},
+        /** 실패하면 세션을 지웠는지와 무관하게, 세션 복원보다 먼저 확정 처리 전 상태로 되돌린다(B-87 가, ConfirmCheckpoint). 기본은 아무 것도 하지 않는다. */
+        val rollbackState: () -> Unit = {}
     )
 
     fun <I> start(steps: Steps<I>, runInBackground: (() -> Unit) -> Unit) {
@@ -33,7 +35,8 @@ object ClarifyConfirmHandoff {
                     sessionRemoved = true
                     steps.continueAfterClarify(intent)
                 } catch (e: Exception) {
-                    // 세션을 지운 뒤(분석 시작 단계)에 실패했으면 세션을 먼저 되돌리고 표지를 푼다: 그래야 곧바로 재확정이 가능하다
+                    // 확정 처리 전 상태로 되돌린 뒤(세션을 지웠는지와 무관), 세션을 지운 뒤(분석 시작 단계)에 실패했으면 세션을 되돌리고 표지를 푼다: 그래야 곧바로 재확정이 가능하다
+                    try { steps.rollbackState() } catch (_: Exception) {}
                     if (sessionRemoved) {
                         try { steps.restoreSession() } catch (_: Exception) {}
                     }
@@ -42,7 +45,8 @@ object ClarifyConfirmHandoff {
                 }
             }
         } catch (e: Exception) {
-            // 백그라운드 실행을 맡기지 못했다: 표지를 풀고 알린다
+            // 백그라운드 실행을 맡기지 못했다: 확정 처리 전 상태로 되돌리고 표지를 풀고 알린다
+            try { steps.rollbackState() } catch (_: Exception) {}
             steps.endHandoff()
             steps.onFailure(e)
         }

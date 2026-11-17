@@ -270,9 +270,12 @@ class WebviewActionRouter(private val project: Project) {
                         isCompletionDeclared = isCompletionDeclared
                     )
 
+                    // B-87 가: 분석 시작이 실패하면 확정 처리 전 상태로 되돌린다(같은 글을 다시 보내도 중복되지 않게)
+                    val checkpoint = net.ib.ixpert.ops.wuwagent.agent.clarify.ConfirmCheckpoint(session)
                     val turnResult = session.engine.processTurn(session.currentState, userInput)
                     session.currentState = turnResult.state
                     session.lastTurnResult = turnResult
+                    checkpoint.applied()
 
                     if (!isCompletionDeclared && !turnResult.isReadyForStage1) {
                         // 다음 턴 대화 진행
@@ -311,6 +314,7 @@ class WebviewActionRouter(private val project: Project) {
                             removeSession = { net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.removeSession(project) },
                             // 분석 시작에 실패하면 같은 세션을 되돌려 사용자가 같은 정제문으로 다시 확정할 수 있게 한다
                             restoreSession = { net.ib.ixpert.ops.wuwagent.agent.clarify.AnalyzeSessionManager.restoreSession(project, session) },
+                            rollbackState = { checkpoint.rollback() },
                             continueAfterClarify = { deferred -> continueAfterClarify(project, bridge, deferred, messageId) },
                             onFailure = { e ->
                                 logger.error("Clarify confirm error", e)
