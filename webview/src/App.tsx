@@ -17,7 +17,7 @@ import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, confirmPayload, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardElapsedSeconds, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
-import { appendRecord, completeClarifyCards, finishRefinedCard, refinedCloseRecords, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, noticeTurnOf, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
+import { appendRecord, completeClarifyCards, finishRefinedCard, refinedCloseRecords, settleStart, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, noticeTurnOf, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
 import { CARD_INFO, cardKeyFor, createLiveCards, endCard, kindOfTimeoutNotice, registerCard, type CardKind } from './liveCardsLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
@@ -1492,7 +1492,8 @@ function App() {
         if (messageId) {
           // 기존에 열려있는 다른 ClarifyForm이 있다면 비활성화(제거) 처리
           setMessages(prev => {
-            const filtered = prev.filter(m => m.subType !== 'analyze_clarify');
+            // B-87 다-1: 같은 id의 진행 줄(analyze_start) 로딩을 끈다(정지 버튼이 카드 뒤에도 켜진 채 남던 것)
+            const filtered = settleStart(prev, messageId).filter(m => m.subType !== 'analyze_clarify');
             let parsedData = null;
             try {
               parsedData = JSON.parse(data.content);

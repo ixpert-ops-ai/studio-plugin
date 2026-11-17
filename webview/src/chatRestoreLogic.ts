@@ -58,6 +58,17 @@ export const completeClarifyCards = <T extends RestorableMessage>(messages: T[],
   return messages.map((m, i) => (m.subType === 'analyze_clarify' && i < idx && !m.clarifyCompleted ? { ...m, clarifyCompleted: true } : m));
 };
 
+/**
+ * Stage 0 카드(analyze_clarify)가 도착하면 같은 id의 진행 줄(analyze_start)의 로딩을 끈다(B-87 다-1).
+ * 전에는 카드만 뒤에 붙고 진행 줄이 계속 로딩이라 정지 버튼이 켜진 채 남았다. 다른 id의 로딩(진행 중인 분석)과 다른 subType은 그대로 둔다.
+ */
+export const settleStart = <T extends RestorableMessage>(messages: T[], id: string | undefined): T[] =>
+  id === undefined
+    ? messages
+    : messages.map(m => (m.id === id && m.subType === 'analyze_start' && (m.isLoading || m.isStreaming)
+        ? { ...m, isLoading: false, isStreaming: false, currentStatus: undefined }
+        : m));
+
 /** 결과 말풍선 안에 끼워 넣는 카드 기록 줄: at은 본문(content)에서 기록이 놓이는 글자 위치(줄 경계로 맞춘 값). */
 export type InlineRecord = { at: number; text: string };
 

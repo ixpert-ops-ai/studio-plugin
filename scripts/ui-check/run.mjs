@@ -982,6 +982,26 @@ try {
   const p58b = await lastConfirm();
   record(58, '확정 payload: 입력창에 남은 글은 userStatement(앞뒤 공백 제외)로 가고, 공백뿐인 입력창은 null이다', typed58 === true && p58a && p58a.userStatement === '이메일은 설문 응답 테이블에서 가져와' && p58a.isCompletionDeclared === true && p58b && p58b.userStatement === null && p58b.isCompletionDeclared === true, JSON.stringify({ typed58, p58a: p58a && p58a.userStatement, p58b: p58b && p58b.userStatement }));
 
+  // 59) B-87 다-1: /clarify의 진행 줄(analyze_start)은 Stage 0 카드(analyze_clarify)가 오면 로딩이 풀려 정지 버튼이 꺼진다. 다른 id의 분석 진행 줄은 그대로 정지 버튼을 켠다.
+  const stopCount = () => evaluate("document.querySelectorAll('button.btn-icon.stop').length");
+  // 앞선 항목이 남긴 진행 표시를 지우려고 빈 채팅을 복원한 상태에서 시작한다(복원은 로딩을 끈다)
+  await loadChat('chat_b87c', [{ id: 'u59', role: 'user', content: 'B-87 다-1 시험' }, { id: 'a59', role: 'ai', content: '준비' }]);
+  await sleep(500);
+  const base59 = await stopCount();
+  await post({ type: 'ai_message', subType: 'analyze_start', messageId: 'clarify_b87c', content: '요구사항을 구체화하고 있습니다...' });
+  await sleep(300);
+  const running59 = await stopCount();
+  await post({ type: 'ai_message', subType: 'analyze_clarify', messageId: 'clarify_b87c', content: JSON.stringify({ ...expPayload, originalRequirement: 'B-87 다-1 카드 뒤 정지 버튼' }) });
+  await sleep(400);
+  const afterCard59 = await stopCount();
+  await post({ type: 'ai_message', subType: 'analyze_start', messageId: 'analyze_b87d', content: '분석을 시작합니다...' });
+  await sleep(300);
+  const otherRunning59 = await stopCount();
+  await post({ type: 'ai_message', subType: 'chat', messageId: 'analyze_b87d', content: '' });
+  await sleep(300);
+  const end59 = await stopCount();
+  record(59, '진행 줄 로딩 해제: /clarify 시작 중에는 정지 버튼 1개, Stage 0 카드가 오면 0개, 다른 id의 분석 시작은 다시 1개, 완료 신호 뒤 0개', base59 === 0 && running59 === 1 && afterCard59 === 0 && otherRunning59 === 1 && end59 === 0, JSON.stringify({ base59, running59, afterCard59, otherRunning59, end59 }));
+
   const errors = await evaluate(`window.__errors || null`);
   fs.writeFileSync(OUT + '/results.json', JSON.stringify({ results, observations, shots, clicks, errors }, null, 1));
   const md = ['| # | 항목 | 결과 | 근거 |', '|---|---|---|---|', ...results.map(r => `| ${r.id} | ${r.item} | ${r.ok ? '됨' : '**안 됨**'} | ${String(r.evidence).replace(/\|/g, '\\|').slice(0, 300)} |`)].join('\n');
