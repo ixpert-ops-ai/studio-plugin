@@ -1639,6 +1639,9 @@ class Stage0ClarificationEngine(
             .distinct()
     )
 
+    /** LLM 클라이언트가 취소(/cancel)로 끊긴 비스트림 호출에 돌려주는 값(OpenAIClient, OllamaClient). */
+    private val CANCELLED_MARK = "__cancelled__"
+
     private fun refineRequirement(
         original: String,
         userStatements: List<String>
@@ -1674,7 +1677,11 @@ class Stage0ClarificationEngine(
             val content = response?.message?.content?.trim()
             // B-82 9: 확정 뒤 대기 시간 분해용(두 호출이 동시에 나가므로 느린 쪽이 대기 시간이다). 본문은 남기지 않고 길이만 남긴다.
             println("[LlmCall] thread=${Thread.currentThread().name} label=정제문 프롬프트 ${systemPrompt.length}+${userPrompt.length}자, 최대 출력 300토큰, 응답 ${content?.length ?: 0}자, ${System.currentTimeMillis() - t0}ms")
-            if (content.isNullOrBlank() || content.startsWith("[Error]")) {
+            if (content == CANCELLED_MARK) {
+                // B-87 다-1b: 정지(/cancel)로 호출이 끊기면 클라이언트가 "__cancelled__"를 돌려준다. 정제문으로 쓰지 않고 원문을 돌려준다.
+                println("[LlmCall] label=정제문 취소로 끊긴 응답(__cancelled__)이라 원문을 사용합니다(원문 ${original.length}자)")
+                original
+            } else if (content.isNullOrBlank() || content.startsWith("[Error]")) {
                 original
             } else {
                 content
