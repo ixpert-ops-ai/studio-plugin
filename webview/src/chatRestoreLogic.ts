@@ -4,6 +4,9 @@ import { createLiveCards, endedLines, isLive, kindOfSubType, neutralLine, type C
 // 저장된 채팅을 복원할 때의 화면 상태 정리와, 카드에서 고른 내용을 채팅에 남기는 한 줄 기록 문구(React 없음).
 // node의 타입 제거 실행(--experimental-strip-types)으로 webview/test에서 테스트하므로 타입 제거만으로 실행되는 문법만 쓴다(enum 등 금지).
 
+/** Stage 0 카드의 상태: running(정제문 확인이 끝나 분석 진행 중), canceled(정제문 카드를 취소해 분석을 시작하지 않음), stopped(정지 요청), done(결과가 나옴). */
+export type ClarifyOutcome = 'running' | 'canceled' | 'stopped' | 'done';
+
 export type RestorableMessage = {
   id: string;
   role?: string;
@@ -13,6 +16,8 @@ export type RestorableMessage = {
   currentStatus?: string;
   stepNotiStatus?: string;
   clarifyCompleted?: boolean;
+  /** Stage 0 카드가 끝난 경로(B-87 다-2). 결과가 나온 "완료됨"은 clarifyCompleted가 맡는다. */
+  clarifyOutcome?: ClarifyOutcome;
   /** 확인 카드 메시지: 웹뷰가 카드 요청을 받을 때 붙인 카드 번호(B-86 c). 정제문 카드는 없으면 payload의 requestId를 쓴다. */
   cardKey?: string;
   /** 확인 카드 메시지: 사용자가 답했다(기록 줄이 이미 채팅에 있다). 복원할 때 카드만 지우고 줄은 더하지 않는다. */
@@ -42,8 +47,14 @@ export const restoreMessages = <T extends RecordableMessage>(messages: T[], card
     if (m.subType === 'step_noti' && m.stepNotiStatus === 'started') {
       next = { ...next, stepNotiStatus: 'failed' };
     }
-    if (m.subType === 'analyze_clarify' && messages.slice(i + 1).some(later => later.subType !== undefined && AFTER_CONFIRM.includes(later.subType))) {
-      next = { ...next, clarifyCompleted: true };
+    // B-87 다-2: clarifyOutcome이 저장돼 있으면 그대로 두고 아래 추정을 하지 않는다. 필드가 없는 옛 채팅은 이 카드 뒤(다음 카드 전)에
+    // "✔ 정제문 확인: 취소" 기록 줄이 있으면 취소로 추정하고, 그 밖에는 이전처럼 확정 뒤 분석 메시지가 있으면 완료됨이다.
+    if (m.subType === 'analyze_clarify' && m.clarifyOutcome === undefined) {
+      if (hasCancelRecordAfter(messages, i)) {
+        next = { ...next, clarifyOutcome: 'canceled' };
+      } else if (messages.slice(i + 1).some(later => later.subType !== undefined && AFTER_CONFIRM.includes(later.subType))) {
+        next = { ...next, clarifyCompleted: true };
+      }
     }
     return next;
   }), cards);
@@ -55,7 +66,59 @@ export const restoreMessages = <T extends RecordableMessage>(messages: T[], card
 export const completeClarifyCards = <T extends RestorableMessage>(messages: T[], resultId: string | undefined): T[] => {
   const idx = resultId === undefined ? -1 : messages.findIndex(m => m.id === resultId);
   if (idx < 0) return messages;
-  return messages.map((m, i) => (m.subType === 'analyze_clarify' && i < idx && !m.clarifyCompleted ? { ...m, clarifyCompleted: true } : m));
+  // 취소한 카드는 분석이 시작되지 않았으므로 결과가 나와도 완료됨으로 덮지 않는다(B-87 다-2)
+  return messages.map((m, i) => (m.subType === 'analyze_clarify' && i < idx && !m.clarifyCompleted && m.clarifyOutcome !== 'canceled' ? { ...m, clarifyCompleted: true } : m));
+};
+
+/** 카드에 보이는 문구(B-87 다-2). done은 기존 "완료됨"과 같은 문구다. */
+export const CLARIFY_STATE_TEXT: Record<ClarifyOutcome, string> = {
+  running: '✔ 분석 진행 중 (정제문 확인 끝)',
+  canceled: '⛔ 확인을 취소했습니다. 분석을 시작하지 않았습니다.',
+  stopped: '정지를 요청했습니다 (분석은 끝까지 진행될 수 있습니다)',
+  done: '✔ 완료됨 (확인을 마치고 분석이 이어졌습니다)',
+};
+
+/** 카드가 지금 보여 줄 상태. canceled는 결과가 나와도 바뀌지 않고, 그 밖에는 완료(clarifyCompleted)가 running·stopped를 덮는다. 상태가 없으면 undefined(제출 전이거나 isSubmitted 문구). */
+export const clarifyCardState = (m: { clarifyCompleted?: boolean; clarifyOutcome?: ClarifyOutcome }): ClarifyOutcome | undefined =>
+  m.clarifyOutcome === 'canceled' ? 'canceled' : (m.clarifyCompleted === true || m.clarifyOutcome === 'done') ? 'done' : m.clarifyOutcome;
+
+/**
+ * 가장 최근 Stage 0 카드(analyze_clarify)의 상태를 정한다(B-87 다-2: 응답·만료 → running, 취소 → canceled, 정지 → stopped, 결과 → done).
+ * 덮어쓰기: done은 running·stopped를 덮고 canceled는 덮지 않는다. canceled는 done이 아닌 것을 덮는다. stopped는 정제문 확인이 끝난(running) 카드에만 붙는다:
+ * 제출 전 카드에서 정지를 눌러도(세션이 살아 있다) 카드를 잠그지 않는다. running은 stopped를 되돌리지 않는다. 카드가 없으면 그대로 돌려준다.
+ */
+export const settleClarifyCard = <T extends RestorableMessage>(messages: T[], outcome: ClarifyOutcome): T[] => {
+  let idx = -1;
+  messages.forEach((m, i) => { if (m.subType === 'analyze_clarify') idx = i; });
+  if (idx < 0) return messages;
+  const card = messages[idx];
+  const prev = clarifyCardState(card);
+  if (prev === 'canceled') return messages;
+  if (prev === 'done') return messages;
+  let next: T;
+  if (outcome === 'done') next = { ...card, clarifyCompleted: true };
+  else if (outcome === 'canceled') next = { ...card, clarifyOutcome: 'canceled' };
+  else if (outcome === 'stopped') {
+    if (prev !== 'running') return messages;
+    next = { ...card, clarifyOutcome: 'stopped' };
+  } else { // running
+    if (prev === 'stopped') return messages;
+    next = { ...card, clarifyOutcome: 'running' };
+  }
+  return messages.map((m, i) => (i === idx ? next : m));
+};
+
+/** 정제문 카드를 취소했을 때 남는 기록 첫 줄(refinedCloseRecords와 같은 문구라 따로 베끼지 않는다). 아래에서 정의되는 함수라 호출 때 읽는다. */
+const cancelRecordLine = (): string => refinedCloseRecords('cancel', '', undefined)[0];
+
+/** 옛 채팅 복원용: i번째 카드 뒤, 다음 Stage 0 카드가 나오기 전에 "✔ 정제문 확인: 취소" 기록 줄(별도 기록 메시지)이 있는가. */
+const hasCancelRecordAfter = (messages: RestorableMessage[], i: number): boolean => {
+  for (let j = i + 1; j < messages.length; j++) {
+    const m = messages[j];
+    if (m.subType === 'analyze_clarify') return false;
+    if (m.subType === 'choice_record' && typeof (m as { content?: unknown }).content === 'string' && ((m as { content?: string }).content ?? '').trim() === cancelRecordLine()) return true;
+  }
+  return false;
 };
 
 /**
@@ -196,6 +259,15 @@ export const finishRefinedCard = <T extends RecordableMessage>(messages: T[], ca
     next = appendRecord(next, `${opts.idBase}_${i}`, text);
   });
   return next;
+};
+
+/**
+ * 정제문 카드를 끝내고(finishRefinedCard) 같은 때에 Stage 0 카드의 상태를 정한다(B-87 다-2): 취소는 canceled, 응답·만료는 running.
+ * 정제문 카드가 이미 없으면(종료 신호가 두 번 오거나 오래된 신호) 아무것도 바꾸지 않는다.
+ */
+export const finishRefinedAndSettle = <T extends RecordableMessage>(messages: T[], cause: RefinedCloseCause, opts: { editedText?: string; idBase: string }): T[] => {
+  const closed = finishRefinedCard(messages, cause, opts);
+  return closed === messages ? messages : settleClarifyCard(closed, cause === 'cancel' ? 'canceled' : 'running');
 };
 
 const cardKeyOf = (kind: CardKind, card: RecordableMessage): string | undefined =>

@@ -100,6 +100,8 @@ try {
             setTimeout(() => window.postMessage({ type: 'ai_message', subType: 'error', messageId: 'analyze_fail1', content: '분석을 시작하지 못했습니다: 연결 실패' }, '*'), 50);
           } else if (window.__confirmMode === 'expired') {
             setTimeout(() => window.postMessage({ type: 'ai_message', subType: 'error', messageId: 'analyze_exp', content: '분석 세션이 만료되었거나 유효하지 않습니다. /clarify를 다시 실행해주세요.' }, '*'), 50);
+          } else if (window.__confirmMode === 'silent') {
+            // B-87 다-2: 확정 뒤 정제문 카드를 기다리는 동안 백엔드는 analyze_start를 보내지 않는다(분석은 카드 응답 뒤에 시작한다)
           } else {
             setTimeout(() => window.postMessage({ type: 'ai_message', subType: 'analyze_start', messageId: 'analyze_C1', content: '분석을 시작합니다' }, '*'), window.__confirmDelayMs || 0);
           }
@@ -1001,6 +1003,64 @@ try {
   await sleep(300);
   const end59 = await stopCount();
   record(59, '진행 줄 로딩 해제: /clarify 시작 중에는 정지 버튼 1개, Stage 0 카드가 오면 0개, 다른 id의 분석 시작은 다시 1개, 완료 신호 뒤 0개', base59 === 0 && running59 === 1 && afterCard59 === 0 && otherRunning59 === 1 && end59 === 0, JSON.stringify({ base59, running59, afterCard59, otherRunning59, end59 }));
+
+  // 60~62) B-87 다-2: Stage 0 카드의 종료 상태. 취소(문구·입력칸 없음·버튼 없음·정지 버튼 0개) / 정지(문구) / 채팅을 저장했다가 복원해도 문구 유지
+  const CARD60 = id => `document.querySelector('[data-message-id="${id}"]')`;
+  const lastSaved = id => evaluate("(()=>{const s=window.__sent.map(x=>JSON.parse(x)).filter(o=>o.command==='/saveChat' && o.messages.includes('" + id + "')); return s.length? s[s.length-1].messages : null})()");
+  const confirmCard = async id => {
+    await post({ type: 'ai_message', subType: 'analyze_clarify', messageId: id, content: JSON.stringify({ ...expPayload, originalRequirement: 'B-87 다-2 ' + id }) });
+    await sleep(400);
+    await click(`[...${CARD60(id)}.querySelectorAll('button')].find(b=>b.textContent.includes('확인 완료'))`, '확인 완료(' + id + ')');
+    await sleep(400);
+  };
+  const refinedFor = rid => post({ type: 'ai_message', subType: 'refinedConfirmation/request', messageId: 'system', content: JSON.stringify({ projectId: 'proj1', requestId: rid, originalRequirement: RC_ORIG, refinedRequirement: RC_REFINED }) });
+  const cardInfo = id => evaluate(`(()=>{const c=${CARD60(id)}; if(!c) return {card:false}; const st=c.querySelector('[data-clarify-state]'); return {card:true, state:st?st.getAttribute('data-clarify-state'):null, text:st?st.innerText:'', submitted:!!c.querySelector('[data-clarify-submitted="true"]'), textInputs:c.querySelectorAll('input[type=text]').length, confirmBtn:[...c.querySelectorAll('button')].filter(b=>b.textContent.includes('확인 완료')).length}})()`);
+
+  await evaluate("window.__confirmMode = 'silent', true");
+  await loadChat('chat_b87e', [{ id: 'u60', role: 'user', content: 'B-87 다-2 취소' }, { id: 'a60', role: 'ai', content: '준비' }]);
+  await sleep(500);
+  await confirmCard('clarify_b87e');
+  await refinedFor('b87e:analyze_1');
+  await sleep(300);
+  await post({ type: 'ai_message', subType: 'refinedConfirmation/finished', id: 'system', cause: 'cancel' });
+  await post({ type: 'ai_message', subType: 'analyze_notice', messageId: 'analyze_notice_b87e', content: '분석을 취소했습니다.' });
+  await sleep(500);
+  const c60 = await cardInfo('clarify_b87e');
+  const stop60 = await stopCount();
+  const saved60 = await lastSaved('clarify_b87e');
+  record(60, '정제문 카드 취소 뒤 Stage 0 카드: "⛔ 확인을 취소했습니다. 분석을 시작하지 않았습니다." 문구, 제출 문구·입력칸·확인 버튼 없음, 정지 버튼 0개',
+    c60.card && c60.state === 'canceled' && c60.text.includes('확인을 취소했습니다. 분석을 시작하지 않았습니다.') && !c60.submitted && c60.textInputs === 0 && c60.confirmBtn === 0 && stop60 === 0, JSON.stringify({ c60, stop60 }));
+
+  await loadChat('chat_b87f', [{ id: 'u61', role: 'user', content: 'B-87 다-2 정지' }, { id: 'a61', role: 'ai', content: '준비' }]);
+  await sleep(500);
+  await confirmCard('clarify_b87f');
+  await refinedFor('b87f:analyze_1');
+  await sleep(300);
+  await post({ type: 'ai_message', subType: 'refinedConfirmation/finished', id: 'system', cause: 'asis' });
+  await sleep(300);
+  const run61 = await cardInfo('clarify_b87f');
+  await post({ type: 'ai_message', subType: 'analyze_start', messageId: 'analyze_b87f', content: '분석을 시작합니다...' });
+  await sleep(300);
+  const sent61 = await evaluate('window.__sent.length');
+  await click("document.querySelector('button.btn-icon.stop')", '정지(B-87 다-2)');
+  await sleep(500);
+  const c61 = await cardInfo('clarify_b87f');
+  const cancels61 = await evaluate(`window.__sent.slice(${sent61}).map(x=>JSON.parse(x)).filter(o=>o.command==='/cancel').length`);
+  const stop61 = await stopCount();
+  const saved61 = await lastSaved('clarify_b87f');
+  record(61, '정제문 확인 뒤 카드는 "✔ 분석 진행 중 (정제문 확인 끝)", 정지를 누르면 "정지를 요청했습니다 (분석은 끝까지 진행될 수 있습니다)"로 바뀌고 /cancel 1건, 정지 버튼 0개',
+    run61.state === 'running' && run61.text.includes('분석 진행 중 (정제문 확인 끝)') && c61.state === 'stopped' && c61.text.includes('정지를 요청했습니다') && cancels61 === 1 && stop61 === 0, JSON.stringify({ run61, c61, cancels61, stop61 }));
+
+  const restore = async (id, saved) => {
+    await loadChat('chat_restore_' + id, JSON.parse(saved));
+    await sleep(600);
+    return { info: await cardInfo(id), stop: await stopCount() };
+  };
+  const r60 = saved60 ? await restore('clarify_b87e', saved60) : null;
+  const r61 = saved61 ? await restore('clarify_b87f', saved61) : null;
+  record(62, '저장했다가 복원해도 문구 유지: 취소 카드는 "확인을 취소했습니다", 정지 카드는 "정지를 요청했습니다"(완료됨으로 바뀌지 않음), 입력칸·확인 버튼·정지 버튼 없음',
+    !!r60 && !!r61 && r60.info.state === 'canceled' && r60.info.text.includes('확인을 취소했습니다') && r61.info.state === 'stopped' && r61.info.text.includes('정지를 요청했습니다')
+    && r60.info.textInputs === 0 && r60.info.confirmBtn === 0 && r61.info.textInputs === 0 && r61.info.confirmBtn === 0 && r60.stop === 0 && r61.stop === 0, JSON.stringify({ r60, r61 }));
 
   const errors = await evaluate(`window.__errors || null`);
   fs.writeFileSync(OUT + '/results.json', JSON.stringify({ results, observations, shots, clicks, errors }, null, 1));

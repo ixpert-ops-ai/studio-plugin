@@ -17,7 +17,7 @@ import { makeErrorBubble } from './errorDisplayLogic';
 import { confirmButtonLabel, confirmPayload, isRetryableConfirmFailure, onClarifyBackendMessage, previousStatements, restartRequest } from './clarifySessionLogic';
 import { RETRY_LABEL, RETRYING_LABEL, parseIncompleteDetail, retryRequest } from './incompleteAnalysisLogic';
 import { applyCardStatus, cardElapsedSeconds, cardPendingAfter, cardWaitLine, isCardHide, isCardInViewport, isCardRequest, submittedStatusText } from './cardWaitLogic';
-import { appendRecord, completeClarifyCards, finishRefinedCard, refinedCloseRecords, settleStart, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, noticeTurnOf, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
+import { appendRecord, completeClarifyCards, refinedCloseRecords, clarifyCardState, CLARIFY_STATE_TEXT, finishRefinedAndSettle, settleClarifyCard, settleStart, splitWithRecords, hintRecord, hintSkipRecord, hintTurnOf, historyWithOpenQuestion, noticeTurnOf, restoreMessages, scopeRecord, scopeSkipRecord, stage3CandidateCount, stage3Record, stage3SkipRecord, timeoutRecord } from './chatRestoreLogic';
 import { CARD_INFO, cardKeyFor, createLiveCards, endCard, kindOfTimeoutNotice, registerCard, type CardKind } from './liveCardsLogic';
 import { IDLE, INTERPRETING_TEXT, canSendUtterance, confirmingElapsedText, elapsedSeconds, expireIfStale, onBackendMessage, startWait, type WaitState } from './clarifyWaitLogic';
 
@@ -382,7 +382,9 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
   const [confirmFailed, setConfirmFailed] = useState(false);
   const isInterpreting = wait.phase === 'interpreting';
   // 복원한 채팅에서 확정 뒤 분석이 이어진 카드: 읽기 전용 "완료됨"(확정 버튼·지시 입력·만료 복구 화면 없음). 답을 받지 못한 마지막 질문은 대화 기록에 어시스턴트 발화로 보인다.
-  const completed = (msg as any).clarifyCompleted === true;
+  // B-87 다-2: 카드 상태(완료·분석 진행 중·취소·정지)가 있으면 읽기 전용이다(입력칸·버튼·제출 문구 없음). 문구는 상태별로 다르다.
+  const cardState = clarifyCardState(msg as any);
+  const completed = cardState !== undefined;
   const shownHistory = completed ? historyWithOpenQuestion(payload.dialogueHistory, payload.openQuestion) : (payload.dialogueHistory ?? []);
 
   useEffect(() => {
@@ -717,8 +719,8 @@ const ClarifyForm = React.memo(({ msg }: { msg: Message }) => {
 
           <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
             {completed && (
-              <span data-clarify-completed="true" style={{ fontSize: '12px', color: '#10b981', fontWeight: 'bold' }}>
-                ✔ 완료됨 (확인을 마치고 분석이 이어졌습니다)
+              <span data-clarify-completed={cardState === 'done' ? 'true' : undefined} data-clarify-state={cardState} style={{ fontSize: '12px', color: cardState === 'canceled' ? '#f59e0b' : '#10b981', fontWeight: 'bold' }}>
+                {CLARIFY_STATE_TEXT[cardState as keyof typeof CLARIFY_STATE_TEXT]}
               </span>
             )}
             {!isSubmitted && !sessionExpired && !completed && (
@@ -1625,7 +1627,7 @@ function App() {
         const live = liveCards.live.refined;
         const p = parsePayload(live?.content ?? '');
         endCard(liveCards, 'refined', refinedCloseRecords('timeout', p?.refinedRequirement ?? '', p?.decisionNote));
-        setMessages(prev => finishRefinedCard(prev, 'timeout', { idBase: `rec_refined_${Date.now()}` }));
+        setMessages(prev => finishRefinedAndSettle(prev, 'timeout', { idBase: `rec_refined_${Date.now()}` }));
         return;
       }
 
@@ -1633,7 +1635,8 @@ function App() {
       if (data.subType === 'refinedConfirmation/finished') {
         const cause = data.cause === 'edited' || data.cause === 'cancel' ? data.cause : 'asis';
         endCard(liveCards, 'refined');
-        setMessages(prev => finishRefinedCard(prev, cause, { editedText: typeof data.editedText === 'string' ? data.editedText : undefined, idBase: `rec_refined_${Date.now()}` }));
+        // B-87 다-2: 응답이면 분석 진행 중, 취소면 분석을 시작하지 않은 취소 상태로 Stage 0 카드를 끝낸다
+        setMessages(prev => finishRefinedAndSettle(prev, cause, { editedText: typeof data.editedText === 'string' ? data.editedText : undefined, idBase: `rec_refined_${Date.now()}` }));
         return;
       }
 
@@ -2450,13 +2453,13 @@ function App() {
             // key="stop" → React가 stop/send 전환 시 DOM 엘리먼트를 재사용하지 않고
             // 새로 마운트하도록 강제. transition: all 에 의한 빨간색 색상 블리딩 방지.
             <button key="stop" className="btn-icon stop" onClick={() => {
-              setMessages(prev => prev.map(m => {
+              setMessages(prev => settleClarifyCard(prev.map(m => {
                 if (m.isLoading || m.isStreaming)
                   return { ...m, isLoading: false, isStreaming: false, currentStatus: undefined };
                 if (m.subType === 'step_noti' && m.stepNotiStatus === 'started')
                   return { ...m, stepNotiStatus: 'failed' as const };
                 return m;
-              }));
+              }), 'stopped')); // B-87 다-2: 정제문 확인이 끝난(분석 진행 중) Stage 0 카드에만 정지 문구가 붙는다
               window.sendToIde?.(JSON.stringify({ command: '/cancel' }));
             }}>
               <div className="spinner-ring"></div>
