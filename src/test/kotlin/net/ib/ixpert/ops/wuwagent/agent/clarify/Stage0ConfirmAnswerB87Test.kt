@@ -24,7 +24,7 @@ import java.io.File
  *  등가: A(processUtterance 후 글 없이 확정) = B(processTurn에 글을 실어 확정)의 상태, 정제문·제약 추출 입력, decisionNote
  *  e1 출처 답 / e2 질문 2개 열림(첫 항목만) / e3 lenient / e4 제외 제안 열림·닫힘 / e5 체크박스 우선
  *  e6 완료 표현만 있는 글 무시와 섞인 글의 기존 경로 / e7 deferTaskSummary=false
- *  r1~r4 되돌림(ConfirmCheckpoint + ClarifyConfirmHandoff) / a1 별칭 / c1 isCompletionOnly
+ *  r1~r5 되돌림(r5는 위임 실패 바깥 catch,ConfirmCheckpoint + ClarifyConfirmHandoff) / a1 별칭 / c1 isCompletionOnly
  */
 class Stage0ConfirmAnswerB87Test {
 
@@ -185,7 +185,10 @@ class Stage0ConfirmAnswerB87Test {
     }
 
     /** 라우터의 확정 순서를 IDE 없이 되풀이한다: 체크포인트 → processTurn → 세션 대입 → applied → Handoff. */
-    private fun confirmFlow(session: Stage0Session, text: String, build: () -> Unit = {}, cont: () -> Unit = {}): Exception? {
+    private fun confirmFlow(
+        session: Stage0Session, text: String, build: () -> Unit = {}, cont: () -> Unit = {},
+        background: ((() -> Unit) -> Unit) = { it() }
+    ): Exception? {
         val cp = ConfirmCheckpoint(session)
         val turn = session.engine.processTurn(session.currentState, complete(text))
         session.currentState = turn.state
@@ -198,7 +201,7 @@ class Stage0ConfirmAnswerB87Test {
                 continueAfterClarify = { cont() }, onFailure = { failure = it }, endHandoff = {},
                 restoreSession = {}, rollbackState = { cp.rollback() }
             ),
-            runInBackground = { it() }
+            runInBackground = background
         )
         return failure
     }
@@ -241,6 +244,40 @@ class Stage0ConfirmAnswerB87Test {
         assertSame("끼어든 변경은 유지한다(=== 비교가 달라 되돌리지 않음)", interleaved, session.currentState)
         assertTrue(session.currentState.userStatements.contains("끼어든 발화"))
         assertTrue(session.currentState.userStatements.contains("${LABEL1}의 출처: $newAnswer"))
+    }
+
+    // r5: 백그라운드 위임 자체가 실패하는 경로(ClarifyConfirmHandoff 바깥 catch). 작업이 한 번도 실행되지 않는다.
+    @Test
+    fun r5_backgroundDelegationFailureRollsBackThroughTheOuterCatch() {
+        val refuse: (() -> Unit) -> Unit = { throw RuntimeException("백그라운드 위임 실패") }
+
+        // (1) 실패 뒤 상태가 호출 전과 같고(=== 조건 경유), 같은 글로 다시 시도한 결과는 1회 성공한 결과와 같으며 글이 중복되지 않는다
+        val before = setup(1)
+        val session = newSession(before)
+        val once = session.engine.processTurn(before, complete(newAnswer)).state
+        var ran = false
+        val failure = confirmFlow(session, newAnswer, build = { ran = true }, background = refuse)
+        assertNotNull(failure)
+        assertFalse("위임이 실패해 작업은 실행되지 않았다", ran)
+        assertSame("위임 실패 뒤 상태가 호출 전과 같다", before, session.currentState)
+        assertEquals(before.userStatements, session.currentState.userStatements)
+        assertNull(confirmFlow(session, newAnswer))
+        assertEquals(once, session.currentState)
+        assertEquals(1, session.currentState.userStatements.count { it.endsWith(newAnswer) })
+
+        // (2) 실패 사이에 상태가 바뀌었으면(끼어든 발화) 되돌리지 않는다(r3와 같은 형태)
+        val before2 = setup(1)
+        val session2 = newSession(before2)
+        lateinit var interleaved: Stage0State
+        val failure2 = confirmFlow(session2, newAnswer, background = {
+            interleaved = session2.currentState.copy(userStatements = session2.currentState.userStatements + "끼어든 발화")
+            session2.currentState = interleaved
+            throw RuntimeException("백그라운드 위임 실패")
+        })
+        assertNotNull(failure2)
+        assertSame("끼어든 변경은 유지한다(=== 비교가 달라 되돌리지 않음)", interleaved, session2.currentState)
+        assertTrue(session2.currentState.userStatements.contains("끼어든 발화"))
+        assertTrue(session2.currentState.userStatements.contains("${LABEL1}의 출처: $newAnswer"))
     }
 
     @Test
